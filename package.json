@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Turnkey Pi packages for the Empirica evidence-convergence workflow and Methodologist formal reasoning router.",
   "type": "module",
-  "license": "MIT",
+  "license": "LicenseRef-PolyForm-Internal-Use-1.0.0",
   "keywords": [
     "pi-package",
     "pi",

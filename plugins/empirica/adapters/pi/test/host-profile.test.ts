@@ -97,9 +97,9 @@ test("the range is half-open, numeric, and exact-version only", () => {
     assert.equal(inSubagentsRange(range, outside), false, String(outside));
 });
 
-test("each reviewed inventory records the Pi generation its package declares (peer_pi_ai), as data the README is checked against", () => {
+test("each reviewed inventory records the Pi generation its package declares (peer_pi_ai), as data doc/hosts.md is checked against", () => {
   const peers = Object.fromEntries(reviewedVersions().map((v) => [v, loadInventory(v)!.peer_pi_ai]));
-  for (const [version, peer] of Object.entries(peers)) assert.match(peer, /^>=\d+\.\d+\.\d+$/, version);  // the README table is checked against these by the validator
+  for (const [version, peer] of Object.entries(peers)) assert.match(peer, /^>=\d+\.\d+\.\d+$/, version);  // the doc/hosts.md table is checked against these by the validator
   const shipped = JSON.parse(readFileSync(path.join(PLUGIN, "adapters", "pi", "compat", "pi-subagents-0.75.0.json"), "utf8"));
   const { peer_pi_ai: _recorded, ...withoutPeer } = shipped;
   assert.throws(() => parseInventory(withoutPeer), /missing "peer_pi_ai"/);

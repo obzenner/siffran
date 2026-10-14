@@ -30,11 +30,11 @@ class SkillRuntimeTests(unittest.TestCase):
         self.assertEqual(len(activation.skill_runtime_problems(text)), 1)
 
 
-README = Path(__file__).resolve().parents[2] / activation.README
+HOSTS_DOC = Path(__file__).resolve().parents[2] / activation.HOSTS_DOC
 
 
-class ReadmeRuntimeTests(unittest.TestCase):
-    """The README's supported-versions table is the contract's reviewed list, nothing else."""
+class HostsDocRuntimeTests(unittest.TestCase):
+    """doc/hosts.md's supported-versions table is the contract's reviewed list, nothing else."""
 
     def peers(self):
         return activation.recorded_peers()
@@ -52,31 +52,31 @@ class ReadmeRuntimeTests(unittest.TestCase):
     def versions(self):
         return activation.reviewed_versions()
 
-    def test_the_committed_readme_is_accepted(self):
-        self.assertEqual(activation.readme_runtime_problems(README.read_text(encoding="utf-8"), activation.PI_PROFILE), [])
+    def test_the_committed_hosts_doc_is_accepted(self):
+        self.assertEqual(activation.hosts_doc_runtime_problems(HOSTS_DOC.read_text(encoding="utf-8"), activation.PI_PROFILE), [])
 
     def test_a_table_equal_to_the_reviewed_list_is_accepted(self):
-        self.assertEqual(activation.readme_runtime_problems(self.table(self.versions()), activation.PI_PROFILE), [])
+        self.assertEqual(activation.hosts_doc_runtime_problems(self.table(self.versions()), activation.PI_PROFILE), [])
 
     def test_a_missing_reviewed_version_is_named(self):
-        problems = activation.readme_runtime_problems(self.table(self.versions()[1:]), activation.PI_PROFILE)
-        self.assertEqual(problems, [f"README supported-versions table has no row for pi-subagents {self.versions()[0]}"])
+        problems = activation.hosts_doc_runtime_problems(self.table(self.versions()[1:]), activation.PI_PROFILE)
+        self.assertEqual(problems, [f"doc/hosts.md supported-versions table has no row for pi-subagents {self.versions()[0]}"])
 
     def test_a_version_with_no_compat_record_in_the_table_is_named(self):
-        problems = activation.readme_runtime_problems(self.table([*self.versions(), "9.9.9"]), activation.PI_PROFILE)
-        self.assertEqual(problems, ["README lists pi-subagents 9.9.9, which has no compat record"])
+        problems = activation.hosts_doc_runtime_problems(self.table([*self.versions(), "9.9.9"]), activation.PI_PROFILE)
+        self.assertEqual(problems, ["doc/hosts.md lists pi-subagents 9.9.9, which has no compat record"])
 
-    def test_a_readme_that_omits_the_supported_range_is_named(self):
+    def test_a_hosts_doc_that_omits_the_supported_range_is_named(self):
         policy = activation.PI_PROFILE["subagents_compatibility"]
         text = self.table(self.versions()).replace(f">={policy['minimum']},<{policy['maximum_exclusive']}", "")
-        problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
-        self.assertEqual(problems, [f"README omits the supported pi-subagents range >={policy['minimum']},<{policy['maximum_exclusive']}"])
+        problems = activation.hosts_doc_runtime_problems(text, activation.PI_PROFILE)
+        self.assertEqual(problems, [f"doc/hosts.md omits the supported pi-subagents range >={policy['minimum']},<{policy['maximum_exclusive']}"])
 
     def test_a_stale_interval_or_dropped_fail_closed_sentence_is_named(self):
         text = self.table(self.versions()).replace(activation.pi_interval(activation.PI_PROFILE), ">=0.90.0,<0.91.0")
-        self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
+        self.assertEqual(len(activation.hosts_doc_runtime_problems(text, activation.PI_PROFILE)), 1)
         text = self.table(self.versions()).replace(activation.SUPPORT_RANGE_DISCLOSURE, "")
-        self.assertEqual(len(activation.readme_runtime_problems(text, activation.PI_PROFILE)), 1)
+        self.assertEqual(len(activation.hosts_doc_runtime_problems(text, activation.PI_PROFILE)), 1)
 
     def test_the_requires_pi_column_is_the_declared_peer_raised_to_the_floor_of_the_pi_interval(self):
         minimum = activation.PI_PROFILE["compatibility"]["minimum"]
@@ -88,7 +88,7 @@ class ReadmeRuntimeTests(unittest.TestCase):
         for version in self.versions():
             with self.subTest(version=version):
                 text = self.table(self.versions(), requires={version: ">=0.99.0"})
-                problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
+                problems = activation.hosts_doc_runtime_problems(text, activation.PI_PROFILE)
                 self.assertEqual(len(problems), 1, problems)
                 self.assertIn(f"pi-subagents {version} requires Pi '>=0.99.0'", problems[0])
                 self.assertIn("'>=1.0.0'", problems[0])
@@ -96,7 +96,7 @@ class ReadmeRuntimeTests(unittest.TestCase):
     def test_a_row_without_the_requirement_column_is_rejected(self):
         old = "\n".join(f"| `{v}` | reviewed |" for v in self.versions())
         text = self.table([]) + old + "\n"
-        problems = activation.readme_runtime_problems(text, activation.PI_PROFILE)
+        problems = activation.hosts_doc_runtime_problems(text, activation.PI_PROFILE)
         self.assertEqual(len(problems), len(self.versions()))
         self.assertTrue(all("lacks the 'Requires Pi' column" in p for p in problems))
 

@@ -36,7 +36,7 @@ STALE_SKILL_TERMS = {"spike_harness.py", "EMPIRICA_STALL_DEADLINE_SEC"}
 STALE_PI_RUNTIME_TERMS = ("pi-subagents@0.50.0", "pi-subagents 0.50.0", "packaged `pi-subagents",
                           "bundled pi-subagents", "bundled `pi-subagents")
 HOST_PROFILES = Path("contracts/empirica/v2/host-profiles.json")
-README = Path("README.md")
+HOSTS_DOC = Path("doc/hosts.md")
 COMPAT_DIR = ROOT / "adapters/pi/compat"
 SUPPORT_RANGE_DISCLOSURE = "outside the supported range fails closed"
 
@@ -82,7 +82,7 @@ def recorded_peers() -> dict[str, str]:
 
 
 def pi_requirement(peer: str, host_minimum: str) -> str:
-    """The Pi a pi-subagents version needs, as the README spells it: its declared pi-ai floor, raised to
+    """The Pi a pi-subagents version needs, as doc/hosts.md spells it: its declared pi-ai floor, raised to
     the floor of the Pi interval Empirica supports (a peer below it adds no constraint)."""
     match = re.fullmatch(r">=(\d+\.\d+\.\d+)", peer)
     if match is None:
@@ -90,37 +90,37 @@ def pi_requirement(peer: str, host_minimum: str) -> str:
     return ">=" + max(match[1], host_minimum, key=_semver)
 
 
-def readme_runtime_problems(readme_text: str, profile: dict, peers: dict[str, str] | None = None) -> list[str]:
-    """How a README misstates which pi-subagents versions are supported (interval, table, fail-closed)
+def hosts_doc_runtime_problems(doc_text: str, profile: dict, peers: dict[str, str] | None = None) -> list[str]:
+    """How doc/hosts.md misstates which pi-subagents versions are supported (interval, table, fail-closed)
     and which Pi each needs (``peers``: version -> declared pi-ai peer, by default the generated inventories)."""
     policy = profile["subagents_compatibility"]
     peers = recorded_peers() if peers is None else peers
     minimum = profile["compatibility"]["minimum"]
     requirements = {version: pi_requirement(peers[version], minimum) for version in reviewed_versions()}
     problems = []
-    if pi_interval(profile) not in readme_text:
-        problems.append(f"README omits the Pi interval {pi_interval(profile)}")
+    if pi_interval(profile) not in doc_text:
+        problems.append(f"doc/hosts.md omits the Pi interval {pi_interval(profile)}")
     rows = {match[1]: match for match in re.finditer(
-        r"^\|\s*`(\d+\.\d+\.\d+)`\s*\|\s*`([^`|]*)`\s*\|", readme_text, re.MULTILINE)}
+        r"^\|\s*`(\d+\.\d+\.\d+)`\s*\|\s*`([^`|]*)`\s*\|", doc_text, re.MULTILINE)}
     for version in reviewed_versions():
-        if not re.search(rf"^\|\s*`?{re.escape(version)}`?\s*\|", readme_text, re.MULTILINE):
-            problems.append(f"README supported-versions table has no row for pi-subagents {version}")
+        if not re.search(rf"^\|\s*`?{re.escape(version)}`?\s*\|", doc_text, re.MULTILINE):
+            problems.append(f"doc/hosts.md supported-versions table has no row for pi-subagents {version}")
         elif version not in rows:
-            problems.append(f"README row for pi-subagents {version} lacks the 'Requires Pi' column")
+            problems.append(f"doc/hosts.md row for pi-subagents {version} lacks the 'Requires Pi' column")
         else:
             if rows[version][2] != requirements[version]:
-                problems.append(f"README says pi-subagents {version} requires Pi {rows[version][2]!r}; "
+                problems.append(f"doc/hosts.md says pi-subagents {version} requires Pi {rows[version][2]!r}; "
                                 f"its declared pi-ai peer {peers[version]} makes it {requirements[version]!r}")
-    table = set(re.findall(r"^\|\s*`?(\d+\.\d+\.\d+)`?\s*\|", readme_text, re.MULTILINE))
+    table = set(re.findall(r"^\|\s*`?(\d+\.\d+\.\d+)`?\s*\|", doc_text, re.MULTILINE))
     for version in sorted(table - set(reviewed_versions())):
-        problems.append(f"README lists pi-subagents {version}, which has no compat record")
+        problems.append(f"doc/hosts.md lists pi-subagents {version}, which has no compat record")
     range_text = f">={policy['minimum']},<{policy['maximum_exclusive']}"
-    if range_text not in readme_text:
-        problems.append(f"README omits the supported pi-subagents range {range_text}")
-    if policy["policy_id"] not in readme_text:
-        problems.append(f"README omits the policy id {policy['policy_id']}")
-    if SUPPORT_RANGE_DISCLOSURE not in readme_text:
-        problems.append(f"README omits: {SUPPORT_RANGE_DISCLOSURE}")
+    if range_text not in doc_text:
+        problems.append(f"doc/hosts.md omits the supported pi-subagents range {range_text}")
+    if policy["policy_id"] not in doc_text:
+        problems.append(f"doc/hosts.md omits the policy id {policy['policy_id']}")
+    if SUPPORT_RANGE_DISCLOSURE not in doc_text:
+        problems.append(f"doc/hosts.md omits: {SUPPORT_RANGE_DISCLOSURE}")
     return problems
 
 
@@ -207,7 +207,7 @@ def main() -> int:
             fail(f"SKILL.md retains stale runtime term: {term}")
     for problem in skill_runtime_problems(skill_text):
         fail(problem)
-    for problem in readme_runtime_problems(README.read_text(encoding="utf-8"), PI_PROFILE):
+    for problem in hosts_doc_runtime_problems(HOSTS_DOC.read_text(encoding="utf-8"), PI_PROFILE):
         fail(problem)
 
     for path in [SKILL, *sorted((ROOT / "agents").glob("**/*.md"))]:

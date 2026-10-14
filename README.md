@@ -1,177 +1,6 @@
 # siffran
 
-A plugin collection for [Claude Code](https://docs.claude.com/en/docs/claude-code), [Codex](https://developers.openai.com/codex/), and the [Pi coding agent](https://pi.dev). It packages reusable, methodology-driven workflows: formal reasoning with Methodologist and evidence-backed convergence with Empirica.
-
-The same host-neutral cores power the Claude Code, Codex (Methodologist only), and Pi adapters.
-Empirica stores operational state under `~/.empirica-plugin` and durable claims
-and evidence in Git shadow refs, leaving project worktrees clean.
-
-## Governed Empirica starts
-
-Empirica defaults to host-mediated approval of run configuration—budget ceilings and
-control mode—**before investigation**. The immutable goal is shown read-only; the claim graph
-defines the work but is not approvable. Prepare from supplied context, record route, propose scope,
-and submit `configure_run` to open approval. Configuration changes need a new exact decision;
-graph changes preserve configuration authority while invalidating stale audit coverage. Explicit
-`/empirica --auto <goal>` is bounded automatic acceptance, not human consent: it cannot increase
-budgets and requires an interactive invocation or recorded operator delegation.
-
-Claude needs MCP form elicitation and Pi uses its UI. Reviewer configuration stays with the host,
-and the adapter observes the identity that actually produced the verdict. See the
-[governance guide](plugins/empirica/skills/empirica/references/governance.md) for configuration and
-auto provenance, and the [audit guide](plugins/empirica/skills/empirica/references/audit.md#independence-reporting)
-for identity classification.
-
-5.0.0 does not read state from earlier versions; start a fresh session.
-
-## Install for Claude Code
-
-Add the marketplace, then install a plugin:
-
-```text
-/plugin marketplace add obzenner/siffran
-/plugin install methodologist@siffran
-/plugin install empirica@siffran
-```
-
-## Install for Codex
-
-Codex CLI 0.146.0 and the Codex desktop surface can install Methodologist from
-the repository marketplace:
-
-```sh
-codex plugin marketplace add obzenner/siffran
-codex plugin add methodologist@siffran
-```
-
-Start a new Codex session after installation. Methodologist's shared `think`
-skill then has two honest modes:
-
-- **Native simple mode (default):** ask a matching question such as “think
-  through this architecture decision” and let Codex activate the skill
-  implicitly, or mention `$think` explicitly. This is stateless and executes
-  the methodology directly. Codex does not expose Methodologist as a custom
-  `/think` slash command.
-- **Structured bridge mode (opt-in):** ask Codex to “use `$think` in structured
-  bridge mode.” On Codex surfaces that load plugin MCP servers, the bundled
-  read-only `methodologist_select` tool validates the model's semantic choice
-  against the shared registry and returns the canonical six-phase plan. Codex
-  has no Methodologist task widget, so phases execute in the conversation
-  without claiming host-native tracking.
-
-Methodologist requires Python 3 only for structured bridge mode. Before
-installing, review
-[`plugins/methodologist/.codex-plugin/plugin.json`](./plugins/methodologist/.codex-plugin/plugin.json),
-[`plugins/methodologist/.mcp.json`](./plugins/methodologist/.mcp.json), and the
-small MCP adapter. The Methodologist package contains no hooks. Codex's normal
-sandbox and MCP approval policy still apply.
-
-**Empirica is not available on Codex.** Only Methodologist is offered through the Codex marketplace (ADR-0069 G10-R1).
-
-Codex plugins are not supported in the IDE extension. Install the shared skill
-directly as a repo/user skill there if needed, and use native simple mode only.
-
-## Install for Pi
-
-Empirica's independent audit runs through the external
-[`pi-subagents`](https://www.npmjs.com/package/pi-subagents) extension; this package does **not**
-bundle or load it. The Pi adapter is POSIX-only (macOS and Linux): spikes run through `/bin/sh` under
-POSIX resource limits, and runtime provenance records POSIX paths; Windows is not supported. Install the
-runtime first, then the repository (which carries Empirica, the Methodologist, and the Empirica auditor
-role):
-
-```sh
-pi install npm:pi-subagents@0.76.1
-pi install git:github.com/obzenner/siffran
-```
-
-At `session_start` the Empirica adapter resolves the single extension that registered the `subagent`
-tool from Pi's own tool inventory, reads that package's exact version, and binds its launch preflight.
-It refuses to start or configure a run (with a `host.subagents_*` reason) when there is no `subagent`
-tool, when the session's slash commands show more than one loaded `pi-subagents` package (Pi reports
-only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
-or when the owner's package or version cannot be verified. A second copy is detected only while its
-extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
-Supported `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
-`pi-subagents-foreground-audit-v1` (Pi `>=1.0.0,<2.0.0`). A version outside the supported range fails closed:
-`/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
-created. Inside the range a version is admitted by what the adapter observes of it, not by a list: its own
-parameter schema must declare every field the audit launch sends, and its live launch preflight must resolve
-the packaged auditor, the configured model and a fresh context, and its tool allowlist may hold only the tools the profile's `audit_child_tools` allows. A version in the table below has a checked-in
-compat record and is *reviewed*. Any other version in the range is admitted by observation, recorded as `reviewed: false`
-and shown on every run view while it stays unreviewed (`host: pi-subagents <version> (not reviewed; preflight passed)`);
-because nobody has reviewed its actions, a `subagent` action runs during a run only if some reviewed version has that
-name and the classifier calls it read-only (`list`, `status`, `models`, ...); launches are classified as usual. `make empirica-subagents-matrix-update` lists releases newer than the newest
-reviewed one; reviewing one means adding its compat record, preflight fixture and classifier cases.
-
-| `pi-subagents` | Pi floor (supported) | Status |
-|---|---|---|
-| `0.50.0` | `>=1.0.0` | reviewed |
-| `0.64.0` | `>=1.0.0` | reviewed |
-| `0.74.0` | `>=1.0.0` | reviewed |
-| `0.75.0` | `>=1.0.0` | reviewed |
-| `0.76.1` | `>=1.0.0` | reviewed; the repository's development pin |
-
-"Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer, raised to the floor of the supported Pi interval (1.0.0, which every reviewed release's peer is below). It is
-recorded in `plugins/empirica/adapters/pi/compat/` and checked against this table.
-
-Install the newest reviewed version and pin the exact
-version, as in the commands above; an unpinned install may resolve to a release outside the range, which is
-refused, or to an unreviewed one inside it, which runs with only the reviewed read-only `subagent` actions allowed during a run.
-
-Restart Pi after installation, or run `/reload` in an existing session. Available commands include:
-
-```text
-/think <intent>                 # structured Methodologist workflow
-/think --simple <intent>        # original single-prompt Methodologist mode
-/empirica <goal>                # start a durable Empirica v2 workflow
-/empirica-ui                    # open the observer UI for your store (see below)
-empirica_observe                 # tool: route, graph, configure_run, investigate, research, spike_request, freeze
-empirica_read                    # tool: complete RunView, argument, contract
-report_convergence               # tool: guarded terminal decision
-```
-
-The Pi adapter binds `empirica.empirica-auditor` as a foreground child, correlates
-its `tool_result`, and admits trusted facts through non-model-callable private ingress.
-It ignores requested result-model metadata and binds identity to the final native assistant
-record in the exact host-generated child session when that record produced the admitted verdict.
-Missing or ambiguous session evidence blocks. Pi also has no native completion veto; call
-`report_convergence` before any status claim.
-
-To update later:
-
-```sh
-pi update --extensions
-```
-
-For local development, install the checkout instead:
-
-```sh
-pi install "$(pwd)"
-```
-
-The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
-release evidence is the long-running scenarios (`.agents/skills/native-qualification/references/scenarios.md`).
-
-### Supported surfaces
-
-Host versions: Pi's range is enforced at `/empirica` start (a Pi outside it, or one whose version cannot be read, is refused with `host.version_unsupported` and nothing starts); Claude Code's range is the documented supported range and is not checked (hook payloads carry no version), so Claude is admitted by observed capability; the pi-subagents range is enforced at runtime.
-
-| Surface | Deliberative | Auto, human present | Auto, delegated (`EMPIRICA_AUTO_DELEGATION=1`) |
-|---|---|---|---|
-| Claude Code, interactive session | Supported | Supported | n/a |
-| Claude Code, non-interactive (`-p`, SDK) | Refused: nobody can approve the configuration | Refused: auto needs the delegation | Supported; nobody can confirm evidence, so URL research stays unconfirmed |
-| Pi TUI and RPC | Supported | Supported | Supported |
-| Pi print and JSON (`pi -p`, `--mode json`) | Refused: nobody can approve | Refused: auto needs the delegation | Supported; notices go to stderr, the command waits for the run it started, a refusal exits 1; nobody can confirm evidence |
-| Codex | Not available | Not available | Not available |
-
-A refusal in print mode is written to stderr and exits 1. Rows qualified only by deterministic tests (Claude Esc mid-turn,
-the Pi auditor calling `contact_supervisor`, Pi compaction failure) are listed in
-`.agents/skills/native-qualification/references/scenarios.md`, section C.
-
-Pi and Claude async promotion remains separate and unsupported.
-
-## Watching the store
+Plugins for [Claude Code](https://docs.claude.com/en/docs/claude-code) and the [Pi coding agent](https://pi.dev): **Methodologist** for structured reasoning, and **Empirica** for evidence-backed convergence with an independent audit.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="doc/images/universe-dark.png">
@@ -179,45 +8,61 @@ Pi and Claude async promotion remains separate and unsupported.
   <img src="doc/images/universe-light.png" width="800" alt="The observer's Universe on a generated demo store of 300 runs: each project an island of run marks coloured by standing, labelled with its run count and how many need you; three callouts point at runs waiting on a human decision; the bottom bar shows the period and the failed-audit, refuted, decided and changed-since-audit counts.">
 </picture>
 
-The Empirica plugin ships a read-only observer UI: the **Universe** (every run a mark, each project an
-island), the **Inbox** (what needs you, the calendar, runs by standing) and a run's **sheet** (its claims, proof,
-audits and history). It is served by the plugin itself on
-127.0.0.1 (at `empirica.localhost:<port>`) and updates while runs progress.
+## Install
 
-| Host | Start it with |
-|---|---|
-| Claude Code | `/empirica:ui` |
-| Pi | `/empirica-ui` |
-| Any (from this checkout) | `make ui`, or `make ui-demo` for the plugin's demo runs |
+### Claude Code
 
-A second start for the same store opens the observer already listening on the default port instead
-of starting another. See
-[`plugins/empirica/ui/README.md`](./plugins/empirica/ui/README.md) and ADR-0065.
+Requires Claude Code `>=2.1.278,<2.2.0` and `python3` (see [host support](doc/hosts.md#supported-surfaces)).
+
+```text
+/plugin marketplace add obzenner/siffran
+/plugin install methodologist@siffran
+/plugin install empirica@siffran
+```
+
+### Pi
+
+Requires Pi `>=1.0.0,<2.0.0` and an exact [`pi-subagents`](doc/hosts.md#pi-and-pi-subagents) version, installed first.
+
+```sh
+pi install npm:pi-subagents@0.76.1
+pi install git:github.com/obzenner/siffran
+```
+
+Then restart Pi, or run `/reload` in an existing session.
+
+5.0.0 does not read state from earlier versions; start a fresh session.
+
+## Usage
+
+- `/empirica <goal>` starts an Empirica run. You approve its budgets before it investigates; `/empirica --auto <goal>` accepts them within fixed bounds ([governance](plugins/empirica/skills/empirica/references/governance.md)).
+- `/think <intent>` runs a Methodologist reasoning workflow.
+- The read-only observer shows your runs: `/empirica:ui` on Claude Code, `/empirica-ui` on Pi, or `make ui` from a checkout.
+
+See the [Empirica skill](plugins/empirica/skills/empirica/SKILL.md) for how a run works.
 
 ## Plugins
 
 <!-- BEGIN GENERATED: plugins (managed by the checkup skill — do not edit by hand) -->
 | Plugin | Version | Description |
 |--------|---------|-------------|
-| `methodologist` | 0.10.0 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 5.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `methodologist` | 0.10.1 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
+| `empirica` | 5.0.1 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
+
+## Documentation
+
+- [Empirica skill](plugins/empirica/skills/empirica/SKILL.md), with its [governance](plugins/empirica/skills/empirica/references/governance.md) and [audit](plugins/empirica/skills/empirica/references/audit.md) references
+- [Host support and versions](doc/hosts.md)
+- [Observer UI](plugins/empirica/ui/README.md)
+- [Architecture decisions](doc/adr/)
+- [Testing](doc/testing.md)
 
 ## Development
 
-The project lifecycle lives in the `Makefile` — run `make help` to see every operation:
+Run `make help` to list every operation, and `make check` before committing.
+See [CLAUDE.md](CLAUDE.md) for the repo structure and conventions.
 
-```
-make check      # fast deterministic contributor gate (run before committing)
-make status     # plugin versions, ADR count, working-tree state
-make bump PLUGIN=<name> PART=minor
-make methodologist-codex-check  # deterministic package + MCP validation
-make native-qualification       # print the operator-led native skill entrypoint; launches nothing
-```
+## Licence
 
-The fast gate never launches online/native sessions. Expensive persistence and simulated-host
-matrices are explicit integration diagnostics, while installed-host qualification is a separate
-operator-led procedure. See [doc/testing.md](./doc/testing.md) for the coverage/cost map and
-native limitations.
-
-See [CLAUDE.md](./CLAUDE.md) for repo structure, conventions, and how to add a plugin or methodology. Run `make check` and the `checkup` skill before committing.
+Licensed under the [PolyForm Internal Use License 1.0.0](./LICENSE). You are free to install and use this, including inside a company, and to change it for your own use. You may not redistribute or resell it. The full terms are in [`LICENSE`](./LICENSE). Third-party parts keep their own licences, in the `LICENSE` files beside them (`plugins/empirica/ui/vendor/`, `plugins/empirica/ui/dist/`).

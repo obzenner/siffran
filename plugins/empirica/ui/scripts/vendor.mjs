@@ -1,6 +1,6 @@
 // Copies the pinned runtime libraries declared in vendor.json into vendor/ (UI.md, Tokens, styles, vendor): Basecoat CSS/JS,
 // latin font files with a generated @font-face sheet, a Lucide sprite of exactly the icons in icons.json, and idiomorph's
-// ES module (the DOM morph EvElement.update() uses) with its licence beside it.
+// ES module (the DOM morph EvElement.update() uses) with its licence beside it; each other package's licence text too.
 // Records versions + sha256 in vendor/VERSIONS. Vendored files are never edited by hand.
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -35,6 +35,10 @@ files.push("vendor/lucide/sprite.svg");
 
 put(`node_modules/idiomorph/${spec.idiomorph.module}`, "vendor/idiomorph/idiomorph.esm.js");
 put("node_modules/idiomorph/LICENSE", "vendor/idiomorph/LICENSE");
+// The other vendored packages' licence texts, copied from the pinned packages (OFL 1.1, MIT, ISC), so a re-vendor keeps them.
+put("node_modules/@fontsource/ibm-plex-mono/LICENSE", "vendor/fonts/LICENSE");
+put("node_modules/basecoat-css/LICENSE.md", "vendor/basecoat/LICENSE");
+put("node_modules/lucide-static/LICENSE", "vendor/lucide/LICENSE");
 
 const packages = ["basecoat-css", "lucide-static", "idiomorph", ...new Set(spec.fonts.map((f) => f.package))];
 const sha = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
