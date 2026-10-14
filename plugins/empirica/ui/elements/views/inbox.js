@@ -21,7 +21,7 @@ export function railHtml(summary, place, go) {
   const projects = [...summary.projects].sort((a, b) => a.label.localeCompare(b.label))
     .map((p) => item(go({ project: p.id }), esc(p.label), p.runs, place.filters.project === p.id));
   const covered = summary.coverage;
-  const unread = covered.pending ? t("coverage.pending", { read: num(covered.read + covered.unreadable + covered.partial), runs: num(covered.runs) }) : "";
+  const unread = covered.pending ? count("coverage.pending", covered.runs, { read: num(covered.read + covered.unreadable + covered.partial), n: num(covered.runs) }) : "";
   return `<nav class="flex flex-col gap-m" aria-label="${t("rail.label")}">
     <div class="flex flex-col gap-3xs">${item(go({}), t("rail.everything"), covered.runs, place.view === "work" && !Object.keys(place.filters).length && !place.q)}${buckets.join("")}</div>
     <div class="flex flex-col gap-3xs"><h2 class="px-xs text-xs font-medium tracking-wide text-muted-foreground uppercase">${t("rail.projects")}</h2>${projects.join("")}</div>
@@ -39,17 +39,17 @@ export function stripHtml(summary, place, { go, periodHref }) {
     return link(periodHref(key), t(`period.${key}`), `rounded-m px-xs py-3xs text-xs ${on ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted"}`, on ? 'aria-current="true"' : "");
   });
   const asks = enums.ask.filter((k) => a.decisions_by[k]?.facts > 0)
-    .map((k) => t("strip.decision_part", { n: num(a.decisions_by[k].facts), what: t(`ask.part.${k}`) }));
+    .map((k) => count(`ask.part.${k}`, a.decisions_by[k].facts, { n: num(a.decisions_by[k].facts) }));
   const stat = (n, label, url) => link(url, `<span class="text-l font-semibold tabular-nums">${num(n)}</span> <span class="text-s text-muted-foreground">${label}</span>`, "flex items-baseline gap-xs hover:underline", "data-stat");
-  const quiet = [t("strip.audits", { passed: num(a.by.audit.passed ?? 0), none: num(a.by.audit.none ?? 0) }), ...asks,
-    a.not_read ? t("strip.not_read", { n: num(a.not_read) }) : "", a.untimed_runs ? t("strip.untimed", { n: num(a.untimed_runs) }) : ""];
+  const quiet = [count("strip.audits_passed", a.by.audit.passed ?? 0, { n: num(a.by.audit.passed ?? 0) }), count("strip.not_audited", a.by.audit.none ?? 0, { n: num(a.by.audit.none ?? 0) }), ...asks,
+    a.not_read ? t("strip.not_read", { total: num(a.not_read) }) : "", a.untimed_runs ? t("strip.untimed", { total: num(a.untimed_runs) }) : ""];
   return `<section class="flex flex-col gap-xs" aria-label="${t("strip.label")}">
     <div class="flex flex-wrap items-baseline gap-x-l gap-y-xs">
       <span class="flex items-center gap-3xs">${periods.join("")}</span>
       ${stat(a.total, count("strip.runs", a.total), go({}))}
-      ${stat(facts.decisions, t("strip.decisions"), go({ flag: "decided" }))}
-      ${stat(facts.failed_audits, t("strip.caught"), go({ flag: "failed_audit" }))}
-      ${stat(facts.refutations, t("strip.refuted"), go({ flag: "refuted" }))}
+      ${stat(facts.decisions, count("strip.decisions", facts.decisions), go({ flag: "decided" }))}
+      ${stat(facts.failed_audits, count("strip.caught", facts.failed_audits), go({ flag: "failed_audit" }))}
+      ${stat(facts.refutations, count("strip.refuted", facts.refutations), go({ flag: "refuted" }))}
     </div>
     <p class="text-xs text-muted-foreground" data-strip-notes>${joined(...quiet)}</p>
   </section>`;
@@ -100,7 +100,7 @@ export function calendarHtml(summary, place, { nowMs, go }) {
     return `<div class="flex items-end gap-3xs"><span class="w-project shrink-0 truncate text-xs text-muted-foreground">${esc(p.label)}</span><span class="flex min-w-0 flex-1 items-end gap-3xs">${cols.join("")}</span></div>`;
   };
   return `<section class="flex flex-col gap-xs" aria-label="${t("calendar.label")}">
-    <h2 class="text-xs font-medium tracking-wide text-muted-foreground uppercase">${joined(t("calendar.title", { days: days.length }), untimed ? t("calendar.untimed", { n: num(untimed) }) : "")}</h2>
+    <h2 class="text-xs font-medium tracking-wide text-muted-foreground uppercase">${joined(t("calendar.title", { days: days.length }), untimed ? count("calendar.untimed", untimed, { n: num(untimed) }) : "")}</h2>
     <div class="flex flex-col gap-3xs" data-calendar>${shown.map(row).join("")}</div>
   </section>`;
 }
@@ -111,7 +111,7 @@ export function groupHtml(standing, total, rows, ctx) {
   const cap = rows.length;
   return `<section class="flex flex-col" aria-labelledby="group-${standing}" data-group="${standing}">
     <div class="flex items-baseline gap-xs px-s py-2xs">${glyph("standing", standing)}<h2 id="group-${standing}" class="text-s font-semibold">${t(`${s.copy}.label`)}</h2>
-      ${total > cap ? link(ctx.all(standing), t("group.all", { n: num(total) }), "text-xs tabular-nums text-foreground underline underline-offset-2", "data-all data-count") : `<span class="text-xs tabular-nums text-muted-foreground" data-count>${num(total)}</span>`}</div>
+      ${total > cap ? link(ctx.all(standing), t("group.all", { total: num(total) }), "text-xs tabular-nums text-foreground underline underline-offset-2", "data-all data-count") : `<span class="text-xs tabular-nums text-muted-foreground" data-count>${num(total)}</span>`}</div>
     <ul class="flex flex-col">${rows.map((r) => rowHtml(r, ctx)).join("")}</ul>
   </section>`;
 }

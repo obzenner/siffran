@@ -21,7 +21,7 @@ export function noticeHtml(key) {
 function headerHtml({ row, project, attempts, now }) {
   const where = joined(
     project ? `<span title="${esc(project.repo ?? "")}" data-project>${esc(project.label)}</span>` : "",
-    t("row.attempt", { n: row.generation, of: attempts.length }),
+    t("row.attempt", { at: row.generation, of: attempts.length }),
     row.state === null ? "" : progress(row),
     row.updated === null ? "" : `<span title="${esc(when(row.updated))}">${esc(ago(row.updated, now))}</span>`);
   return `<header class="flex flex-col gap-xs">
@@ -58,25 +58,29 @@ function nowHtml(ctx) {
   return section("now", t(ended ? "now.outcome" : "now.title"), body);
 }
 
-/** Every audit verdict in order, the latest last: the verdict, who audited and how independent they were when it was
- * recorded, and what it found. The row's summary leads: whether the latest still covers the argument. */
+/** Every audit verdict as the observer serves them, newest first: the verdict, who audited and how independent they were
+ * when it was recorded, and what it found. The row's summary (whether the latest still covers the argument, a re-audit
+ * pending) is said once: on the latest verdict when it is that verdict, else as its own line (no verdict read yet). */
 function auditsHtml({ row, detail, now }) {
   const verdicts = detail ? detail.audits : undefined;
+  const notes = (a) => a ? [a.current === false ? t("audit.not_current") : "", a.pending ? t(a.verdict === "none" ? "audit.first_pending" : "audit.reaudit_pending") : ""]
+    .filter(Boolean).map((m) => `<span class="text-xs text-muted-foreground">${m}</span>`).join("") : "";
   const lead = row.audit ? `<p class="flex flex-wrap items-center gap-xs text-s">${auditHtml(row.audit)}${row.audit.independence ? `<span class="text-xs text-muted-foreground">${t(`independence.${row.audit.independence}`)}</span>` : ""}</p>` : "";
   if (verdicts === undefined) return `${lead}${detail ? "" : `<p class="text-s text-muted-foreground">${t("detail.loading")}</p>`}`;
   if (verdicts === null) return `${lead}<p class="text-s text-muted-foreground">${t("audits.unread")}</p>`;
   if (!verdicts.length) return lead || `<p class="text-s text-muted-foreground">${t("audits.none")}</p>`;
-  const one = (a) => `<span class="flex flex-col gap-3xs" data-audit>
-    <span class="flex flex-wrap items-center gap-xs">${chip("audit", a.verdict)}<span class="text-xs text-muted-foreground">${joined(a.auditor ? esc(a.auditor) : t("audits.auditor_unknown"), a.independence ? t(`independence.${a.independence}`) : t("audits.independence_unknown"), ago(a.at, now))}</span></span>
+  const same = row.audit?.verdict === verdicts[0].verdict;
+  const one = (a, i) => `<span class="flex flex-col gap-3xs" data-audit>
+    <span class="flex flex-wrap items-center gap-xs">${chip("audit", a.verdict)}<span class="text-xs text-muted-foreground">${joined(a.auditor ? esc(a.auditor) : t("audits.auditor_unknown"), a.independence ? t(`independence.${a.independence}`) : t("audits.independence_unknown"), ago(a.at, now))}</span>${i === 0 && same ? notes(row.audit) : ""}</span>
     ${a.findings.length ? list(a.findings.map((f) => `<span class="text-s">${esc(f)}</span>`)) : `<span class="text-xs text-muted-foreground">${t("audits.no_findings")}</span>`}</span>`;
-  return `${lead}${list(verdicts.map(one))}`;
+  return `${same ? "" : lead}${list(verdicts.map(one))}`;
 }
 
 /** What a decision is attached to, in words: the claim (a link to it in this sheet), the source, or the plan. */
 function decidedHtml(d, { row, href }) {
   if (d.claim) return `<span class="text-xs" data-decision-claim="${esc(d.claim)}">${claimLink(row, d.claim, href) || esc(d.claim)}${d.source ? ` · <code class="break-all font-mono">${esc(d.source)}</code>` : ""}</span>`;
   if (d.source) return `<code class="break-all font-mono text-xs">${esc(d.source)}</code>`;
-  return d.plan === null ? "" : `<span class="text-xs text-muted-foreground">${t("decision.plan", { n: d.plan })}</span>`;
+  return d.plan === null ? "" : `<span class="text-xs text-muted-foreground">${t("decision.plan", { plan: d.plan })}</span>`;
 }
 
 /** Every answer a human gave: what was asked, the answer and its effect as the core records it, and what it decided. */
@@ -90,7 +94,7 @@ function decisionsHtml(decisions, ctx) {
  * the same work is not claimed, a changed goal is said to be changed. */
 function attemptsHtml({ attempts, row, href, now }) {
   if (attempts.length < 2) return `<p class="text-s text-muted-foreground">${t("attempts.only")}</p>`;
-  const head = attempts.map((a) => `<th scope="col" class="text-left">${a.key === row.key ? `<span aria-current="true">${t("row.attempt.short", { n: a.generation })}</span>` : link(href({ run: a.id, claim: null }), t("row.attempt.short", { n: a.generation }), "data-attempt")}</th>`).join("");
+  const head = attempts.map((a) => `<th scope="col" class="text-left">${a.key === row.key ? `<span aria-current="true">${t("row.attempt.short", { at: a.generation })}</span>` : link(href({ run: a.id, claim: null }), t("row.attempt.short", { at: a.generation }), "data-attempt")}</th>`).join("");
   const cell = (html) => `<td class="align-top">${html}</td>`;
   const rows = [
     [t("compare.goal"), attempts.map((a, i) => a.goal === null ? t("compare.unread") : `${esc(clip(a.goal, 100))}${i && attempts[i - 1].goal !== null && attempts[i - 1].goal !== a.goal ? ` <span class="text-xs font-medium">${t("compare.goal_changed")}</span>` : ""}`)],

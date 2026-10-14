@@ -9,13 +9,13 @@ import enums from "../enums.json" with { type: "json" };
 import { colours, drawn, flush, install } from "./dom.mjs";
 
 install({ catalogue });
-const { clip, plain, stateOf, t } = await import("../elements/core/element.js");
+const { clip, num, plain, plainCount, stateOf, t } = await import("../elements/core/element.js");
 await import("../elements/index.js");
 const { railHtml, stripHtml, calendarHtml, groupsHtml } = await import("../elements/views/inbox.js");
 const { sheetHtml } = await import("../elements/views/sheet.js");
 const { windowFor, revealTop } = await import("../app/list.js");
 const { layout, shapePath } = await import("../app/universe.js");
-const { bounds, cardBox, claimGraph, fitView, footprint, keyBox, markRadius, toScreen, viewInset } = await import("../app/geometry.js");
+const { bounds, cardBox, claimGraph, segmentMeetsCircle, fitView, footprint, keyBox, markRadius, toScreen, viewInset } = await import("../app/geometry.js");
 const { line, rows, scenarios, sheets, summary } = await import("./fixtures.mjs");
 
 const G = catalogue.universe, TURN = 2 * Math.PI;
@@ -39,6 +39,47 @@ function mount(tag, data, attrs = {}) {
 beforeEach(() => { document.body.innerHTML = ""; drawn.length = 0; flush(); });
 
 // ---- atoms ----------------------------------------------------------------------------------------------------------------
+// ---- update() morphs: a poll that changes nothing touches nothing; one that changes a count changes that text only ----
+const records = (el, fn) => { const o = new MutationObserver(() => {}); o.observe(el, { subtree: true, childList: true, attributes: true, characterData: true }); fn(); const r = o.takeRecords(); o.disconnect(); return r; };
+const nodesOf = (el) => [...el.querySelectorAll("*")];
+
+test("update() keeps every node when the HTML is the same, and records no mutation (the rail on a poll that changed nothing)", () => {
+  const el = mount("ev-rail", { summary, place, go: () => "?" }), before = nodesOf(el);
+  assert.ok(before.length > 5);
+  const r = records(el, () => { el.data = { summary: structuredClone(summary), place: { ...place }, go: () => "?" }; });
+  assert.deepEqual(r.map((x) => [x.type, x.target.nodeName]), [], "no mutation");
+  const after = nodesOf(el);
+  assert.equal(after.length, before.length); assert.ok(after.every((n, i) => n === before[i]), "every node the same node");
+});
+
+test("update() changes only what changed: one bucket's count is one text node, every element kept, focus kept", () => {
+  const el = mount("ev-rail", { summary, place, go: () => "?" }), before = nodesOf(el);
+  const link = el.querySelector("a[href]"); link.focus();
+  const s = structuredClone(summary), k = Object.keys(s.facets.standing).find((x) => s.facets.standing[x] > 0);
+  s.facets.standing[k] += 1000;
+  const r = records(el, () => { el.data = { summary: s, place: { ...place }, go: () => "?" }; });
+  const after = nodesOf(el);
+  assert.ok(after.length === before.length && after.every((n, i) => n === before[i]), "every element the same element");
+  assert.ok(r.length > 0 && r.every((x) => x.type === "characterData" || (x.type === "childList" && x.target.nodeType === 1 && [...x.addedNodes, ...x.removedNodes].every((n) => n.nodeType === 3))), JSON.stringify(r.map((x) => [x.type, x.target.nodeName])));
+  assert.ok(text(el).includes(num(s.facets.standing[k])), "the new count");
+  assert.equal(document.activeElement, link, "focus kept");
+});
+
+test("a morphed parent keeps its child elements, the same nodes, and a new attribute still redraws the child (a sheet's budget meter)", () => {
+  const s = structuredClone(sheets[Object.keys(sheets).find((k) => sheets[k].governance?.ceilings)]);
+  const ctx = (d) => ({ row: d.row, project: null, detail: d, attempts: d.attempts, notice: null, claim: null, now: 0, href });
+  const el = mount("ev-sheet", ctx(s)), kids = [...el.querySelectorAll("ev-meter, ev-more, ev-copy")], meter = el.querySelector("ev-meter");
+  assert.ok(meter && kids.length > 1);
+  assert.deepEqual(records(el, () => { el.data = ctx(structuredClone(s)); }).length, 0, "the same answer: nothing touched");
+  const k = meter.getAttribute("label").replace("budget.", ""), next = structuredClone(s);
+  next.governance.ceilings[k].used = next.governance.ceilings[k].max;
+  el.data = ctx(next);
+  const now = [...el.querySelectorAll("ev-meter, ev-more, ev-copy")];
+  assert.ok(now.length === kids.length && now.every((n, i) => n === kids[i]), "every child element the same element");
+  assert.equal(meter.getAttribute("used"), String(next.governance.ceilings[k].max));
+  assert.ok(meter.querySelector("meter").hasAttribute("data-full"), "the child redrew from its new attribute");
+});
+
 test("ev-meter says how much of a budget is used, and marks it full only at its max", () => {
   const el = mount("ev-meter", undefined, { label: "budget.passes", used: "3", max: "10" });
   assert.equal(text(el), `${plain("budget.passes")} ${plain("budget.of", { used: 3, max: 10 })} ${plain("budget.of", { used: 3, max: 10 })}`);
@@ -193,7 +234,7 @@ function universe(p, extra) { const el = mount("ev-universe", udata(p, extra)); 
 
 test("ev-universe at store zoom draws each island's shore and each mark where geometry puts them, in its standing's colour", () => {
   const el = universe();
-  const L = world(), cam = fitView(L.bounds(), view(), Infinity, G), m = summary.marks;
+  const L = world(), cam = fitView(L.bounds(), view(), G.island_scale_max, G), m = summary.marks;
   for (const p of summary.projects) {
     const c = L.island(p.id), q = toScreen(cam, view(), c.x, c.y);
     assert.ok(hasArc(q.sx, q.sy, c.r * cam.s), `the shore of ${p.label}`);
@@ -220,8 +261,8 @@ test("ev-universe names every island with its counts, calls out the runs that ne
   for (const a of names) {
     const p = summary.projects.find((x) => x.id === a.dataset.islandLabel);
     assert.equal(a.getAttribute("href"), `?project=${p.id}`);
-    assert.ok(text(a).startsWith(`${p.label} ${plain(p.runs === 1 ? "universe.runs.one" : "universe.runs", { n: p.runs })}`), p.label);
-    assert.equal(text(a).includes(plain("universe.need_you", { n: p.needs })), p.needs > 0, p.label);
+    assert.ok(text(a).startsWith(`${p.label} ${plainCount("universe.runs", p.runs, { n: p.runs })}`), p.label);
+    assert.equal(text(a).includes(plainCount("universe.need_you", p.needs, { n: p.needs })), p.needs > 0, p.label);
     assert.equal(el.querySelector(`[data-island-label="${p.id}"]`).style.left, `${a.dataset.x}px`);
   }
   const called = [...el.querySelectorAll("[data-callout]")];
@@ -237,7 +278,7 @@ test("ev-universe names every island with its counts, calls out the runs that ne
   const more = el.querySelector("[data-more-needs]");
   assert.equal(more ? text(more) : "", needs > called.length ? plain("universe.more", { n: needs - called.length }) : "");
   // the pulse rings: each called-out run's ring, at its mark, in the needs colour, under the marks
-  const L = world(), cam = fitView(L.bounds(), view(), Infinity, G), r = markRadius("store", cam.s, G), m = summary.marks;
+  const L = world(), cam = fitView(L.bounds(), view(), G.island_scale_max, G), r = markRadius("store", cam.s, G), m = summary.marks;
   for (const c of called) {
     const { x, y } = L.mark(m, m.id.indexOf(c.dataset.callout)), q = toScreen(cam, view(), x, y);
     const ring = drawn.findIndex((d) => d[0] === "arc" && near(d[1], q.sx) && near(d[2], q.sy) && d[3] > r);
@@ -255,7 +296,7 @@ test("ev-universe's bars, key and mirror show the observer's counts; the key sta
   el.querySelector("[data-bottom] [data-key-toggle]").click(); flush();
   const a = summary.aggregates;
   const counts = { failed_audit: a.runs.failed_audits, refuted: a.runs.refutations, decided: a.runs.decisions, changed_since_audit: a.by.standing.changed_since_audit ?? 0 };
-  for (const chip of el.querySelectorAll("[data-hl]")) assert.equal(text(chip), `${counts[chip.dataset.hl]} ${plain(`flag.${chip.dataset.hl}`)}`);
+  for (const chip of el.querySelectorAll("[data-hl]")) assert.equal(text(chip), `${counts[chip.dataset.hl]} ${plainCount(`chip.flag.${chip.dataset.hl}`, counts[chip.dataset.hl])}`);
   assert.deepEqual([...el.querySelectorAll("[data-period]")].map((p) => p.dataset.period), catalogue.periods);
   assert.equal(el.querySelector('[data-period][aria-current="true"]').dataset.period, place.period);
   const shown = summary.marks.standings.filter((s) => (summary.facets.standing[s] ?? 0) > 0);
@@ -270,7 +311,7 @@ test("ev-universe's bars, key and mirror show the observer's counts; the key sta
   el.querySelector("[data-legend] [data-key-toggle]").click(); flush();
   assert.equal(el.querySelector("[data-key]").innerHTML, "");
   assert.ok(el.querySelector("[data-bottom] [data-key-toggle]"));
-  const cam = fitView(world().bounds(), view(false), Infinity, G);
+  const cam = fitView(world().bounds(), view(false), G.island_scale_max, G);
   assert.ok(el.dataset.fit.endsWith(cam.s.toFixed(4)));
   el.querySelector("[data-bottom] [data-key-toggle]").click(); flush();
   assert.ok(el.querySelector("[data-legend]"));
@@ -316,7 +357,9 @@ test("ev-universe on a run never lays a claim's label over a claim's or an attem
 test("ev-universe on a run is its own scene: the run large with its word, its claims a graph from geometry's claimGraph, its attempts a chain", () => {
   const key = Object.keys(sheets).find((x) => (sheets[x].row.claims ?? []).length > 1 && sheets[x].attempts.length > 1 && summary.marks.id.includes(sheets[x].row.id))
     ?? Object.keys(sheets).find((x) => (sheets[x].row.claims ?? []).length > 1 && summary.marks.id.includes(sheets[x].row.id));
-  const s = sheets[key], row = s.row;
+  const s = structuredClone(sheets[key]), row = s.row;
+  // one claim as long as real ones get: its label is cut at claim_chars, its node keeps every word (L12)
+  row.claims[1].text = `${row.claims[1].text} It holds for every timestamp RFC 3339 section 5.6 allows, and for no string it forbids.`;
   const el = universe({ run: row.id }, { sheet: s });
   const W0 = world(), m = summary.marks, i = m.id.indexOf(row.id), own = W0.island(summary.projects[m.project[i]].id), at = W0.mark(m, i);
   const cam = { ...fitView(bounds([footprint(own.x, own.y, own.r, G)]), view(), G.island_scale_max, G), x: at.x, y: at.y };
@@ -337,6 +380,16 @@ test("ev-universe on a run is its own scene: the run large with its word, its cl
     assert.deepEqual([+l.dataset.x, +l.dataset.y, +l.dataset.w, +l.dataset.h], [Math.round(c.sx + b.x), Math.round(c.sy + b.y), Math.round(b.w), Math.round(b.h)]);
     assert.equal(text(l), label(cl)); assert.equal(l.title, cl.text);
   }
+  // a label cut short keeps the claim's whole text: in its title, and in its node's accessible name (L12)
+  for (const n of nodes) {
+    const cl = claims.find((x) => x.id === n.dataset.orbit);
+    assert.equal(n.title.split(plain("list.join"))[0], cl.text); assert.ok(text(n.querySelector(".sr-only")).startsWith(cl.text), `${cl.id}: the whole text is its name`);
+  }
+  // no edge crosses the run's disc (L12)
+  for (const pl of el.querySelectorAll("[data-graph] polyline[data-edge]")) {
+    const pts = pl.getAttribute("points").split(" ").map((xy) => xy.split(",").map(Number));
+    for (let k = 1; k < pts.length; k++) assert.ok(!segmentMeetsCircle(pts[k - 1][0], pts[k - 1][1], pts[k][0], pts[k][1], { sx: c.sx, sy: c.sy, r: size.run + size.gap - 0.2 }), pl.dataset.edge);
+  }
   const wd = el.querySelector("[data-run-word]");
   assert.deepEqual([+wd.dataset.x, +wd.dataset.y], [Math.round(c.sx + word.x), Math.round(c.sy + word.y)], "the word under the run");
   if (g.root) {
@@ -350,7 +403,7 @@ test("ev-universe on a run is its own scene: the run large with its word, its cl
     assert.ok(n.querySelector("path").getAttribute("d") === shapePath(stateOf("claim", claims.find((x) => x.id === n.dataset.orbit).state).shape, G.claim_px - 1), "its state's shape");
   }
   const published = new Set((row.edges ?? []).filter((e) => g.at.has(e.from) && g.at.has(e.to)).map((e) => `${e.from} ${e.to}`));
-  const lines = [...el.querySelectorAll("[data-graph] line[data-edge]")].map((l) => l.dataset.edge);
+  const lines = [...el.querySelectorAll("[data-graph] [data-edge]")].map((l) => l.dataset.edge);
   assert.deepEqual(new Set(lines), published, "the SupportedBy edges, each once"); assert.equal(lines.length, published.size);
   assert.equal(text(el.querySelector("[data-run-word]")), plain(`${stateOf("standing", row.standing).copy}.label`));
   assert.equal(el.querySelectorAll("[data-island-label]").length + el.querySelectorAll("[data-callout]").length, 0);
@@ -422,13 +475,14 @@ test("ev-universe says an empty store is empty, and counts the flights it begins
 
 test("ev-universe lights only the highlighted flag's marks and the period's, and dims the islands it is not zoomed on", () => {
   const m = summary.marks, L = world();
-  const alphaAt = (q, r) => { const at = drawn.findIndex((d) => d[0] === "arc" && near(d[1], q.sx) && near(d[2], q.sy) && near(d[3], r)); return drawn.slice(0, at).reverse().find((d) => d[0] === "=globalAlpha")[1]; };
+  // the last arc there: a mark's dot is drawn over its pulse ring, which may start at the dot's own radius
+  const alphaAt = (q, r) => { const at = drawn.findLastIndex((d) => d[0] === "arc" && near(d[1], q.sx) && near(d[2], q.sy) && near(d[3], r)); return drawn.slice(0, at).reverse().find((d) => d[0] === "=globalAlpha")[1]; };
   const flag = m.flag_bits.find((f) => m.flags.some((x) => x & (1 << m.flag_bits.indexOf(f))) && m.flags.some((x) => !(x & (1 << m.flag_bits.indexOf(f)))));
   const since = [...m.updated].filter((u) => u !== null).sort((a, b) => a - b)[Math.floor(m.updated.length / 2)];
   for (const [p, extra, lit] of [[{ hl: flag }, {}, (i) => (m.flags[i] & (1 << m.flag_bits.indexOf(flag))) !== 0], [{}, { since }, (i) => m.updated[i] !== null && m.updated[i] >= since]]) {
     document.body.innerHTML = ""; drawn.length = 0;
     universe(p, extra);
-    const cam = fitView(L.bounds(), view(), Infinity, G), r = markRadius("store", cam.s, G);
+    const cam = fitView(L.bounds(), view(), G.island_scale_max, G), r = markRadius("store", cam.s, G);
     const lits = m.id.map((_, i) => alphaAt(toScreen(cam, view(), L.mark(m, i).x, L.mark(m, i).y), r));
     assert.deepEqual(lits, m.id.map((_, i) => (lit(i) ? 1 : G.dim)), JSON.stringify(p));
     assert.ok(lits.includes(1) && lits.includes(G.dim), "both lit and dimmed marks");
@@ -473,7 +527,7 @@ test("ev-universe's pointer: a mark's tip says its goal and standing, a click op
   } finally { clock.mockRestore(); }
   // the store: a click on an island zooms on it
   document.body.innerHTML = "";
-  const store = universe(), shore = L.island(summary.projects[0].id), cs = fitView(L.bounds(), view(), Infinity, G), at = toScreen(cs, view(), shore.x, shore.y);
+  const store = universe(), shore = L.island(summary.projects[0].id), cs = fitView(L.bounds(), view(), G.island_scale_max, G), at = toScreen(cs, view(), shore.x, shore.y);
   const opened = [];
   store.addEventListener("ev-navigate", (e) => opened.push(e.detail));
   store.querySelector("canvas").dispatchEvent(new MouseEvent("click", { bubbles: true, clientX: at.sx, clientY: at.sy }));
@@ -515,7 +569,7 @@ test("ev-universe draws every placed mark on screen and no other: drawn() is eac
   const W0 = world(), m = summary.marks;
   const expect = (cam, v, r) => m.id.flatMap((id, i) => { const q = toScreen(cam, v, W0.mark(m, i).x, W0.mark(m, i).y);
     return q.sx >= -r && q.sy >= -r && q.sx <= W + r && q.sy <= H + r ? [`${id} ${q.sx.toFixed(1)} ${q.sy.toFixed(1)}`] : []; });
-  const store = universe(), cs = fitView(W0.bounds(), view(), Infinity, G);
+  const store = universe(), cs = fitView(W0.bounds(), view(), G.island_scale_max, G);
   assert.deepEqual(store.drawn().marks, expect(cs, view(), markRadius("store", cs.s, G)));
   assert.equal(store.drawn().fit, store.dataset.fit);
   assert.equal(store.drawn().marks.length, m.id.length, "the store shows them all");
@@ -626,7 +680,7 @@ test("ev-universe's mirror: the islands as links in, the runs as links to each, 
   assert.equal(z.querySelectorAll("[data-mirror-run]").length, G.mirror_cap);
   const rest = z.querySelector("[data-mirror-rest]");
   assert.equal(rest.getAttribute("href"), `?project=${big.projects[0].id}`); assert.equal(text(rest), plain("universe.all_in", { n }));
-  assert.equal(text(z.querySelector('[data-mirror-run="x0"]')), `the first goal${plain("list.join")}${plain("standing.proven.label")}${plain("list.join")}${plain("row.attempt.short", { n: 2 })}`);
+  assert.equal(text(z.querySelector('[data-mirror-run="x0"]')), `the first goal${plain("list.join")}${plain("standing.proven.label")}${plain("list.join")}${plain("row.attempt.short", { at: 2 })}`);
   assert.equal(text(z.querySelector('[data-mirror-run="x1"]')), plain("standing.proven.label"), "attempt 1 says no attempt");
 });
 

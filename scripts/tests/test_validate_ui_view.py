@@ -276,8 +276,14 @@ class ValidateUiViewSummaryTests(unittest.TestCase):
 
     def test_a_latest_audit_that_is_not_the_rows_verdict_is_rejected(self):
         details = copy.deepcopy(RUNS)
-        details[SCENARIOS["audit-failed"]]["audits"][-1]["verdict"] = "passed"
-        self.assertRejected(SUMMARY, ROWS, details, "the latest of audits")
+        details[SCENARIOS["audit-failed"]]["audits"][0]["verdict"] = "passed"
+        self.assertRejected(SUMMARY, ROWS, details, "the first of audits (newest first)")
+
+    def test_audits_oldest_first_are_rejected(self):
+        details = copy.deepcopy(RUNS)
+        one = details[SCENARIOS["audit-failed"]]["audits"][0]
+        details[SCENARIOS["audit-failed"]]["audits"] = [one, {**one, "at": one["at"] + 60}]  # the older first
+        self.assertRejected(SUMMARY, ROWS, details, "audits are newest first")
 
     def test_coverage_that_does_not_sum_is_rejected(self):
         summary = copy.deepcopy(SUMMARY)

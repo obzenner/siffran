@@ -128,3 +128,12 @@ test("C4: a placeholder the call does not supply, and a variable the copy does n
   assert.ok(has(r, "C4 placeholder not supplied", "{n}") && has(r, "C4 variable the copy does not use", "total"));
 });
 
+
+test("a count phrase without its one form, or read without its count, is a finding (L2/L4/L7)", () => {
+  const t = base(); t.copy["work.count.one"] && delete t.copy["work.count.one"];
+  assert.ok(has(audit(t), "C1 count phrase without its one form", "work.count"));
+  const u = base(); u.code[page] += "\nconst a = t(\"universe.runs\", { n: 1 });";
+  assert.ok(has(audit(u), "C1 count phrase read without its count", "universe.runs"));
+  const w = base(); w.code[page] += "\nconst a = plain(`ask.part.${k}`);";
+  assert.ok(has(audit(w), "C1 count phrase read without its count", "ask.part.*"));
+});

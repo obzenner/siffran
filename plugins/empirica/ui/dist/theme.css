@@ -74,6 +74,9 @@
   --container-list: 23rem;
   --container-rail: 13.5rem;
   --container-sheet: 28.5rem;
+  --container-sheet-min: 20rem;
+  --container-main-min: 22rem;
+  --container-split-step: 2rem;
   --container-project: 7.5rem;
   --container-time: 6.5rem;
   --font-weight-normal: 300;

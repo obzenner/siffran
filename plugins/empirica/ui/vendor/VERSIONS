@@ -1,5 +1,6 @@
 basecoat-css 1.0.2
 lucide-static 1.51.0
+idiomorph 0.8.0
 @fontsource/ibm-plex-mono 5.3.0
 
 98ca5bbecf6bbe67226cdfeb9700173d0f31532ce8772ea34871f6bcfb3f198f  basecoat/basecoat-nova.css
@@ -8,3 +9,5 @@ d2ce22595d55a52b0c63f837515729bd97706bfa1b833816509f13d93daa59b5  fonts/ibm-plex
 01d285447409c8a588692162439a038b8cbd7871309ee20267b0d2d91c6e8e22  fonts/ibm-plex-mono-latin-500-normal.woff2
 ad14760da763ef524172d720be7054b615c736378cd50ab8fea67c9b0dddec2b  fonts/fonts.css
 aebe2e9c5fe4b10b80b4bd60145bbe00ec2311fb7ca945ee6e7d11ddb04694f4  lucide/sprite.svg
+e1e2c7dbd606233d302bac48074fd1307c15609b77ea485c18f1b13d6be67c14  idiomorph/idiomorph.esm.js
+d3d2456f76414f2456104660ebd65aff1c04cd7966b942bdabd63f3cdb316a38  idiomorph/LICENSE

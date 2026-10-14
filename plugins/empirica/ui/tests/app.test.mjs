@@ -56,7 +56,7 @@ test("the page boots: it asks what the server serves and the summary, then shows
   assert.equal($("universe").querySelectorAll("[data-island-label]").length, summary.projects.length);
   for (const p of summary.projects) assert.ok(text($("rail")).includes(p.label), p.label);
   assert.ok(text($("status")).includes(plain("app.checked", { at: "" }).trim()), text($("status")));
-  assert.ok(text($("status")).includes(plain("coverage.unread", { n: summary.coverage.unreadable + summary.coverage.partial })));
+  assert.ok(text($("status")).includes(plain("coverage.unread", { total: summary.coverage.unreadable + summary.coverage.partial })));
   assert.deepEqual([...$("switch").querySelectorAll("[data-switch]")].map((a) => [a.dataset.switch, a.hasAttribute("aria-current")]), [["universe", true], ["inbox", false]]);
 });
 

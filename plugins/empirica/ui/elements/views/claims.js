@@ -3,7 +3,7 @@
 // and the claims the run no longer stands on. Words only: the
 // states, the scope (Required or Deferred) and the assurance are the core's; the blocker's sentence is the registry's.
 import catalogue from "../../catalogue.json" with { type: "json" };
-import { claimGraph, graphBox } from "../../app/geometry.js";
+import { claimGraph, edgePath, graphBox } from "../../app/geometry.js";
 import { shapePath } from "../../app/universe.js";
 import { TONE, ago, clip, esc, joined, plain, stateOf, t } from "../core/element.js";
 import { supportTree } from "../core/tree.js";
@@ -110,7 +110,7 @@ export function claimsGraphHtml({ row, claim, href }) {
   const v = graphBox(g, SMALL, [], 4), f = (n) => n.toFixed(1);
   const tone = (domain, value) => TONE[stateOf(domain, value).tone]?.fg ?? TONE.neutral.fg;
   const line = (a, b, extra = "") => `<line ${extra} x1="${f(a.x)}" y1="${f(a.y)}" x2="${f(b.x)}" y2="${f(b.y)}" class="stroke-border" stroke-width="1"></line>`;
-  const lines = g.edges.map((e) => line(g.at.get(e.from), g.at.get(e.to), `data-edge="${esc(e.from)} ${esc(e.to)}"`)).join("") + (g.root ? line({ x: 0, y: 0 }, g.at.get(g.root)) : "");
+  const lines = g.edges.map((e) => `<polyline data-edge="${esc(e.from)} ${esc(e.to)}" points="${edgePath(g, e).map((p) => `${f(p.x)},${f(p.y)}`).join(" ")}" fill="none" class="stroke-border" stroke-width="1"></polyline>`).join("") + (g.root ? line({ x: 0, y: 0 }, g.at.get(g.root)) : "");
   const nodes = claims.map((c) => {
     const p = g.at.get(c.id), s = stateOf("claim", c.state), lb = g.labels.get(c.id), sel = c.id === claim, marked = c.kind !== "ordinary";
     return `<a href="${esc(href({ claim: sel ? null : c.id }))}" data-graph-claim="${esc(c.id)}" ${sel ? 'aria-current="true"' : ""}><title>${esc(joined(c.id, clip(c.text, 120), plain(`${s.copy}.label`), marked ? plain(`kind.${c.kind}`) : ""))}</title>

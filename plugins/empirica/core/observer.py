@@ -362,13 +362,14 @@ def ask(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
 
 
 def audits(snapshot: EvaluationSnapshot, at: Mapping[str, float | None]) -> list[dict[str, Any]]:
-    """Every audit verdict of the run in history order (``evaluation.audit_verdicts``; the last is the latest): its
+    """Every audit verdict of the run, newest first (``evaluation.audit_verdicts`` reversed; the first is the latest, the
+    one that decides the run, so a reader meets it before the older findings it answers): its
     verdict, its findings, the auditor the host recorded for it, its independence as it stood when it was recorded
     (``evaluation.independence_then``: against the evidence its audit was launched over, never today's; ``None`` when
     the run no longer holds that launch dossier) and the time of the write that recorded it."""
     return [{"verdict": "passed" if v.get("verdict") == "pass" else "failed", "findings": list(v.get("findings", [])),
              "auditor": identity_pair(audit_attributions(snapshot, v)[0]), "independence": independence_then(snapshot, v),
-             "at": at.get(v["artifact_id"])} for v in audit_verdicts(snapshot)]
+             "at": at.get(v["artifact_id"])} for v in reversed(audit_verdicts(snapshot))]
 
 
 def _why(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], stale: set[str],

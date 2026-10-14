@@ -3,6 +3,10 @@
 // renders hundreds of these, so a row is not an element.
 import { ago, clip, esc, hostName, joined, t } from "../core/element.js";
 import { glyph } from "./parts.js";
+import catalogue from "../../catalogue.json" with { type: "json" };
+
+/** A host's session id as a row shows it: its first `session_short` characters (a UUID's first group), the rest elided. */
+const shortId = (s) => (s.length > catalogue.session_short ? `${s.slice(0, catalogue.session_short)}…` : s);
 
 /** @param {object} r a page line (/api/runs, /api/search) @param {{href:(id:string)=>string, now:number, open:?string, here:?string}} ctx
  * `open` is the run whose sheet is open; `here` the one the keyboard is on. */
@@ -10,9 +14,9 @@ export function rowHtml(r, ctx) {
   // only a run filed under Needs a human shows its ask: a host that has not looked for a dialog (not_ended) owes no question yet
   const asked = r.standing === "needs_human" && r.ask !== null;
   const goal = r.goal === null ? `<span class="text-muted-foreground">${t("goal.unread")}</span>` : esc(clip(r.goal, 140));
-  const where = asked ? `<span class="shrink-0 rounded-m bg-tone-human-tint px-xs text-xs font-medium text-tone-human">${t(`ask.${r.ask}`)}</span><span class="ev-optional hidden shrink-0 text-xs text-muted-foreground md:inline">${joined(r.host === null ? "" : hostName(r.host), esc(r.session ?? ""))}</span>` : "";
+  const where = asked ? `<span class="shrink-0 rounded-m bg-tone-human-tint px-xs text-xs font-medium text-tone-human">${t(`ask.${r.ask}`)}</span><span class="ev-optional hidden shrink-0 text-xs text-muted-foreground md:inline"${r.session ? ` title="${esc(r.session)}"` : ""}>${joined(r.host === null ? "" : hostName(r.host), esc(shortId(r.session ?? "")))}</span>` : "";
   // an attempt after the first says so on every row, so attempts at one run never read as unrelated runs
-  const attempt = r.generation > 1 ? `<span class="shrink-0 rounded-s border border-border px-2xs text-xs text-muted-foreground" data-attempt-badge>${t("row.attempt.short", { n: r.generation })}</span>` : "";
+  const attempt = r.generation > 1 ? `<span class="shrink-0 rounded-s border border-border px-2xs text-xs text-muted-foreground" data-attempt-badge>${t("row.attempt.short", { at: r.generation })}</span>` : "";
   // the time column is a fixed width: a time not recorded is a short word there, the whole sentence in its title
   const at = asked ? r.asked_at : r.updated, short = typeof at === "number" ? ago(at, ctx.now) : t("time.unknown.short");
   const time = asked ? t("row.asked", { when: short }) : short, full = asked ? t("row.asked", { when: ago(at, ctx.now) }) : ago(at, ctx.now);

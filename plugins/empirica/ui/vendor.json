@@ -1,5 +1,5 @@
 {
-  "$description": "What scripts/vendor.mjs copies into vendor/ (UI.md, Tokens, styles, vendor). Versions come from package-lock.json. Fonts: the weights tokens.json names (weight: 300 body, 400 medium, 500 semibold), nothing heavier. `lucide.stroke_width` is the sprite's line width (V2 thinned it from Lucide's 2).",
+  "$description": "What scripts/vendor.mjs copies into vendor/ (UI.md, Tokens, styles, vendor). Versions come from package-lock.json. Fonts: the weights tokens.json names (weight: 300 body, 400 medium, 500 semibold), nothing heavier. `lucide.stroke_width` is the sprite's line width (V2 thinned it from Lucide's 2). `idiomorph.module` is the package's ES-module build, vendored as is (0BSD, its LICENSE beside it).",
   "basecoat": {
     "styles": [
       "nova"
@@ -27,5 +27,8 @@
   ],
   "lucide": {
     "stroke_width": 1.5
+  },
+  "idiomorph": {
+    "module": "dist/idiomorph.esm.js"
   }
 }

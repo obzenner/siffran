@@ -2,6 +2,7 @@
 import copy from "../../copy/en.json" with { type: "json" };
 import icons from "../../icons.json" with { type: "json" };
 import states from "../../states.json" with { type: "json" };
+import { Idiomorph } from "../../vendor/idiomorph/idiomorph.esm.js";
 
 const SPRITE = new URL("../../vendor/lucide/sprite.svg", import.meta.url).href;
 
@@ -33,6 +34,8 @@ export function word(domain, value) { return t(`${stateOf(domain, value).copy}.l
 
 /** A counted phrase: `${key}.one` for exactly one thing, else `key`. `{n}` is that count unless `vars` says more. */
 export function count(key, n, vars = {}) { return t(n === 1 ? `${key}.one` : key, { n, ...vars }); }
+/** The same choice for text that is escaped later (as `plain`). */
+export function plainCount(key, n, vars = {}) { return plain(n === 1 ? `${key}.one` : key, { n, ...vars }); }
 /** A moment as a clock time, in the reader's locale (`ms` since the epoch). */
 export function clock(ms) { return new Intl.DateTimeFormat(undefined, { timeStyle: "medium" }).format(new Date(ms)); }
 /** Whether the copy catalogue has `key`. */
@@ -118,6 +121,44 @@ function refocus(root, k) {
   (k.own ? owner.querySelector(k.own) : owner.querySelectorAll(FOCUSABLE)[k.i])?.focus();
 }
 
+/** The attributes of `from` on `to`, each set only where it differs and removed where `from` has none (so an unchanged
+ * element records no mutation). */
+function syncAttributes(to, from) {
+  for (const a of from.attributes) if (to.getAttribute(a.name) !== a.value) to.setAttribute(a.name, a.value);
+  for (const a of [...to.attributes]) if (!from.hasAttribute(a.name) && a.name !== "style") to.removeAttribute(a.name);
+}
+/** Set `el`'s inline style properties (CSSOM: the CSP forbids style attributes, so markup never carries one), each only
+ * where it differs, so a redraw that moves nothing records nothing. */
+export function setStyle(el, props) {
+  for (const [k, v] of Object.entries(props)) if (el.style[k] !== v) el.style[k] = v;
+}
+const LAST = new WeakMap();  // host -> the HTML last morphed into it
+const MORPH = {
+  morphStyle: "innerHTML",
+  restoreFocus: true,
+  callbacks: {
+    // the style attribute is the CSSOM's (setStyle), never markup's: a morph leaves it
+    beforeAttributeUpdated: (name, _el, how) => !(name === "style" && how === "remove"),
+    // A child custom element draws its own children: take only its attributes (its attributeChangedCallback redraws
+    // it) and keep it, the same node, for its parent's populate() to hand its data to.
+    beforeNodeMorphed(old, next) {
+      if (old.nodeType !== 1 || !old.localName.includes("-")) return true;
+      syncAttributes(old, next);
+      return false;
+    },
+  },
+};
+/** Make `host`'s children `html` by changing only what differs (idiomorph, vendor/idiomorph): every node that stays is the
+ * same node, so a poll that changed one count changes one text node, and focus, scroll and a child element's own state
+ * stay. Nothing at all when `html` is what was morphed in last. The one way the UI redraws markup; a host emptied on
+ * purpose, or a scaffold drawn once, may still be written directly. Returns whether anything was morphed. */
+export function morph(host, html) {
+  if (LAST.get(host) === html) return false;
+  Idiomorph.morph(host, html, MORPH);
+  LAST.set(host, html);
+  return true;
+}
+
 /** Base class: light DOM, re-render on attribute change or .data assignment (E3). Subclasses attach their own
  * listeners once, in the constructor, so reconnecting an element never duplicates them. */
 export class EvElement extends HTMLElement {
@@ -126,13 +167,15 @@ export class EvElement extends HTMLElement {
   get data() { return this.#data; }
   connectedCallback() { this.update(); }
   attributeChangedCallback() { if (this.isConnected) this.update(); }
-  /** Re-render, let the subclass fill in child data (populate), then give focus back to the equivalent control. */
+  /** Morph to render()'s HTML (nothing when it is the same), let the subclass hand its child elements their data
+   * (populate, every time: a child skips its own redraw when its HTML is the same), then, only if focus was lost, give it
+   * back to the equivalent control. */
   update() {
     const a = document.activeElement;
     const keep = a && a !== this && this.contains(a) ? focusKey(this, a) : null;
-    this.innerHTML = this.render();
+    morph(this, this.render());
     this.populate();
-    if (keep) refocus(this, keep);
+    if (keep && !this.contains(document.activeElement)) refocus(this, keep);
   }
   /** Hand structured data to child elements after render (they render synchronously on assignment). */
   populate() {}

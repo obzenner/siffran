@@ -10,7 +10,7 @@ import catalogue from "../catalogue.json" with { type: "json" };
 import states from "../states.json" with { type: "json" };
 import enums from "../enums.json" with { type: "json" };
 import { FLAG_COUNT, callouts, layout, lit, mirror, shapePath } from "../app/universe.js";
-import { footprint, islandRadius, islandSlots, latticePlace } from "../app/geometry.js";
+import { bounds, fitView, footprint, islandRadius, islandSlots, latticePlace, slotTier, toScreen, viewInset } from "../app/geometry.js";
 import { summary } from "./fixtures.mjs";
 
 const G = catalogue.universe;
@@ -22,6 +22,8 @@ function made(ids, runs) {
   runs.forEach(([k, place], n) => { m.id.push(`r${k}-${place}-${n}`); m.project.push(k); m.place.push(place); m.attempt.push(1); m.standing.push(4); m.updated.push(null); m.started.push(null); m.flags.push(0); });
   return { ...summary, projects: ids.map((id, k) => ({ ...summary.projects[0], id, label: id, runs: runs.filter(([p]) => p === k).length })), marks: m };
 }
+/** The slots' tier a summary lays out at: the smallest that holds its largest island (`slotTier`). */
+const tierOf = (s) => slotTier(Math.max(1, ...s.projects.map((p, k) => Math.max(p.runs, ...s.marks.place.filter((x, i) => x !== null && s.marks.project[i] === k).map((x) => x + 1)))), G);
 /** Every island's and placed mark's world place, by id. */
 function places(L, s) {
   const out = new Map(L.islands.map((c) => [`island ${c.id}`, [c.x, c.y]]));
@@ -37,7 +39,8 @@ test("the layout of a summary is a pure function of it: the same summary twice, 
 });
 
 test("island k sits in slot k as large as its runs need, each mark at its observer place on its island's sunflower", () => {
-  const L = layout(summary, G), slots = islandSlots(summary.projects.length, G);
+  const L = layout(summary, G), reach = Math.max(...summary.projects.map((p, k) => Math.max(p.runs, ...marks.place.filter((_, i) => marks.project[i] === k).map((x) => x + 1))));
+  const slots = islandSlots(summary.projects.length, G, slotTier(reach, G));
   summary.projects.forEach((p, k) => {
     const c = L.islands[k];
     const furthest = Math.max(p.runs, ...marks.place.filter((_, i) => marks.project[i] === k).map((x) => x + 1));
@@ -74,7 +77,12 @@ test("a mark the observer has not placed (its project not read in full) is not d
   s.marks.place[0] = null;
   const L = layout(s, G), full = layout(summary, G);
   assert.ok(Number.isNaN(L.x[0]) && Number.isNaN(L.y[0]));
-  for (let i = 1; i < marks.id.length; i++) assert.deepEqual([L.x[i], L.y[i]], [full.x[i], full.y[i]]);
+  // the rest keep their places on their islands; the islands themselves move only if the slots' tier changed (L1)
+  for (let i = 1; i < marks.id.length; i++) {
+    const a = L.islands[marks.project[i]], b = full.islands[marks.project[i]];
+    assert.ok(Math.abs(L.x[i] - a.x - (full.x[i] - b.x)) < 1e-9 && Math.abs(L.y[i] - a.y - (full.y[i] - b.y)) < 1e-9, `mark ${i}`);
+  }
+  if (tierOf(s) === tierOf(summary)) for (let i = 1; i < marks.id.length; i++) assert.deepEqual([L.x[i], L.y[i]], [full.x[i], full.y[i]]);
 });
 
 test("property: whatever order, coverage step or growth produced two summaries, an island or mark in both has one place", () => {
@@ -90,10 +98,19 @@ test("property: whatever order, coverage step or growth produced two summaries, 
       s.marks.id = held.map((_, n) => `r${n}`);
       seen.push(s);
     }
-    const a = seen[i % seen.length], b = seen[j % seen.length], A = places(layout(a, G), a), B = places(layout(b, G), b);
-    let shared = 0;
-    for (const [k, v] of A) if (B.has(k)) { shared++; assert.deepEqual(B.get(k), v, k); }
-    assert.ok(shared >= 1, "the first island is in both");
+    const a = seen[i % seen.length], b = seen[j % seen.length], LA = layout(a, G), LB = layout(b, G);
+    if (tierOf(a) === tierOf(b)) {
+      const A = places(LA, a), B = places(LB, b);
+      let shared = 0;
+      for (const [k, v] of A) if (B.has(k)) { shared++; assert.deepEqual(B.get(k), v, k); }
+      assert.ok(shared >= 1, "the first island is in both");
+    }
+    // across a tier the islands keep their arrangement, spread by the slots' size: the same pattern, scaled (L1)
+    const unit = (s) => 2 * footprint(0, 0, islandRadius(tierOf(s), G), G).r + G.island_gap;
+    for (const c of LA.islands) {
+      const d = LB.islands.find((x) => x.id === c.id);
+      if (d) for (const [u, v] of [[c.x / unit(a), d.x / unit(b)], [(c.y + G.label_world / 2) / unit(a), (d.y + G.label_world / 2) / unit(b)]]) assert.ok(Math.abs(u - v) < 1e-9, c.id);
+    }
   }), { seed: 20261014, numRuns: 80 });
 });
 
@@ -227,4 +244,33 @@ test("one count per declared flag, the observer's (SOL-03), and a highlight ligh
   assert.deepEqual([0, 1, 2].map((i) => lit(m, i, "failed_audit", 500)), [true, false, false], "the old event with a recent write is not lit");
   assert.deepEqual([0, 1, 2].map((i) => lit(m, i, null, 500)), [false, true, true], "no highlight: the period by the latest write");
   assert.deepEqual([0, 1, 2].map((i) => lit(m, i, null, null)), [true, true, true]);
+});
+
+/** The store's camera as ev-universe takes it: the world box filled inside the bars, at most `island_scale_max`. */
+const storeView = (w, h) => ({ w, h, inset: viewInset(false, G) });
+test("at small n the store fills the view: the islands centred, a readable size, the least gap kept (L1)", () => {
+  for (const [w, h] of [[1440, 900], [1024, 768]]) for (let n = 1; n <= 6; n++) {
+    const s = made(Array.from({ length: n }, (_, k) => `p${k}`), Array.from({ length: n }, (_, k) => [k, 0]));
+    const L = layout(s, G), view = storeView(w, h), cam = fitView(L.bounds, view, G.island_scale_max, G);
+    const feet = L.islands.map((c) => footprint(c.x, c.y, c.r, G)), b = bounds(feet);
+    const a = toScreen(cam, view, b.x0, b.y0), z = toScreen(cam, view, b.x1, b.y1), i = view.inset;
+    const iw = w - i.left - i.right, ih = h - i.top - i.bottom, cx = i.left + iw / 2, cy = i.top + ih / 2;
+    assert.ok(Math.abs((a.sx + z.sx) / 2 - cx) <= 0.05 * iw && Math.abs((a.sy + z.sy) / 2 - cy) <= 0.05 * ih, `n=${n} ${w}x${h}: centred`);
+    assert.ok(Math.max(z.sx - a.sx, z.sy - a.sy) >= 0.5 * Math.min(iw, ih), `n=${n} ${w}x${h}: the islands span half the short side`);
+    // a readable size, not a dot in a corner: each island (with its name) at least `fill_share` of the short side across
+    for (const f of feet) assert.ok(2 * f.r * cam.s >= G.fill_share * Math.min(iw, ih), `n=${n} ${w}x${h}: ${Math.round(2 * f.r * cam.s)} px of ${Math.min(iw, ih)}`);
+    assert.ok(a.sx >= i.left - 1 && a.sy >= i.top - 1 && z.sx <= w - i.right + 1 && z.sy <= h - i.bottom + 1, `n=${n}: inside the bars`);
+    for (let p = 0; p < n; p++) for (let q = p + 1; q < n; q++)
+      assert.ok(Math.hypot(feet[p].x - feet[q].x, feet[p].y - feet[q].y) >= feet[p].r + feet[q].r + G.island_gap - 1e-6, `n=${n}: the gap`);
+  }
+});
+test("the slots are of the smallest tier that holds every island: they move only when the largest island crosses a tier (L1)", () => {
+  for (const reach of [1, 2, 4, 5, 16, 17, 64, 65, G.slot_places, 10 * G.slot_places]) {
+    const tier = slotTier(reach, G);
+    assert.ok(G.slot_tiers.includes(tier) && tier >= Math.min(reach, G.slot_places), `${reach} → ${tier}`);
+    assert.ok(G.slot_tiers.every((t) => t >= tier || t < Math.min(reach, G.slot_places)), "the smallest such tier");
+  }
+  assert.equal(G.slot_tiers.at(-1), G.slot_places);
+  const before = layout(made(["a", "b"], [[0, 0], [1, 0]]), G), after = layout(made(["a", "b"], [[0, 0], [1, 0], [1, 1]]), G);
+  assert.deepEqual(after.islands.map((c) => [c.x, c.y]), before.islands.map((c) => [c.x, c.y]), "a run inside the tier moves no island");
 });

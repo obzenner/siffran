@@ -1,8 +1,8 @@
 import catalogue from "../../catalogue.json" with { type: "json" };
 import enums from "../../enums.json" with { type: "json" };
 import { FLAG_COUNT, callouts, layout, lit as litMark, mirror, shapePath } from "../../app/universe.js";
-import { attemptChain, bounds, rimFirst, cardBox, claimGraph, fitView, footprint, flyCamera, keyBox, labelWidth, markRadius, nearest, placeCallouts, placeLabels, pulseRadius, toScreen, toWorld, viewInset } from "../../app/geometry.js";
-import { EvElement, TONE, clip, define, esc, hostName, joined, num, plain, stateHtml, stateOf, t } from "../core/element.js";
+import { attemptChain, edgePath, bounds, rimFirst, cardBox, claimGraph, fitView, footprint, flyCamera, keyBox, labelWidth, markRadius, nearest, placeCallouts, placeLabels, pulseRadius, toScreen, toWorld, viewInset } from "../../app/geometry.js";
+import { EvElement, TONE, clip, count, define, esc, hostName, joined, morph, num, plain, plainCount, setStyle, stateHtml, stateOf, t } from "../core/element.js";
 
 const glyphOf = (domain, value) => stateHtml(domain, value, "glyph");
 
@@ -99,7 +99,7 @@ class EvUniverse extends EvElement {
     }
     const island = d.place.zoom ? this.#island(d.place.zoom) : null;
     if (island) return fitView(bounds([footprint(island.x, island.y, island.r, G)]), view, G.island_scale_max, G);
-    return fitView(this.#L.bounds, view, Infinity, G);
+    return fitView(this.#L.bounds, view, G.island_scale_max, G);  // a few small islands fill the view, never past an island's zoom
   }
   /** Put the camera where the place wants it. It flies only when the place changed (a navigation) and motion is allowed; a
    * first paint (a load or a reload: the URL's place), a new summary, a resize or the key's toggle puts it there at once. */
@@ -268,9 +268,9 @@ class EvUniverse extends EvElement {
     if (level !== "run") {
       const named = d.summary.projects.map((p, k) => ({ p, k })).filter(({ p }) => level === "store" || p.id === d.place.zoom).slice(0, G.labels);
       const words = named.map(({ p }) => {
-        const runs = plain(p.runs === 1 ? "universe.runs.one" : "universe.runs", { n: num(p.runs) }), need = p.needs ? plain("universe.need_you", { n: num(p.needs) }) : "";
+        const runs = plainCount("universe.runs", p.runs, { n: num(p.runs) }), need = p.needs ? plainCount("universe.need_you", p.needs, { n: num(p.needs) }) : "";
         // the line is muted; only K, the count that needs a human, is in its tone
-        const [pre, post] = plain("universe.need_you", { n: "\u0000" }).split("\u0000");
+        const [pre, post] = plainCount("universe.need_you", p.needs, { n: "\u0000" }).split("\u0000");
         return { name: p.label, sub: [runs, need].filter(Boolean).join(plain("list.join")), html: `${esc(runs)}${need ? `${t("list.join")}${esc(pre)}<span class="font-medium text-tone-human">${esc(num(p.needs))}</span>${esc(post)}` : ""}` };
       });
       const boxes = placeLabels(named.map(({ k }) => discs[k]), words.map((x) => labelWidth(x.name.length, x.sub.length, G)), fixed, view, G);
@@ -313,7 +313,7 @@ class EvUniverse extends EvElement {
       const i = this.#hover, at = this.#mark(i), goal = d.goals.get(m.id[i]), r = markRadius("project", this.#cam.s, G);
       if (at) {
         const s = this.#screen(at.x, at.y);
-        out.push(`<p class="absolute rounded-m border border-border bg-background px-xs py-3xs text-xs shadow-1" data-tip data-x="${Math.round(s.sx + 2 * r)}" data-y="${Math.round(s.sy + 2 * r)}">${joined(goal ? esc(clip(goal, 60)) : "", t(`${stateOf("standing", m.standings[m.standing[i]]).copy}.label`), m.attempt[i] > 1 ? t("row.attempt.short", { n: m.attempt[i] }) : "")}</p>`);
+        out.push(`<p class="absolute rounded-m border border-border bg-background px-xs py-3xs text-xs shadow-1" data-tip data-x="${Math.round(s.sx + 2 * r)}" data-y="${Math.round(s.sy + 2 * r)}">${joined(goal ? esc(clip(goal, 60)) : "", t(`${stateOf("standing", m.standings[m.standing[i]]).copy}.label`), m.attempt[i] > 1 ? t("row.attempt.short", { at: m.attempt[i] }) : "")}</p>`);
       }
     }
     place(this.querySelector("[data-overlay]"), out.join(""));
@@ -353,7 +353,9 @@ class EvUniverse extends EvElement {
     const chain = attempts.length > 1 ? attemptChain(attempts.length, below, G.chain_step_px) : [];
     const xy = (p) => ({ x: c.sx + p.x, y: c.sy + p.y }), node = (id) => xy(graph.at.get(id));
     const line = (a, b, cls) => `<line x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}" class="${cls}" stroke-width="${G.stroke_px}"></line>`;
-    const lines = [...graph.edges.map((e) => line(node(e.from), node(e.to), "stroke-border")).map((l, n) => l.replace("<line", `<line data-edge="${esc(graph.edges[n].from)} ${esc(graph.edges[n].to)}"`)),
+    // an edge is its claims' line, bent round the run's disc where the straight one would cross it (edgePath)
+    const path = (e) => `<polyline data-edge="${esc(e.from)} ${esc(e.to)}" points="${edgePath(graph, e).map((p) => `${(c.sx + p.x).toFixed(1)},${(c.sy + p.y).toFixed(1)}`).join(" ")}" fill="none" class="stroke-border" stroke-width="${G.stroke_px}"></polyline>`;
+    const lines = [...graph.edges.map(path),
       graph.root ? line({ x: c.sx, y: c.sy }, node(graph.root), "stroke-border") : "",
       ...chain.slice(1).map((p, n) => line(xy(chain[n]), xy(p), "stroke-muted-foreground"))].join("");
     const out = [`<svg class="absolute inset-0 size-full" aria-hidden="true" focusable="false" data-graph>${lines}</svg>`,
@@ -362,14 +364,14 @@ class EvUniverse extends EvElement {
     for (const cl of claims) {
       const p = node(cl.id), sel = d.place.claim === cl.id, s = stateOf("claim", cl.state), marked = cl.kind !== "ordinary";
       const ring = marked ? `<circle r="${G.claim_px + 1}" fill="none" stroke="currentColor" stroke-dasharray="${G.shore_dash.join(" ")}"></circle>` : "";
-      out.push(`<a class="pointer-events-auto absolute flex items-center justify-center rounded-full ${sel ? "ring-2 ring-ring" : ""}" href="${esc(d.href({ claim: sel ? null : cl.id }))}" data-orbit="${esc(cl.id)}" ${sel ? 'aria-current="true"' : ""} data-cx="${Math.round(p.x)}" data-cy="${Math.round(p.y)}" ${box({ x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r })} title="${esc(joined(cl.text, plain(`${s.copy}.label`), marked ? plain(`kind.${cl.kind}`) : ""))}">${shapeSvg("claim", cl.state, G.claim_px - 1, ring)}<span class="sr-only">${esc(clip(cl.text, 80))} ${t(`${s.copy}.label`)}${marked ? ` ${t(`kind.${cl.kind}`)}` : ""}</span></a>`);
+      out.push(`<a class="pointer-events-auto absolute flex items-center justify-center rounded-full ${sel ? "ring-2 ring-ring" : ""}" href="${esc(d.href({ claim: sel ? null : cl.id }))}" data-orbit="${esc(cl.id)}" ${sel ? 'aria-current="true"' : ""} data-cx="${Math.round(p.x)}" data-cy="${Math.round(p.y)}" ${box({ x: p.x - r, y: p.y - r, w: 2 * r, h: 2 * r })} title="${esc(joined(cl.text, plain(`${s.copy}.label`), marked ? plain(`kind.${cl.kind}`) : ""))}">${shapeSvg("claim", cl.state, G.claim_px - 1, ring)}<span class="sr-only">${esc(cl.text)} ${t(`${s.copy}.label`)}${marked ? ` ${t(`kind.${cl.kind}`)}` : ""}</span></a>`);
       const lb = graph.labels.get(cl.id);
       if (lb) out.push(`<a class="pointer-events-auto absolute truncate text-xs font-normal leading-none whitespace-nowrap text-muted-foreground hover:underline" href="${esc(d.href({ claim: sel ? null : cl.id }))}" tabindex="-1" aria-hidden="true" data-orbit-label="${esc(cl.id)}" title="${esc(cl.text)}" ${box({ ...lb, x: c.sx + lb.x, y: c.sy + lb.y })}>${esc(text.get(cl.id))}</a>`);
     }
     attempts.forEach((a, n) => {
       if (!chain.length) return;
       const p = xy(chain[n]), here = a.id === d.place.run, q = G.chain_px + 2;
-      out.push(`<a class="pointer-events-auto absolute flex items-center justify-center rounded-full ${here ? "ring-2 ring-ring" : ""}" href="${esc(d.href({ run: a.id, claim: null }))}" data-chain="${esc(a.id)}" ${here ? 'aria-current="true"' : ""} ${box({ x: p.x - q, y: p.y - q, w: 2 * q, h: 2 * q })} title="${esc(joined(plain("row.attempt.short", { n: a.generation }), plain(`${stateOf("standing", a.standing).copy}.label`)))}">${shapeSvg("standing", a.standing, G.chain_px - 1)}<span class="sr-only">${t("row.attempt.short", { n: a.generation })} ${t(`${stateOf("standing", a.standing).copy}.label`)}</span></a>`);
+      out.push(`<a class="pointer-events-auto absolute flex items-center justify-center rounded-full ${here ? "ring-2 ring-ring" : ""}" href="${esc(d.href({ run: a.id, claim: null }))}" data-chain="${esc(a.id)}" ${here ? 'aria-current="true"' : ""} ${box({ x: p.x - q, y: p.y - q, w: 2 * q, h: 2 * q })} title="${esc(joined(plain("row.attempt.short", { at: a.generation }), plain(`${stateOf("standing", a.standing).copy}.label`)))}">${shapeSvg("standing", a.standing, G.chain_px - 1)}<span class="sr-only">${t("row.attempt.short", { at: a.generation })} ${t(`${stateOf("standing", a.standing).copy}.label`)}</span></a>`);
     });
     return out.join("");
   }
@@ -377,8 +379,8 @@ class EvUniverse extends EvElement {
   #paintMore(more) {
     const slot = this.querySelector("[data-more-slot]");
     if (!slot) return;
-    const html = more > 0 ? `<a class="pointer-events-auto rounded-m border border-tone-human bg-background px-xs py-3xs text-2xs font-medium text-tone-human hover:underline" href="${esc(this.data.needsAll)}" data-more-needs data-fixed>${t("universe.more", { n: num(more) })}</a>` : "";
-    if (slot.dataset.html !== html) { slot.innerHTML = html; slot.dataset.html = html; }
+    const html = more > 0 ? `<a class="pointer-events-auto rounded-m border border-tone-human bg-background px-xs py-3xs text-2xs font-medium text-tone-human hover:underline" href="${esc(this.data.needsAll)}" data-more-needs data-fixed>${count("universe.more", more, { n: num(more) })}</a>` : "";
+    morph(slot, html);
   }
 
   /** The keyboard's ring around the focused item, while the canvas has focus. */
@@ -397,45 +399,45 @@ class EvUniverse extends EvElement {
     const d = this.data, s = d.summary, level = this.#level, i = level === "run" ? this.#index(s.marks, d.place.run) : -1;
     const project = s.projects.find((p) => p.id === (i >= 0 ? s.projects[s.marks.project[i]].id : d.place.zoom));
     // one line: the store's crumb whole, the project's and the run's truncated, the whole path in the title
-    const crumb = [`<a class="shrink-0 whitespace-nowrap hover:underline" href="${esc(d.href({ zoom: null, run: null, claim: null }))}" data-crumb="store">${t("universe.all", { n: num(s.coverage.runs) })}</a>`];
-    const path = [plain("universe.all", { n: num(s.coverage.runs) })];
+    const crumb = [`<a class="shrink-0 whitespace-nowrap hover:underline" href="${esc(d.href({ zoom: null, run: null, claim: null }))}" data-crumb="store">${count("universe.all", s.coverage.runs, { n: num(s.coverage.runs) })}</a>`];
+    const path = [plainCount("universe.all", s.coverage.runs, { n: num(s.coverage.runs) })];
     if (project) { crumb.push(`<a class="min-w-0 truncate whitespace-nowrap hover:underline" href="${esc(d.href({ zoom: project.id, run: null, claim: null }))}" data-crumb="project">${esc(project.label)}</a>`); path.push(project.label); }
     if (level === "run") { const goal = d.sheet?.row?.goal ?? d.place.run; crumb.push(`<span class="min-w-0 truncate whitespace-nowrap text-muted-foreground" data-crumb="run">${esc(clip(goal, 48))}</span>`); path.push(goal); }
     const needs = s.facets.standing.needs_human ?? 0;
-    const pill = needs ? `<a class="pointer-events-auto rounded-full bg-tone-human px-s py-2xs text-2xs font-medium text-background hover:underline" href="${esc(d.needsAll)}" data-needs-pill>${t("universe.pill", { n: num(needs) })}</a>` : "";
-    this.querySelector("[data-top]").innerHTML = `<div class="flex min-w-0 flex-1"><nav class="pointer-events-auto flex min-w-0 items-center gap-xs overflow-hidden rounded-m border border-border bg-background px-xs py-3xs text-2xs whitespace-nowrap" aria-label="${t("universe.crumbs")}" title="${esc(path.join(" › "))}" data-crumbs>${crumb.join(`<span class="shrink-0 text-muted-foreground" aria-hidden="true">›</span>`)}</nav></div>
-      <div class="flex flex-1 justify-center" data-more-slot></div><div class="flex flex-1 justify-end">${pill}</div>`;
+    const pill = needs ? `<a class="pointer-events-auto rounded-full bg-tone-human px-s py-2xs text-2xs font-medium text-background hover:underline" href="${esc(d.needsAll)}" data-needs-pill>${count("universe.pill", needs, { n: num(needs) })}</a>` : "";
+    morph(this.querySelector("[data-top]"), `<div class="flex min-w-0 flex-1"><nav class="pointer-events-auto flex min-w-0 items-center gap-xs overflow-hidden rounded-m border border-border bg-background px-xs py-3xs text-2xs whitespace-nowrap" aria-label="${t("universe.crumbs")}" title="${esc(path.join(" › "))}" data-crumbs>${crumb.join(`<span class="shrink-0 text-muted-foreground" aria-hidden="true">›</span>`)}</nav></div>
+      <div class="flex flex-1 justify-center" data-more-slot></div><div class="flex flex-1 justify-end">${pill}</div>`);
   }
   /** The bottom bar: the period, then the trophy chips (each the observer's count, lighting its runs), and the key's toggle. */
   #paintBottom() {
     const d = this.data, s = d.summary, a = s.aggregates;
-    const chip = "pointer-events-auto flex h-xl items-center gap-xs rounded-m border px-s text-2xs text-muted-foreground";
+    const chip = "pointer-events-auto flex h-xl min-w-0 items-center gap-xs rounded-m border px-s text-2xs text-muted-foreground";  // a short bar ellipsizes the words, each whole in its title
     const periods = catalogue.periods.map((k) => {
       const on = d.place.period === k && d.place.since === null;
-      return `<a class="pointer-events-auto rounded-s px-xs py-3xs ${on ? "bg-muted text-foreground" : "hover:bg-muted"}" href="${esc(d.href({ period: k, since: null }))}" ${on ? 'aria-current="true"' : ""} data-period="${k}">${t(`period.${k}`)}</a>`;
+      return `<a class="pointer-events-auto shrink-0 whitespace-nowrap rounded-s px-xs py-3xs ${on ? "bg-muted text-foreground" : "hover:bg-muted"}" href="${esc(d.href({ period: k, since: null }))}" ${on ? 'aria-current="true"' : ""} data-period="${k}">${t(`period.${k}`)}</a>`;
     }).join("");
     const chips = enums.flag.map((f) => {
       const on = d.place.hl === f;
-      return `<a class="${chip} ${on ? "border-ring bg-background text-foreground" : "border-border bg-background hover:bg-muted"}" href="${esc(d.href({ hl: on ? null : f }))}" aria-pressed="${on}" data-hl="${f}"><span class="text-xs font-medium tabular-nums leading-none text-foreground">${num(FLAG_COUNT[f](a))}</span><span class="leading-none">${t(`flag.${f}`)}</span></a>`;
+      return `<a class="${chip} ${on ? "border-ring bg-background text-foreground" : "border-border bg-background hover:bg-muted"}" href="${esc(d.href({ hl: on ? null : f }))}" aria-pressed="${on}" data-hl="${f}"><span class="shrink-0 text-xs font-medium tabular-nums leading-none text-foreground">${num(FLAG_COUNT[f](a))}</span><span class="min-w-0 truncate leading-none" title="${count(`chip.flag.${f}`, FLAG_COUNT[f](a))}">${count(`chip.flag.${f}`, FLAG_COUNT[f](a))}</span></a>`;
     }).join("");
     const toggle = this.#keyOpen ? "" : `<button type="button" class="${chip} ml-auto border-border bg-background hover:bg-muted" data-key-toggle>${t("universe.key.show")}</button>`;
-    this.querySelector("[data-bottom]").innerHTML = `<nav class="pointer-events-auto flex h-xl items-center gap-3xs rounded-m border border-border bg-background px-3xs text-2xs text-muted-foreground" aria-label="${t("universe.chips")}" data-chips>${periods}</nav>${chips}${toggle}`;
+    morph(this.querySelector("[data-bottom]"), `<nav class="pointer-events-auto flex h-xl shrink-0 items-center gap-3xs rounded-m border border-border bg-background px-3xs text-2xs text-muted-foreground" aria-label="${t("universe.chips")}" data-chips>${periods}</nav>${chips}${toggle}`);
   }
   /** The key: each standing's shape and word with the observer's count, in a small card the person may hide. */
   #paintKey() {
     const el = this.querySelector("[data-key]");
     if (!el || !this.data) return;
-    if (!this.#keyOpen || !this.#size.w) { el.innerHTML = ""; return; }
+    if (!this.#keyOpen || !this.#size.w) { morph(el, ""); return; }
     const s = this.data.summary, r = 5, rows = this.#rows();
     const b = keyBox(rows.length, this.#view, G);
     const items = rows.map((k) => {
       const st = stateOf("standing", k);
       return `<li class="flex items-center gap-xs" data-key-row><svg class="size-s shrink-0 ${TONE[st.tone]?.fg ?? TONE.neutral.fg}" viewBox="${-2 * r} ${-2 * r} ${4 * r} ${4 * r}" aria-hidden="true" focusable="false"><path d="${shapePath(st.shape, r)}" fill="currentColor"></path></svg><span class="min-w-0 flex-1 truncate">${t(`${st.copy}.label`)}</span><span class="tabular-nums text-muted-foreground">${num(s.facets.standing[k])}</span></li>`;
     }).join("");
-    el.innerHTML = `<section class="pointer-events-auto flex size-full flex-col rounded-l border border-border bg-background px-s py-xs text-2xs text-muted-foreground" aria-label="${t("universe.key")}" data-legend>
+    morph(el, `<section class="pointer-events-auto flex size-full flex-col rounded-l border border-border bg-background px-s py-xs text-2xs text-muted-foreground" aria-label="${t("universe.key")}" data-legend>
       <div class="flex items-center justify-between font-medium text-foreground"><span>${t("universe.key")}</span><button type="button" class="rounded-s px-2xs text-muted-foreground hover:bg-muted" aria-label="${t("universe.key.hide")}" title="${t("universe.key.hide")}" data-key-toggle>×</button></div>
-      <ul class="mt-2xs flex flex-col">${items}</ul></section>`;
-    Object.assign(el.style, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
+      <ul class="mt-2xs flex flex-col">${items}</ul></section>`);
+    setStyle(el, { left: `${b.x}px`, top: `${b.y}px`, width: `${b.w}px`, height: `${b.h}px` });
     el.querySelectorAll("[data-key-row]").forEach((li) => { li.style.height = `${G.key_row_px}px`; });
   }
 
@@ -445,17 +447,17 @@ class EvUniverse extends EvElement {
     const shown = level === "store" ? callouts(s.needs, (n) => this.#index(s.marks, n.id) >= 0, 0, G.callouts, (n) => s.marks.project[this.#index(s.marks, n.id)]).shown : [];
     const zoom = i >= 0 ? s.projects[s.marks.project[i]].id : d.place.zoom;
     const items = mirror({ level: level === "run" ? "project" : level, summary: s, zoom, shown, cap: G.mirror_cap });
-    const islands = items.islands.map((p) => `<li><a href="${esc(d.href({ zoom: p.id, run: null, claim: null }))}" data-mirror-island="${esc(p.id)}">${t("universe.island", { name: esc(p.label), n: num(p.runs) })}</a></li>`).join("");
+    const islands = items.islands.map((p) => `<li><a href="${esc(d.href({ zoom: p.id, run: null, claim: null }))}" data-mirror-island="${esc(p.id)}">${count("universe.island", p.runs, { name: esc(p.label), n: num(p.runs) })}</a></li>`).join("");
     const runs = items.runs.map((r) => {
       const standing = r.standing ?? "needs_human", goal = d.goals.get(r.id);
-      const words = joined(goal ? esc(clip(goal, 80)) : "", t(`${stateOf("standing", standing).copy}.label`), r.need ? t(`ask.${r.need.ask}`) : "", r.attempt > 1 ? t("row.attempt.short", { n: r.attempt }) : "");
+      const words = joined(goal ? esc(clip(goal, 80)) : "", t(`${stateOf("standing", standing).copy}.label`), r.need ? t(`ask.${r.need.ask}`) : "", r.attempt > 1 ? t("row.attempt.short", { at: r.attempt }) : "");
       return `<li><a href="${esc(d.href({ run: r.id, claim: null }))}" data-mirror-run="${esc(r.id)}">${words}</a></li>`;
     }).join("");
     const project = level === "store" ? null : s.projects.find((p) => p.id === zoom);
-    const rest = items.rest > 0 && project ? `<li><a href="${esc(d.list(project.id))}" data-mirror-rest>${t("universe.all_in", { n: num(project.runs) })}</a></li>` : "";
+    const rest = items.rest > 0 && project ? `<li><a href="${esc(d.list(project.id))}" data-mirror-rest>${count("universe.all_in", project.runs, { n: num(project.runs) })}</a></li>` : "";
     const html = `<ul>${islands}${runs}${rest}</ul>`;
     const nav = this.querySelector("[data-mirror]");
-    if (nav.dataset.html !== html) { nav.innerHTML = html; nav.dataset.html = html; }
+    morph(nav, html);
   }
 
   // ---- input --------------------------------------------------------------------------------------------------------------
@@ -479,7 +481,7 @@ class EvUniverse extends EvElement {
   #say(it) {
     const d = this.data, m = d.summary.marks;
     let words = "";
-    if (it.kind === "island") { const p = d.summary.projects.find((x) => x.id === it.id); words = plain("universe.island", { name: p.label, n: num(p.runs) }); }
+    if (it.kind === "island") { const p = d.summary.projects.find((x) => x.id === it.id); words = plainCount("universe.island", p.runs, { name: p.label, n: num(p.runs) }); }
     else if (it.kind === "run") words = [d.goals.get(it.id) ?? "", plain(`${stateOf("standing", m.standings[m.standing[it.i]]).copy}.label`)].filter(Boolean).join(plain("list.join"));
     else words = d.sheet?.row?.claims?.find((c) => c.id === it.id)?.text ?? it.id;
     this.querySelector("[data-said]").textContent = words;
@@ -549,17 +551,12 @@ class EvUniverse extends EvElement {
 /** A box's data attributes (`place` puts the element there). */
 const box = (b) => `data-x="${Math.round(b.x)}" data-y="${Math.round(b.y)}" data-w="${Math.round(b.w)}" data-h="${Math.round(b.h)}"`;
 
-/** Render `html` into `overlay` when it changed (keeping the focused link focused), then put each positioned element at the
- * box its data attributes name (the CSP forbids inline style attributes, not the CSSOM). */
+/** Morph `html` into `overlay` (nothing when it is the same; a link that stays keeps its focus), then put each positioned
+ * element at the box its data attributes name (the CSP forbids inline style attributes, not the CSSOM). */
 function place(overlay, html) {
-  if (overlay.dataset.html !== html) {
-    const keep = document.activeElement && overlay.contains(document.activeElement) ? document.activeElement.getAttribute("href") : null;
-    overlay.innerHTML = html; overlay.dataset.html = html;
-    if (keep) overlay.querySelector(`a[href="${CSS.escape(keep)}"]`)?.focus();
-  }
+  morph(overlay, html);
   for (const el of overlay.querySelectorAll("[data-x]")) {
-    el.style.left = `${el.dataset.x}px`; el.style.top = `${el.dataset.y}px`;
-    if (el.dataset.w) { el.style.width = `${el.dataset.w}px`; el.style.height = `${el.dataset.h}px`; }
+    setStyle(el, { left: `${el.dataset.x}px`, top: `${el.dataset.y}px`, ...(el.dataset.w ? { width: `${el.dataset.w}px`, height: `${el.dataset.h}px` } : {}) });
   }
 }
 define("ev-universe", EvUniverse);

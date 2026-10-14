@@ -218,6 +218,31 @@ test("an audit's independence is worded on the sheet, for every value the contra
     assert.ok(base.audits.length > 0 && t.includes(copy[`independence.${independence}`]), independence);
   }
 });
+test("every count the strip says is in the number's own form: 1 revision, 1 audit passed, 1 human decision (L2, L4)", () => {
+  const s = structuredClone(summary), a = s.aggregates;
+  a.by.audit.passed = 1; a.by.audit.none = 1; a.facts.decisions = 1; a.facts.failed_audits = 1; a.facts.refutations = 1;
+  for (const k of Object.keys(a.decisions_by)) a.decisions_by[k].facts = 1;
+  const t = text(stripHtml(s, place, { go: () => "?", periodHref: () => "?" }));
+  for (const word of ["1 audit passed", "1 run not audited", "human decision", "failed audit", "claim refuted", "1 revision", "1 configuration"])
+    assert.ok(t.includes(word), `${word}: ${t}`);
+  for (const wrong of ["1 audits", "1 runs", "1 revisions", "1 configurations", "1 human decisions", "1 failed audits"]) assert.ok(!t.includes(wrong), wrong);
+});
+test("the audit section says its latest verdict once, then every verdict as served, newest first (L9, L13)", () => {
+  const base = sheets[scenarios.converged];
+  const audit = (html) => html.slice(html.indexOf('data-section="audit"'), html.indexOf("</details>", html.indexOf('data-section="audit"')));
+  const one = structuredClone(base);
+  one.audits = [{ ...base.audits[0], verdict: "passed" }]; one.row.audit = { ...one.row.audit, verdict: "passed", current: true, pending: false };
+  const passed = copy["audit.passed.label"];
+  assert.equal(text(audit(sheetHtml(ctx(one)))).split(passed).length - 1, 1, "one audit: its verdict once, not a summary and a record");
+  const two = structuredClone(one);
+  two.audits = [{ ...one.audits[0], at: 200, findings: ["the newest finding"] }, { ...one.audits[0], verdict: "failed", at: 100, findings: ["the older finding"] }];
+  const t = text(audit(sheetHtml(ctx(two))));
+  assert.ok(t.indexOf("the newest finding") < t.indexOf("the older finding"), "as served: newest first");
+  assert.equal(t.split(passed).length - 1, 1, "the latest verdict once");
+  const stale = structuredClone(one); stale.row.audit = { ...stale.row.audit, current: false, pending: true };
+  const st = text(audit(sheetHtml(ctx(stale))));
+  assert.ok(st.includes(copy["audit.not_current"]) && st.includes(copy["audit.reaudit_pending"]) && st.split(passed).length - 1 === 1, "the summary's notes stay, on the latest verdict");
+});
 test("a human asked only if the host finds a dialog is said so, and the session's context is a closed disclosure", () => {
   const s = structuredClone(sheets[scenarios.verification]);
   for (const o of s.outstanding) if (o.who === "human") o.where = "if_available";

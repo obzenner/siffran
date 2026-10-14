@@ -772,7 +772,7 @@
           }
         }
       ],
-      "description": "Every audit verdict in history order (core.evaluation.audit_verdicts; the last is the latest): its findings, the auditor the host recorded, its independence and when it was recorded. Null when not read."
+      "description": "Every audit verdict, newest first (core.evaluation.audit_verdicts reversed; the first is the latest, the one that decides the run): its findings, the auditor the host recorded, its independence and when it was recorded. Null when not read."
     },
     "dropped": {
       "oneOf": [

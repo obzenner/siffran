@@ -1,5 +1,6 @@
 // Copies the pinned runtime libraries declared in vendor.json into vendor/ (UI.md, Tokens, styles, vendor): Basecoat CSS/JS,
-// latin font files with a generated @font-face sheet, and a Lucide sprite of exactly the icons in icons.json.
+// latin font files with a generated @font-face sheet, a Lucide sprite of exactly the icons in icons.json, and idiomorph's
+// ES module (the DOM morph EvElement.update() uses) with its licence beside it.
 // Records versions + sha256 in vendor/VERSIONS. Vendored files are never edited by hand.
 import { createHash } from "node:crypto";
 import { copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -11,7 +12,7 @@ const files = [];
 const put = (src, dst) => { copyFileSync(src, dst); files.push(dst); };
 
 rmSync("vendor", { recursive: true, force: true });
-for (const d of ["vendor/basecoat", "vendor/lucide", "vendor/fonts"]) mkdirSync(d, { recursive: true });
+for (const d of ["vendor/basecoat", "vendor/lucide", "vendor/fonts", "vendor/idiomorph"]) mkdirSync(d, { recursive: true });
 
 for (const s of spec.basecoat.styles) put(`node_modules/basecoat-css/dist/basecoat-${s}.cdn.min.css`, `vendor/basecoat/basecoat-${s}.css`);
 // Basecoat's script is a registry of interactive components (tabs, popover, select menus); this UI uses only its CSS and native controls, so no script is vendored.
@@ -32,7 +33,10 @@ const symbols = ids.map((id) => {
 writeFileSync("vendor/lucide/sprite.svg", `<!-- lucide-static ${version("lucide-static")} (ISC), subset from icons.json -->\n<svg xmlns="http://www.w3.org/2000/svg">\n${symbols.join("\n")}\n</svg>\n`);
 files.push("vendor/lucide/sprite.svg");
 
-const packages = ["basecoat-css", "lucide-static", ...new Set(spec.fonts.map((f) => f.package))];
+put(`node_modules/idiomorph/${spec.idiomorph.module}`, "vendor/idiomorph/idiomorph.esm.js");
+put("node_modules/idiomorph/LICENSE", "vendor/idiomorph/LICENSE");
+
+const packages = ["basecoat-css", "lucide-static", "idiomorph", ...new Set(spec.fonts.map((f) => f.package))];
 const sha = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
 writeFileSync("vendor/VERSIONS", [...packages.map((p) => `${p} ${version(p)}`), "", ...files.map((f) => `${sha(f)}  ${f.slice("vendor/".length)}`), ""].join("\n"));
 console.log(`vendored ${files.length} files (${ids.length} icons, ${spec.fonts.length} font files)`);

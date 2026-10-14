@@ -31,9 +31,9 @@ class EvMore extends EvElement {
   }
   populate() {
     this.#watch?.disconnect();
-    if (this.#open) { this.querySelector("[data-more]").hidden = false; return; }
+    if (this.#open) { const b = this.querySelector("[data-more]"); if (b.hidden) b.hidden = false; return; }
     const text = this.querySelector("[data-text]"), button = this.querySelector("[data-more]");
-    const measure = () => { button.hidden = !(text.clientHeight > 0 && text.scrollHeight > text.clientHeight + 1); };
+    const measure = () => { const fits = !(text.clientHeight > 0 && text.scrollHeight > text.clientHeight + 1); if (button.hidden !== fits) button.hidden = fits; };
     measure();
     this.#watch = new ResizeObserver(measure);
     this.#watch.observe(text);

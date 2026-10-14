@@ -45,6 +45,7 @@ function families(states, cat, enums) {
     "ask.part.*": of("ask.part", enums.ask),
     "effect.*": of("effect", enums.effect),
     "flag.*": of("flag", enums.flag),
+    "chip.flag.*": of("chip.flag", enums.flag),
     "period.*": of("period", cat.periods),
     "filter.*": of("filter", cat.filters),
     "record.class.*": of("record.class", enums.record_class),
@@ -115,7 +116,7 @@ export function audit({ code, copy, states, icons, catalogue, enums, tokens = nu
   const literals = new Set([...all.matchAll(/["']([a-z][\w-]*(?:\.[\w-]+)+)["']/g)].map((m) => m[1]));
   const calls = new Set([...all.matchAll(/\b(?:t|plain)\(\s*(["'])([^"']+)\1/g)].map((m) => m[2]));
   // count(key, n) reads `key` and `key.one` (copy says "1 run" and "2 runs").
-  const counted = new Set([...all.matchAll(/\bcount\(\s*(["'])([^"']+)\1/g)].map((m) => m[2]));
+  const counted = new Set([...all.matchAll(/\b(?:count|plainCount)\(\s*(["'])([^"']+)\1/g)].map((m) => m[2]));
   for (const k of counted) { calls.add(k); calls.add(`${k}.one`); }
   const labelAttr = new Set([...all.matchAll(/\blabel="([a-z_.-]+)"/g)].map((m) => m[1]));
   const stateList = entries(states).flatMap(([, d]) => (d.copy ? [d] : entries(d).map(([, s]) => s)));
@@ -127,7 +128,7 @@ export function audit({ code, copy, states, icons, catalogue, enums, tokens = nu
     const norm = m[1].replace(/\$\{[^}`]*\}/g, "*");
     if (norm in F) for (const k of F[norm]) expanded.add(k);
   }
-  const grouped = [["t", false], ["plain", false], ["count", true]];
+  const grouped = [["t", false], ["plain", false], ["count", true], ["plainCount", true]];
   for (const [name, counts] of grouped) {
     for (const tpl of new Set(Object.values(clean).flatMap((src) => templates(src, name)))) {
       if (!tpl.includes("*")) { calls.add(tpl); if (counts) calls.add(`${tpl}.one`); continue; }
@@ -138,6 +139,16 @@ export function audit({ code, copy, states, icons, catalogue, enums, tokens = nu
   const used = (k) => literals.has(k) || stateKeys.has(k) || expanded.has(k) || calls.has(k);
   for (const [k] of entries(copy)) if (!used(k)) report("C1 unused copy key", k);
   for (const k of new Set([...calls, ...labelAttr, ...stateKeys, ...expanded])) if (!(k in copy)) report("C1 missing copy key", k);
+
+  // C1 plurals: `{n}` is always a count, so its phrase has its one form (`key.one`, "1 run") and is read through
+  // count()/plainCount(), which choose by the number; a number a phrase does not inflect for is named otherwise
+  // (`{at}`, `{total}`), and a key with a one form is never read by t()/plain() directly.
+  for (const [k, v] of entries(copy)) if (typeof v === "string" && !k.endsWith(".one") && /\{n\}/.test(v) && !(`${k}.one` in copy)) report("C1 count phrase without its one form", k);
+  for (const m of all.matchAll(/\b(?:t|plain)\(\s*(["'])([^"']+)\1/g)) if (`${m[2]}.one` in copy) report("C1 count phrase read without its count", m[2]);
+  for (const m of all.matchAll(/\b(?:t|plain)\(\s*`([^`]+)`/g)) {
+    const norm = m[1].replace(/\$\{[^}`]*\}/g, "*");
+    if (norm in F && F[norm].some((k) => `${k}.one` in copy)) report("C1 count phrase read without its count", norm);
+  }
 
   // C1 literal text in markup
   for (const [f, s] of Object.entries(clean)) {

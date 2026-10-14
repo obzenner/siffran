@@ -9,6 +9,7 @@ const { rowHtml, windowHtml } = await import("../elements/views/rows.js");
 const { ago, esc, stateHtml, t } = await import("../elements/core/element.js");
 const copy = (await import("../copy/en.json", { with: { type: "json" } })).default;
 const enums = (await import("../enums.json", { with: { type: "json" } })).default;
+const catalogue = (await import("../catalogue.json", { with: { type: "json" } })).default;
 
 const RUNS = { seed: 20261015, numRuns: 120 };
 const NOW = Date.UTC(2026, 9, 13, 12);
@@ -24,7 +25,7 @@ const line = fc.record({
 });
 const ctx = (extra = {}) => ({ href: (x) => `?run=${x}`, now: NOW, open: null, here: null, ...extra });
 const chip = (html) => /<span class="shrink-0 rounded-m bg-tone-human-tint px-xs text-xs font-medium text-tone-human">([^<]*)<\/span>/.exec(html)?.[1] ?? null;
-const hostPart = (html) => /<span class="ev-optional hidden shrink-0 text-xs text-muted-foreground md:inline">([^<]*)<\/span>/.exec(html)?.[1] ?? null;
+const hostPart = (html) => /<span class="ev-optional hidden shrink-0 text-xs text-muted-foreground md:inline"[^>]*>([^<]*)<\/span>/.exec(html)?.[1] ?? null;
 const goalPart = (html) => /<span class="min-w-0 flex-1 truncate" data-goal>(.*?)<\/span>\s*\n/s.exec(html)?.[1];
 const timePart = (html) => /<span class="w-time [^"]*" title="[^"]*" data-time>([^<]*)<\/span>/.exec(html)?.[1];
 const timeTitle = (html) => /<span class="w-time [^"]*" title="([^"]*)" data-time>/.exec(html)?.[1];
@@ -34,7 +35,8 @@ test("only a run filed under Needs a human with an ask shows the ask chip, in th
     const html = rowHtml(r, ctx()), asked = r.standing === "needs_human" && r.ask !== null;
     assert.equal(chip(html), asked ? t(`ask.${r.ask}`) : null);
     // the host's name (an unknown host by its id), then the session, each left out when there is none
-    const said = [r.host === null ? null : (copy[`host.${r.host}`] ?? esc(r.host)), r.session ? esc(r.session) : null].filter(Boolean).join(copy["list.join"]);
+    const short = (x) => x.length > catalogue.session_short ? `${x.slice(0, catalogue.session_short)}…` : x;
+    const said = [r.host === null ? null : (copy[`host.${r.host}`] ?? esc(r.host)), r.session ? esc(short(r.session)) : null].filter(Boolean).join(copy["list.join"]);
     assert.equal(hostPart(html), asked ? said : null);
     assert.equal(/bg-tone-human-tint/.test(html), asked);
   }), RUNS);
@@ -45,6 +47,15 @@ test("an asking run with no host recorded says only its session; with neither, n
   assert.equal(hostPart(rowHtml(r, ctx())), "s1");
   assert.equal(hostPart(rowHtml({ ...r, session: null }, ctx())), "");
   assert.equal(hostPart(rowHtml({ ...r, host: "pi" }, ctx())), `${copy["host.pi"]}${copy["list.join"]}s1`);
+});
+
+test("a host's session id is its short form on the row, the whole id in its title (L5)", () => {
+  const uuid = "01a139b1-de3f-74f4-98f7-695561e5170b";
+  const r = { id: "c".repeat(12), key: "k", standing: "needs_human", ask: asks[0], goal: "g", host: "pi", session: uuid, generation: 1, project_label: "p", asked_at: null, updated: null };
+  const html = rowHtml(r, ctx());
+  assert.equal(hostPart(html), `${copy["host.pi"]}${copy["list.join"]}${uuid.slice(0, 8)}…`);
+  assert.match(html, new RegExp(`title="${uuid}"`), "the whole id is its title");
+  assert.equal(catalogue.session_short, 8);
 });
 
 test("the time is when it was asked for a run asking, else when it was last updated", () => {
@@ -85,7 +96,7 @@ test("the goal is escaped and clipped to 140 characters with an ellipsis; an unr
 test("an attempt after the first says its number; the first says nothing", () => {
   fc.assert(fc.property(line, (r) => {
     const html = rowHtml(r, ctx()), badge = /<span class="[^"]*" data-attempt-badge>([^<]*)<\/span>/.exec(html)?.[1] ?? null;
-    assert.equal(badge, r.generation > 1 ? t("row.attempt.short", { n: r.generation }) : null);
+    assert.equal(badge, r.generation > 1 ? t("row.attempt.short", { at: r.generation }) : null);
   }), RUNS);
 });
 

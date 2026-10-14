@@ -42,10 +42,12 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   island is `mark_c`·√n plus `island_margin` across half, n its project's runs (the observer's count) or its furthest
   place, up to `slot_places`. **Islands in slots:** island k (the observer's project order: by its first run's start,
   then id, so a new project appends) sits in slot k (`islandSlots`): equal discs of the
-  largest island with the band under them for a name (`label_world`), packed `island_gap` apart at the free place nearest
-  the centre (`packCircles`, an ellipse `pack_aspect` wide). Slot k depends on k alone, so the same summary lays out the
-  same on every load and reload, a later one moves nothing an earlier one held, and no two islands come closer than
-  `island_gap` (UI2-spec §5). **Known limitation (5.0.0):** the observer recomputes places and slots from the runs as
+  smallest of `slot_tiers` that holds the largest island (`slotTier`), with the band under them for a name (`label_world`),
+  packed `island_gap` apart at the free place nearest the centre (`packCircles`, an ellipse `pack_aspect` wide). For one
+  tier slot k depends on k alone, so the same summary lays out the same on every load and reload, a later one moves
+  nothing an earlier one held, and no two islands come closer than `island_gap` (UI2-spec §5); when the largest island
+  crosses a tier the same arrangement spreads wider, once. A store of a few small islands is therefore packed close and
+  the store's camera (at most `island_scale_max`, as an island's) shows them centred and large. **Known limitation (5.0.0):** the observer recomputes places and slots from the runs as
   they are and stores none, so a deleted run, or a run whose time is recovered late, may renumber the places (or slots)
   after it, and the marks there move once (contract README, `marks.place`). The look: each island a soft
   glow of its own hue (`island-1`…`island-8`, tokens) inside a dashed shore, its **name** bold in that hue with "N runs ·
@@ -92,13 +94,17 @@ each source as the server says it serves it (`/api/about`: your store, a generat
 - **Work view:** one line per run, filtered and counted by the observer, drawn a window at a time (never more than
   `max_rows` row nodes, whatever the list holds) and read in pages. Chips say which filters made the list and remove them.
   A row: the standing glyph (its word on hover; **Aa** or `?` puts a word beside every glyph), the goal, what a human is asked
-  and in which session (only for a run filed under Needs a human), an attempt after the first ("Attempt 2"), the project and
+  and in which session (only for a run filed under Needs a human; its id's first `session_short` characters, the whole id
+  on hover and in the sheet), an attempt after the first ("Attempt 2"), the project and
   the time.
-- **Sheet** (beside the list or the map, over it below 64 rem): one line of where the run is (project, attempt, claims, last
+- **Sheet** (beside the list or the map, over it below 64 rem; a divider between them, `ev-divider`, drags, moves with the
+  arrow, Page and Home/End keys, resets on a double-click and is a separator saying the width; the width is remembered and
+  clamped between `width.sheet-min` and what leaves the main area `width.main-min`, below both the sheet is the whole width,
+  and the map refits beside it): one line of where the run is (project, attempt, claims, last
   change; the repository and the full time on hover), the session to copy, then **Now** or **Outcome** (what is owed, in the order the report asks it,
   or that the run ended, its scope, what it left unresolved *as recorded when it stopped* and, only if the files changed,
-  **Unresolved against the workspace now**); **Audit** (every verdict with its auditor and how independent it was, and
-  whether the latest still covers the argument); **Claims** as the support graph (the root, each claim's supporters nested
+  **Unresolved against the workspace now**); **Audit** (every verdict, newest first as the observer serves them, with its auditor and how
+  independent it was; whether the latest still covers the argument is said on it, once); **Claims** as the support graph (the root, each claim's supporters nested
   beneath it, a claim that supports several named again where it recurs), each one line that opens in place to its sources and
   quotes, the human's answer, each spike's command, result and bound files, review and independence, and the decisions made on
   it; **Dropped claims** with the gate's own reason; **Human decisions**, each attached to what it decided (the claim, a link to
@@ -139,7 +145,8 @@ zooms in, `−` steps out. Typing in a field is never a command (`app/keys.js`).
 
 Raw values (colours, sizes, durations) live only in `tokens/tokens.json` (`make ui-tokens`); Tailwind generates only
 token utilities (`make ui-css`); no arbitrary values, no inline styles, no class glued to an interpolation. Basecoat,
-fonts and a Lucide subset are vendored (`make ui-vendor`) and `dist/` is committed, so the UI runs offline without Node.
+fonts, a Lucide subset and idiomorph's ES module (0BSD, its LICENSE beside it) are vendored (`make ui-vendor`, versions and
+SHA-256 in `vendor/VERSIONS`) and `dist/` is committed, so the UI runs offline without Node.
 Colour pairs are checked for contrast in both schemes (`make ui-contrast`).
 The type is thin and small (V2): IBM Plex Mono Light (300) for the body, 400 and 500 for emphasis and nothing heavier
 (`weight` tokens, also emitted as runtime variables so Basecoat's components follow, and its text scale is mapped onto
@@ -148,10 +155,15 @@ ours in `styles/app.css`); UI text 11–12 px, small text 10 px, an island's nam
 
 ## Elements and layers
 
-Light-DOM custom elements, one per file: `atoms/` (`ev-meter`, `ev-more`, `ev-copy`), `organisms/` (`ev-rail`, `ev-inbox`,
+Light-DOM custom elements, one per file: `atoms/` (`ev-meter`, `ev-more`, `ev-copy`, `ev-divider`), `organisms/` (`ev-rail`, `ev-inbox`,
 `ev-work`, `ev-sheet`), `views/` (pure HTML builders the elements share, tested on their own from the real-service
 fixtures), `core/` (shared helpers; `tree.js`). A state is a string builder (`stateHtml`), not an element: a list draws
-hundreds. An element re-renders on `.data` and puts focus back on the equivalent control.
+hundreds. An element redraws on `.data` by morphing (`morph` in core/element.js, idiomorph): nothing at all when its HTML
+is the one it drew last, else only the nodes that differ, so a poll that changed one count changes one text node, and
+every node that stays is the same node (focus, scroll and a child's own state kept). A child custom element is kept and
+takes only its new attributes (it redraws itself); the `style` attribute is the CSSOM's (`setStyle`, set only where it
+differs), never markup's. If focus was lost anyway it goes back to the equivalent control. Only a host emptied on
+purpose or a scaffold drawn once is written with `innerHTML`; the `poll-stable` journey holds the rest.
 
 ## Freshness and errors
 

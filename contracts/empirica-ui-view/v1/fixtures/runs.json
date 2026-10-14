@@ -1003,7 +1003,7 @@
     "started": 1790591820.0,
     "state": "active",
     "updated": 1790592900.0,
-    "version": "sha256:41c814c017b3ab2a899371c7282c0c5580b642fc9d812592e97f382ec287e6d7"
+    "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
    }
   ],
   "audit": {
@@ -1418,12 +1418,12 @@
     "started": 1790591820.0,
     "state": "active",
     "updated": 1790592900.0,
-    "version": "sha256:41c814c017b3ab2a899371c7282c0c5580b642fc9d812592e97f382ec287e6d7"
+    "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
    }
   ],
   "audit": {
    "findings": [
-    "The tolerance test never checks the wide-gamut swatches."
+    "The tolerance test never checks the wide-gamut swatches: research artifact sha256:8db61ff4da9b90192441e9833d4306964aeb94e1bf64248638f124bca4268e21 cites tests/colour/tolerance/wide_gamut_swatches_display_p3_rec2020_regression_cases.py:3,5,16."
    ]
   },
   "auditor": "anthropic/claude-opus-4-6",
@@ -1432,7 +1432,7 @@
     "at": 1790592900.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
-     "The tolerance test never checks the wide-gamut swatches."
+     "The tolerance test never checks the wide-gamut swatches: research artifact sha256:8db61ff4da9b90192441e9833d4306964aeb94e1bf64248638f124bca4268e21 cites tests/colour/tolerance/wide_gamut_swatches_display_p3_rec2020_regression_cases.py:3,5,16."
     ],
     "independence": "distinct",
     "verdict": "failed"
@@ -1627,7 +1627,7 @@
    "started": 1790591820.0,
    "state": "active",
    "updated": 1790592900.0,
-   "version": "sha256:41c814c017b3ab2a899371c7282c0c5580b642fc9d812592e97f382ec287e6d7"
+   "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
   },
   "stale": [],
   "steps": [
@@ -1753,7 +1753,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:41c814c017b3ab2a899371c7282c0c5580b642fc9d812592e97f382ec287e6d7"
+  "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
   "attempts": [

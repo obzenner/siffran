@@ -444,8 +444,10 @@ def view_problems(summary: dict, rows: list, details: dict, ui: dict[str, dict] 
                 out.append(f"{at}: a run not read in full has no audits, dropped claims, decisions or flags (null)")
             continue
         audits = d["audits"]
-        if (audits[-1]["verdict"] if audits else "none") != r["audit"]["verdict"]:
-            out.append(f"{at}: the latest of audits is the row's audit verdict")
+        if (audits[0]["verdict"] if audits else "none") != r["audit"]["verdict"]:
+            out.append(f"{at}: the first of audits (newest first) is the row's audit verdict")
+        if any(x["at"] is not None and y["at"] is not None and x["at"] < y["at"] for x, y in zip(audits, audits[1:])):
+            out.append(f"{at}: audits are newest first")
         known = {c["id"] for c in r["claims"] or ()} | {x["claim"] for x in d["dropped"]}
         if any(x["claim"] is not None and x["claim"] not in known for x in d["decisions"]):
             out.append(f"{at}: a decision is attached to a claim of its run")

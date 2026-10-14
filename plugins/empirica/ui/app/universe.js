@@ -4,22 +4,23 @@
 // The layout is a pure function of one summary, the observer's facts alone, so a reload, a poll or a summary taken while
 // the observer is still reading lays out every island and mark it holds the same way:
 // - island k (the observer's project order: by its first run's start, so a new project appends) sits in slot k
-//   (`islandSlots`: equal slots of the maximum island, packed append-only), drawn as large as its places reach (its
+//   (`islandSlots`: equal slots of the smallest tier that holds the largest island, `slotTier`, packed append-only), drawn as large as its places reach (its
 //   project's runs, the observer's count, or its furthest place), never past its slot;
 // - each mark sits at its observer `place` (a timed run's ordinal in its project's start order; an untimed run's in the
 //   outer band) on the fixed lattice (`latticePlace`, which never rescales with a count), so a run started later takes
 //   the next place at the edge and nothing drawn moves; a mark the observer has not placed yet (its project not read in
 //   full) is not drawn.
 // Nothing here orders, counts or remembers.
-import { bounds, footprint, islandRadius, islandSlots, latticePlace } from "./geometry.js";
+import { bounds, footprint, islandRadius, islandSlots, latticePlace, slotTier } from "./geometry.js";
 
 /** Where each island and mark of `summary` is, in world units: `islands[k]` (`{id, x, y, r, hue}`: its centre, its
  * radius and its hue) for `summary.projects[k]`, `x[i]`, `y[i]` for mark i (NaN while it has no place), and the world box
  * holding every island with its name's band. */
 export function layout(summary, g) {
-  const slots = islandSlots(summary.projects.length, g), m = summary.marks;
+  const m = summary.marks;
   const reach = summary.projects.map((p) => p.runs);  // an island reaches its runs, or its furthest place (the outer band)
   for (let i = 0; i < m.id.length; i++) if (m.place[i] !== null) reach[m.project[i]] = Math.max(reach[m.project[i]], m.place[i] + 1);
+  const slots = islandSlots(summary.projects.length, g, slotTier(Math.max(1, ...reach), g));
   const islands = summary.projects.map((p, k) => ({ id: p.id, x: slots[k].x, y: slots[k].y, r: islandRadius(reach[k], g), hue: k % g.island_hues }));
   const x = new Float64Array(m.id.length).fill(NaN), y = new Float64Array(m.id.length).fill(NaN);
   for (let i = 0; i < m.id.length; i++) {

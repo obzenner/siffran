@@ -134,7 +134,7 @@ async function narrowing(A) {
   const stat = await E(`[...document.querySelectorAll("a[data-stat]")].length`);
   await A.go("&view=inbox");
   const links = await E(`[...document.querySelectorAll("a[data-stat]")].map((a) => ({ label: a.innerText.replace(/\\s+/g, " ").trim(), href: a.getAttribute("href") }))`);
-  const caught = links.find((l) => /failed audits/.test(l.label));
+  const caught = links.find((l) => /failed audits?\b/.test(l.label));
   await A.click(`a[data-stat][href*="flag=failed_audit"]`);
   const n = digits(await A.text("ev-work h1"));
   check(`narrowing ${tag}: the strip's failed-audits number leads to exactly that many runs (1 click)`, !!caught && n === facts.failed_audits && stat >= 3 && /since=|view=work/.test(runsLink), [n, facts, caught, runsLink]);
@@ -349,6 +349,18 @@ const INVARIANTS = `(() => {
   overlays.forEach((a, i) => overlays.slice(i + 1).forEach((b) => { if (!a.contains(b) && !b.contains(a) && hit(box(a), box(b))) overlaps.push([a.outerHTML.slice(0, 60), b.outerHTML.slice(0, 60)]); }));
   const clipped = [...document.querySelectorAll("h1, h2, [data-chip], [data-island-label], [data-callout], [data-crumbs], [data-crumb], [data-needs-pill], [data-hl], .badge, [data-time], [data-card] span, [data-orbit-label]")].filter(seen)
     .filter((e) => !e.classList.contains("sr-only") && e.scrollWidth > e.clientWidth + 1 && !(e.title || e.closest("[title]")?.title || "").trim()).map((e) => e.outerHTML.slice(0, 80));
+  // nothing in a sheet or a project card runs past its right edge: a long unbroken token (a digest, a path) wraps (L8)
+  for (const pane of [...document.querySelectorAll("#sheet-pane, [data-card]")].filter(seen)) {
+    const edge = box(pane).right + 0.5;
+    // the text itself, not its box: a word too long for its line overflows a box that fits
+    const past = [], walk = document.createTreeWalker(pane, NodeFilter.SHOW_TEXT), range = document.createRange();
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!n.textContent.trim() || !n.parentElement?.checkVisibility() || n.parentElement.closest(".truncate, .sr-only, [title]")) continue;
+      range.selectNodeContents(n);
+      if ([...range.getClientRects()].some((r) => r.width > 0 && r.right > edge)) past.push(n.textContent.trim().slice(0, 40));
+    }
+    if (past.length) clipped.push(\`past the edge of \${pane.id || "a card"}: \${past.slice(0, 3).join(" | ")}\`);
+  }
   // a sheet's attempts comparison fits the sheet's width: no cell past its right edge, nothing scrolled or cut sideways
   for (const table of [...document.querySelectorAll("ev-sheet .ev-compare")].filter(seen)) {
     const sheet = box(table.closest("#sheet-pane") ?? table.closest("ev-sheet"));
@@ -573,7 +585,7 @@ async function universe(A) {
   if (asking?.needs) { await A.go(`&zoom=${asking.id}`); await A.P.sleep(700); await leaderRule(A, `universe ${tag}: ${asking.label}'s zoom`); await A.go(""); await A.P.sleep(400); }
   // each island's name says its runs and how many need a human, the observer's counts
   const labelled = await E(`Object.fromEntries([...document.querySelectorAll("[data-island-label]")].map((e) => [e.dataset.islandLabel, e.innerText.replace(/\\s+/g, " ")]))`);
-  const wrong = s.projects.filter((p) => labelled[p.id] !== undefined && !(labelled[p.id].includes(p.runs.toLocaleString("en")) && (p.needs ? labelled[p.id].includes(`${p.needs.toLocaleString("en")} need you`) : !labelled[p.id].includes("need you"))));
+  const wrong = s.projects.filter((p) => labelled[p.id] !== undefined && !(labelled[p.id].includes(p.runs.toLocaleString("en")) && (p.needs ? labelled[p.id].includes(`${p.needs.toLocaleString("en")} ${p.needs === 1 ? "needs" : "need"} you`) : !/needs? you/.test(labelled[p.id]))));
   check(`universe ${tag}: each island's name says its runs and how many of them need a human, by the observer's count`, wrong.length === 0 && s.projects.reduce((n, p) => n + p.needs, 0) === needs, [wrong.map((p) => [p.label, labelled[p.id], p.runs, p.needs])]);
   check(`universe ${tag}: the needs pill says the observer's count and lists them`, needs === 0 ? (await A.count("[data-needs-pill]")) === 0 : digits(await A.text("[data-needs-pill]")) === needs, await A.text("[data-needs-pill]"));
   const calledIds = await E(`[...document.querySelectorAll("[data-callout]")].map((e) => e.dataset.callout)`);
@@ -614,7 +626,7 @@ async function universe(A) {
   // Claims section draws the same graph small
   const drawnClaims = (detail.row.claims ?? []).slice(0, catalogue.universe.claims_cap).map((c) => c.id), ids = new Set(drawnClaims);
   const published = new Set((detail.row.edges ?? []).filter((e) => ids.has(e.from) && ids.has(e.to)).map((e) => `${e.from} ${e.to}`));
-  const graph = await E(`({ nodes: [...document.querySelectorAll("${U} [data-orbit]")].map((a) => a.dataset.orbit), edges: [...document.querySelectorAll("${U} [data-graph] line[data-edge]")].map((l) => l.dataset.edge),
+  const graph = await E(`({ nodes: [...document.querySelectorAll("${U} [data-orbit]")].map((a) => a.dataset.orbit), edges: [...document.querySelectorAll("${U} [data-graph] [data-edge]")].map((l) => l.dataset.edge),
     word: document.querySelector("${U} [data-run-word]")?.innerText ?? "", sheet: [...document.querySelectorAll("ev-sheet [data-claim-graph] [data-graph-claim]")].map((a) => a.dataset.graphClaim) })`);
   check(`universe ${tag}: the run's zoom draws its claims as a graph, each once with every published edge, its standing in words, and the sheet draws the same graph`,
     JSON.stringify(graph.nodes) === JSON.stringify(drawnClaims) && graph.edges.length === published.size && graph.edges.every((e) => published.has(e)) && graph.word.length > 0
@@ -706,6 +718,94 @@ async function leaderRule(A, what) {
 
 // note A · a reload lays the map out exactly as before, at the store, on an island and on a run: the overlay's boxes and the
 // geometry drawn (the store's box and scale, each mark's screen place), not pixels; and a load never flies
+// ---- a poll redraws only what changed: the same nodes, no mutation when nothing changed, one text node when one count did ----
+async function pollStable(A) {
+  const E = A.E, P = A.P, run = A.id("audit-failed");
+  const rules = { bump: null };
+  await P.send("Fetch.enable", { patterns: [{ urlPattern: "*/api/summary*" }] });
+  P.on("Fetch.requestPaused", async (p) => {
+    if (!rules.bump) return P.send("Fetch.continueRequest", { requestId: p.requestId });
+    // one project's run count changes (and so the token): what a store gives when one run is added to it
+    const body = await (await fetch(p.request.url)).json();
+    body.projects.find((x) => x.id === rules.bump).runs += 1000; body.token = `${body.token}-bumped`;
+    return P.send("Fetch.fulfillRequest", { requestId: p.requestId, responseCode: 200, responseHeaders: [{ name: "Content-Type", value: "application/json" }], body: Buffer.from(JSON.stringify(body)).toString("base64") });
+  });
+  const polls = () => E(`performance.getEntriesByType("resource").filter((r) => r.name.includes("/api/summary")).length`);
+  /** Ask once, now (a shown tab polls at once), and wait for its answer and what it draws. */
+  const poll = async () => { const n = await polls(); await E(`document.dispatchEvent(new Event("visibilitychange"))`); for (let i = 0; i < 40 && (await polls()) === n; i++) await P.sleep(50); await P.sleep(700); };
+  const watch = (sels) => E(`(() => { window.__refs = {}; window.__recs = {};
+    for (const sel of ${JSON.stringify(sels)}) { const root = document.querySelector(sel); window.__refs[sel] = [...root.querySelectorAll("*")]; window.__recs[sel] = [];
+      new MutationObserver((rs) => window.__recs[sel].push(...rs.map((r) => ({ type: r.type, node: r.target.nodeName, attr: r.attributeName, text: r.type === "characterData" ? r.target.data : [...r.addedNodes].map((n) => n.textContent).join("") })))).observe(root, { subtree: true, childList: true, attributes: true, characterData: true }); }
+    return true; })()`);
+  const seen = () => E(`Object.fromEntries(Object.keys(window.__refs).map((sel) => { const now = [...document.querySelector(sel).querySelectorAll("*")];
+    return [sel, { kept: now.length === window.__refs[sel].length && now.every((n, i) => n === window.__refs[sel][i]), nodes: now.length, recs: window.__recs[sel] }]; }))`);
+  await A.go(`&view=inbox&run=${run}`);
+  const project = A.summary.projects.find((x) => x.runs > 0);
+  await E(`document.getElementById("sheet-pane").scrollTop = 120; document.querySelector('#rail a[href*="project"]').focus()`);
+  const focused = await E(`document.activeElement.getAttribute("href")`), top = await E(`document.getElementById("sheet-pane").scrollTop`);
+  await watch(["#rail", "#sheet", "#inbox"]);
+  await poll();
+  const same = await seen();
+  check("poll-stable: a poll that changed nothing keeps every node of the rail, the open sheet and the inbox, and records no mutation",
+    Object.values(same).every((x) => x.kept && x.nodes > 5 && x.recs.length === 0), same);
+  rules.bump = project.id;
+  await watch(["#rail", "#sheet"]);
+  await poll();
+  rules.bump = null;
+  const bumped = await seen(), want = num(project.runs + 1000);
+  const railRecs = bumped["#rail"].recs;
+  check("poll-stable: a poll that changed one project's count changes that text alone: every node kept, the sheet untouched, focus and scroll kept",
+    bumped["#rail"].kept && bumped["#sheet"].kept && bumped["#sheet"].recs.length === 0 && railRecs.length > 0 && railRecs.every((r) => (r.type === "characterData" || r.type === "childList") && r.text === want)
+      && (await E(`document.activeElement.getAttribute("href")`)) === focused && (await E(`document.getElementById("sheet-pane").scrollTop`)) === top, [bumped, want, focused, top]);
+  // the work list: its rows are the same nodes after a poll that changed nothing
+  await A.go("&view=work");
+  await watch(["#work [data-window]", "#rail"]);
+  await poll();
+  const work = await seen();
+  check("poll-stable: the work list's rows are the same nodes after a poll that changed nothing, and nothing in it is touched",
+    Object.values(work).every((x) => x.kept && x.recs.length === 0) && work["#work [data-window]"].nodes > 5, work);
+  await P.send("Fetch.disable");
+}
+
+// ---- the run sheet's divider: drag, keys, a reload remembers, narrow is the whole width -------------------------------
+async function divider(A) {
+  const E = A.E, P = A.P, run = A.id("audit-failed");
+  const state = () => E(`(() => { const d = document.querySelector("ev-divider"), s = document.getElementById("sheet-pane").getBoundingClientRect(), c = document.querySelector("ev-universe canvas");
+    return { now: +d.getAttribute("aria-valuenow"), min: +d.getAttribute("aria-valuemin"), max: +d.getAttribute("aria-valuemax"), role: d.getAttribute("role"), sheet: Math.round(s.width), shown: getComputedStyle(d).display !== "none",
+      x: d.getBoundingClientRect().x + d.getBoundingClientRect().width / 2, y: d.getBoundingClientRect().y + 200, main: getComputedStyle(document.getElementById("main")).display, stored: +localStorage.getItem("empirica.sheet-width"),
+      canvas: c && c.getBoundingClientRect().width ? Math.abs(c.width / Math.min(2, devicePixelRatio || 1) - c.getBoundingClientRect().width) <= 1 && Math.round(c.getBoundingClientRect().right) <= Math.round(d.getBoundingClientRect().left) + 1 : null }; })()`);
+  const mouse = async (type, x, y) => P.send("Input.dispatchMouseEvent", { type, x, y, button: "left", buttons: type === "mouseReleased" ? 0 : 1, clickCount: 1, pointerType: "mouse" });
+  // the token lengths, as the page resolves them (registered lengths compute to px)
+  const len = (name) => E(`Math.round(parseFloat(getComputedStyle(document.body).getPropertyValue("${name}")))`);
+  const step = await len("--ev-split-step"), sheetW = await len("--ev-sheet");
+  for (const [where, q] of [["the inbox", `&view=inbox&run=${run}`], ["the universe", `&run=${run}`]]) {
+    await E(`localStorage.removeItem("empirica.sheet-width")`); await A.go(q);
+    const a = await state();
+    await mouse("mousePressed", a.x, a.y); await mouse("mouseMoved", a.x - 60, a.y); await mouse("mouseMoved", a.x - 120, a.y); await mouse("mouseReleased", a.x - 120, a.y); await P.sleep(300);
+    const dragged = await state();
+    check(`divider ${where}: a separator with its width; dragging it 120 px left widens the sheet 120 px, remembered${where === "the universe" ? ", and the map refits beside it" : ""}`,
+      a.role === "separator" && a.shown && a.now === a.sheet && Math.abs(dragged.now - a.now - 120) <= 2 && dragged.sheet === dragged.now && dragged.stored === dragged.now && (where === "the inbox" || dragged.canvas === true), [a, dragged]);
+    await E(`document.querySelector("ev-divider").focus()`);
+    await P.key("ArrowLeft"); const left = await state(); await P.key("ArrowRight"); await P.key("ArrowRight"); const right = await state();
+    await P.key("Home"); const home = await state(); await P.key("End"); const end = await state(); await P.key("PageDown"); const page = await state();
+    check(`divider ${where}: Left widens a step, Right narrows one, Home its narrowest, End its widest (the main area keeps its minimum), PageDown four steps`,
+      left.now === dragged.now + step && right.now === dragged.now - step && home.now === home.min && end.now === end.max && page.now === end.max - catalogue.split_page * step && page.sheet === page.now, [step, dragged.now, left.now, right.now, home, end.now, page.now]);
+    await P.send("Page.reload"); await P.sleep(300); await P.waitReady(); await P.sleep(600);
+    const reloaded = await state();
+    check(`divider ${where}: a reload keeps the width chosen`, reloaded.now === page.now && reloaded.sheet === page.now, [page.now, reloaded]);
+    await E(`document.querySelector("ev-divider").dispatchEvent(new MouseEvent("dblclick", { bubbles: true }))`); await P.sleep(200);
+    const reset = await state();
+    check(`divider ${where}: a double-click resets it to the sheet's width`, reset.now === sheetW && reset.sheet === reset.now, [reset, sheetW]);
+  }
+  await P.send("Emulation.setDeviceMetricsOverride", { width: 800, height: 700, deviceScaleFactor: 1, mobile: false }); await P.sleep(500);
+  const narrow = await state(), vw = await E(`innerWidth`);
+  check("divider: narrower than both minimums the sheet takes the full width and the divider is not drawn; the width chosen is kept", narrow.sheet === vw && narrow.main === "none" && !narrow.shown && narrow.stored === sheetW, narrow);
+  const [w, h] = A.size.split("x").map(Number);
+  await P.send("Emulation.setDeviceMetricsOverride", { width: w, height: h, deviceScaleFactor: 1, mobile: false }); await P.sleep(500);
+  const back = await state();
+  check("divider: wide again, the sheet is back at the width chosen beside the main area", back.shown && back.sheet === back.stored && back.main !== "none", back);
+}
+
 async function universeReload(A) {
   const E = A.E, P = A.P, project = A.summary.projects.find((p) => p.runs > 1) ?? A.summary.projects[0], run = A.id("verification");
   const snap = () => E(`(() => { const u = document.querySelector("${U}");
@@ -820,6 +920,8 @@ const JOURNEYS = {
   universeHistory: () => session(SOURCES[1], WIDE, universeHistory),
   universeReload: () => session(SOURCES[0], WIDE, universeReload),
   universeMotion: demo(universeMotion),
+  divider: demo(divider),
+  pollStable: demo(pollStable),
   layout: async () => {
     for (const size of SIZES) { await session(SOURCES[0], size, layout); for (const scheme of SCHEMES) await session(SOURCES[0], size, layoutInvariants, { scheme }); }
     await narrow(SOURCES[0]);

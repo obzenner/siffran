@@ -5,7 +5,7 @@ import { test } from "vitest";
 import fc from "fast-check";
 import catalogue from "../catalogue.json" with { type: "json" };
 import {
-  GOLDEN_ANGLE, attemptChain, budget, calloutBoxes, insideLength, rimFirst, bounds, cardBox, claimGraph, footprint, graphBox, labelBox, labelWidth, boxMeetsCircle, crosses, fitView, flyCamera, inBox, insideView,
+  GOLDEN_ANGLE, attemptChain, edgePath, budget, calloutBoxes, insideLength, rimFirst, bounds, cardBox, claimGraph, footprint, graphBox, labelBox, labelWidth, boxMeetsCircle, crosses, fitView, flyCamera, inBox, insideView,
   islandRadius, islandSlots, keyBox, latticePlace, markRadius, nearest, nearestOnBox, orbit, placeTags, segmentsMeet, overlaps, packCircles, placeCallouts, placeLabels, pulseRadius, segmentMeetsCircle,
   sunflower, toScreen, toWorld, touching, viewInset,
 } from "../app/geometry.js";
@@ -188,7 +188,7 @@ test("a leader ends on its box, at the box's point nearest the mark", () => {
 const screens = fc.tuple(fc.array(fc.integer({ min: 1, max: 300 }), { minLength: 1, maxLength: 20 }), fc.constantFrom([1440, 900], [1024, 768]), fc.boolean())
   .map(([runs, [w, h], keyOpen]) => {
     const view = { w, h, inset: viewInset(keyOpen, G) }, slots = islandSlots(runs.length, G);
-    const drawn = slots.map((p, k) => ({ ...p, r: islandRadius(runs[k], G) })), cam = fitView(bounds(drawn.map((c) => footprint(c.x, c.y, c.r, G))), view, Infinity, G);
+    const drawn = slots.map((p, k) => ({ ...p, r: islandRadius(runs[k], G) })), cam = fitView(bounds(drawn.map((c) => footprint(c.x, c.y, c.r, G))), view, G.island_scale_max, G);
     return { view, runs, cam, discs: drawn.map((c) => ({ ...toScreen(cam, view, c.x, c.y), r: c.r * cam.s })) };
   });
 
@@ -453,6 +453,22 @@ test("a run's claims orbit it: every claim once, the root on the first ring, a s
     for (let i = 0; i < ps.length; i++) for (let j = i + 1; j < ps.length; j++) assert.ok(Math.hypot(ps[i].x - ps[j].x, ps[i].y - ps[j].y) >= 2 * SIZE.node + SIZE.gap - 1e-6, `nodes ${i} and ${j}`);
     for (const p of ps) assert.ok(Math.hypot(p.x, p.y) >= SIZE.run + SIZE.node, "off the run");
   }), RUNS);
+});
+
+test("no edge crosses the run's disc: an edge whose straight line would is routed around it, from its claim to its claim (L12)", () => {
+  for (const size of [SIZE, { ring: G.sheet_ring, node: G.sheet_node_px, gap: G.claim_gap_px / 2, run: G.sheet_run_px, label_h: G.sheet_label_px, cap: G.loop_cap }])
+    fc.assert(fc.property(graphs, ({ claims, edges, widths }) => {
+      const g = claimGraph("C0", claims, edges, widths, size), disc = { sx: 0, sy: 0, r: size.run + size.gap };
+      for (const e of g.edges) {
+        const pts = edgePath(g, e);
+        assert.deepEqual([pts[0], pts.at(-1)], [g.at.get(e.from), g.at.get(e.to)].map((p) => ({ x: p.x, y: p.y })), "it joins its two claims");
+        for (let k = 1; k < pts.length; k++) assert.ok(!segmentMeetsCircle(pts[k - 1].x, pts[k - 1].y, pts[k].x, pts[k].y, disc), `${e.from} ${e.to}`);
+      }
+    }), RUNS);
+  // the run zoom of the demo (7 claims): C1 supports C3 across the run
+  const at = (r, a) => ({ x: r * Math.cos(a), y: r * Math.sin(a) });
+  const g = { at: new Map([["A", { ...at(100, 0), depth: 1 }], ["B", { ...at(100, Math.PI), depth: 1 }]]), edges: [{ from: "A", to: "B", via: [] }] };
+  assert.equal(edgePath(g, g.edges[0]).length, 2, "a path is its edge's own points");
 });
 
 test("the claim graph: every edge drawn is a published edge, each once, every published edge between drawn claims drawn; no label on a node, the run, another label or the fixed boxes", () => {

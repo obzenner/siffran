@@ -12,6 +12,7 @@ timeline, ADR-0070), with a deterministic clock in place of the wall clock.
 """
 from __future__ import annotations
 
+import hashlib
 import unittest
 import uuid
 import zlib
@@ -640,7 +641,10 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     b.research(run, "C1", ref="src/colour.py")
     b.spike(run, "C1", "python -m pytest tests/test_colour.py", {"src/colour.py": b"srgb\n"})
     b.freeze(run)
-    b.audit(run, "fail", ["The tolerance test never checks the wide-gamut swatches."])
+    # a long unbroken token, as real audit reasons carry (a digest, a path): the sheet wraps it inside its width
+    b.audit(run, "fail", ["The tolerance test never checks the wide-gamut swatches: research artifact "
+                          "sha256:8db61ff4da9b90192441e9833d4306964aeb94e1bf64248638f124bca4268e21 cites "
+                          "tests/colour/tolerance/wide_gamut_swatches_display_p3_rec2020_regression_cases.py:3,5,16."])
     b.stamp("audit-failed", "lumen", "s-retry")
 
     # atlas: research the service cannot check itself (ADR-0067): one record per way of being verified,
@@ -931,7 +935,8 @@ def _varied(b: "_Builder", n: int, goal: str, thing: str, name: str, repo: str |
         b.research(run, "C1", ref=path)
         b.spike(run, "C1", f"python -m pytest {check} -k edge", {check: f"edge {n}\n".encode()})
         b.freeze(run)
-        b.audit(run, "fail", [f"The edge-case test never feeds {thing} an empty input."])
+        b.audit(run, "fail", [f"The edge-case test never feeds {thing} an empty input (research artifact "
+                              f"sha256:{hashlib.sha256(name.encode()).hexdigest()} cites {check}:1,2)."])
     elif shape == 4:  # waits on a human's decision
         run = b.begin(name, session, goal, _graph(
             "C0", [("C0", "ordinary", f"{subject} keeps working for existing users."),

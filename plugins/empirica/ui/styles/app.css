@@ -33,9 +33,24 @@
    beats the panes' own utilities. */
 body:not([data-sheet]) #sheet-pane { display: none; }
 @media (width < theme(--breakpoint-lg)) {
-  body[data-sheet] #sheet-pane { width: 100%; border-inline-start: 0; }
+  body[data-sheet] #sheet-pane { width: 100%; }
   body[data-sheet] #main { display: none; }
 }
+/* The divider between the main area and the sheet (elements/atoms/ev-divider.js) reads these lengths in px: registered as
+   lengths, a rem resolves first. It sets the sheet's width (--ev-sheet-w); below sheet-min + main-min, or below the
+   large breakpoint, it is not drawn and the sheet takes the full width as above. */
+@property --ev-sheet { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-sheet-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-main-min { syntax: "<length>"; inherits: true; initial-value: 0px; }
+@property --ev-split-step { syntax: "<length>"; inherits: true; initial-value: 0px; }
+body { --ev-sheet: var(--container-sheet); --ev-sheet-min: var(--container-sheet-min); --ev-main-min: var(--container-main-min); --ev-split-step: var(--container-split-step); }
+#sheet-pane { width: var(--ev-sheet-w, var(--container-sheet)); }
+ev-divider { display: flex; touch-action: none; }
+ev-divider:hover > [data-line], ev-divider:focus-visible > [data-line] { background: var(--ring); }
+body:not([data-sheet]) ev-divider, body[data-narrow] ev-divider { display: none; }
+body[data-sheet][data-narrow] #sheet-pane { width: 100%; }
+body[data-sheet][data-narrow] #main { display: none; }
+@media (width < theme(--breakpoint-lg)) { ev-divider { display: none; } }
 
 /* The Universe is the whole main pane: the rail is the inbox's. */
 body[data-view="universe"] #rail-pane { display: none; }
@@ -82,6 +97,9 @@ body[data-words] .ev-word { position: static; inline-size: auto; block-size: aut
 /* The attempts side by side: Basecoat's table keeps every cell on one line, so a long goal or residual is painted through the
    next attempt's column. Cells wrap (a long word too) and keep room to be read; the wrapper scrolls sideways when the
    attempts do not fit. Outside any layer, so it beats the vendored `nowrap`. */
+/* every sheet's and card's prose wraps anywhere: a long unbroken token (a digest, a path, a regex in an audit's reason)
+   breaks inside the width rather than running past the edge (L8); `anywhere` also lets a flex item shrink below it */
+ev-sheet, [data-card] { overflow-wrap: anywhere; }
 /* the attempts share the sheet's width (fixed layout: equal columns), each cell wrapping, so none is cut at its edge */
 .ev-compare { table-layout: fixed; }
 .ev-compare th, .ev-compare td { white-space: normal; overflow-wrap: anywhere; vertical-align: top; }

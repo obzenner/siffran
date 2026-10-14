@@ -525,13 +525,13 @@ class ObserverAgreementTests(unittest.TestCase):
         self.assertEqual(row["ask"], expected, "ask is the item the author view presents")
 
     def _audits(self, row, detail, core, b):
-        verdicts = [s for s in detail["steps"] if s["kind"] == "audit_verdict"]
+        verdicts = [s for s in detail["steps"] if s["kind"] == "audit_verdict"][::-1]  # newest first, as served
         self.assertEqual([a["verdict"] for a in detail["audits"]],
-                         ["passed" if s["outcome"] == "pass" else "failed" for s in verdicts], "every verdict, in order")
+                         ["passed" if s["outcome"] == "pass" else "failed" for s in verdicts], "every verdict, newest first")
         self.assertEqual([a["at"] for a in detail["audits"]], [s["at"] for s in verdicts], "each at its step's time")
-        self.assertEqual(detail["audits"][-1]["verdict"] if detail["audits"] else "none", core["audit"]["verdict"],
-                         "the last is the author view's latest")
-        self.assertEqual([a["independence"] for a in detail["audits"]], b.independence_then,
+        self.assertEqual(detail["audits"][0]["verdict"] if detail["audits"] else "none", core["audit"]["verdict"],
+                         "the first is the author view's latest")
+        self.assertEqual([a["independence"] for a in detail["audits"]], b.independence_then[::-1],
                          "each verdict's independence is what it was when recorded, never today's evidence")
 
     def _dropped(self, detail, argument, removed):

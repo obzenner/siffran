@@ -44,14 +44,22 @@ export function budget(cap) {
 }
 
 const SLOTS = new Map();
-/** The centres of the first `n` island slots: equal discs of the slot's maximum radius (`islandRadius(slot_places)`), each
- * with its name's band, packed `island_gap` apart (`packCircles`). Slot k depends on k alone (equal radii, append-only), so
- * an island's place is its index in the observer's project order, whatever its runs, and no two islands' discs ever come
- * closer than `island_gap`. */
-export function islandSlots(n, g) {
-  const key = `${n} ${g.slot_places} ${g.mark_c} ${g.island_margin} ${g.label_world} ${g.island_gap} ${g.pack_aspect} ${g.pack_angles}`;
+/** The slots' size, in places: the smallest of `slot_tiers` that holds `reach` (the largest island's), the last being
+ * `slot_places`. A store of a few small islands packs them close, so the store's camera shows them large and centred; the
+ * slots grow only when the largest island crosses a tier, a handful of times in a store's life. */
+export function slotTier(reach, g) {
+  return g.slot_tiers.find((t) => t >= Math.min(reach, g.slot_places)) ?? g.slot_places;
+}
+
+/** The centres of the first `n` island slots: equal discs of an island of `places` places (`islandRadius`, `slotTier`),
+ * each with its name's band, packed `island_gap` apart (`packCircles`). For one size, slot k depends on k alone (equal
+ * radii, append-only), so an island's place is its index in the observer's project order, whatever its runs, and no two
+ * islands' discs ever come closer than `island_gap`; equal circles pack in the same pattern at any size, so a larger
+ * tier spreads the same arrangement wider. */
+export function islandSlots(n, g, places = g.slot_places) {
+  const key = `${n} ${places} ${g.slot_places} ${g.mark_c} ${g.island_margin} ${g.label_world} ${g.island_gap} ${g.pack_aspect} ${g.pack_angles}`;
   if (!SLOTS.has(key)) {
-    const f = footprint(0, 0, islandRadius(g.slot_places, g), g).r;
+    const f = footprint(0, 0, islandRadius(places, g), g).r;
     SLOTS.set(key, packCircles(Array.from({ length: n }, () => f), g.island_gap, g).map((p) => ({ x: p.x, y: p.y - g.label_world / 2 })));
   }
   return SLOTS.get(key);
@@ -390,9 +398,33 @@ export function claimGraph(root, claims, edges, widths, size, fixed = [], inside
   const seen = new Set(), lines = [];
   for (const e of edges ?? []) {
     const k = `${e.from} ${e.to}`;
-    if (at.has(e.from) && at.has(e.to) && e.from !== e.to && !seen.has(k)) { seen.add(k); lines.push({ from: e.from, to: e.to }); }
+    if (at.has(e.from) && at.has(e.to) && e.from !== e.to && !seen.has(k)) { seen.add(k); lines.push({ from: e.from, to: e.to, via: around(at.get(e.from), at.get(e.to), size) }); }
   }
   return { at, rings, edges: lines, root: at.has(root) ? root : null, labels: placeTags(at, widths, size, fixed, inside) };
+}
+
+/** The bends an edge from `a` to `b` takes so it never crosses the run's disc (radius `size.run + size.gap` about the
+ * centre): none when the straight line misses it; else points on the circle of the nearer claim's radius, spread evenly
+ * along the shorter way round, as few as keep every segment clear (both claims sit on rings past the disc, so a few do). */
+function around(a, b, size) {
+  const disc = { sx: 0, sy: 0, r: size.run + size.gap };
+  if (!segmentMeetsCircle(a.x, a.y, b.x, b.y, disc)) return [];
+  const ta = Math.atan2(a.y, a.x), r = Math.min(Math.hypot(a.x, a.y), Math.hypot(b.x, b.y));
+  let sweep = Math.atan2(b.y, b.x) - ta;
+  if (sweep > Math.PI) sweep -= 2 * Math.PI; else if (sweep < -Math.PI) sweep += 2 * Math.PI;
+  if (Math.abs(Math.abs(sweep) - Math.PI) < 1e-9) sweep = Math.PI;  // straight across: one fixed side, the same every time
+  for (let k = 1, more = budget(size.cap); more(); k++) {
+    const via = Array.from({ length: k }, (_, j) => ({ x: r * Math.cos(ta + (sweep * (j + 1)) / (k + 1)), y: r * Math.sin(ta + (sweep * (j + 1)) / (k + 1)) }));
+    const pts = [a, ...via, b];
+    if (pts.every((p, j) => !j || !segmentMeetsCircle(pts[j - 1].x, pts[j - 1].y, p.x, p.y, disc))) return via;
+  }
+  return [];
+}
+
+/** An edge's points, from its claim through its bends (`via`) to the claim it supports: the line both renderers draw. */
+export function edgePath(graph, e) {
+  const p = (id) => ({ x: graph.at.get(id).x, y: graph.at.get(id).y });
+  return [p(e.from), ...(e.via ?? []), p(e.to)];
 }
 
 /** A run's attempts as a short chain of glyphs, in the graph's px offsets: one per attempt, `step` apart in a row centred

@@ -2,6 +2,7 @@
 import "./atoms/ev-meter.js";
 import "./atoms/ev-more.js";
 import "./atoms/ev-copy.js";
+import "./atoms/ev-divider.js";
 import "./organisms/ev-rail.js";
 import "./organisms/ev-inbox.js";
 import "./organisms/ev-work.js";

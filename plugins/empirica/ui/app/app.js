@@ -5,7 +5,7 @@
 // `poll_ms` (not while the tab is hidden, and later after a failed answer); when it changed, what is on screen is read again
 // where it stands. A run's sheet is asked for when it is opened, and its request state lives in app/sheets.js.
 import "../elements/index.js";
-import { clip, clock, esc, has, plain, stateOf, t } from "../elements/core/element.js";
+import { clip, clock, esc, has, morph, plain, stateOf, t } from "../elements/core/element.js";
 import enums from "../enums.json" with { type: "json" };
 import { Keys } from "./keys.js";
 import { Walk } from "./list.js";
@@ -60,7 +60,7 @@ $("bar").innerHTML = `<div class="flex flex-wrap items-center gap-x-m gap-y-xs">
 /** The data menu, each source in the words of what the server says it serves (a generated demo store is not "your store"). */
 function paintSources() {
   const word = (k) => (k === "store" && served.store === "generated" ? t("app.data.generated") : t(`app.data.${k}`));
-  $("source").innerHTML = catalogue.data_sources.map((k) => `<option value="${k}" ${k === source ? "selected" : ""}>${word(k)}</option>`).join("");
+  morph($("source"), catalogue.data_sources.map((k) => `<option value="${k}" ${k === source ? "selected" : ""}>${word(k)}</option>`).join(""));
 }
 paintSources();
 client.about().then((s) => { served = s; paintSources(); });
@@ -70,7 +70,7 @@ function paintSwitch() {
     const on = place.view === view || (view === "inbox" && place.view === "work");
     return `<a class="rounded-s px-xs py-3xs ${on ? "bg-muted font-medium" : "text-muted-foreground hover:bg-muted"}" href="${placeHref(switchTo(place, view))}" ${on ? 'aria-current="page"' : ""} data-switch="${view}">${t(`switch.${view}`)}</a>`;
   };
-  $("switch").innerHTML = catalogue.switch.map(side).join("");
+  morph($("switch"), catalogue.switch.map(side).join(""));
 }
 
 $("source").addEventListener("change", (e) => { location.search = new URLSearchParams({ data: e.target.value }); });
@@ -175,7 +175,7 @@ function paintMain() {
   $("rail").data = summary ? { summary, place, go } : null;
   const c = summary?.coverage;
   const unread = c ? c.unreadable + c.partial : 0;
-  $("status").textContent = [status ? t(`app.status.${status}`) : "", unread ? t("coverage.unread", { n: unread }) : "", client.checked === null ? "" : t("app.checked", { at: clock(client.checked) })].filter(Boolean).join(" · ");
+  $("status").textContent = [status ? t(`app.status.${status}`) : "", unread ? t("coverage.unread", { total: unread }) : "", client.checked === null ? "" : t("app.checked", { at: clock(client.checked) })].filter(Boolean).join(" · ");
 }
 
 let paintedSheet = "";

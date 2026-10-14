@@ -1,6 +1,6 @@
 import catalogue from "../../catalogue.json" with { type: "json" };
 import { anchorAt, anchoredTop, nearEnd, revealTop, windowFor } from "../../app/list.js";
-import { EvElement, define, esc, num, t } from "../core/element.js";
+import { EvElement, count, define, esc, morph, num, setStyle, t } from "../core/element.js";
 import { windowHtml } from "../views/rows.js";
 
 /**
@@ -30,10 +30,10 @@ class EvWork extends EvElement {
     }
     const { walk } = d;
     const chips = d.chips.map((c) => `<a class="badge" data-variant="secondary" href="${esc(c.href)}" data-chip>${esc(c.label)}<span class="sr-only"> ${t("work.remove")}</span> ✕</a>`).join("");
-    this.querySelector("[data-toolbar]").innerHTML = `<h1 class="text-s font-semibold">${walk.total === null ? t("work.title") : t("work.count", { n: num(walk.total) })}</h1>${chips}
-      ${walk.failure ? `<button type="button" class="btn" data-variant="outline" data-size="sm" data-retry-list>${t("detail.retry")}</button>` : ""}`;
+    morph(this.querySelector("[data-toolbar]"), `<h1 class="text-s font-semibold">${walk.total === null ? t("work.title") : count("work.count", walk.total, { n: num(walk.total) })}</h1>${chips}
+      ${walk.failure ? `<button type="button" class="btn" data-variant="outline" data-size="sm" data-retry-list>${t("detail.retry")}</button>` : ""}`);
     const state = walk.failure ? t(`app.status.${walk.failure}`) : walk.loading ? t("work.loading") : walk.total === 0 ? t(d.empty) : walk.next ? t("work.more", { shown: num(walk.rows.length), total: num(walk.total) }) : "";
-    this.querySelector("[data-foot]").innerHTML = `${state}${walk.unsearched ? `<span class="block">${t("coverage.unsearched", { n: num(walk.unsearched) })}</span>` : ""}`;
+    morph(this.querySelector("[data-foot]"), `${state}${walk.unsearched ? `<span class="block">${count("coverage.unsearched", walk.unsearched, { n: num(walk.unsearched) })}</span>` : ""}`);
     this.#keepPlace();
     this.#paint(true);
   }
@@ -50,21 +50,21 @@ class EvWork extends EvElement {
     if (!d || !box || !host) return;
     const rows = d.walk.rows;
     if (!this.#rowHeight && rows.length) {  // measure a row once: draw a few, read one
-      host.innerHTML = windowHtml(rows.slice(0, 3), d.ctx);
+      morph(host, windowHtml(rows.slice(0, 3), d.ctx));
       this.#rowHeight = host.querySelector("[data-row]")?.offsetHeight ?? 0;
     }
-    if (!this.#rowHeight) { host.innerHTML = ""; return; }
+    if (!this.#rowHeight) { morph(host, ""); return; }
     const { start, end } = windowFor({ top: box.scrollTop, view: box.clientHeight, rowHeight: this.#rowHeight, count: rows.length, overscan: catalogue.overscan, max: catalogue.max_rows });
     const at = anchorAt(box.scrollTop, this.#rowHeight, rows.length);
     this.#anchor = at ? { key: rows[at.index].key, offset: at.offset } : null;
     const same = this.#drawn && this.#drawn.start === start && this.#drawn.end === end && this.#drawn.rows === rows && this.#drawn.ctx === d.ctx;
     if (same && !force) return;
     const a = document.activeElement, kept = a && host.contains(a) ? a.dataset.run : null;
-    host.innerHTML = windowHtml(rows.slice(start, end), d.ctx);
-    host.querySelector("[data-before]").style.height = `${start * this.#rowHeight}px`;
-    host.querySelector("[data-after]").style.height = `${(rows.length - end) * this.#rowHeight}px`;
+    morph(host, windowHtml(rows.slice(start, end), d.ctx));
+    setStyle(host.querySelector("[data-before]"), { height: `${start * this.#rowHeight}px` });
+    setStyle(host.querySelector("[data-after]"), { height: `${(rows.length - end) * this.#rowHeight}px` });
     this.#drawn = { start, end, rows, ctx: d.ctx };
-    if (kept) host.querySelector(`a[data-run="${kept}"]`)?.focus({ preventScroll: true });
+    if (kept && !host.contains(document.activeElement)) host.querySelector(`a[data-run="${kept}"]`)?.focus({ preventScroll: true });
   }
   /** Whether the window is near the last row held, so the next page should be read. */
   #nearEnd() {
