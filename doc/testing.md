@@ -22,7 +22,7 @@ Each suite runs in its own process group, and the runner tracks every launched g
 
 Measured with fresh temporary `HOME`, `EMPIRICA_HOME` and `TMPDIR`. "After" static is slower than before because it also holds the skill and suite-ownership guards. The wall time is the slowest suite plus start-up and contention. The simulated-host module (`test_evidence_hosts.py`) is trimmed to adapter contracts: the scripted "successful human journey" tests `test_confirm_releases_the_record_and_the_human_saw_what_they_decided` and `test_a_human_decides_each_item_and_a_needs_decision_claim_in_the_same_batch` are removed. Each is covered elsewhere on the same payload and state: `test_evidence_confirmation` (`confirmed_by_human`, `human_decision`), `test_evidence_scenarios` (confirm releases the record; the needs-decision answer converges), and `test_the_form_is_flat_primitive_and_unlike_the_configuration_form`, which now also pins what the human reads (source, claim, decision order, the reason an observed record has no check). A native session, not these tests, is what shows that a host renders the dialog; that is the job of the qualification skill.
 
-The fast gate retains schema/vendor validation; malformed protocol and state input; private authority and identity checks; core StartRun admission (including required explicit `control_mode` and structural refusal without a run); contract-tagged refusal/recovery dispositions; state and bridge boundaries; focused real-service governance CAS/replay and consent denial; the Claude model-switch subprocess regression; Pi guards, transport failures, and governance UI controls; and Methodologist core/MCP/adapter tests. Governance goldens assert the contract-owned rationale label, hostile-rationale escaping, the human-amendment warning, and original-versus-amended ceiling confirmation. Cross-adapter tests feed identical neutral facts to the Python and TypeScript phase rules: interactive auto presents exactly once, post-approval lower changes auto-accept without a dialog, raises refuse without a dialog, and dismissal/timeout/unavailable UI grant nothing. Pi bundle validation checks package composition only, so it does not execute the adapter suite a second time.
+The fast gate retains schema/vendor validation; malformed protocol and state input; strict run/3 state with major-version rejection of run/2 and every other persisted-state schema; private authority and identity checks; core StartRun admission (including required explicit `control_mode` and structural refusal without a run); contract-tagged refusal/recovery dispositions; state and bridge boundaries; focused real-service governance CAS/replay and consent denial; the Claude model-switch subprocess regression; Pi guards, transport failures, and governance UI controls; and Methodologist core/MCP/adapter tests. Governance goldens assert the contract-owned rationale label, hostile-rationale escaping, the human-amendment warning, and original-versus-amended ceiling confirmation. Cross-adapter tests feed identical neutral facts to the Python and TypeScript phase rules: interactive auto presents exactly once, post-approval lower changes auto-accept without a dialog, raises refuse without a dialog, and dismissal/timeout/unavailable UI grant nothing. Pi bundle validation checks package composition only, so it does not execute the adapter suite a second time.
 
 **Calculated, not enumerated (T1).** The property and stateful tests use Hypothesis, pinned with hashes in `requirements-dev.txt` and installed by `make dev-install` into the gitignored `.venv` (with uv; checks never install, and a missing or stale `.venv` fails with the command to run). `check-observer`, `contract-check` and `empirica-v2-check` run under that interpreter; everything else keeps the system `python3`. The UI's properties use fast-check from the UI's pinned toolchain (`make ui-install`). Every Hypothesis and fast-check run is bounded, under a fixed seed and without an example database: the same examples on every machine. The contract's coverage is generated, not listed: strategies and arbitraries read from the `empirica-ui-view/v1` schemas produce every declared enumeration value, every generated document validates (`scripts/tests/test_ui_view_generators.py`, in `contract-check`), and the UI renders every generated row and sheet, its standing word from `standing` alone (`ui/tests/generated.test.mjs`, in `check-ui`). The observer's agreement with the core is a `RuleBasedStateMachine` over the real service's public actions (`tests/v2/test_observer_stateful.py`), with its named replays and the minimal sequences of what it found that is not the tests' to fix (`KnownDisagreementTests`, expected failures until their owner fixes them).
 
@@ -30,10 +30,60 @@ Runtime-derived Empirica wire-fixture fields are generated with `make contract-f
 
 ## Targeted integration diagnostics
 
-Run these when changing the named boundary, not on every edit:
+Run these when changing the named boundary, not on every edit. Checkout targets delegate to the
+same shipped operator entry point that installed plugin users run directly:
+`python3 <empirica-plugin-root>/adapters/sandbox/cli.py preflight`, `... qualify --probe all`, or
+`... install`. The command is operator-owned and outside an Empirica run. `preflight` performs exactly
+five Docker discovery reads (context name and endpoint, version, engine info, pinned-image inspect)
+plus a separate passive host-environment check; it never runs census, recovery, create, start or
+remove. Environment readiness binds the canonical executable CPython >=3.10 identity and bytes on
+Darwin POSIX, process/session/no-follow capabilities, exact compatible jsonschema version/origin and
+Draft 2020-12 APIs, and import-smokes the shipped bridge, protocol and run-state modules at their
+exact plugin-root paths. Dependency/API/origin imports run under the same canonical Python in a
+scrubbed process group with a 5-second/64-KiB ceiling; timeout, output overflow, malformed output or
+child failure is a structured reason and bounded process-group cleanup leaves no descendant. Missing
+or incompatible dependencies are structured `environment_preflight` reasons, never an install or
+traceback; no upper Python cap is asserted. Git is reported as not checked/not required for sandbox
+isolation because Git identity remains the separate snapshot-capture boundary. Both Docker and
+environment availability are required for preflight success and installable all-probe evidence.
+After Docker discovery, every qualification
+operation uses only the absolute qualified CLI and a closed host environment (`LANG=C`, `LC_ALL=C`,
+and `DOCKER_HOST=<qualified Unix endpoint>`), never ambient Docker context/config, proxy or credential
+variables.
+
+The closed recovery-journal v1 vocabulary is `intent` (JSON has no container ID yet), `created`
+(one full 64-hex ID), and `removing` (the same full ID while conservative removal is in progress).
+Operation IDs have the exact production grammar `o-` plus 32 lowercase hexadecimal characters;
+`.`/`..`, historical friendly names and every other spelling are refused before path use.
+Each journal directory is its operation ID and contains `intent.json`; the only other permitted file
+is exact 0600 `container.cid`. An `intent` plus a complete cidfile is the create-before-JSON-update
+crash window and the cidfile ID is the recovery candidate; `created`/`removing` require the cidfile
+and exact agreement with the JSON ID. The reader loads the immutable qualification record named by
+the journal and requires its execution binding, effective-policy digest, RepoDigest and config ID to
+match before returning recovery facts. Run/role and owner/schema/policy/run/role labels and the fixed
+`container.cid` spelling must agree. Unknown entries, files, states or schemas fail closed; journal
+and cidfile allocation and enumeration are capped before reads or recovery. The operator-owned
+qualification install also creates exact 0700 `staging/` and an empty exact 0600 no-follow
+`runtime.lock`; runtime execution refuses missing or unsafe scaffolding and never repairs it. An exact empty operation
+directory left before `intent.json` publication or after its deletion, and an fsio atomic-write temporary
+file with the exact safe owner/mode/name/size, are the only incomplete entries recovery removes; every
+unknown residue refuses. Finalization first atomically publishes an ID-less `intent` tombstone, then
+removes cid, intent and operation directory in order, so every crash window is either a valid journal or
+that one exact empty directory.
+The unreachable 3C-a substrate serializes lifecycle/recovery only to a supplied finite monotonic deadline,
+materializes only immutable snapshot bytes below `staging/<operation-id>` with profile-bound
+256-file/64-MiB ceilings and the same deterministic cleanup entry/depth ceiling, and recovers only a
+full-ID container whose exact name, five labels, image, process, isolation, resources and mount policy
+pass inspect. For a journal with a cid, recovery inspects that recorded ID first and only a successful
+bounded unfiltered full-ID census can prove it absent; the all-label census then rejects replacements. A successful all-label census plus exact
+inspect—not a name filter or a generic failed inspect—is the only absence/ownership basis. The
+journal is deleted last, after exact container absence and bounded no-follow staging cleanup.
 
 | Target | Boundary | Why it is not in the fast gate |
 |---|---|---|
+| `make empirica-docker-execution-check` | unreachable 3C-a Docker lifecycle substrate: operator-created scaffolding, bounded process lock, immutable staging, atomic journal transitions, exact fake-CLI inspect/removal/recovery, and BaseException process-group cleanup | fake runner only; no Docker daemon and no transaction/public spike path imports the substrate |
+| `make sandbox-qualification BACKEND=docker ARGS="--probe all"` | external qualification of one exact absolute Docker CLI, local Darwin-to-Unix-to-Docker-Desktop-Linux-VM boundary, engine builtin seccomp/cgroup-v2 namespace facts, already-present digest-pinned Rust image/config, and one closed executable pull-disabled policy; security probes (including enforced memory/PID canaries) precede Rust/contract performance; selected probes report incomplete and cannot claim backend eligibility; reports and before/after resource census are written under `$TMPDIR/siffran-sandbox-qualification` unless `--output` is supplied | requires an operator-approved already-running local Docker engine and the pinned image already present; it never installs, pulls, repairs, switches context, starts/stops the daemon/VM, qualifies native Linux, or authorizes host-subprocess fallback. `make sandbox-qualification-unit-check` owns checkout delegation in `check-static`; `make empirica-sandbox-check` owns the shipped profile/runtime/record primitives in `check-core` |
+| `make sandbox-qualification-install BACKEND=docker [ARGS="--sandbox-home path"]` | reruns the complete current-code all-probe qualification and, only on success, atomically publishes immutable user-scoped authority under `~/.empirica-plugin/sandbox/qualification` (or the explicit `EMPIRICA_SANDBOX_HOME`/argument override); human reports remain under `$TMPDIR/siffran-sandbox-qualification` and are non-authoritative provenance | operator setup only, never an Empirica author action; it has the same already-running-engine/no-pull restrictions as qualification and refuses selected/incomplete evidence, unsafe ownership/modes/symlinks, or any digest/identity mismatch |
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |
 | `make empirica-core-integration` | full governance coverage, strict v2 state, transactions, retry, persistence, complete behavioral matrix | broad filesystem/schema scenarios; includes `empirica-governance-check` so admission/consent negative controls cannot fall outside the milestone gate |
 | `make empirica-v2-check ARGS="-k test_name"` | a selected behavioral regression (omit ARGS for all v2 cases) | ordinary unittest selection, no custom runner |

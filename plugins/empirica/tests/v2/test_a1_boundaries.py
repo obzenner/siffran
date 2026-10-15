@@ -380,12 +380,52 @@ class OneClaimsBlockerOrder(MediatorFixture):
         self.assertIn("re-gate", stale.stderr.lower())
 
     def record_passing_spike(self, drv, run_id, ref):
+        """Persist validated historical evidence without run/3 ingress or a harness."""
+        from application.location import decode_handle
+        from application.observation import build_execution_snapshot
+        from application.ports import HarnessResult, ObservationSnapshot
         from assertions import action_spike_request
+        from core.canonical import canonical_digest
+        from core.evaluation import plan_spike_request, plan_spike_result
+        from core.freshness import execution_facts, observations_digest
+
         path = ref.split(":")[0]
         drv.workspace_write(path, b"v1")
-        drv.harness_complete("python -m pytest", 0)
-        self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id="C0", command="python -m pytest", dependent_files=[path])))
+        action = action_spike_request(
+            claim_id="C0", command="python -m pytest", dependent_files=[path])
+        coordinator = drv._service._coordinator
+        key = decode_handle(run_id)
+        self.assertIsNotNone(key)
+        command = {"type": "ObserveAction", "run_id": run_id, "action": action}
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(
+            key, loaded.state, command, require_graph=True)
+        request = plan_spike_request(snapshot, action)
+        self.assertEqual(request.result_type, "Allow")
+        state, _, _, _ = coordinator._commit(
+            key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
+
+        execution = build_execution_snapshot((path,), drv._workspace)
+        result = HarnessResult(
+            0, canonical_digest({"historical": action["command"]}),
+            execution.snapshot_digest)
+        capture = drv._workspace.observe((path,))
+        observations = tuple(item.observation for item in capture.files)
+        observed = ObservationSnapshot(
+            observations, capture.basis_id, observations_digest(observations))
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(key, state, command, require_graph=True)
+        planned = plan_spike_result(
+            snapshot, request.intent.artifacts[0]["body"],
+            execution_facts(execution.file_bindings, result))
+        self.assertEqual(planned.result_type, "Allow")
+        coordinator._commit(
+            key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
+            additional_observations=(("spike_execution", observed),))
+        checked = coordinator._load(key)
+        coordinator._assemble(
+            key, checked.state, {"type": "GetRun", "run_id": run_id},
+            require_graph=False)
 
     def change_file(self, drv, ref):
         drv.workspace_write(ref.split(":")[0], b"v2")

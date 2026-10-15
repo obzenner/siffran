@@ -8,6 +8,7 @@
   "required": [
     "protocol",
     "state_schema",
+    "spike_backend",
     "goal",
     "invocation",
     "status",
@@ -29,7 +30,51 @@
       "const": "empirica/v2"
     },
     "state_schema": {
-      "const": "empirica.run/2"
+      "const": "empirica.run/3"
+    },
+    "spike_backend": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "backend",
+            "profile_id",
+            "qualification_record_digest",
+            "execution_binding_digest"
+          ],
+          "properties": {
+            "kind": {
+              "const": "qualified"
+            },
+            "backend": {
+              "const": "docker"
+            },
+            "profile_id": {
+              "const": "docker-rust-v1"
+            },
+            "qualification_record_digest": {
+              "$ref": "#/$defs/digest256"
+            },
+            "execution_binding_digest": {
+              "$ref": "#/$defs/digest256"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "spikes_unavailable"
+            }
+          }
+        }
+      ]
     },
     "goal": {
       "type": "string",

@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "Prove strict v2 state codec roundtrip with terminal children.",
   "invocation": {
     "host": "test",
@@ -149,5 +149,8 @@
     "first_approval": true,
     "pre_approval_revisions": 0,
     "post_approval_revisions": 0
+  },
+  "spike_backend": {
+    "kind": "spikes_unavailable"
   }
 }

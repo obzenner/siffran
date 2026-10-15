@@ -19,6 +19,7 @@ SHELL := /bin/bash
 .DEFAULT_GOAL := help
 
 PYTHON ?= python3
+BACKEND ?= docker
 PLUGINS_DIR := plugins
 SCRIPTS := scripts
 ADR_DIR := doc/adr
@@ -32,6 +33,10 @@ EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
 EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
 CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
 PI_CANARY_TESTS := $(SCRIPTS)/tests/test_pi_canary.py
+SANDBOX_QUALIFICATION_TESTS := $(SCRIPTS)/tests/test_sandbox_qualification.py
+EMPIRICA_SANDBOX_TESTS := $(PLUGINS_DIR)/empirica/tests/test_sandbox_adapter.py
+EMPIRICA_DOCKER_EXECUTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_docker_execution.py
+EMPIRICA_RUN3_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run3_binding.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -115,10 +120,10 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check sandbox-qualification-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden empirica-governance-dialog-golden ## Fast host-neutral contracts, malformed input, state, bridge, and governance boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-sandbox-check empirica-docker-execution-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, and shipped sandbox boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -232,7 +237,10 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
-.PHONY: empirica-transaction-check empirica-git-check
+.PHONY: empirica-transaction-check empirica-git-check empirica-run3-check
+empirica-run3-check: ## Check strict run/3 backend binding, passive selection and major-version run/2 rejection
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run3_binding test_d6_strict_v2
+
 empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bootstrap process counts
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
 	@$(PYTHON) $(EMPIRICA_GIT_IO_BOOTSTRAP_TESTS)
@@ -515,6 +523,22 @@ pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never
 	@$(PYTHON) $(PI_CANARY_TESTS)
 
 ## --- Qualify
+
+.PHONY: sandbox-qualification sandbox-qualification-install sandbox-qualification-unit-check empirica-sandbox-check empirica-docker-execution-check
+sandbox-qualification: ## Qualify the pull-disabled local Docker spike policy outside Empirica (BACKEND=docker ARGS="--probe all")
+	@$(PYTHON) $(SCRIPTS)/sandbox_qualification.py qualify --backend $(BACKEND) $(ARGS)
+
+sandbox-qualification-install: ## Run every Docker probe and install user-scoped qualification authority (BACKEND=docker ARGS="--sandbox-home path")
+	@$(PYTHON) $(SCRIPTS)/sandbox_qualification.py install --backend $(BACKEND) $(ARGS)
+
+sandbox-qualification-unit-check: ## Test checkout/Make delegation to the shipped operator CLI without Docker
+	@$(PYTHON) $(SANDBOX_QUALIFICATION_TESTS)
+
+empirica-sandbox-check: ## Test shipped Docker profile, runtime, lifecycle, record, journal and operator CLI primitives without Docker
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_SANDBOX_TESTS)
+
+empirica-docker-execution-check: ## Test unreachable Docker execution staging, locking and recovery with a fake CLI
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_DOCKER_EXECUTION_TESTS)
 
 .PHONY: skills-check suites-check
 skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Claude symlink and relative links (with negative controls), and test the native-qualification census

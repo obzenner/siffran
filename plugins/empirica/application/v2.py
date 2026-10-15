@@ -8,6 +8,7 @@ from core import governance
 from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
+from .ports import NullSpikeAuthoritySelector
 from .run_state import classify_and_decode
 from .transaction import Coordinator
 
@@ -42,11 +43,15 @@ class _Service:
     __slots__ = ("_workspace", "_harness", "_runs", "_artifacts", "_host", "_profile_id",
                  "_limits", "_clock", "_coordinator")
 
-    def __init__(self, workspace, harness, runs, artifacts, host, profile_id, limits, clock):
+    def __init__(self, workspace, harness, runs, artifacts, host, profile_id, limits, clock,
+                 spike_authority_selector=None):
         self._workspace, self._harness, self._runs = workspace, harness, runs
         self._artifacts, self._host, self._profile_id = artifacts, host, profile_id
         self._limits, self._clock = _admit_limits(limits), clock
-        self._coordinator = Coordinator(workspace, harness, runs, artifacts, profile_id, self._limits)
+        selector = (spike_authority_selector if spike_authority_selector is not None
+                    else NullSpikeAuthoritySelector())
+        self._coordinator = Coordinator(
+            workspace, harness, runs, artifacts, profile_id, self._limits, selector)
 
     def dispatch(self, raw: dict) -> dict:
         return _proto.dispatch_request(raw, self._handler)
@@ -59,7 +64,8 @@ class _Service:
 
     def reload(self) -> "_Service":
         return _Service(self._workspace, self._harness, self._runs, self._artifacts,
-                        self._host, self._profile_id, self._limits, self._clock)
+                        self._host, self._profile_id, self._limits, self._clock,
+                        self._coordinator.spike_authority_selector)
 
     def compact(self) -> dict:
         snapshot = self._coordinator.last_snapshot
@@ -230,5 +236,8 @@ class _Service:
             run_id, payload)
 
 
-def compose(workspace, harness, runs, artifacts, host, profile_id, limits, clock):
-    return _Service(workspace, harness, runs, artifacts, host, profile_id, limits, clock)
+def compose(workspace, harness, runs, artifacts, host, profile_id, limits, clock,
+            spike_authority_selector=None):
+    return _Service(
+        workspace, harness, runs, artifacts, host, profile_id, limits, clock,
+        spike_authority_selector)

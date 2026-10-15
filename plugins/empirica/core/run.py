@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
@@ -83,11 +84,29 @@ class OperationalState:
     children: tuple[Mapping[str, Any], ...]
     observation_basis_digest: str
     committed_artifact_head_id: str | None
+    spike_backend: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        binding = self.spike_backend
+        if not isinstance(binding, Mapping):
+            raise ValueError("run/3 requires a spike backend binding")
+        qualified = {
+            "kind", "backend", "profile_id", "qualification_record_digest",
+            "execution_binding_digest",
+        }
+        if binding.get("kind") == "qualified":
+            if (set(binding) != qualified or binding.get("backend") != "docker"
+                    or binding.get("profile_id") != "docker-rust-v1"
+                    or any(not isinstance(binding.get(key), str)
+                           or re.fullmatch(r"sha256:[0-9a-f]{64}", binding[key]) is None
+                           for key in ("qualification_record_digest", "execution_binding_digest"))):
+                raise ValueError("run/3 qualified spike backend is malformed")
+        elif set(binding) != {"kind"} or binding.get("kind") != "spikes_unavailable":
+            raise ValueError("run/3 unavailable spike backend is malformed")
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))
         object.__setattr__(self, "children", _immutable(self.children))
+        object.__setattr__(self, "spike_backend", _immutable(self.spike_backend))
         if self.frozen_claim_ids is not None:
             object.__setattr__(self, "frozen_claim_ids", tuple(self.frozen_claim_ids))

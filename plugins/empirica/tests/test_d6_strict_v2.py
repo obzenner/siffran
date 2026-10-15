@@ -263,7 +263,8 @@ class D6ProtocolPrevalidation(unittest.TestCase):
     def test_committed_valid_active_state_loads(self):
         """The committed valid-active state fixture loads and has exact identity."""
         self.assertEqual(_VALID_ACTIVE_STATE["protocol"], _PROTOCOL)
-        self.assertEqual(_VALID_ACTIVE_STATE["state_schema"], "empirica.run/2")
+        self.assertEqual(_VALID_ACTIVE_STATE["state_schema"], "empirica.run/3")
+        self.assertEqual(_VALID_ACTIVE_STATE["spike_backend"], {"kind": "spikes_unavailable"})
         self.assertEqual(_VALID_ACTIVE_STATE["status"], "active")
         self.assertTrue(_VALID_ACTIVE_STATE["children"])
 
@@ -698,6 +699,17 @@ class D6StrictRunStateTests(unittest.TestCase):
         encoded = mod.encode_state(classification.state)
         self.assertEqual(encoded, _VALID_ACTIVE_STATE,
                          "state.encode() must reproduce the exact closed document with no defaults")
+
+    def test_exact_run2_is_current_corrupt_without_decode_or_compatibility_state(self):
+        mod = _import_run_state()
+        run2 = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        run2["state_schema"] = "empirica.run/2"
+        run2.pop("spike_backend")
+        classified = mod.classify_and_decode(run2)
+        self.assertEqual(classified.kind, "current_corrupt")
+        self.assertIsNone(classified.state)
+        run2["spike_backend"] = {"kind": "spikes_unavailable"}
+        self.assertEqual(mod.classify_and_decode(run2).kind, "current_corrupt")
 
     def test_strict_state_roundtrip_no_defaults(self):
         """Valid committed fixture roundtrips through classify_and_decode → encode with no

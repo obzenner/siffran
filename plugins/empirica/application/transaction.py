@@ -11,8 +11,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
-                             plan_spike_request,
-                             plan_spike_result, valid_attribution)
+                             valid_attribution)
 from core import confirmation
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
@@ -23,10 +22,10 @@ from . import protocol as _proto
 from . import run_state
 from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
 from .location import decode_handle, encode_handle, storage_id
-from .observation import (HarnessContractError, HarnessUnavailable, ObservationUnavailable,
-                          build_observation_snapshot, execute_spike_bound,
+from .observation import (ObservationUnavailable, build_observation_snapshot,
                           observation_basis_body)
-from .ports import ObservationSnapshot
+from .ports import (NullSpikeAuthoritySelector, ObservationSnapshot,
+                    QualifiedSpikeBackend, SpikesUnavailable)
 from .snapshot import (GraphInvalid, HistoryCorrupt, assemble, graph_from_history,
                        make_artifact, state_digest, traverse_history,
                        validate_investigation_history)
@@ -79,9 +78,12 @@ def complete_start_ceilings(command: Mapping[str, Any],
 
 class Coordinator:
     def __init__(self, workspace: Any, harness: Any, runs: RunRepository[Any], artifacts: Any,
-                 profile_id: str, limits: Mapping[str, int]):
+                 profile_id: str, limits: Mapping[str, int], spike_authority_selector: Any = None):
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
         self.profile_id, self.limits = profile_id, limits
+        self.spike_authority_selector = (spike_authority_selector
+                                         if spike_authority_selector is not None
+                                         else NullSpikeAuthoritySelector())
         self.last_state: OperationalState | None = None
         self.last_snapshot: EvaluationSnapshot | None = None
         self.injected_run_ids: set[str] = set()
@@ -98,7 +100,9 @@ class Coordinator:
         if not self._present(read):
             return AbsentLoad()
         classified = run_state.classify_and_decode(read.value)
-        return Loaded(read, classified.state) if classified.kind == "valid" else CorruptLoad()
+        if classified.kind == "valid":
+            return Loaded(read, classified.state)
+        return CorruptLoad()
 
     def _read_artifacts(self, key: RunKey) -> Any:
         if self.artifacts is None:
@@ -112,7 +116,7 @@ class Coordinator:
         return RunKey(project, session, generations[-1]) if generations else None
 
     def _initial_state(self, command: dict[str, Any], limits: Mapping[str, int],
-                       observation_basis_digest: str) -> OperationalState:
+                       observation_basis_digest: str, spike_backend: Mapping[str, Any]) -> OperationalState:
         ceilings = effective_ceilings(command, limits)
         budgets = {**ceilings, "passes_used": 0, "spawns_used": 0,
                    "audit_spawns_used": 0}
@@ -128,7 +132,7 @@ class Coordinator:
             route_stamp=None,
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
             children=(), observation_basis_digest=observation_basis_digest,
-            committed_artifact_head_id=None,
+            committed_artifact_head_id=None, spike_backend=spike_backend,
         )
 
     def _append_once(self, key: RunKey, value: Any) -> None:
@@ -167,9 +171,6 @@ class Coordinator:
             return {"protocol": _proto.protocol_id(), "request_id": request_id,
                     "result": {"type": "Block", "reasons": [self._reason(rejected)]}}
         selector = command["selector"]
-        empty = build_observation_snapshot((), self.workspace)
-        basis_artifact = self._observation_basis_artifact(empty)
-        state = self._initial_state(command, limits, basis_artifact["artifact_id"])
         latest = self._latest_key(selector)
         if latest is not None:
             current = self.runs.read(latest)
@@ -183,6 +184,17 @@ class Coordinator:
             key = RunKey(latest.project_id, latest.run_id, latest.generation + 1)
         else:
             key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
+        try:
+            selected = self.spike_authority_selector.select()
+        except Exception as exc:  # an injected selector cannot prevent ordinary reasoning
+            selected = SpikesUnavailable(f"{type(exc).__name__}: {exc}")
+        spike_backend = (selected.persisted()
+                         if isinstance(selected, (QualifiedSpikeBackend, SpikesUnavailable))
+                         else SpikesUnavailable("selector returned an unknown value").persisted())
+        empty = build_observation_snapshot((), self.workspace)
+        basis_artifact = self._observation_basis_artifact(empty)
+        state = self._initial_state(
+            command, limits, basis_artifact["artifact_id"], spike_backend)
         manifest = self._manifest(
             key, state, None, (basis_artifact,), empty.basis_id, empty.digest)
         state = replace(state, committed_artifact_head_id=manifest.artifact_id)
@@ -250,7 +262,8 @@ class Coordinator:
                 action = command["action"]
                 require_graph = action["kind"] in {"research", "freeze"}
             try:
-                snapshot = self._assemble(key, state, command, require_graph=require_graph)
+                snapshot = self._assemble(
+                    key, state, command, require_graph=require_graph)
             except HistoryCorrupt:
                 if not self._revision_unchanged(key, read.revision):
                     continue
@@ -613,73 +626,15 @@ class Coordinator:
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
-        action = command["action"]
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
-            try:
-                snapshot = self._assemble(key, state, command, require_graph=True)
-            except HistoryCorrupt:
-                return self._safe_block(key, request_id, "run.corrupt")
-            except GraphInvalid:
-                return self._block_from_state(key, state, command, request_id, "graph.invalid")
-            decision = plan_spike_request(snapshot, action)
-            if decision.result_type != "Allow":
-                return self._response(request_id, snapshot, decision)
-            request_art = decision.intent.artifacts[0]
-            try:
-                state, _, _, _ = self._commit(key, read.revision, snapshot, state, (request_art,))
-                break
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-        else:
-            return self._fault(request_id, "conflict")
-        try:
-            facts, _execution, execution_observation = execute_spike_bound(
-                action["command"], tuple(sorted(action["dependent_files"])),
-                self.workspace, self.harness)
-        except (ObservationUnavailable, HarnessUnavailable, HarnessContractError, ValueError):
-            return self._fault(request_id, "unavailable")
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
-            try:
-                snapshot = self._assemble(key, state, command, require_graph=True)
-            except HistoryCorrupt:
-                return self._safe_block(key, request_id, "run.corrupt")
-            except GraphInvalid:
-                return self._block_from_state(key, state, command, request_id, "graph.invalid")
-            except ObservationUnavailable:
-                return self._fault(request_id, "unavailable")
-            decision = plan_spike_result(snapshot, request_art["body"], facts)
-            if decision.result_type != "Allow":
-                return self._response(request_id, snapshot, decision)
-            result_art = decision.intent.artifacts[0]
-            try:
-                state, _, _, committed = self._commit(
-                    key, read.revision, snapshot, state, (result_art,),
-                    additional_observations=(("spike_execution", execution_observation),))
-                self.last_state = state
-                return self._allow(request_id, committed)
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-        return self._fault(request_id, "conflict")
+        """No run/3 spike may reach a host harness before Docker integration."""
+        loaded = self._load(key)
+        if isinstance(loaded, CorruptLoad):
+            return self._safe_block(key, request_id, "run.corrupt")
+        if isinstance(loaded, AbsentLoad):
+            return self._inert(request_id)
+        if loaded.state.status != "active":
+            return self._inert(request_id)
+        return self._fault(request_id, "unavailable")
 
     @staticmethod
     def _is_conflict(exc: Exception) -> bool:
@@ -707,7 +662,8 @@ class Coordinator:
 
     def _assemble(self, key: RunKey, state: OperationalState, command: dict[str, Any],
                   *, require_graph: bool) -> EvaluationSnapshot:
-        return assemble(state, self._read_artifacts(key), self.workspace, run_id=encode_handle(key),
+        stored = self._read_artifacts(key)
+        return assemble(state, stored, self.workspace, run_id=encode_handle(key),
                         profile_id=self.profile_id, command=command, require_graph=require_graph)
 
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,

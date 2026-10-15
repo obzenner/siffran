@@ -206,7 +206,8 @@ def basis_for(observations=(), basis_id="empty") -> Artifact:
 def initial() -> OperationalState:
     basis = basis_for()
     return OperationalState(
-        protocol="empirica/v2", state_schema="empirica.run/2", goal="g",
+        protocol="empirica/v2", state_schema="empirica.run/3",
+        spike_backend={"kind": "spikes_unavailable"}, goal="g",
         invocation={**TEST_INVOCATION, "signal": "transaction fixture"}, status="active",
         budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
                  "max_audit_spawns": 1, "audit_spawns_used": 0},
@@ -424,7 +425,7 @@ class D7TransactionTests(unittest.TestCase):
         stored = list(artifacts_repo.values[key].values())
         self.assertEqual(len(stored), len({a.artifact_id for a in stored}))
         decoded = protocol._STATE_SCHEMA_ID
-        self.assertEqual(decoded, "empirica.run/2")
+        self.assertEqual(decoded, "empirica.run/3")
         self.assertEqual(runs.data[key].value["route_stamp"], 1)
         traverse_history(decode_state(runs.data[key].value), stored)
 

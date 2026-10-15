@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "governed task",
   "invocation": {
     "host": "test",
@@ -152,5 +152,8 @@
     }
   ],
   "observation_basis_digest": "sha256:d0ab2b75f9473424954b6638a5eb0af9f4c74849e849f9431d10c5a4dfd00249",
-  "committed_artifact_head_id": "sha256:96eddb4da56d6e091e9184a779120f47ce6e233b2daeb3a51b6a8cdfe0792770"
+  "committed_artifact_head_id": "sha256:96eddb4da56d6e091e9184a779120f47ce6e233b2daeb3a51b6a8cdfe0792770",
+  "spike_backend": {
+    "kind": "spikes_unavailable"
+  }
 }

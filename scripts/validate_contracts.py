@@ -1769,7 +1769,8 @@ def _minimal_valid_state() -> dict:
     """A minimal valid state wrapper for child-matrix validation."""
     return {
         "protocol": "empirica/v2",
-        "state_schema": "empirica.run/2",
+        "state_schema": "empirica.run/3",
+        "spike_backend": {"kind": "spikes_unavailable"},
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
         "invocation": {"host": "test", "interactive": True,

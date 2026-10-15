@@ -44,10 +44,11 @@ def decode_state(doc: dict[str, Any]) -> OperationalState:
         stamp_seq=doc["stamp_seq"], last_derivation_digest=doc["last_derivation_digest"],
         children=tuple(doc["children"]), observation_basis_digest=doc["observation_basis_digest"],
         committed_artifact_head_id=doc["committed_artifact_head_id"],
+        spike_backend=doc["spike_backend"],
     )
 
 
-def encode_state(state: OperationalState) -> dict[str, Any]:
+def _state_document(state: OperationalState) -> dict[str, Any]:
     return {
         "protocol": state.protocol, "state_schema": state.state_schema, "goal": state.goal,
         "invocation": _thaw(state.invocation), "status": state.status,
@@ -61,7 +62,14 @@ def encode_state(state: OperationalState) -> dict[str, Any]:
         "children": _thaw(state.children),
         "observation_basis_digest": state.observation_basis_digest,
         "committed_artifact_head_id": state.committed_artifact_head_id,
+        "spike_backend": _thaw(state.spike_backend),
     }
+
+
+def encode_state(state: OperationalState) -> dict[str, Any]:
+    if state.state_schema != _STATE_SCHEMA_ID:
+        raise ValueError("only exact current run/3 state may be encoded")
+    return _state_document(state)
 
 
 @dataclass(frozen=True)
@@ -146,7 +154,7 @@ def _procedural_ok(doc: dict) -> bool:
 
 
 def classify_and_decode(raw: Any) -> Classification:
-    """Decode only an exact valid v2 document; classify every other value as corrupt."""
+    """Decode exact current run/3 state; every other identity is corrupt."""
     if (not isinstance(raw, dict) or raw.get("protocol") != _PROTOCOL
             or raw.get("state_schema") != _STATE_SCHEMA_ID):
         return Classification("current_corrupt")

@@ -22,11 +22,15 @@ from typing import Any
 
 import governance_setup
 from governance_setup import TEST_INVOCATION, sized_configure_run
-from application.location import storage_id
+from application.location import decode_handle, storage_id
+from application.observation import build_execution_snapshot
+from application.ports import HarnessResult, ObservationSnapshot
 from application.observer import Project, run_key
 from assertions import (ConformanceCase, action_graph, get_argument, get_run, action_investigate, action_research,
                         action_spike_request, evaluate, observe_action)
 from core.canonical import canonical_digest
+from core.evaluation import plan_spike_request, plan_spike_result
+from core.freshness import execution_facts, observations_digest
 from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
@@ -484,11 +488,63 @@ class _Builder:
             run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions})
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
+        """Seed contract-valid immutable historical spike evidence without public run/3 ingress.
+
+        New run/3 public spikes are intentionally unavailable until DockerSpikeHarness integration.
+        Observer fixtures still need persisted historical request/result bindings for freshness and
+        aggregation coverage, so this test-only builder uses the pure planners and existing in-memory
+        repositories, validates the resulting chain through normal coordinator assembly, and invokes
+        no harness or subprocess.
+        """
         for path, content in files.items():
             self.write(path, content)
-        self.drv.harness_complete(command, exit_code)
-        self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id=claim, command=command, dependent_files=sorted(files))))
+        action = action_spike_request(
+            claim_id=claim, command=command, dependent_files=sorted(files))
+        coordinator = self.drv._service._coordinator
+        key = decode_handle(run_id)
+        assert key is not None
+        loaded = coordinator._load(key)
+        before_state = loaded.read
+        before_artifacts = tuple(self.drv._artifacts.all())
+        snapshot = coordinator._assemble(key, loaded.state, {
+            "type": "ObserveAction", "run_id": run_id, "action": action,
+        }, require_graph=True)
+        request = plan_spike_request(snapshot, action)
+        if request.result_type == "Block":
+            assert request.reason_code == "claim.spike_prerequisite_missing", request
+            assert request.affected_obligation_id == "claim:" + claim, request
+            assert not request.intent.artifacts, request
+            after = coordinator._load(key)
+            assert after.read.value == before_state.value and after.read.revision == before_state.revision
+            assert tuple(self.drv._artifacts.all()) == before_artifacts
+            return
+        assert request.result_type == "Allow", request
+        state, _, _, _ = coordinator._commit(
+            key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
+
+        paths = tuple(sorted(files))
+        execution = build_execution_snapshot(paths, self.drv._workspace)
+        result = HarnessResult(
+            exit_code, canonical_digest({"command": command}), execution.snapshot_digest)
+        facts = execution_facts(execution.file_bindings, result)
+        capture = self.drv._workspace.observe(paths)
+        observations = tuple(item.observation for item in capture.files)
+        execution_observation = ObservationSnapshot(
+            observations, capture.basis_id, observations_digest(observations))
+
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(key, state, {
+            "type": "ObserveAction", "run_id": run_id, "action": action,
+        }, require_graph=True)
+        planned = plan_spike_result(snapshot, request.intent.artifacts[0]["body"], facts)
+        assert planned.result_type == "Allow", planned
+        coordinator._commit(
+            key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
+            additional_observations=(("spike_execution", execution_observation),))
+        # Prove the persisted chain remains readable by the real codec/history traversal.
+        checked = coordinator._load(key)
+        coordinator._assemble(key, checked.state, {"type": "GetRun", "run_id": run_id},
+                              require_graph=False)
 
     def freeze(self, run_id: str):
         self.a.require_frozen_scope(self.drv, run_id)

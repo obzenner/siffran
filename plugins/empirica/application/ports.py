@@ -11,6 +11,44 @@ from core.freshness import (FileBinding, FileObservation, canonical_digest, obse
 
 
 @dataclass(frozen=True)
+class QualifiedSpikeBackend:
+    qualification_record_digest: str
+    execution_binding_digest: str
+
+    def __post_init__(self):
+        validate_digest256(self.qualification_record_digest)
+        validate_digest256(self.execution_binding_digest)
+
+    def persisted(self) -> dict[str, str]:
+        return {
+            "kind": "qualified",
+            "backend": "docker",
+            "profile_id": "docker-rust-v1",
+            "qualification_record_digest": self.qualification_record_digest,
+            "execution_binding_digest": self.execution_binding_digest,
+        }
+
+
+@dataclass(frozen=True)
+class SpikesUnavailable:
+    """A closed selection result. ``diagnostic`` is never persisted as run authority."""
+
+    diagnostic: str | None = None
+
+    def persisted(self) -> dict[str, str]:
+        return {"kind": "spikes_unavailable"}
+
+
+class SpikeAuthoritySelector(Protocol):
+    def select(self) -> QualifiedSpikeBackend | SpikesUnavailable: ...
+
+
+class NullSpikeAuthoritySelector:
+    def select(self) -> SpikesUnavailable:
+        return SpikesUnavailable()
+
+
+@dataclass(frozen=True)
 class CapturedFile:
     observation: FileObservation
     content: bytes | None

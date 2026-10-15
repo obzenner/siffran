@@ -29,10 +29,14 @@ from adapters import bridge
 from adapters.git.artifact_repo import _COMMIT_IDENTITY, GitArtifactRepository
 from adapters.state import identity
 from adapters.state.repository import FilesystemRunRepository
-from application.location import storage_id
+from application.location import decode_handle, storage_id
+from application.observation import build_execution_snapshot
+from application.ports import HarnessResult, ObservationSnapshot
 from application.protocol import host_profile_id
 from assertions import (action_graph, action_investigate, action_research, action_route, action_spike_request,
                         observe_action, start_run)
+from core.evaluation import plan_spike_request, plan_spike_result
+from core.freshness import canonical_digest, execution_facts, observations_digest
 from core.records import RunKey
 from governance_setup import approve_current, end_with_consent
 from observer_store import BOUND, DRIFTED, body
@@ -92,9 +96,43 @@ TEMPLATES = (
 )
 
 
+def _seed_historical_spike(service, run_id: str, action: dict) -> None:
+    """Persist bound historical spike evidence without public ingress or workload execution."""
+    coordinator = service._coordinator
+    key = decode_handle(run_id)
+    assert key is not None
+    loaded = coordinator._load(key)
+    command = {"type": "ObserveAction", "run_id": run_id, "action": action}
+    snapshot = coordinator._assemble(key, loaded.state, command, require_graph=True)
+    request = plan_spike_request(snapshot, action)
+    assert request.result_type == "Allow", request
+    state, _, _, _ = coordinator._commit(
+        key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
+    paths = tuple(action["dependent_files"])
+    execution = build_execution_snapshot(paths, coordinator.workspace)
+    result = HarnessResult(
+        0, canonical_digest({"historical_command": action["command"]}),
+        execution.snapshot_digest)
+    capture = coordinator.workspace.observe(paths)
+    observations = tuple(item.observation for item in capture.files)
+    observed = ObservationSnapshot(
+        observations, capture.basis_id, observations_digest(observations))
+    loaded = coordinator._load(key)
+    snapshot = coordinator._assemble(key, state, command, require_graph=True)
+    planned = plan_spike_result(
+        snapshot, request.intent.artifacts[0]["body"],
+        execution_facts(execution.file_bindings, result))
+    assert planned.result_type == "Allow", planned
+    coordinator._commit(
+        key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
+        additional_observations=(("spike_execution", observed),))
+    checked = coordinator._load(key)
+    coordinator._assemble(
+        key, checked.state, {"type": "GetRun", "run_id": run_id}, require_graph=False)
+
+
 def _drive(service, repo: Path, session: str, goal: str, kinds: list[str], steps, stopped: bool) -> None:
-    """One run through the bridge: started, routed, graphed, approved, investigated, its research cited verbatim and
-    its spikes run by the real harness over the files they bind; then stopped (as its human consents) or left active."""
+    """Drive one run; test-only historical spikes preserve bound-file complexity coverage."""
     started = service.dispatch(start_run(goal=goal, request_id=f"start-{session}", project=identity.project_id(repo),
                                          session=session))
     run_id = started["result"]["run"]["id"]
@@ -108,9 +146,10 @@ def _drive(service, repo: Path, session: str, goal: str, kinds: list[str], steps
             claim_id=claim, source_kind="code", result="supports", payload={"source_ref": cited, "citation": line})))
         assert admitted["result"]["type"] == "Allow", admitted
         if bound:
-            ran = service.dispatch(observe_action(run_id=run_id, action=action_spike_request(
-                claim_id=claim, command="cat " + " ".join(bound) + " > /dev/null", dependent_files=sorted(bound))))
-            assert ran["result"]["type"] == "Allow", ran
+            _seed_historical_spike(service, run_id, action_spike_request(
+                claim_id=claim,
+                command="cat " + " ".join(bound) + " > /dev/null",
+                dependent_files=sorted(bound)))
     if stopped:
         end_with_consent(service._coordinator, run_id)
 
