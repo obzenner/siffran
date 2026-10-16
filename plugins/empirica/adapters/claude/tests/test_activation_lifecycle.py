@@ -24,8 +24,14 @@ PLUGIN = Path(__file__).resolve().parents[3]
 HOOKS = PLUGIN / "hooks"
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
+_TESTS = PLUGIN / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import (  # noqa: E402
+    ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
 
 from application.protocol import host_profile_id, stored  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _ENTRYPOINTS = {
@@ -42,7 +48,9 @@ def _run(hook: str, payload: dict, cwd: Path) -> tuple[int, str, str]:
     proc = subprocess.run(
         [sys.executable, str(HOOKS / hook)],
         input=json.dumps(payload), text=True, capture_output=True, cwd=str(cwd),
-        env={"PYTHONPATH": str(PLUGIN), "PATH": ""},  # hermetic: in-process bridge, no host tools
+        env={"PYTHONPATH": str(PLUGIN), "PATH": "",
+             "EMPIRICA_SANDBOX_HOME": str(ABSENT_SANDBOX_HOME)},
+        # hermetic: in-process bridge, no host tools or developer authority
     )
     return proc.returncode, proc.stdout, proc.stderr
 
@@ -337,7 +345,9 @@ class IsolatedHookResolutionTests(unittest.TestCase):
     def _run(self, hook: str, payload: dict, cwd: Path,
              overrides: dict | None = None) -> tuple[int, str, str]:
         env = {key: value for key, value in os.environ.items() if not key.startswith("EMPIRICA_")}
-        env.update({"EMPIRICA_HOME": str(self.home), "GIT_CEILING_DIRECTORIES": str(self.root)})
+        env.update({"EMPIRICA_HOME": str(self.home),
+                    "EMPIRICA_SANDBOX_HOME": str(ABSENT_SANDBOX_HOME),
+                    "GIT_CEILING_DIRECTORIES": str(self.root)})
         env.update(overrides or {})
         proc = subprocess.run([sys.executable, str(HOOKS / hook)], input=json.dumps(payload),
                               text=True, capture_output=True, cwd=cwd, env=env, timeout=30)

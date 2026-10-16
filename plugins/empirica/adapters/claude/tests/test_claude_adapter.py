@@ -20,6 +20,10 @@ from unittest.mock import patch
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+_TESTS = PLUGIN_ROOT / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 import jsonschema  # noqa: E402
 
@@ -52,6 +56,7 @@ from adapters.claude.spawn import spawn_decision  # noqa: E402
 from adapters.claude.transport import BridgeTransport, Response  # noqa: E402
 from application.protocol import (  # noqa: E402
     HUMAN_WAIT_NOTICE, author_view_labels, host_profile_id, render_notice, stored)
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _REQUEST_SCHEMA = json.loads(

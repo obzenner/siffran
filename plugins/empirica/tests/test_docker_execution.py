@@ -51,7 +51,7 @@ class SubstrateCase(unittest.TestCase):
             "reasons": tuple(result["preflight"]["reasons"]),
         })
         self.runner = support.LifecycleRunner()
-        self.client = docker.DockerClient(identity, self.policy, self.runner, env={})
+        self.client = docker.DockerClient(identity, self.policy, self.runner)
 
     def snapshot(self, rows=(("src/main.rs", b"fn main() {}\n"),)):
         bindings = tuple(FileBinding(path, "sha256:" + __import__("hashlib").sha256(data).hexdigest())
@@ -416,7 +416,7 @@ class RecoveryTests(SubstrateCase):
                 operation = operation_id("live-" + state)
                 intent, staging = self.begin_and_stage(operation)
                 runner = support.LifecycleRunner()
-                client = docker.DockerClient(self.client.identity, self.policy, runner, env={})
+                client = docker.DockerClient(self.client.identity, self.policy, runner)
                 container_id, _ = client.create_container_with_identity(
                     name=intent["name"], labels=intent["labels"], input_dir=staging,
                     command="true", network="none")
@@ -455,7 +455,7 @@ class RecoveryTests(SubstrateCase):
                     output_limit_bytes=output_limit_bytes, env=env)
 
         runner = InspectFailureRunner()
-        client = docker.DockerClient(self.client.identity, self.policy, runner, env={})
+        client = docker.DockerClient(self.client.identity, self.policy, runner)
         operation = operation_id("inspect")
         intent, staging = self.begin_and_stage(operation)
         runner.created = True
@@ -636,7 +636,7 @@ class RecoveryTests(SubstrateCase):
         self.assertFalse((self.store.runtime / operation).exists())
 
         self.runner = support.LifecycleRunner()
-        self.client = docker.DockerClient(self.client.identity, self.policy, self.runner, env={})
+        self.client = docker.DockerClient(self.client.identity, self.policy, self.runner)
         operation = self._removing_absent("intent-unlink")
         def fail_intent(path, *args, **kwargs):
             if path.name == "intent.json":
@@ -652,7 +652,7 @@ class RecoveryTests(SubstrateCase):
         self.assertFalse((self.store.runtime / operation).exists())
 
         self.runner = support.LifecycleRunner()
-        self.client = docker.DockerClient(self.client.identity, self.policy, self.runner, env={})
+        self.client = docker.DockerClient(self.client.identity, self.policy, self.runner)
         operation = self._removing_absent("rmdir")
         original_rmdir = Path.rmdir
         def fail_rmdir(path, *args, **kwargs):
@@ -711,7 +711,7 @@ class ClientBaseExceptionTests(SubstrateCase):
                             output_limit_bytes=output_limit_bytes, env=env)
 
                 runner = InterruptRunner(remove_exit=1 if cleanup_fails else 0)
-                client = docker.DockerClient(self.client.identity, self.policy, runner, env={})
+                client = docker.DockerClient(self.client.identity, self.policy, runner)
                 operation = operation_id("cancel-" + str(int(cleanup_fails)))
                 intent, staging = self.begin_and_stage(operation)
                 with self.assertRaises(KeyboardInterrupt):
@@ -723,16 +723,19 @@ class ClientBaseExceptionTests(SubstrateCase):
 
 
 class ReachabilityTests(unittest.TestCase):
-    def test_substrate_is_not_imported_by_application_or_bridge_paths(self):
+    def test_substrate_helpers_stay_below_the_one_bridge_harness_composition(self):
         root = Path(__file__).resolve().parents[1]
         for relative in (
             "application/observation.py", "application/transaction.py", "application/v2.py",
-            "adapters/bridge.py",
         ):
             source = (root / relative).read_text(encoding="utf-8")
             self.assertNotIn("sandbox.execution", source)
             self.assertNotIn("recover_operations", source)
             self.assertNotIn("materialize_snapshot", source)
+        bridge = (root / "adapters/bridge.py").read_text(encoding="utf-8")
+        self.assertIn("from adapters.sandbox.execution import DockerSpikeHarness", bridge)
+        self.assertNotIn("recover_operations", bridge)
+        self.assertNotIn("materialize_snapshot", bridge)
 
 
 class BaseExceptionCleanupTests(unittest.TestCase):

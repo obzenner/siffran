@@ -38,8 +38,26 @@ _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 OPERATION_ID = re.compile(r"^o-[0-9a-f]{32}$")
 
 _EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
+# Alongside the execution/state implementation, authority includes every source
+# that selects the harness, constructs or invokes public ObserveAction transport,
+# classifies/enforces its outer deadline, or owns the Claude MCP ceiling, plus
+# every vendored v2 JSON document loaded by those runtime paths. Private
+# transport/bridge stay excluded: their closed operation enum cannot carry a
+# public ObserveAction. Root contract duplicates stay excluded; vendor-check owns
+# their byte identity with the runtime-loaded copies below.
 IMPLEMENTATION_SOURCE_PATHS = (
+    ".mcp.json",
+    "adapters/bridge.py",
+    "adapters/claude/transport.py",
+    "adapters/codex/transport.py",
     "adapters/execution.py",
+    "adapters/mcp_server.py",
+    "adapters/pi/bridge.py",
+    "adapters/pi/src/index.ts",
+    "adapters/pi/src/process-transport.ts",
+    "adapters/pi/src/stdio-transport.ts",
+    "adapters/pi/src/translate.ts",
+    "adapters/public_tools.py",
     "adapters/sandbox/cli.py",
     "adapters/sandbox/docker.py",
     "adapters/sandbox/environment.py",
@@ -56,6 +74,12 @@ IMPLEMENTATION_SOURCE_PATHS = (
     "core/evaluation.py",
     "core/freshness.py",
     "core/run.py",
+    "vendor/contracts/empirica/v2/host-profiles.json",
+    "vendor/contracts/empirica/v2/public-contract.json",
+    "vendor/contracts/empirica/v2/public-contract.schema.json",
+    "vendor/contracts/empirica/v2/public-tools.json",
+    "vendor/contracts/empirica/v2/request.schema.json",
+    "vendor/contracts/empirica/v2/response.schema.json",
     "vendor/contracts/empirica/v2/state.schema.json",
 )
 

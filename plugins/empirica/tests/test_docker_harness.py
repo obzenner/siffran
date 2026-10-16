@@ -407,7 +407,10 @@ class FailureTests(DockerHarnessCase):
                 self.setUp()
                 self.runner = HarnessRunner(**options)
                 self.harness = self.make_harness(runner=self.runner)
-                self.assert_reason(expected)
+                with patch.object(
+                        execution, "_admit_result", wraps=execution._admit_result) as admit:
+                    self.assert_reason(expected)
+                admit.assert_not_called()
                 if expected == "cleanup_failed":
                     journals = self.store.read_journals()
                     self.assertEqual(len(journals), 1)
@@ -600,7 +603,10 @@ class FailureTests(DockerHarnessCase):
                 self.setUp()
                 self.runner = StateRunner(mode)
                 self.harness = self.make_harness(runner=self.runner)
-                self.assert_reason(expected)
+                with patch.object(
+                        execution, "_admit_result", wraps=execution._admit_result) as admit:
+                    self.assert_reason(expected)
+                admit.assert_not_called()
                 self.assert_clean()
 
     def test_postflight_drift_produces_no_result_after_cleanup(self):
@@ -736,29 +742,58 @@ class FailureTests(DockerHarnessCase):
 
 
 class ReachabilityTests(unittest.TestCase):
-    def test_production_composition_cannot_reach_docker_harness(self):
+    def test_production_composition_has_one_docker_harness_entry_and_no_host_fallback(self):
         plugin = Path(__file__).resolve().parents[1]
         repository = plugin.parents[1]
         transaction = (plugin / "application" / "transaction.py").read_text(encoding="utf-8")
+        bridge = (plugin / "adapters" / "bridge.py").read_text(encoding="utf-8")
+        host_execution = (plugin / "adapters" / "execution.py").read_text(encoding="utf-8")
         self.assertIn("execute_run_bound_spike", transaction)
         self.assertNotIn("DockerSpikeHarness", transaction)
         self.assertNotIn("sandbox.execution", transaction)
-        files = [
-            plugin / "application" / "v2.py",
-            plugin / "adapters" / "bridge.py",
-            plugin / "adapters" / "sandbox" / "__init__.py",
-        ]
-        for root in (
-            plugin / "adapters" / "claude", plugin / "adapters" / "codex",
-            plugin / "adapters" / "pi", plugin / "ui", repository / "scripts",
+        self.assertIn("from adapters.sandbox.execution import DockerSpikeHarness", bridge)
+        self.assertIn("QualificationAuthoritySelector(qualification_store)", bridge)
+        self.assertIn("DockerSpikeHarness(qualification_store)", bridge)
+        for forbidden in (
+            "SubprocessSpikeHarness", "LegacySpikeHarness", "execute_spike_bound",
+            "RLIMIT_FSIZE", "subprocess.Popen", '"/bin/sh"', "'/bin/sh'",
         ):
+            self.assertNotIn(forbidden, host_execution)
+
+        entry_points = {
+            plugin / "adapters" / "claude" / "transport.py": "bridge.handle",
+            plugin / "adapters" / "claude" / "lifecycle.py":
+                "from adapters import bridge as application_bridge",
+            plugin / "adapters" / "codex" / "transport.py": "bridge.handle",
+            plugin / "adapters" / "codex" / "lifecycle.py":
+                "from adapters import bridge as application_bridge",
+            plugin / "adapters" / "pi" / "bridge.py": "from bridge import main",
+            plugin / "adapters" / "pi" / "private_bridge.py":
+                "from adapters import bridge, confirmation",
+            plugin / "adapters" / "mcp_server.py":
+                "from adapters.public_tools import PublicTools",
+            plugin / "adapters" / "public_tools.py": "_bridge.handle",
+        }
+        for path, shared in entry_points.items():
+            self.assertIn(shared, path.read_text(encoding="utf-8"), path)
+
+        files = []
+        for root in (plugin / "application", plugin / "adapters", plugin / "core"):
             files.extend(path for path in root.rglob("*")
-                         if path.is_file() and path.suffix in {".py", ".ts", ".js", ".mjs"})
+                         if path.is_file() and path.suffix in {".py", ".ts", ".js", ".mjs"}
+                         and "test" not in path.parts and "tests" not in path.parts)
         for path in files:
             source = path.read_text(encoding="utf-8")
-            self.assertNotIn("DockerSpikeHarness", source, path)
-            self.assertNotIn("execute_run_bound_spike", source, path)
-            self.assertNotIn("sandbox.execution", source, path)
+            for forbidden in ("SubprocessSpikeHarness", "LegacySpikeHarness", "execute_spike_bound"):
+                self.assertNotIn(forbidden, source, path)
+            if "adapters.sandbox.execution" in source:
+                self.assertEqual(path, plugin / "adapters" / "bridge.py")
+
+        scripts = [path for path in (repository / "scripts").rglob("*.py") if path.is_file()]
+        for path in scripts:
+            source = path.read_text(encoding="utf-8")
+            self.assertNotIn("SubprocessSpikeHarness", source, path)
+            self.assertNotIn("adapters.sandbox.execution", source, path)
 
 
 if __name__ == "__main__":

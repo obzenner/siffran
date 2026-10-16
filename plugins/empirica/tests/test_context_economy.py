@@ -18,6 +18,8 @@ from pathlib import Path
 import jsonschema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
 from adapters import public_tools as _pt
 from adapters.public_tools import PublicTools
 from application import protocol as _proto
@@ -29,6 +31,7 @@ from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_
                               sized_configure_run)
 from core.canonical import canonical_digest
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 PI_PROFILE = host_profile_id("pi")
 

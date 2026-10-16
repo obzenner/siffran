@@ -42,6 +42,8 @@ EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
 EMPIRICA_BRIDGE_V2_TESTS := $(PLUGINS_DIR)/empirica/tests/test_bridge_v2.py
+# Read-only production-composition tests must never observe a developer's installed authority.
+EMPIRICA_TEST_SANDBOX_HOME := $(CURDIR)/.empirica-test-sandbox-authority-must-remain-absent
 EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.py
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
@@ -112,6 +114,11 @@ endif
 RUN_SUITES = $(PYTHON) $(SCRIPTS)/run_suites.py $(foreach s,$1,$(s)='$(MAKE) --no-print-directory check-$(s)')
 
 .PHONY: check check-ci check-static check-core check-evidence check-observer check-claude check-codex check-pi check-ui pi-governance-dialog-golden
+
+check-core check-observer check-claude check-codex check-pi \
+empirica-bridge-composition-check empirica-core-integration empirica-v2-check \
+empirica-host-integration empirica-governance-bridge-check: \
+export EMPIRICA_SANDBOX_HOME := $(EMPIRICA_TEST_SANDBOX_HOME)
 check: ## Fast contributor gate: every fast suite, scheduled by load (JOBS=<n> caps; see doc/testing.md)
 	@$(call RUN_SUITES,$(FAST_SUITES))
 	@printf '\n$(BOLD)Fast contributor checks passed.$(RESET)\n'
@@ -124,7 +131,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check sandbox-qualification-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-sandbox-check empirica-docker-execution-check empirica-docker-harness-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, and shipped sandbox boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-docker-execution-check empirica-docker-harness-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and shipped sandbox boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -238,7 +245,10 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
-.PHONY: empirica-transaction-check empirica-git-check empirica-run3-check
+.PHONY: empirica-transaction-check empirica-git-check empirica-run3-check empirica-bridge-composition-check
+empirica-bridge-composition-check: ## Check shared production Docker composition and fail-closed authority degradation without Docker
+	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
+
 empirica-run3-check: ## Check strict run/3 backend binding, passive selection and major-version run/2 rejection
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run3_binding test_d6_strict_v2
 
@@ -255,7 +265,7 @@ empirica-core-integration: ## Diagnose governance, persistence, transaction, ret
 	@$(PYTHON) $(EMPIRICA_D6_STRICT_TESTS)
 	@$(MAKE) --no-print-directory empirica-transaction-check
 	@$(MAKE) --no-print-directory empirica-git-check
-	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
+	@$(MAKE) --no-print-directory empirica-bridge-composition-check
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
 	@$(MAKE) empirica-v2-check
 

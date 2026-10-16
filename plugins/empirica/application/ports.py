@@ -152,14 +152,19 @@ class SpikeExecutionUnavailable(RuntimeError):
         super().__init__(f"{reason}: {self.detail}")
 
 
-class LegacySpikeHarness(Protocol):
-    """Temporary host/qualification port retained until bridge composition is replaced."""
-
-    def run(self, command: str, snapshot: ExecutionSnapshot) -> HarnessResult: ...
-
-
 class SpikeHarness(Protocol):
     def run(
         self, *, run_id: str, binding: QualifiedSpikeBackend,
         command: str, snapshot: ExecutionSnapshot,
     ) -> HarnessResult: ...
+
+
+class UnavailableSpikeHarness:
+    """Run-bound null object used when production sandbox composition is unavailable."""
+
+    def run(
+        self, *, run_id: str, binding: QualifiedSpikeBackend,
+        command: str, snapshot: ExecutionSnapshot,
+    ) -> HarnessResult:
+        raise SpikeExecutionUnavailable(
+            "authority_invalid", "qualified spike harness is unavailable")

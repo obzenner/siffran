@@ -635,7 +635,7 @@ class _UnavailableSignal(Exception):
 
 
 class DockerSpikeHarness:
-    """Exact-record Docker harness candidate; intentionally unreachable from transaction paths."""
+    """Production exact-record Docker harness for run-bound qualified transactions."""
 
     def __init__(
         self, store: record.QualificationStore | None = None, *,

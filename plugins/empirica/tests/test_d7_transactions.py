@@ -14,7 +14,6 @@ sys.path.insert(0, str(ROOT))
 
 import jsonschema  # noqa: E402
 from adapters.audit import child_event  # noqa: E402
-from adapters.execution import SubprocessSpikeHarness  # noqa: E402
 from adapters.git.artifact_repo import ArtifactCollision  # noqa: E402
 from application import protocol  # noqa: E402
 from application.governance import transact as governance_transact  # noqa: E402
@@ -24,7 +23,7 @@ from application.snapshot import (HistoryCorrupt, assemble, graph_from_history, 
                                   state_digest, traverse_history)
 from application.ports import (CapturedFile, HarnessResult, ObservationSnapshot,  # noqa: E402
                                QualifiedSpikeBackend, SpikeExecutionUnavailable,
-                               WorkspaceCapture)
+                               UnavailableSpikeHarness, WorkspaceCapture)
 from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
@@ -1287,10 +1286,13 @@ class D7TransactionTests(unittest.TestCase):
         self.assertIn(("src/a.py", "src/x.py"), workspace.calls)
 
     def test_closed_execution_failure_keeps_request_and_base_exception_propagates(self):
-        failures = (
-            (SpikeExecutionUnavailable("lifecycle_failed", "injected"), "Fault"),
-            (KeyboardInterrupt(), "BaseException"),
-        )
+        failures = tuple(
+            (SpikeExecutionUnavailable(reason, "injected"), reason)
+            for reason in (
+                "lifecycle_failed", "workload_timeout",
+                "workload_output_limit", "workload_oom",
+            )
+        ) + ((KeyboardInterrupt(), "BaseException"),)
         for failure, expected in failures:
             with self.subTest(expected=expected):
                 harness = Harness(failure=failure)
@@ -1354,8 +1356,10 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
         self.assertEqual([item["kind"] for item in history].count("spike"), 1)
 
-    def test_post_execution_terminal_graph_claim_research_and_corrupt_races_discard_fact(self):
-        for race in ("terminal", "graph", "claim", "research", "corrupt"):
+    def test_post_execution_terminal_graph_claim_research_stamp_and_corrupt_races_discard_fact(self):
+        for race in (
+                "terminal", "graph", "claim", "research",
+                "route_stamp", "investigation_stamp", "corrupt"):
             with self.subTest(race=race):
                 harness = Harness()
                 coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
@@ -1369,6 +1373,17 @@ class D7TransactionTests(unittest.TestCase):
                         runs.data[key] = Present(encode_state(stopped), Revision(str(runs.seq)))
                     elif race == "corrupt":
                         runs.data[key] = Corrupt("post-execution corruption")
+                    elif race in {"route_stamp", "investigation_stamp"}:
+                        current = runs.data[key]
+                        changed_state = decode_state(current.value)
+                        changed_state = replace(
+                            changed_state,
+                            **{race: changed_state.stamp_seq + 1,
+                               "stamp_seq": changed_state.stamp_seq + 1},
+                        )
+                        runs.seq += 1
+                        runs.data[key] = Present(
+                            encode_state(changed_state), Revision(str(runs.seq)))
                     elif race == "research":
                         changed = coordinator.handle({
                             "type": "ObserveAction", "run_id": run_id,
@@ -1420,24 +1435,14 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
         self.assertEqual([item["kind"] for item in history].count("spike"), 2)
 
-    def test_legacy_harness_keyword_mismatch_fails_before_its_body(self):
-        class GuardedLegacyHarness(SubprocessSpikeHarness):
-            def __init__(self):
-                super().__init__()
-                self.body_calls = 0
-
-            def run(self, command, snapshot):
-                self.body_calls += 1
-                raise AssertionError("legacy body must remain unreachable")
-
-        harness = GuardedLegacyHarness()
+    def test_existing_qualified_run_with_unavailable_null_harness_faults_closed(self):
+        harness = UnavailableSpikeHarness()
         coordinator, runs, artifacts_repo, _, _, selector, run_id, key, action = \
-            self._qualified_spike_ready(harness, session="legacy")
+            self._qualified_spike_ready(harness, session="unavailable-harness")
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
         self.assertEqual(response["result"], {
             "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
-        self.assertEqual(harness.body_calls, 0)
         self.assertEqual(selector.calls, 1)
         history = traverse_history(
             decode_state(runs.data[key].value), artifacts_repo.values[key].values())

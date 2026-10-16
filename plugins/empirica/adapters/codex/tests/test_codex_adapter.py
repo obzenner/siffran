@@ -27,6 +27,10 @@ from unittest.mock import patch
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+_TESTS = PLUGIN_ROOT / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 import jsonschema  # noqa: E402
 
@@ -41,6 +45,7 @@ from adapters.codex import (  # noqa: E402
 from adapters.codex.correlation import CorrelationError, correlate, request_id  # noqa: E402
 from adapters.codex.lifecycle import _start, explicit_activation  # noqa: E402
 from adapters.codex.transport import BridgeTransport  # noqa: E402
+force_absent_sandbox_home()
 
 _REQUEST_SCHEMA = json.loads(
     (PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "request.schema.json").read_text(

@@ -5,12 +5,29 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { HOST_PROFILE_ID } from "../src/host-profile.ts";
-import { createStdioBridgeDispatch } from "../src/stdio-transport.ts";
+import {
+  CLAIM_ID_PATTERN,
+  DEPENDENT_FILE_PATTERN,
+  OBSERVE_ACTION_OPTIONAL_KEYS,
+  OBSERVE_ACTION_REQUIRED_KEYS,
+  ORDINARY_BRIDGE_TIMEOUT_MS,
+  ROOT_OPTIONAL_KEYS,
+  ROOT_REQUIRED_KEYS,
+  SPIKE_ACTION_OPTIONAL_KEYS,
+  SPIKE_ACTION_REQUIRED_KEYS,
+  SPIKE_BRIDGE_TIMEOUT_MS,
+  bridgeProcessConfig,
+  bridgeTimeoutMs,
+  createStdioBridgeDispatch,
+  defaultBridgeConfig,
+  isExactSpikeRequest,
+} from "../src/stdio-transport.ts";
 import { createPrivateIngress, type PrivateOperation } from "../src/private-transport.ts";
 import { resolveRunRequest } from "../src/translate.ts";
 import { GuardError } from "../src/guard.ts";
@@ -107,6 +124,137 @@ test("rejects when the bridge command cannot be spawned", async () => {
     async () => dispatch(resolveRunRequest({ project: "p", session: "s" }, "r")),
     /failed to start/,
   );
+});
+
+test("only an exact schema-shaped public spike request gets the 300s outer margin", () => {
+  const spike = {
+    protocol: "empirica/v2",
+    request_id: "request-1",
+    command: {
+      type: "ObserveAction",
+      run_id: "er2.run",
+      action: {
+        kind: "spike_request",
+        claim_id: "C0",
+        command: "cargo test --offline",
+        dependent_files: ["Cargo.lock", "Cargo.toml"],
+      },
+    },
+  };
+  assert.equal(ORDINARY_BRIDGE_TIMEOUT_MS, 30_000);
+  assert.equal(SPIKE_BRIDGE_TIMEOUT_MS, 300_000);
+  assert.equal(isExactSpikeRequest(spike), true);
+  assert.equal(bridgeTimeoutMs(spike, defaultBridgeConfig()), 300_000);
+  assert.equal(bridgeProcessConfig(defaultBridgeConfig(), spike).timeoutMs, 300_000);
+
+  const nearMisses = [
+    { ...spike, extra: true },
+    { ...spike, protocol: "empirica/v1" },
+    { ...spike, request_id: "" },
+    { ...spike, command: { ...spike.command, extra: true } },
+    { ...spike, command: { ...spike.command, type: "GetRun" } },
+    { ...spike, command: { ...spike.command, run_id: "" } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, extra: true } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, claim_id: "bad claim" } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, command: "" } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: [] } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: ["/absolute"] } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: ["line\nbreak"] } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: ["a", "a"] } } },
+  ];
+  for (const request of nearMisses) {
+    assert.equal(isExactSpikeRequest(request), false);
+    assert.equal(bridgeProcessConfig(defaultBridgeConfig(), request).timeoutMs, 30_000);
+  }
+});
+
+test("timeout classifier mirrors every duplicated canonical request-schema semantic", () => {
+  const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const contracts = resolve(plugin, "../../contracts/empirica/v2");
+  const request = JSON.parse(readFileSync(join(contracts, "request.schema.json"), "utf8"));
+  const shared = JSON.parse(readFileSync(join(contracts, "shared-defs.json"), "utf8"));
+  const optional = (node: { required: string[]; properties: Record<string, unknown> }) =>
+    Object.keys(node.properties).filter((key) => !node.required.includes(key));
+  const observe = request.$defs.observeAction;
+  const spike = request.$defs.actionSpikeRequest;
+  const dependentFiles = spike.properties.dependent_files;
+  const dependentFile = dependentFiles.items;
+
+  assert.equal(request.type, "object");
+  assert.equal(request.additionalProperties, false);
+  assert.deepEqual(ROOT_REQUIRED_KEYS, request.required);
+  assert.deepEqual(ROOT_OPTIONAL_KEYS, optional(request));
+  assert.equal(request.properties.protocol.const, "empirica/v2");
+  assert.equal(request.properties.request_id.type, "string");
+  assert.equal(request.properties.request_id.minLength, 1);
+  assert.ok(request.properties.command.oneOf.some(
+    (item: { $ref?: string }) => item.$ref === "#/$defs/observeAction"));
+
+  assert.equal(observe.type, "object");
+  assert.equal(observe.additionalProperties, false);
+  assert.deepEqual(OBSERVE_ACTION_REQUIRED_KEYS, observe.required);
+  assert.deepEqual(OBSERVE_ACTION_OPTIONAL_KEYS, optional(observe));
+  assert.equal(observe.properties.type.const, "ObserveAction");
+  assert.equal(observe.properties.run_id.type, "string");
+  assert.equal(observe.properties.run_id.minLength, 1);
+  assert.deepEqual(observe.properties.observed_at.type, ["string", "null"]);
+  assert.deepEqual(observe.properties.action, { $ref: "#/$defs/action" });
+  assert.ok(request.$defs.action.oneOf.some(
+    (item: { $ref?: string }) => item.$ref === "#/$defs/actionSpikeRequest"));
+
+  assert.equal(spike.type, "object");
+  assert.equal(spike.additionalProperties, false);
+  assert.deepEqual(SPIKE_ACTION_REQUIRED_KEYS, spike.required);
+  assert.deepEqual(SPIKE_ACTION_OPTIONAL_KEYS, optional(spike));
+  assert.equal(spike.properties.kind.const, "spike_request");
+  assert.deepEqual(spike.properties.claim_id, { $ref: "#/$defs/claimId" });
+  assert.equal(spike.properties.command.type, "string");
+  assert.equal(spike.properties.command.minLength, 1);
+  assert.equal(dependentFiles.type, "array");
+  assert.equal(dependentFiles.minItems, 1);
+  assert.equal(dependentFiles.uniqueItems, true);
+  assert.equal(dependentFile.type, "string");
+  assert.equal(dependentFile.minLength, 1);
+  assert.equal(DEPENDENT_FILE_PATTERN, dependentFile.pattern);
+
+  assert.equal(request.$defs.claimId.type, "string");
+  assert.equal(shared.$defs.claimId.type, "string");
+  assert.equal(CLAIM_ID_PATTERN, request.$defs.claimId.pattern);
+  assert.equal(CLAIM_ID_PATTERN, shared.$defs.claimId.pattern);
+});
+
+test("workload, backend, Pi, and Claude timeout owners preserve strict outer margins", () => {
+  const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const dockerSource = readFileSync(join(plugin, "adapters/sandbox/docker.py"), "utf8");
+  const seconds = (name: string) => {
+    const match = dockerSource.match(new RegExp(`^${name} = ([0-9.]+)$`, "m"));
+    assert.ok(match, `missing ${name}`);
+    return Number(match[1]);
+  };
+  const workload = seconds("WORKLOAD_TIMEOUT_SECONDS");
+  const backend = seconds("OPERATION_TIMEOUT_SECONDS");
+  const piOuter = SPIKE_BRIDGE_TIMEOUT_MS / 1000;
+  const claudeOuter = JSON.parse(readFileSync(join(plugin, ".mcp.json"), "utf8"))
+    .mcpServers.empirica.tool_timeout_sec;
+  assert.deepEqual([workload, backend, piOuter, claudeOuter], [120, 210, 300, 360]);
+  assert.ok(workload < backend && backend < piOuter && piOuter < claudeOuter);
+});
+
+test("ordinary and spike test overrides are separate, positive, and bounded", () => {
+  const ordinary = resolveRunRequest({ project: "p", session: "s" }, "ordinary");
+  const spike = {
+    protocol: "empirica/v2", request_id: "spike",
+    command: { type: "ObserveAction", run_id: "r", action: {
+      kind: "spike_request", claim_id: "C", command: "true", dependent_files: ["x"],
+    } },
+  };
+  const config = { command: "python3", timeoutMs: 17, spikeTimeoutMs: 23 };
+  assert.equal(bridgeProcessConfig(config, ordinary).timeoutMs, 17);
+  assert.equal(bridgeProcessConfig(config, spike).timeoutMs, 23);
+  for (const invalid of [0, -1, 30_001, 1.5, Number.NaN, Number.POSITIVE_INFINITY])
+    assert.throws(() => bridgeTimeoutMs(ordinary, { command: "x", timeoutMs: invalid }), /timeoutMs/);
+  for (const invalid of [0, -1, 300_001, 1.5, Number.NaN, Number.POSITIVE_INFINITY])
+    assert.throws(() => bridgeTimeoutMs(spike, { command: "x", spikeTimeoutMs: invalid }), /spikeTimeoutMs/);
 });
 
 test("private ingress kills and rejects a bridge that exceeds its deadline", async () => {

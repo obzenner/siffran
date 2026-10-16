@@ -828,6 +828,9 @@ def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, A
                 and item.get("claim_id") == request_body["claim_id"]]
     if not requests or requests[-1].get("artifact_id") != request_artifact_id:
         return _decision(snapshot, state, "Block", reason="graph.invalid")
+    if (state.route_stamp != request_body["route_stamp"]
+            or state.investigation_stamp != request_body["investigation_stamp"]):
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
     claim = next((c for c in snapshot.graph["claims"] if c["id"] == request_body["claim_id"]), None)
     if claim is None or claim_digest(claim) != request_body["claim_digest"]:
         return _decision(snapshot, state, "Block", reason="graph.invalid")

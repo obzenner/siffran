@@ -148,6 +148,18 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual(runs.data[key].value["spike_backend"]["qualification_record_digest"],
                          DIGEST_A)
 
+    def test_existing_unavailable_run_never_adopts_later_authority(self):
+        selector = CountingSelector(SpikesUnavailable("absent"))
+        coordinator, (_workspace, _harness, runs, _artifacts) = self.coordinator(selector)
+        first = coordinator.handle(start_command(session="unavailable-sticky"), "one")
+        key = next(iter(runs.data))
+        self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "spikes_unavailable"})
+        selector.value = QualifiedSpikeBackend(DIGEST_A, DIGEST_B)
+        second = coordinator.handle(start_command(session="unavailable-sticky"), "two")
+        self.assertEqual(second["result"]["run"]["id"], first["result"]["run"]["id"])
+        self.assertEqual(selector.calls, 1)
+        self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "spikes_unavailable"})
+
     def test_selector_exception_and_unknown_result_cannot_block_reasoning(self):
         for value in (RuntimeError("broken"), object(), SpikesUnavailable("absent")):
             with self.subTest(value=type(value).__name__):
@@ -271,53 +283,103 @@ class StartSelectionTests(unittest.TestCase):
 
 class Store:
     def __init__(self, outcome):
-        self.outcome = outcome
-        self.kwargs = None
+        self.outcomes = list(outcome) if isinstance(outcome, list) else [outcome]
+        self.kwargs = []
 
     def __bool__(self):
         return False
 
     def load_current(self, **kwargs):
-        self.kwargs = kwargs
-        if isinstance(self.outcome, BaseException):
-            raise self.outcome
-        return self.outcome
+        self.kwargs.append(kwargs)
+        outcome = self.outcomes[min(len(self.kwargs) - 1, len(self.outcomes) - 1)]
+        if isinstance(outcome, BaseException):
+            raise outcome
+        return outcome
 
 
 class PassiveSelectorTests(unittest.TestCase):
     def select(self, outcome):
+        if isinstance(outcome, dict):
+            outcome = {**outcome, "runtime": {"docker_cli": "/exact/docker"}}
         store = Store(outcome)
+        runtime_calls = []
+
+        def inspect_runtime(_environment, *, cli_path):
+            runtime_calls.append(cli_path)
+            return {}
+
         selector = selection.QualificationAuthoritySelector(
             store,
             environment_inspector=lambda: object(),
-            runtime_inspector=lambda _environment: {},
+            runtime_inspector=inspect_runtime,
         )
         with (patch.object(selection.environment, "validate_environment_identity", return_value={}),
               patch.object(selection.docker, "validate_runtime_identity", return_value={})):
-            return selector.select(), store
+            return selector.select(), store, runtime_calls
 
     def test_absent_unsafe_drift_and_unexpected_errors_all_close_without_persisted_reason(self):
         for failure in (FileNotFoundError("absent"), PermissionError("unsafe"),
                         ValueError("drift"), RuntimeError("unexpected")):
             with self.subTest(failure=type(failure).__name__):
-                selected, _store = self.select(failure)
+                selected, store, runtime_calls = self.select(failure)
                 self.assertIsInstance(selected, SpikesUnavailable)
                 self.assertEqual(selected.persisted(), {"kind": "spikes_unavailable"})
                 self.assertIn(type(failure).__name__, selected.diagnostic)
+                self.assertEqual(runtime_calls, [])
+                self.assertEqual(len(store.kwargs), 1)
 
     def test_qualified_authority_and_base_exception_behavior(self):
-        selected, store = self.select({
+        selected, store, runtime_calls = self.select({
             "qualification_record_digest": DIGEST_A,
             "execution_binding_digest": DIGEST_B,
         })
         self.assertEqual(selected, QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
-        self.assertEqual(set(store.kwargs), {"expected_environment", "expected_runtime"})
+        self.assertEqual(runtime_calls, ["/exact/docker"])
+        self.assertEqual(len(store.kwargs), 2)
+        self.assertEqual(set(store.kwargs[0]), {"expected_environment"})
+        self.assertEqual(
+            set(store.kwargs[1]), {"expected_environment", "expected_runtime"})
         with self.assertRaises(KeyboardInterrupt):
             self.select(KeyboardInterrupt())
 
+    def test_success_observes_environment_once_and_reloads_exact_current_record(self):
+        authority = {
+            "qualification_record_digest": DIGEST_A,
+            "execution_binding_digest": DIGEST_B,
+            "runtime": {"docker_cli": "/exact/docker"},
+        }
+        store = Store(authority)
+        environment_calls = []
+        selector = selection.QualificationAuthoritySelector(
+            store,
+            environment_inspector=lambda: environment_calls.append("environment") or object(),
+            runtime_inspector=lambda _value, *, cli_path: {},
+        )
+        with (patch.object(selection.environment, "validate_environment_identity", return_value={}),
+              patch.object(selection.docker, "validate_runtime_identity", return_value={})):
+            self.assertEqual(selector.select(), QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
+        self.assertEqual(environment_calls, ["environment"])
+        self.assertEqual(len(store.kwargs), 2)
+
+    def test_pointer_race_fails_closed_after_one_exact_cli_inspection(self):
+        first = {
+            "qualification_record_digest": DIGEST_A,
+            "execution_binding_digest": DIGEST_B,
+            "runtime": {"docker_cli": "/exact/docker"},
+        }
+        second = {
+            **first,
+            "qualification_record_digest": "sha256:" + "c" * 64,
+        }
+        selected, store, runtime_calls = self.select([first, second])
+        self.assertIsInstance(selected, SpikesUnavailable)
+        self.assertEqual(runtime_calls, ["/exact/docker"])
+        self.assertEqual(len(store.kwargs), 2)
+
     def test_falsey_store_and_environment_inspector_are_preserved_by_identity(self):
         authority = {"qualification_record_digest": DIGEST_A,
-                     "execution_binding_digest": DIGEST_B}
+                     "execution_binding_digest": DIGEST_B,
+                     "runtime": {"docker_cli": "/exact/docker"}}
         store = Store(authority)
 
         class Inspector:
@@ -328,12 +390,15 @@ class PassiveSelectorTests(unittest.TestCase):
                 return object()
 
         inspector = Inspector()
+        runtime_calls = []
         selector = selection.QualificationAuthoritySelector(
-            store, environment_inspector=inspector, runtime_inspector=lambda _value: {})
+            store, environment_inspector=inspector,
+            runtime_inspector=lambda _value, *, cli_path: runtime_calls.append(cli_path) or {})
         self.assertIs(selector._store, store)
         with (patch.object(selection.environment, "validate_environment_identity", return_value={}),
               patch.object(selection.docker, "validate_runtime_identity", return_value={})):
             self.assertIsInstance(selector.select(), QualifiedSpikeBackend)
+        self.assertEqual(runtime_calls, ["/exact/docker"])
         with tempfile.TemporaryDirectory() as temporary:
             qualification_store = record.QualificationStore(
                 Path(temporary).resolve(), environment_inspector=inspector)

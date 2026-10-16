@@ -27,8 +27,11 @@ release evidence is the long-running scenarios (same file).
 
 Empirica's independent audit runs through the external
 [`pi-subagents`](https://www.npmjs.com/package/pi-subagents) extension; this package does **not**
-bundle or load it. The Pi adapter is POSIX-only (macOS and Linux): spikes run through `/bin/sh` under
-POSIX resource limits, and runtime provenance records POSIX paths; Windows is not supported. Install the
+bundle or load it. The Pi adapter is POSIX-only (macOS and Linux) because runtime provenance records
+POSIX paths; Windows is not supported. Qualified spikes execute through the exact Docker backend and
+its container-internal `/bin/sh -c` policy—there is no ambient host-shell fallback. Pi's 300-second
+stdio deadline for an exact public spike request is only an outer transport margin around the
+backend's 210-second operation; it does not extend the 120-second workload hard limit. Install the
 runtime first, then the repository (which carries Empirica, the Methodologist, and the Empirica auditor
 role):
 

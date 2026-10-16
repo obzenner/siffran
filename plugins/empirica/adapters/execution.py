@@ -4,21 +4,13 @@ from __future__ import annotations
 import errno
 import hashlib
 import os
-import resource
-import signal
 import stat
-import subprocess
-import tempfile
 import time
 from pathlib import Path
 
-from application.ports import CapturedFile, ExecutionSnapshot, HarnessResult, WorkspaceCapture
+from application.ports import CapturedFile, WorkspaceCapture
 from core.freshness import (FileObservation, ObservationState, canonical_digest,
                             validate_relative_posix_path)
-
-DEFAULT_SPIKE_TIMEOUT_SECONDS = 300
-DEFAULT_OUTPUT_LIMIT_BYTES = 1 << 20
-OUTPUT_LIMIT_EXIT_CODE = 125
 
 
 class FilesystemWorkspace:
@@ -145,55 +137,3 @@ class FilesystemWorkspace:
         basis = canonical_digest([(f.observation.path, f.observation.state.value,
                                    f.observation.sha256) for f in files])
         return WorkspaceCapture(basis, files)
-
-
-class SubprocessSpikeHarness:
-    """Temporary host-side LegacySpikeHarness; run/3 remains guarded from this path."""
-    def __init__(self, timeout_seconds: int = DEFAULT_SPIKE_TIMEOUT_SECONDS,
-                 output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES):
-        self.timeout_seconds, self.output_limit_bytes = timeout_seconds, output_limit_bytes
-
-    @staticmethod
-    def _stream_fact(stream) -> dict:
-        size = stream.tell()
-        stream.seek(0)
-        return {"sha256": "sha256:" + hashlib.sha256(stream.read()).hexdigest(),
-                "bytes": size}
-
-    def run(self, command: str, snapshot: ExecutionSnapshot) -> HarnessResult:
-        with tempfile.TemporaryDirectory(prefix="empirica-spike-") as directory:
-            root = Path(directory)
-            for binding, content in zip(snapshot.file_bindings, snapshot.captured_bytes):
-                target = root.joinpath(*binding.path.split("/"))
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(content)
-                target.chmod(0o444)
-            with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
-                def limit_output() -> None:
-                    resource.setrlimit(resource.RLIMIT_FSIZE,
-                                       (self.output_limit_bytes, self.output_limit_bytes))
-
-                process = subprocess.Popen(
-                    ["/bin/sh", "-c", command], cwd=root, stdout=stdout, stderr=stderr,
-                    start_new_session=True, preexec_fn=limit_output)
-                timed_out = False
-                try:
-                    process.wait(timeout=self.timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    timed_out = True
-                finally:
-                    try:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    process.wait()
-                output_limited = max(stdout.tell(), stderr.tell()) >= self.output_limit_bytes
-                exit_code = (OUTPUT_LIMIT_EXIT_CODE if output_limited else
-                             124 if timed_out else process.returncode)
-                result = canonical_digest({
-                    "command": command, "exit_code": exit_code,
-                    "stdout": self._stream_fact(stdout), "stderr": self._stream_fact(stderr),
-                    "output_limit_bytes": self.output_limit_bytes,
-                    "snapshot_digest": snapshot.snapshot_digest,
-                })
-        return HarnessResult(exit_code, result, snapshot.snapshot_digest)

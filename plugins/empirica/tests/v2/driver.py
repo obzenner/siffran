@@ -21,13 +21,21 @@ from __future__ import annotations
 
 import hashlib
 import posixpath
+import sys
+from pathlib import Path
 from typing import Any, Protocol
 
-from application.ports import CapturedFile, HarnessResult, WorkspaceCapture
-from core.freshness import (FileObservation, ObservationState, canonical_digest,
+_TESTS = Path(__file__).resolve().parents[1]
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
+from application.ports import CapturedFile, HarnessResult, WorkspaceCapture  # noqa: E402
+from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
                             observations_digest)
 
-import sut_adapter  # the only composition bridge; no load-time cycle (sut_adapter late-imports this)
+import sut_adapter  # noqa: E402  # the only composition bridge; no load-time cycle
+force_absent_sandbox_home()
 
 
 # ---------------------------------------------------------------------------

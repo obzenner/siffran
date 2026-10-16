@@ -18,7 +18,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
 
-from adapters.sandbox import docker, environment, record  # noqa: E402
+from adapters.sandbox import docker, environment, record, selection  # noqa: E402
 from adapters.sandbox import cli as qualification  # noqa: E402
 
 
@@ -357,17 +357,34 @@ class PolicyTests(unittest.TestCase):
         self.assertEqual(policy["container_lifecycle"]["remove_volumes"], False)
         self.assertRegex(docker.policy_digest(policy), r"^sha256:[0-9a-f]{64}$")
 
+    def test_timeout_layers_are_distinct_policy_and_transport_margins(self):
+        self.assertEqual(docker.WORKLOAD_TIMEOUT_SECONDS, 120.0)
+        self.assertEqual(docker.OPERATION_TIMEOUT_SECONDS, 210.0)
+        self.assertEqual(docker.CLEANUP_TIMEOUT_SECONDS, 15.0)
+        self.assertEqual(docker.POSTFLIGHT_TIMEOUT_SECONDS, 15.0)
+        self.assertGreater(
+            docker.OPERATION_TIMEOUT_SECONDS,
+            docker.WORKLOAD_TIMEOUT_SECONDS
+            + docker.CLEANUP_TIMEOUT_SECONDS + docker.POSTFLIGHT_TIMEOUT_SECONDS)
+        self.assertEqual(docker.WORKLOAD_OUTPUT_LIMIT_BYTES, 1024 * 1024)
+        manifest = json.loads(
+            (ROOT / "plugins" / "empirica" / ".mcp.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["mcpServers"]["empirica"]["tool_timeout_sec"], 360)
+
     def test_post_discovery_client_uses_only_closed_endpoint_bound_environment(self):
         with tempfile.TemporaryDirectory() as raw:
             cli = fake_cli(Path(raw))
             identity = self.identity(cli)
             runner = DiscoveryRunner()
-            client = docker.DockerClient(
-                identity, docker.effective_policy(identity), runner,
-                env={"PATH": "/host/bin", "DOCKER_HOST": "ssh://wrong",
-                     "DOCKER_CONTEXT": "wrong", "DOCKER_CONFIG": "/secret",
-                     "HTTPS_PROXY": "https://secret", "SECRET_TOKEN": "secret"})
-            client.call(("version", "--format", "{{json .}}"))
+            hostile = {
+                "PATH": "/host/bin", "DOCKER_HOST": "ssh://wrong",
+                "DOCKER_CONTEXT": "wrong", "DOCKER_CONFIG": "/secret",
+                "HTTPS_PROXY": "https://secret", "SECRET_TOKEN": "secret",
+            }
+            with patch.dict(os.environ, hostile, clear=True):
+                client = docker.DockerClient(
+                    identity, docker.effective_policy(identity), runner)
+                client.call(("version", "--format", "{{json .}}"))
         self.assertEqual(runner.calls[-1][3], {
             "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": "unix:///tmp/docker.sock"})
         self.assertNotIn("SECRET_TOKEN", runner.calls[-1][3])
@@ -428,7 +445,7 @@ class PolicyTests(unittest.TestCase):
             self.assertEqual(fresh["resources"]["memory_bytes"], docker.MEMORY_BYTES)
             self.assertNotIn("QUALIFICATION_POLICY_TEST=yes", fresh["process"]["environment"])
             runner = LifecycleRunner()
-            client = docker.DockerClient(identity, policy, runner, env={})
+            client = docker.DockerClient(identity, policy, runner)
             result = client.execute(
                 run_id="q123", role="unit", input_dir=input_dir, command="true")
         self.assertEqual(result.exit_code, 0)
@@ -470,6 +487,15 @@ class PolicyTests(unittest.TestCase):
 
 
 class BoundedRunnerTests(unittest.TestCase):
+    def test_output_ceiling_is_per_stream_not_aggregate(self):
+        result = docker.BoundedRunner().run(
+            (sys.executable, "-c",
+             "import sys; sys.stdout.write('o'*3000); sys.stderr.write('e'*3000)"),
+            timeout_seconds=5, output_limit_bytes=4096)
+        self.assertFalse(result.output_limited)
+        self.assertEqual(result.stdout.bytes_seen, 3000)
+        self.assertEqual(result.stderr.bytes_seen, 3000)
+
     def test_runner_limits_streaming_output_without_buffering_the_whole_stream(self):
         result = docker.BoundedRunner().run(
             (sys.executable, "-c", "import sys; sys.stdout.write('x'*1000000)"),
@@ -638,7 +664,7 @@ class LifecycleRunner:
 def lifecycle_client(root: Path, runner: LifecycleRunner) -> docker.DockerClient:
     cli = fake_cli(root)
     identity = PolicyTests().identity(cli)
-    return docker.DockerClient(identity, docker.effective_policy(identity), runner, env={})
+    return docker.DockerClient(identity, docker.effective_policy(identity), runner)
 
 
 class LifecycleTests(unittest.TestCase):
@@ -814,6 +840,27 @@ class RecordTests(unittest.TestCase):
         markdown.write_text("# report\n", encoding="utf-8")
         return json_report, markdown
 
+    def test_installed_fake_authority_selects_without_live_docker(self):
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve(strict=True)
+            authority = record.build_record(self.result(root))
+            store = record.QualificationStore(
+                root / "authority", environment_inspector=lambda: self.expected_environment)
+            store.publish(authority)
+            runtime_calls = []
+            selector = selection.QualificationAuthoritySelector(
+                store,
+                environment_inspector=lambda: self.expected_environment,
+                runtime_inspector=lambda _environment, *, cli_path: (
+                    runtime_calls.append(cli_path) or authority["runtime"]),
+            )
+            selected = selector.select()
+        self.assertEqual(selected.qualification_record_digest,
+                         authority["qualification_record_digest"])
+        self.assertEqual(selected.execution_binding_digest,
+                         authority["execution_binding_digest"])
+        self.assertEqual(runtime_calls, [authority["runtime"]["docker_cli"]])
+
     def test_record_digests_are_canonical_and_report_deletion_is_non_authoritative(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve(strict=True)
@@ -955,17 +1002,57 @@ class RecordTests(unittest.TestCase):
 
     def test_implementation_manifest_is_closed_and_every_dependency_affects_binding(self):
         expected = {
-            "adapters/execution.py", "adapters/sandbox/cli.py", "adapters/sandbox/docker.py",
+            ".mcp.json", "adapters/bridge.py", "adapters/claude/transport.py",
+            "adapters/codex/transport.py", "adapters/execution.py",
+            "adapters/mcp_server.py", "adapters/pi/bridge.py",
+            "adapters/pi/src/index.ts", "adapters/pi/src/process-transport.ts",
+            "adapters/pi/src/stdio-transport.ts", "adapters/pi/src/translate.ts",
+            "adapters/public_tools.py", "adapters/sandbox/cli.py",
+            "adapters/sandbox/docker.py",
             "adapters/sandbox/environment.py", "adapters/sandbox/execution.py",
             "adapters/sandbox/record.py",
             "adapters/sandbox/selection.py", "adapters/state/fsio.py",
             "application/observation.py", "application/ports.py", "application/protocol.py",
             "application/run_state.py", "application/transaction.py",
             "application/v2.py", "core/evaluation.py", "core/freshness.py", "core/run.py",
+            "vendor/contracts/empirica/v2/host-profiles.json",
+            "vendor/contracts/empirica/v2/public-contract.json",
+            "vendor/contracts/empirica/v2/public-contract.schema.json",
+            "vendor/contracts/empirica/v2/public-tools.json",
+            "vendor/contracts/empirica/v2/request.schema.json",
+            "vendor/contracts/empirica/v2/response.schema.json",
             "vendor/contracts/empirica/v2/state.schema.json",
         }
+        runtime_contract_data = {
+            f"vendor/contracts/empirica/v2/{path.name}"
+            for path in (ROOT / "plugins/empirica/vendor/contracts/empirica/v2").glob("*.json")
+        }
+        self.assertEqual(runtime_contract_data, {
+            relative for relative in expected
+            if relative.startswith("vendor/contracts/empirica/v2/")
+        })
         baseline = record.implementation_manifest()
         self.assertEqual({row["path"] for row in baseline["files"]}, expected)
+        public_boundary_sources = {
+            "adapters/bridge.py": "DockerSpikeHarness(qualification_store)",
+            "adapters/mcp_server.py": "PublicTools",
+            "adapters/public_tools.py": "_bridge.handle",
+            "adapters/claude/transport.py": "bridge.handle",
+            "adapters/codex/transport.py": "bridge.handle",
+            "adapters/pi/src/translate.ts": 'type: "ObserveAction"',
+            "adapters/pi/src/index.ts": "createStdioBridgeDispatch(defaultBridgeConfig())",
+            "adapters/pi/src/stdio-transport.ts": "SPIKE_BRIDGE_TIMEOUT_MS",
+            "adapters/pi/src/process-transport.ts": "config.timeoutMs",
+        }
+        for relative, source_marker in public_boundary_sources.items():
+            self.assertIn(relative, expected)
+            self.assertIn(
+                source_marker,
+                (ROOT / "plugins/empirica" / relative).read_text(encoding="utf-8"),
+                relative,
+            )
+        self.assertNotIn("adapters/pi/src/private-transport.ts", expected)
+        self.assertNotIn("adapters/pi/private_bridge.py", expected)
         base_binding = record._digest({"schema": record.RECORD_SCHEMA,
                                       "qualification_protocol_revision": record.PROTOCOL_REVISION,
                                       "profile_digest": "sha256:" + "1" * 64,

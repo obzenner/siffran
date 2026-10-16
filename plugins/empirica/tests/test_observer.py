@@ -30,6 +30,8 @@ for _path in (_HERE / "v2", _HERE, _PLUGIN, _ROOT / "scripts"):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
 import validate_ui_view  # noqa: E402
 from application import observer as observer_module  # noqa: E402
 from application import protocol as _proto  # noqa: E402
@@ -41,6 +43,7 @@ from governance_setup import sized_configure_run  # noqa: E402
 from observer_store import (DriverSource, _Builder, _graph, build_store, observed, contract_problems,  # noqa: E402
                             view_of)
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _STORE = build_store()

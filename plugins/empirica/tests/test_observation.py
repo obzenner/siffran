@@ -28,11 +28,11 @@ sys.path.insert(0, str(PLUGIN))
 
 from application.observation import (  # noqa: E402
     HarnessContractError, HarnessUnavailable, ObservationUnavailable,
-    build_execution_snapshot, build_observation_snapshot, execute_spike,
+    build_execution_snapshot, build_observation_snapshot, execute_run_bound_spike,
 )
 from application.ports import (  # noqa: E402
-    CapturedFile, ExecutionSnapshot, HarnessResult, LegacySpikeHarness, ObservationSnapshot,
-    SpikeHarness, Workspace, WorkspaceCapture,
+    CapturedFile, ExecutionSnapshot, HarnessResult, ObservationSnapshot,
+    QualifiedSpikeBackend, SpikeHarness, Workspace, WorkspaceCapture,
 )
 from core.freshness import (  # noqa: E402
     ActiveSpikeHead, ExecutionFacts, FileBinding, FileObservation, Gate,
@@ -95,8 +95,11 @@ class FakeSpikeHarness:
         self._require_workspace = require_workspace
         self.invocations = []
 
-    def run(self, command, snapshot):
-        self.invocations.append({"command": command, "snapshot": snapshot})
+    def run(self, *, run_id, binding, command, snapshot):
+        self.invocations.append({
+            "run_id": run_id, "binding": binding,
+            "command": command, "snapshot": snapshot,
+        })
         if self._raise is not None:
             raise self._raise
         if self._require_workspace:
@@ -117,7 +120,7 @@ class MutatingHarness:
         self.invocations = []
         self.saw_bytes = None
 
-    def run(self, command, snapshot):
+    def run(self, *, run_id, binding, command, snapshot):
         self.invocations.append(snapshot)
         # Ambient mutation AFTER observe returned, while the harness runs.
         self.workspace._captures = {
@@ -129,6 +132,18 @@ class MutatingHarness:
 
 def _present_ws(path, content):
     return FakeWorkspace({path: _present_capture(path, content)})
+
+
+def _execute(command, dependent_paths, workspace, harness):
+    facts, _, _ = execute_run_bound_spike(
+        run_id="er2.observation-test",
+        binding=QualifiedSpikeBackend(_d("qualification"), _d("binding")),
+        command=command,
+        dependent_paths=dependent_paths,
+        workspace=workspace,
+        harness=harness,
+    )
+    return facts
 
 
 # --- proof 7: empty zero calls; nonempty exactly one complete lexical call -----
@@ -346,10 +361,10 @@ class ExecutionSnapshotFacts(unittest.TestCase):
         self.assertEqual([b.path for b in snap.file_bindings], ["z", "a", "m"])
         self.assertEqual(snap.captured_bytes, (b"ZZ", b"AA", b"MM"))
 
-    def test_execute_spike_harness_called_once_no_workspace_arg(self):
+    def test_run_bound_harness_called_once_no_workspace_arg(self):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness(exit_code=0)
-        facts = execute_spike("pytest", ("a",), ws, harness)
+        facts = _execute("pytest", ("a",), ws, harness)
         self.assertEqual(len(harness.invocations), 1)
         self.assertEqual(len(ws.observe_calls), 1)
         inv = harness.invocations[0]
@@ -366,7 +381,7 @@ class ExecutionSnapshotFacts(unittest.TestCase):
         with self.assertRaises(PathContractError):
             build_execution_snapshot(["a"], ws)  # list rejected; tuple required
 
-    def test_execute_spike_rejects_invalid_dependent_paths(self):
+    def test_execution_rejects_invalid_dependent_paths(self):
         ws = FakeWorkspace()
         with self.assertRaises(PathContractError):
             build_execution_snapshot(("a/../b",), ws)
@@ -382,7 +397,7 @@ class MutationAndAmbientHarness(unittest.TestCase):
     def test_harness_sees_original_bytes_after_workspace_mutation(self):
         ws = FakeWorkspace({"a": _present_capture("a", b"original")})
         harness = MutatingHarness(ws, b"original", exit_code=0)
-        facts = execute_spike("pytest", ("a",), ws, harness)
+        facts = _execute("pytest", ("a",), ws, harness)
         # harness saw the snapshot's ORIGINAL captured bytes, never the mutated ambient ones
         self.assertEqual(harness.saw_bytes, (b"original",))
         # echoed digest matched the snapshot built from the original -> no contract error
@@ -393,7 +408,7 @@ class MutationAndAmbientHarness(unittest.TestCase):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness(require_workspace=True)
         with self.assertRaises(HarnessUnavailable):
-            execute_spike("pytest", ("a",), ws, harness)
+            _execute("pytest", ("a",), ws, harness)
         self.assertEqual(len(harness.invocations), 1)
 
 
@@ -404,26 +419,26 @@ class ExecutionFailClosed(unittest.TestCase):
         ws = FakeWorkspace()  # path "a" defaults to MISSING
         harness = FakeSpikeHarness()
         with self.assertRaises(ObservationUnavailable):
-            execute_spike("pytest", ("a",), ws, harness)
+            _execute("pytest", ("a",), ws, harness)
         self.assertEqual(harness.invocations, [])
 
     def test_harness_exception_raises_unavailable(self):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness(raise_exc=RuntimeError("harness boom"))
         with self.assertRaises(HarnessUnavailable):
-            execute_spike("pytest", ("a",), ws, harness)
+            _execute("pytest", ("a",), ws, harness)
 
     def test_snapshot_echo_mismatch_raises_contract_error(self):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness(exit_code=0, echo_digest=_d("x"))  # wrong echo
         with self.assertRaises(HarnessContractError):
-            execute_spike("pytest", ("a",), ws, harness)
+            _execute("pytest", ("a",), ws, harness)
 
     def test_gate_derived_from_exit_code_only(self):
         for code, gate in ((0, Gate.PASS), (1, Gate.FAIL), (42, Gate.FAIL)):
             ws = _present_ws("a", b"AA")
             harness = FakeSpikeHarness(exit_code=code)
-            facts = execute_spike("pytest", ("a",), ws, harness)
+            facts = _execute("pytest", ("a",), ws, harness)
             self.assertEqual(facts.gate, gate)
             self.assertEqual(facts.exit_code, code)
 
@@ -432,11 +447,9 @@ class ExecutionFailClosed(unittest.TestCase):
 
 class PortShape(unittest.TestCase):
     def test_protocols_are_protocols(self):
-        for proto in (Workspace, LegacySpikeHarness, SpikeHarness):
+        for proto in (Workspace, SpikeHarness):
             self.assertTrue(hasattr(proto, "_is_protocol"))
-        legacy = inspect.signature(LegacySpikeHarness.run).parameters
         bound = inspect.signature(SpikeHarness.run).parameters
-        self.assertEqual(tuple(legacy), ("self", "command", "snapshot"))
         self.assertEqual(
             tuple(bound), ("self", "run_id", "binding", "command", "snapshot"))
         self.assertTrue(all(parameter.kind is inspect.Parameter.KEYWORD_ONLY
@@ -532,7 +545,7 @@ class CommandValidation(unittest.TestCase):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness()
         with self.assertRaises((ValueError, Exception)):
-            execute_spike("", ("a",), ws, harness)
+            _execute("", ("a",), ws, harness)
         self.assertEqual(ws.observe_calls, [])
         self.assertEqual(harness.invocations, [])
 
@@ -540,7 +553,7 @@ class CommandValidation(unittest.TestCase):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness()
         with self.assertRaises((ValueError, Exception)):
-            execute_spike(123, ("a",), ws, harness)
+            _execute(123, ("a",), ws, harness)
         self.assertEqual(ws.observe_calls, [])
         self.assertEqual(harness.invocations, [])
 
@@ -548,7 +561,7 @@ class CommandValidation(unittest.TestCase):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness()
         with self.assertRaises((ValueError, Exception)):
-            execute_spike(None, ("a",), ws, harness)
+            _execute(None, ("a",), ws, harness)
         self.assertEqual(ws.observe_calls, [])
         self.assertEqual(harness.invocations, [])
 
@@ -556,14 +569,14 @@ class CommandValidation(unittest.TestCase):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness(exit_code=0)
         cmd = "  pytest --flag  "
-        execute_spike(cmd, ("a",), ws, harness)
+        _execute(cmd, ("a",), ws, harness)
         self.assertEqual(harness.invocations[0]["command"], cmd)
 
     def test_whitespace_only_command_preserved(self):
         ws = _present_ws("a", b"AA")
         harness = FakeSpikeHarness(exit_code=0)
         cmd = "   "
-        execute_spike(cmd, ("a",), ws, harness)
+        _execute(cmd, ("a",), ws, harness)
         self.assertEqual(harness.invocations[0]["command"], cmd)
 
 

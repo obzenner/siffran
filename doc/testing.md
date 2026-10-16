@@ -11,7 +11,7 @@ Each suite runs in its own process group, and the runner tracks every launched g
 | Suite | What it runs | Before (serial, s) | After (alone, s) |
 |---|---|---|---|
 | `check-static` | lint, manifests, skills, suite ownership, docs, ADRs, contracts, vendor copies, validator unit tests | 25 | 38 |
-| `check-core` | contracts, state, bridge, governance, audit, v2 activation/audit/blocker modules, Methodologist core | 104 | 33 |
+| `check-core` | contracts, state, production composition, governance, audit, v2 activation/audit/blocker modules, Methodologist core | 104 | 33 |
 | `check-evidence` | citations, confirmation, scenarios, A1 boundaries, home isolation, host adapter contracts | (in core) | 37 |
 | `check-observer` | the observer read model and its server, the filesystem source, its pass costs (git processes, reads, hashes, projections) and background indexer (`test_observer_fs.py`), the drift index's counted pass costs and the oracle that the incremental view equals a from-scratch one (`test_observer_incremental.py`), the generated invariant that it says what the gate and the author view say, its cost counted at n and 2n (`test_observer_complexity.py`), and the stateful machine (`test_observer_stateful.py`: random sequences of public actions through the real service, the observer equal to the core after every step; 12 sequences of up to 6 steps, fixed seed, no database, no shrinking, about 15 s); four processes side by side; needs `make dev-install` (Hypothesis) | (in core) | 33 |
 | `check-claude` | Claude payload, lifecycle translation, Stop settlement | 8 | 9 |
@@ -53,10 +53,46 @@ variables. The exact-record Docker harness uses the same passive ambient `DOCKER
 discovery precedence as qualification and StartRun for both preflight and postflight; only its
 post-discovery container lifecycle uses that closed endpoint-bound environment. The 3C-c application
 transaction seals a deterministic `spike_request` in one CAS before execution, keeps the immutable
-execution fact only in memory, and retries only the separate result CAS. Qualified execution is
-available only when composition supplies the run-bound harness; the unchanged bridge still supplies
-the two-argument legacy harness, whose body cannot be entered by the keyword-only call, so default
-production composition fails closed as unavailable.
+execution fact only in memory, and retries only the separate result CAS. Production composition builds
+one `QualificationStore` shared by `QualificationAuthoritySelector` and `DockerSpikeHarness`; ordinary
+sandbox-construction failure degrades only spike authority/harness to closed unavailable null objects,
+so reads and non-spike reasoning remain usable. Selection rejects an absent or invalid current pointer
+before Docker discovery, observes the host environment once, inspects Docker through the statically
+validated record's exact CLI, and reloads the same current record against the observed runtime; a pointer
+race fails closed.
+
+Timeouts are four distinct limits, not one extensible workload allowance. The container workload hard
+limit is 120 seconds. The Docker backend's 210-second whole-operation limit reserves bounded cleanup
+and postflight phases after effects. Pi grants only an exact schema-shaped public
+`ObserveAction`/`spike_request` a 300-second **outer transport margin**; every near-miss and ordinary
+public operation remains at 30 seconds. Claude MCP's 360-second tool ceiling is likewise an outer
+transport margin. Neither 300 nor 360 seconds can extend the 120-second workload. The authoritative
+`workload_output_limit_bytes` is 1 MiB **per stream**: stdout and stderr are counted and retained
+separately, and either stream exceeding its ceiling is output-limited (it is not a 1 MiB aggregate
+budget). Workload timeout, output limiting, or OOM is unavailable substrate execution, not a failing
+experimental result, and admits no `spike` result evidence.
+
+The qualification implementation manifest uses an inclusive public-execution criterion: it binds
+all sources that select the harness, construct or invoke public `ObserveAction` transport,
+classify or enforce that transport's outer deadline, or own the Claude MCP ceiling. It also binds
+all seven runtime-loaded vendored v2 JSON documents: public contract and schema, public tool
+projection, request and response schemas, host profiles, and persisted-state schema. Root contract
+duplicates are not runtime inputs and remain outside the authority; `make vendor-check` owns their
+byte identity with the vendored copies. The source set includes the shared bridge, MCP server/public
+tools, Claude and Codex transports, Pi translate/index/stdio/process sources, and `.mcp.json`, in
+addition to the sandbox/application implementation. Pi's `private-transport.ts` and
+`private_bridge.py` are deliberately outside this spike authority: their closed private-operation
+enum cannot carry public `ObserveAction` requests and they retain the ordinary 30-second bound.
+Claude and Codex public entry adapters converge on `adapters.bridge.handle`; Pi converges through
+`adapters/pi/bridge.py` to the same bridge. None owns or can select a weaker harness;
+manifest/source regressions pin those entry paths and forbid an ordinary host spike executor.
+
+Every hermetic test module or shared driver that can reach the production bridge imports
+`tests/sandbox_isolation.py` before that bridge. The helper holds a process-lifetime temporary root
+and forces `EMPIRICA_SANDBOX_HOME` to an absent child, including in bridge subprocesses, so a
+developer's installed qualification authority cannot make direct unittest invocation discover or
+execute Docker. Qualification and sandbox-home semantic tests remain excluded because their own
+fixtures are the authority under test.
 
 The closed recovery-journal v1 vocabulary is `intent` (JSON has no container ID yet), `created`
 (one full 64-hex ID), and `removing` (the same full ID while conservative removal is in progress).
@@ -88,9 +124,10 @@ journal is deleted last, after exact container absence and bounded no-follow sta
 
 | Target | Boundary | Why it is not in the fast gate |
 |---|---|---|
-| `make empirica-docker-execution-check` | Docker lifecycle substrate: operator-created scaffolding, bounded process lock, immutable staging, atomic journal transitions, exact fake-CLI inspect/removal/recovery, and BaseException process-group cleanup | fake runner only; no Docker daemon and no default production composition imports the Docker harness |
-| `make empirica-docker-harness-check` | exact-record `DockerSpikeHarness`: run binding, shared passive ambient pre/post authority resolution, reserved effect/cleanup/postflight deadlines, restart recovery, closed unavailable reasons, attached-versus-inspected workload outcomes, exact cleanup, canonical result admission, and absence from default composition | fake runner only; no Docker daemon, bridge wiring, current-pointer authority, or host fallback |
-| `make empirica-transaction-check` | 3C-c two-CAS qualified spike activation: request-before-execution, exact run-bound arguments, one execution across result-CAS retries, request-only failures, post-execution race discard, execution observation basis, and legacy-harness fail-closed composition | in-memory repositories/workspace/harness only; no Docker daemon or bridge change |
+| `make empirica-docker-execution-check` | Docker lifecycle substrate: operator-created scaffolding, bounded process lock, immutable staging, atomic journal transitions, exact fake-CLI inspect/removal/recovery, and BaseException process-group cleanup | fake runner only; no Docker daemon, and only the exact-record production harness imports the substrate |
+| `make empirica-docker-harness-check` | exact-record production `DockerSpikeHarness`: run binding, shared passive ambient pre/post authority resolution, reserved effect/cleanup/postflight deadlines, restart recovery, closed unavailable reasons, attached-versus-inspected workload outcomes, exact cleanup, canonical result admission, and source-level single composition/no-host-fallback guards | fake runner only; no Docker daemon, current-pointer execution authority, or host fallback |
+| `make empirica-bridge-composition-check` | shared production composition: one qualification store shared by the selector and Docker harness, absent/unsafe authority degradation, StartRun-before-Docker ordering, and non-spike availability | isolated absent `EMPIRICA_SANDBOX_HOME`; no Docker daemon and no live qualification authority |
+| `make empirica-transaction-check` | 3C-c two-CAS qualified spike activation: request-before-execution, exact run-bound arguments, one execution across result-CAS retries, request-only failures, post-execution race discard, execution observation basis, and unavailable-null-harness fail-closed behavior | in-memory repositories/workspace/harness only; no Docker daemon or live authority |
 | `make sandbox-qualification BACKEND=docker ARGS="--probe all"` | external qualification of one exact absolute Docker CLI, local Darwin-to-Unix-to-Docker-Desktop-Linux-VM boundary, engine builtin seccomp/cgroup-v2 namespace facts, already-present digest-pinned Rust image/config, and one closed executable pull-disabled policy; security probes (including enforced memory/PID canaries) precede Rust/contract performance; selected probes report incomplete and cannot claim backend eligibility; reports and before/after resource census are written under `$TMPDIR/siffran-sandbox-qualification` unless `--output` is supplied | requires an operator-approved already-running local Docker engine and the pinned image already present; it never installs, pulls, repairs, switches context, starts/stops the daemon/VM, qualifies native Linux, or authorizes host-subprocess fallback. `make sandbox-qualification-unit-check` owns checkout delegation in `check-static`; `make empirica-sandbox-check` owns the shipped profile/runtime/record primitives in `check-core` |
 | `make sandbox-qualification-install BACKEND=docker [ARGS="--sandbox-home path"]` | reruns the complete current-code all-probe qualification and, only on success, atomically publishes immutable user-scoped authority under `~/.empirica-plugin/sandbox/qualification` (or the explicit `EMPIRICA_SANDBOX_HOME`/argument override); human reports remain under `$TMPDIR/siffran-sandbox-qualification` and are non-authoritative provenance | operator setup only, never an Empirica author action; it has the same already-running-engine/no-pull restrictions as qualification and refuses selected/incomplete evidence, unsafe ownership/modes/symlinks, or any digest/identity mismatch |
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |

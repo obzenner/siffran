@@ -35,9 +35,9 @@ if str(EMPIRICA) not in sys.path:
 
 from adapters.execution import FilesystemWorkspace  # noqa: E402
 from adapters.sandbox.environment import EnvironmentIdentity, inspect_environment  # noqa: E402
-from application.observation import execute_spike_bound  # noqa: E402
+from application.observation import build_execution_snapshot  # noqa: E402
 from application.ports import ExecutionSnapshot, HarnessResult  # noqa: E402
-from core.freshness import Gate, canonical_digest  # noqa: E402
+from core.freshness import Gate, canonical_digest, execution_facts  # noqa: E402
 
 SCHEMA_VERSION = 1
 BACKEND = "docker"
@@ -822,7 +822,6 @@ class Census:
 class DockerClient:
     def __init__(
         self, identity: DockerRuntimeIdentity, policy: Mapping[str, Any], runner: Runner,
-        *, env: Mapping[str, str] | None = None,
     ) -> None:
         if not identity.available or identity.docker_cli is None:
             raise DockerQualificationError("Docker client requires an available runtime identity")
@@ -1714,7 +1713,7 @@ def rust_probe(client: DockerClient, run_id: str, *, large: bool) -> ProbeResult
 
 
 class QualificationDockerHarness:
-    """Qualification-only LegacySpikeHarness, never the production SpikeHarness port."""
+    """Qualification-only exact-snapshot adapter; never a production harness."""
 
     def __init__(self, client: DockerClient, run_id: str):
         self.client, self.run_id, self.counter = client, run_id, 0
@@ -1749,10 +1748,20 @@ def empirica_contract_probe(client: DockerClient, run_id: str) -> ProbeResult:
             (root / "fixture.txt").write_text("expected\n", encoding="utf-8")
             workspace = FilesystemWorkspace(root)
             harness = QualificationDockerHarness(client, run_id)
-            passing, pass_snapshot, _ = execute_spike_bound(
-                'test "$(cat fixture.txt)" = expected', ("fixture.txt",), workspace, harness)
-            failing, fail_snapshot, _ = execute_spike_bound(
-                'test "$(cat fixture.txt)" = wrong', ("fixture.txt",), workspace, harness)
+            pass_snapshot = build_execution_snapshot(("fixture.txt",), workspace)
+            pass_result = harness.run(
+                'test "$(cat fixture.txt)" = expected', pass_snapshot)
+            fail_snapshot = build_execution_snapshot(("fixture.txt",), workspace)
+            fail_result = harness.run(
+                'test "$(cat fixture.txt)" = wrong', fail_snapshot)
+            if (not isinstance(pass_result, HarnessResult)
+                    or not isinstance(fail_result, HarnessResult)
+                    or pass_result.snapshot_digest != pass_snapshot.snapshot_digest
+                    or fail_result.snapshot_digest != fail_snapshot.snapshot_digest):
+                raise DockerQualificationError(
+                    "qualification contract harness returned an invalid snapshot echo")
+            passing = execution_facts(pass_snapshot.file_bindings, pass_result)
+            failing = execution_facts(fail_snapshot.file_bindings, fail_result)
             passed = (
                 passing.gate is Gate.PASS and passing.exit_code == 0
                 and failing.gate is Gate.FAIL and failing.exit_code != 0
@@ -1846,7 +1855,7 @@ def qualify_docker(
         )
         return base
     policy = effective_policy(identity)
-    client = DockerClient(identity, policy, runner, env=env)
+    client = DockerClient(identity, policy, runner)
     base["policy"] = policy
     base["policy_sha256"] = client.digest
     before: Census | None = None

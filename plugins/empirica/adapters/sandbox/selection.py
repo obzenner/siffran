@@ -39,7 +39,7 @@ class QualificationAuthoritySelector:
     def __init__(
         self, store: QualificationStore | None = None, *,
         environment_inspector: Callable[[], environment.EnvironmentIdentity] = environment.inspect_environment,
-        runtime_inspector: Callable[[environment.EnvironmentIdentity], Mapping[str, Any]] = inspect_runtime,
+        runtime_inspector: Callable[..., Mapping[str, Any]] = inspect_runtime,
     ) -> None:
         self._environment_inspector = environment_inspector
         self._runtime_inspector = runtime_inspector
@@ -51,12 +51,17 @@ class QualificationAuthoritySelector:
             current_environment = self._environment_inspector()
             checked_environment = environment.validate_environment_identity(
                 current_environment, require_available=True)
-            current_runtime = self._runtime_inspector(current_environment)
-            checked_runtime = docker.validate_runtime_identity(current_runtime)
             authority = self._store.load_current(
+                expected_environment=checked_environment)
+            current_runtime = self._runtime_inspector(
+                current_environment, cli_path=authority["runtime"]["docker_cli"])
+            checked_runtime = docker.validate_runtime_identity(current_runtime)
+            reloaded = self._store.load_current(
                 expected_environment=checked_environment,
                 expected_runtime=checked_runtime,
             )
+            if reloaded != authority:
+                raise ValueError("qualification pointer changed during selection")
             return QualifiedSpikeBackend(
                 authority["qualification_record_digest"],
                 authority["execution_binding_digest"],

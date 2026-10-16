@@ -13,7 +13,7 @@ from .history_records import (
     OBSERVATION_ROW_KEYS, OBSERVATION_SOURCE_KEYS,
 )
 from .ports import (
-    CapturedFile, ExecutionSnapshot, HarnessResult, LegacySpikeHarness, ObservationSnapshot,
+    CapturedFile, ExecutionSnapshot, HarnessResult, ObservationSnapshot,
     SpikeExecutionUnavailable, SpikeHarness, WorkspaceCapture,
 )
 
@@ -162,26 +162,3 @@ def execute_run_bound_spike(
     if result.snapshot_digest != execution.snapshot_digest:
         raise HarnessContractError("harness echoed a mismatched snapshot digest")
     return execution_facts(bindings, result), execution, observation
-
-
-def execute_spike_bound(
-    command, dependent_paths, workspace, harness: LegacySpikeHarness,
-):
-    """Qualification/test-only legacy executor; production uses ``execute_run_bound_spike``."""
-    bindings, execution, observation = _capture_execution(
-        command, dependent_paths, workspace)
-    try:
-        result = harness.run(command, execution)
-    except Exception as exc:
-        raise HarnessUnavailable("harness run failed") from exc
-    if not isinstance(result, HarnessResult):
-        raise HarnessContractError("harness must return a HarnessResult")
-    if result.snapshot_digest != execution.snapshot_digest:
-        raise HarnessContractError("harness echoed a mismatched snapshot digest")
-    return execution_facts(bindings, result), execution, observation
-
-
-def execute_spike(command, dependent_paths, workspace, harness):
-    """Compatibility projection of the canonical bound executor's facts."""
-    facts, _, _ = execute_spike_bound(command, dependent_paths, workspace, harness)
-    return facts

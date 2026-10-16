@@ -22,6 +22,7 @@ Exit 0 = all pass; 1 = at least one failed.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -29,6 +30,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 
@@ -56,7 +58,13 @@ _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _PROFILE_IDS = [p["profile_id"] for p in _HOST_PROFILES["profiles"]]
 _CANONICAL_PROFILE = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if p["host_id"] == "claude-code")
 
+from sandbox_isolation import (  # noqa: E402
+    ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
+
 from adapters import bridge  # noqa: E402
+from adapters.sandbox import selection  # noqa: E402
+from governance_setup import invocation_for  # noqa: E402
+force_absent_sandbox_home()
 
 
 def _valid_request(command: dict, request_id: str = "r") -> dict:
@@ -211,6 +219,138 @@ class BridgeV2Tests(unittest.TestCase):
         service = bridge.build_service(_CANONICAL_PROFILE)
         self.assertTrue(callable(getattr(service, "dispatch", None)))
         self.assertTrue(callable(getattr(service, "_dispatch_validated", None)))
+
+    def test_bridge_test_modules_are_isolated_from_developer_sandbox_authority(self):
+        bridge_tests = (
+            _PLUGIN_ROOT / "tests/test_bridge_v2.py",
+            _PLUGIN_ROOT / "tests/test_host_runtime.py",
+            _PLUGIN_ROOT / "tests/test_governance_hosts.py",
+            _PLUGIN_ROOT / "tests/test_context_economy.py",
+            _PLUGIN_ROOT / "tests/test_observer.py",
+            _PLUGIN_ROOT / "tests/v2/driver.py",
+            _PLUGIN_ROOT / "tests/v2/fs_store.py",
+            _PLUGIN_ROOT / "tests/v2/observer_store.py",
+            _PLUGIN_ROOT / "tests/v2/test_timeline.py",
+            _PLUGIN_ROOT / "adapters/claude/tests/test_claude_adapter.py",
+            _PLUGIN_ROOT / "adapters/claude/tests/test_activation_lifecycle.py",
+            _PLUGIN_ROOT / "adapters/codex/tests/test_codex_adapter.py",
+        )
+        for path in bridge_tests:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("from sandbox_isolation import", source, path)
+            self.assertIn("force_absent_sandbox_home()", source, path)
+
+        test_roots = (
+            _PLUGIN_ROOT / "tests",
+            _PLUGIN_ROOT / "adapters/claude/tests",
+            _PLUGIN_ROOT / "adapters/codex/tests",
+        )
+        for root in test_roots:
+            for path in root.rglob("*.py"):
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                aliases = {
+                    alias.asname or alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom) and node.module == "adapters"
+                    for alias in node.names if alias.name == "bridge"
+                }
+                reaches_bridge = any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"build_service", "handle"}
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in aliases
+                    for node in ast.walk(tree)
+                )
+                if reaches_bridge:
+                    self.assertIn(path, bridge_tests, path)
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn("from sandbox_isolation import", source, path)
+                    self.assertIn("force_absent_sandbox_home()", source, path)
+        excluded_semantic_tests = (
+            _PLUGIN_ROOT / "tests/test_sandbox_adapter.py",
+            _REPO_ROOT / "scripts/tests/test_sandbox_qualification.py",
+        )
+        for path in excluded_semantic_tests:
+            self.assertNotIn(
+                "from sandbox_isolation import", path.read_text(encoding="utf-8"), path)
+        self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
+        self.assertFalse(ABSENT_SANDBOX_HOME.exists())
+
+    def test_build_service_composes_one_shared_store_selector_and_docker_harness(self):
+        store, selector, harness, service = object(), object(), object(), object()
+        with (patch.object(bridge, "QualificationStore", return_value=store) as store_type,
+              patch.object(
+                  bridge, "QualificationAuthoritySelector", return_value=selector) as selector_type,
+              patch.object(bridge, "DockerSpikeHarness", return_value=harness) as harness_type,
+              patch.object(bridge._v2, "compose", return_value=service) as compose):
+            self.assertIs(bridge.build_service(_CANONICAL_PROFILE), service)
+        store_type.assert_called_once_with()
+        selector_type.assert_called_once_with(store)
+        harness_type.assert_called_once_with(store)
+        self.assertIs(compose.call_args.kwargs["harness"], harness)
+        self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
+
+    def test_sandbox_constructor_failure_degrades_only_spikes(self):
+        for failing in ("QualificationStore", "QualificationAuthoritySelector", "DockerSpikeHarness"):
+            with self.subTest(failing=failing), \
+                    patch.object(bridge, "QualificationStore", return_value=object()) as store, \
+                    patch.object(
+                        bridge, "QualificationAuthoritySelector", return_value=object()) as selector, \
+                    patch.object(bridge, "DockerSpikeHarness", return_value=object()) as harness:
+                {"QualificationStore": store, "QualificationAuthoritySelector": selector,
+                 "DockerSpikeHarness": harness}[failing].side_effect = PermissionError("unsafe")
+                service = bridge.build_service(_CANONICAL_PROFILE)
+            from application.ports import NullSpikeAuthoritySelector, UnavailableSpikeHarness
+            self.assertIsInstance(service._harness, UnavailableSpikeHarness)
+            self.assertIsInstance(
+                service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
+            self.assertEqual(response["result"]["type"], "Allow", response)
+
+    def test_bridge_construction_performs_no_docker_discovery(self):
+        with patch.object(
+                bridge.QualificationAuthoritySelector, "select",
+                side_effect=AssertionError("selection is StartRun-only")) as selected:
+            service = bridge.build_service(_CANONICAL_PROFILE)
+        self.assertTrue(callable(service.dispatch))
+        selected.assert_not_called()
+
+    def test_start_run_with_absent_authority_binds_unavailable_without_docker_reads(self):
+        self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
+        self.assertFalse(ABSENT_SANDBOX_HOME.exists())
+        with tempfile.TemporaryDirectory() as home, patch.object(
+                selection.docker, "discover_docker",
+                side_effect=AssertionError("absent authority must precede Docker discovery")) as docker:
+            saved = os.environ.get("EMPIRICA_HOME")
+            os.environ["EMPIRICA_HOME"] = str(Path(home).resolve())
+            try:
+                service = bridge.build_service(_CANONICAL_PROFILE)
+                response = service.dispatch(_valid_request({
+                    "type": "StartRun",
+                    "control_mode": "deliberative",
+                    "selector": {"project": "composition", "session": "absent"},
+                    "goal": "reason without Docker",
+                    "invocation": invocation_for(_CANONICAL_PROFILE),
+                }, "start-absent"))
+            finally:
+                if saved is None:
+                    os.environ.pop("EMPIRICA_HOME", None)
+                else:
+                    os.environ["EMPIRICA_HOME"] = saved
+        self.assertIn(response["result"]["type"], {"Allow", "Block"}, response)
+        self.assertEqual(
+            service._coordinator.last_state.spike_backend, {"kind": "spikes_unavailable"})
+        docker.assert_not_called()
+
+    def test_unsafe_authority_does_not_block_nonspike_read(self):
+        saved = os.environ["EMPIRICA_SANDBOX_HOME"]
+        os.environ["EMPIRICA_SANDBOX_HOME"] = "relative/unsafe"
+        try:
+            response = bridge.handle(_get_run(request_id="unsafe-read"), _CANONICAL_PROFILE)
+        finally:
+            os.environ["EMPIRICA_SANDBOX_HOME"] = saved
+        _assert_inert_no_run(response)
 
     # --- no state/git repo reached (no-location, no-write) ----------------------
 

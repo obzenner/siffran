@@ -24,6 +24,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from unittest import mock
 
+from sandbox_isolation import force_absent_sandbox_home
+
 import governance_setup
 from adapters import bridge
 from adapters.git.artifact_repo import _COMMIT_IDENTITY, GitArtifactRepository
@@ -40,6 +42,7 @@ from core.freshness import canonical_digest, execution_facts, observations_diges
 from core.records import RunKey
 from governance_setup import approve_current, end_with_consent
 from observer_store import BOUND, DRIFTED, body
+force_absent_sandbox_home()
 
 PROFILE = host_profile_id("claude-code")
 FILES = ("run.json", "timeline.jsonl", "workspace.json")

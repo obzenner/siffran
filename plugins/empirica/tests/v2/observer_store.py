@@ -20,6 +20,8 @@ from unittest import mock
 from dataclasses import dataclass, field
 from typing import Any
 
+from sandbox_isolation import force_absent_sandbox_home
+
 import governance_setup
 from governance_setup import TEST_INVOCATION, sized_configure_run
 from application.location import decode_handle, storage_id
@@ -35,6 +37,7 @@ from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
 from driver import FakeClock, MemoryTimeline, clone_driver
+force_absent_sandbox_home()
 
 PROFILE = ConformanceCase.DEFAULT_PROFILE
 #: The store's clock: 2026-09-28T09:00Z at the first write, then one minute per write.
