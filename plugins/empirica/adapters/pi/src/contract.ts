@@ -163,10 +163,22 @@ export function isTerminalBatch(batch: unknown): batch is ConfirmationBatch & { 
     && (batch as ConfirmationBatch).terminal !== null;
 }
 
+/** The run's immutable spike authority selected once at StartRun; qualified is binding, not live health. */
+export type SpikeBackend =
+  | { kind: "spikes_unavailable" }
+  | {
+      kind: "qualified";
+      backend: "docker";
+      profile_id: "docker-rust-v1";
+      qualification_record_digest: string;
+      execution_binding_digest: string;
+    };
+
 /** Minimum run fields the guard validates on Allow/Block branches. */
 export interface RunSnapshot {
   id: string;
   status: RunStatus;
+  spike_backend: SpikeBackend;
   /** The core's progress basis (a digest; `core.evaluation.progress_basis`): the one thing a host compares to know whether the run moved. */
   basis?: string;
   /** What a human would be shown now, or null (the core's projection; the host presents when `prompt_error` is null). */

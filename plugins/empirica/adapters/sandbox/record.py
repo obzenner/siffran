@@ -40,8 +40,8 @@ OPERATION_ID = re.compile(r"^o-[0-9a-f]{32}$")
 _EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
 # Alongside the execution/state implementation, authority includes every source
 # that selects the harness, constructs or invokes public ObserveAction transport,
-# classifies/enforces its outer deadline, or owns the Claude MCP ceiling, plus
-# every vendored v2 JSON document loaded by those runtime paths. Private
+# classifies/enforces its outer deadline, owns the run repository/CAS that seals
+# request state before execution, or owns the Claude MCP ceiling, plus every vendored v2 JSON document loaded by those runtime paths. Private
 # transport/bridge stay excluded: their closed operation enum cannot carry a
 # public ObserveAction. Root contract duplicates stay excluded; vendor-check owns
 # their byte identity with the runtime-loaded copies below.
@@ -65,6 +65,8 @@ IMPLEMENTATION_SOURCE_PATHS = (
     "adapters/sandbox/record.py",
     "adapters/sandbox/selection.py",
     "adapters/state/fsio.py",
+    "adapters/state/located.py",
+    "adapters/state/repository.py",
     "application/observation.py",
     "application/ports.py",
     "application/protocol.py",

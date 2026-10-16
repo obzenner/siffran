@@ -18,6 +18,34 @@ from core.governance import human_wait, proposal_digest  # noqa: E402
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
 STATE_FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "state-fixtures"
 
+_UNAVAILABLE_SPIKES = {"kind": "spikes_unavailable"}
+_QUALIFIED_SPIKES = {
+    "kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+    "qualification_record_digest": "sha256:" + "a" * 64,
+    "execution_binding_digest": "sha256:" + "b" * 64,
+}
+
+
+def _has_spike(node) -> bool:
+    if isinstance(node, dict):
+        if node.get("kind") == "spike":
+            return True
+        return any(_has_spike(value) for value in node.values())
+    return isinstance(node, list) and any(_has_spike(value) for value in node)
+
+
+def _has_spike_reason(node) -> bool:
+    if isinstance(node, dict):
+        if isinstance(node.get("code"), str) and node["code"].startswith("claim.spike_"):
+            return True
+        return any(_has_spike_reason(value) for value in node.values())
+    return isinstance(node, list) and any(_has_spike_reason(value) for value in node)
+
+
+def _spike_binding(document: dict) -> dict:
+    requires_spikes = _has_spike(document) or _has_spike_reason(document)
+    return dict(_QUALIFIED_SPIKES if requires_spikes else _UNAVAILABLE_SPIKES)
+
 
 def _audit_summary(result: dict, run: dict) -> dict[str, object]:
     """Derive the bounded RunView audit summary for hand-authored conformance fixtures.
@@ -48,11 +76,18 @@ def generated(path: Path) -> str:
             command["target"], command.get("section_id"))
     result = document.get("expected", {}).get("result", {})
     run = result.get("run", {})
+    binding = _spike_binding(document)
+    if isinstance(run, dict) and run:
+        run["spike_backend"] = dict(binding)
+    argument = result.get("argument") if isinstance(result, dict) else None
+    if isinstance(argument, dict):
+        argument["spike_backend"] = dict(binding)
     governed = run.get("governance") if isinstance(run, dict) else None
     for child in document.get("children", ()):
         dossier = child.get("audit_argument") if isinstance(child, dict) else None
         if isinstance(dossier, dict) and isinstance(dossier.get("audit"), dict):
-            # Persisted audit dossiers are argument views, so they carry findings too.
+            # Persisted audit dossiers are argument views, so they carry the exact run backend and findings too.
+            dossier["spike_backend"] = dict(binding)
             dossier["audit"].setdefault("findings", [])
     argument_audit = result.get("argument", {}).get("audit") if isinstance(result, dict) else None
     if isinstance(argument_audit, dict):

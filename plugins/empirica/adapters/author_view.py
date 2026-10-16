@@ -46,12 +46,13 @@ class TextSafety:
 
 @dataclass(frozen=True)
 class Header:
-    """First-line result, run, governance summary, public proposal rationale, and the unreviewed-runtime note."""
+    """First-line result, run, governance, immutable spike binding, public rationale, and host note."""
 
     result_type: Trusted
     status: Trusted
     governance: Trusted
     run_id: Trusted
+    spike_backend: tuple[Trusted, ...]
     proposal_rationale: Untrusted | None
     host_note: Trusted | None = None
 
@@ -266,6 +267,18 @@ def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
     )
 
 
+def _spike_backend(run: dict[str, Any]) -> tuple[Trusted, ...]:
+    """Render only the closed public StartRun binding; never infer current backend health."""
+    backend = run["spike_backend"]
+    if backend["kind"] == "spikes_unavailable":
+        return (Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_unavailable']}"),)
+    return (
+        Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_qualified']}"),
+        Trusted(f"  {_LABELS['spike_backend_record']} {backend['qualification_record_digest']}"),
+        Trusted(f"  {_LABELS['spike_backend_execution']} {backend['execution_binding_digest']}"),
+    )
+
+
 def _governance(run: dict[str, Any]) -> Trusted:
     """Render the compact governance header summary."""
     governance = run["governance"]
@@ -319,7 +332,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     host_note = (Trusted(f"{_LABELS['host_unreviewed']} {unreviewed['package']} {unreviewed['version']} "
                          f"{_LABELS['host_unreviewed_note']}") if unreviewed is not None else None)
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
-                    Trusted(run["id"]),
+                    Trusted(run["id"]), _spike_backend(run),
                     safety.untrusted(rationale) if rationale is not None else None, host_note)
     terminal_next = tuple(render_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
@@ -435,6 +448,7 @@ def _render(view: AuthorView) -> str:
     """Render a parsed view through one ordered, empty-dropping section table."""
     base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
             f"{_LABELS['run_id']} {view.header.run_id}",
+            *view.header.spike_backend,
             *((f"{_LABELS['proposal_rationale']} {view.header.proposal_rationale}",)
               if view.header.proposal_rationale is not None else ()),
             *((view.header.host_note,) if view.header.host_note is not None else ()),

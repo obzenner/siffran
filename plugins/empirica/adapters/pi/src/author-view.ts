@@ -16,6 +16,7 @@ interface Header {
   readonly status: Trusted;
   readonly governance: Trusted;
   readonly runId: Trusted;
+  readonly spikeBackend: readonly Trusted[];
   readonly proposalRationale: Untrusted | null;
   readonly hostNote: Trusted | null;
 }
@@ -156,7 +157,7 @@ function validContractResult(value: unknown): boolean {
   if (value.target === "index") {
     const index = value.index;
     return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
-      && index.id === "empirica/public" && index.version === "4.0.0"
+      && index.id === "empirica/public" && index.version === "6.0.0"
       && rows(index.sections, ["id", "title"], ["id", "title"])
       && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
         objectWithKeys(reason, ["code", "sections"]) && text(reason.code)
@@ -338,6 +339,18 @@ function reason(row: Json, safety: TextSafety): Reason {
   };
 }
 
+/** Render only the closed public StartRun binding; never infer current backend health. */
+function spikeBackend(run: Json): readonly Trusted[] {
+  const backend = run.spike_backend as Json;
+  if (backend.kind === "spikes_unavailable")
+    return [trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_unavailable}`)];
+  return [
+    trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_qualified}`),
+    trusted(`  ${LABELS.spike_backend_record} ${backend.qualification_record_digest}`),
+    trusted(`  ${LABELS.spike_backend_execution} ${backend.execution_binding_digest}`),
+  ];
+}
+
 /** Render the compact governance header summary. */
 function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
@@ -408,7 +421,8 @@ function parse(result: Json): AuthorView {
   const rationale = governanceValue === null ? null : requiredRationale(governanceValue);
   const header: Header = {
     resultType: trusted(resultType), status: trusted(run.status), governance: governance(run),
-    runId: trusted(run.id), proposalRationale: rationale === null ? null : untrusted(rationale, safety),
+    runId: trusted(run.id), spikeBackend: spikeBackend(run),
+    proposalRationale: rationale === null ? null : untrusted(rationale, safety),
     hostNote: hostNote(run.host as Json),
   };
   const terminalNext = (run.next_actions as string[]).map(surface);
@@ -509,6 +523,7 @@ function render(view: AuthorView): string {
   const base = [
     `${view.header.resultType} ${view.header.status} — ${view.header.governance}`,
     `${LABELS.run_id} ${view.header.runId}`,
+    ...view.header.spikeBackend,
     ...(view.header.proposalRationale === null
       ? [] : [`${LABELS.proposal_rationale} ${view.header.proposalRationale}`]),
     ...(view.header.hostNote === null ? [] : [view.header.hostNote]),

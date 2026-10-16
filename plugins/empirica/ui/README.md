@@ -2,7 +2,8 @@
 
 A read-only page for people. The **Universe**: every run a mark, each project an island, zoom from the store to an
 island to a run. The **Inbox**: buckets of what needs you, the calendar, and runs by standing. A run's **sheet**
-(resizable): what it owes or how it ended, its claims with their proof, its audits, attempts and history.
+(resizable): what it owes or how it ended, its immutable spike capability (unavailable or a safely abbreviated qualified
+binding, never live health), its claims with their proof, its audits, attempts and history.
 It reads only the plugin's observer (`application/observer.py`, contract
 [`empirica-ui-view/v1`](../../../contracts/empirica-ui-view/v1/README.md)), which the plugin serves on 127.0.0.1
 (`adapters/observer/server.py`), at `http://empirica.localhost:<port>/app/`. Why it is built this way: ADR-0065.

@@ -105,8 +105,16 @@ Research outcomes:
 ## Fold 2: spike
 
 Only a `needs-experiment` claim requires Fold 2. Supporting Fold-1 research must
-already exist. Submit a `spike_request` with the exact deterministic command and a
-non-empty list of repo-relative dependent files:
+already exist. Before designing a spike, read the RunView's immutable `spike_backend`:
+
+- `spikes_unavailable`: do not submit an unchanged spike request. Continue non-spike research,
+  refine the graph to claims the available evidence can answer, or stop with an honest residual.
+  Never fabricate evidence or run the command through an ambient host fallback.
+- `qualified` / `docker-rust-v1`: this run is bound to the published qualification-record and
+  execution-binding digests. That is not a guarantee the backend is currently healthy.
+
+For a qualified run, submit a `spike_request` with a small, bounded, offline, deterministic command
+and a non-empty list naming **every** repo-relative file it reads:
 
 ```json
 {
@@ -118,14 +126,31 @@ non-empty list of repo-relative dependent files:
 ```
 
 The service—not the author—captures a coherent workspace tree, seals the request,
-runs the harness exactly once against captured bytes, records file hashes, and
-derives pass/fail solely from the subprocess exit code. A spike's file bindings must include every
-file its command reads, because the harness sandbox contains only the bound files. Do not submit an
+runs the harness at most once within that application call, records file hashes, and derives pass/fail
+from an inspected normal workload exit. A result-CAS retry never reruns the harness, but a crash after
+execution or a separate call may execute the same sealed request again; make the probe safe under duplicate
+execution. The command workload hard limit is **120 seconds**; design comfortably
+below it and split a longer deterministic experiment. The backend's **210-second** whole-operation
+bound reserves create, inspect, cleanup, absence proof, and postflight; it is not workload time. Pi's
+**300-second** and Claude MCP's **360-second** limits are outer transport margins, not workload budgets.
+Do not claim 300 or 360 seconds of usable spike runtime.
+
+The sandbox permits no network, download, or install. It has one CPU, 512 MiB memory with no swap,
+128 PIDs, 256 open files, at most 256 staged files totalling 64 MiB with each file at most 64 MiB, and
+private writable tmpfs only. Stdout and stderr each have an independent 1 MiB ceiling (up to 1 MiB
+each, not 1 MiB aggregate). It permits no daemon or background continuation. Because the captured
+sandbox contains only the bound files, explicitly name every file the command reads. Do not submit an
 `evidence_leaf` or a claimed gate.
 
+An inspected exit zero is PASS and another inspected workload exit is FAIL. Actual workload exits 124
+and 125 remain ordinary nonzero results. A backend-enforced timeout, stdout or stderr output limit,
+OOM, cleanup failure, identity mismatch, or authority failure is **unavailable**, not FAIL, and admits
+**no spike result evidence**. Narrow or redesign the probe after unavailable, continue research, or
+arrange operator requalification for a future new run; do not blindly retry or use a host fallback.
+
 A passing exit code satisfies Fold 2 only while every bound file remains current.
-A changed binding makes the spike stale. Request the same canonical
-`spike_request` path again; there is no separate re-gate operation.
+A changed binding makes the spike stale. Request the same canonical `spike_request` path again only
+while this run remains qualified; there is no separate re-gate operation.
 
 ## Choosing a falsifier
 

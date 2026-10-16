@@ -10,7 +10,8 @@ from dataclasses import replace
 from pathlib import Path
 from unittest.mock import patch
 
-from adapters.sandbox import record, selection
+from adapters import author_view
+from adapters.sandbox import docker, record, selection
 from adapters.state.repository import FilesystemRunRepository
 from application import protocol, run_state, v2
 from application.location import encode_handle, storage_id
@@ -50,6 +51,109 @@ class CountingSelector:
         if isinstance(self.value, BaseException):
             raise self.value
         return self.value
+
+
+class PublicSpikeBackendTests(unittest.TestCase):
+    def _public_views(self, binding):
+        selector = CountingSelector(binding)
+        coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), PROFILE, {}, selector)
+        started = coordinator.handle(start_command(session=f"public-{binding.persisted()['kind']}"), "start")
+        run_id = started["result"]["run"]["id"]
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "route", "reason": "public projection test"}}, "route")
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {
+            "kind": "graph", "payload": {"root": "C0", "claims": [{
+                "id": "C0", "text": "The public backend is immutable.",
+                "kind": "ordinary", "gating": True}], "edges": []}}}, "graph")
+        run = coordinator.handle({"type": "GetRun", "run_id": run_id}, "read-run")
+        argument = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "read-argument")
+        self.assertEqual(selector.calls, 1, "public reads must not rediscover authority")
+        protocol.schema_validator("response").validate(run)
+        protocol.schema_validator("response").validate(argument)
+        return run["result"]["run"], argument["result"]["argument"], run["result"]
+
+    def test_closed_binding_projects_identically_into_run_and_audit_dossier(self):
+        for selected in (SpikesUnavailable("local diagnostic must not escape"),
+                         QualifiedSpikeBackend(DIGEST_A, DIGEST_B)):
+            with self.subTest(kind=selected.persisted()["kind"]):
+                run, argument, result = self._public_views(selected)
+                self.assertEqual(run["spike_backend"], selected.persisted())
+                self.assertEqual(argument["spike_backend"], selected.persisted())
+                public_text = author_view.render_author_view(result, strict=True)
+                self.assertNotIn("local diagnostic", public_text)
+                if selected.persisted()["kind"] == "spikes_unavailable":
+                    self.assertIn(
+                        "spikes unavailable; no spike requests "
+                        "(research, graph, honest stop still allowed)", public_text)
+                else:
+                    self.assertIn("qualified docker-rust-v1 binding", public_text)
+                    self.assertIn("not a live-health claim", public_text)
+                    self.assertIn(DIGEST_A, public_text)
+                    self.assertIn(DIGEST_B, public_text)
+
+    def test_generated_claim_spike_reason_fixtures_are_qualified(self):
+        seen = []
+        fixture_dir = ROOT / "contracts/empirica/v2/fixtures"
+        for path in sorted(fixture_dir.glob("*.json")):
+            document = json.loads(path.read_text())
+            result = document.get("expected", {}).get("result", {})
+            codes = [reason.get("code") for reason in result.get("reasons", ())
+                     if isinstance(reason, dict)]
+            if any(isinstance(code, str) and code.startswith("claim.spike_") for code in codes):
+                seen.append(path.name)
+                self.assertEqual(result["run"]["spike_backend"]["kind"], "qualified", path.name)
+        self.assertEqual(seen, ["block-stale-spike-missing.json", "block-stale-spike.json"])
+
+    def test_response_schema_rejects_every_backend_extension_or_near_match(self):
+        run, _argument, result = self._public_views(SpikesUnavailable())
+        for backend in (
+            {"kind": "spikes_unavailable", "diagnostic": "socket"},
+            {"kind": "qualified", "backend": "host", "profile_id": "docker-rust-v1",
+             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
+            {"kind": "qualified", "backend": "docker", "profile_id": "other",
+             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
+            {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+             "qualification_record_digest": "bad", "execution_binding_digest": DIGEST_B},
+        ):
+            candidate = copy.deepcopy(result)
+            candidate["run"]["spike_backend"] = backend
+            with self.subTest(backend=backend):
+                self.assertFalse(protocol.schema_validator("response").is_valid({
+                    "protocol": "empirica/v2", "request_id": "schema", "result": candidate}))
+        self.assertNotIn("diagnostic", run["spike_backend"])
+
+    def test_agent_spike_design_limits_are_bound_to_backend_constants(self):
+        skill = (ROOT / "plugins/empirica/skills/empirica/SKILL.md").read_text()
+        evidence = (ROOT / "plugins/empirica/skills/empirica/references/evidence.md").read_text()
+        contract = (ROOT / "contracts/empirica/v2/public-contract.json").read_text()
+        for text in (skill, evidence, contract):
+            normalized = " ".join(text.lower().split())
+            positions = [text.index(value) for value in ("120", "210", "300", "360")]
+            self.assertEqual(positions, sorted(positions))
+            self.assertIn("512 MiB", text)
+            self.assertIn("128 PIDs", text)
+            self.assertIn("256 open files", text)
+            self.assertIn("256", text)
+            self.assertIn("64 MiB", text)
+            self.assertIn("1 MiB", text)
+            self.assertIn("stdout", text.lower())
+            self.assertIn("stderr", text.lower())
+            self.assertIn("no spike result evidence", normalized)
+            self.assertIn("result-cas", normalized)
+            self.assertIn("crash", normalized)
+            self.assertIn("separate call", normalized)
+            self.assertIn("duplicate execution", normalized)
+        self.assertEqual((docker.WORKLOAD_TIMEOUT_SECONDS, docker.OPERATION_TIMEOUT_SECONDS),
+                         (120.0, 210.0))
+        self.assertEqual((docker.CPU_NANO, docker.MEMORY_BYTES, docker.PIDS_LIMIT,
+                          docker.NOFILE_LIMIT, docker.FSIZE_LIMIT,
+                          docker.WORKLOAD_OUTPUT_LIMIT_BYTES),
+                         (1_000_000_000, 512 * 1024 * 1024, 128, 256,
+                          64 * 1024 * 1024, 1024 * 1024))
+        mcp = json.loads((ROOT / "plugins/empirica/.mcp.json").read_text())
+        self.assertEqual(mcp["mcpServers"]["empirica"]["tool_timeout_sec"], 360)
+        pi_transport = (ROOT / "plugins/empirica/adapters/pi/src/stdio-transport.ts").read_text()
+        self.assertIn("SPIKE_BRIDGE_TIMEOUT_MS = 300_000", pi_transport)
 
 
 class Run3SchemaTests(unittest.TestCase):

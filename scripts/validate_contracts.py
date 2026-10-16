@@ -65,7 +65,7 @@ AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:d4915422e2b04b6d6d44f4ff480d7134d69b81a94dfec0c6f4d52878868bfc14"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "4.0.0"
+REGISTRY_VERSION = "6.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
@@ -2789,6 +2789,12 @@ def main() -> int:
         check_protocol_identity(expected, errors, f"{where}:expected")
         check_banned_fields(expected, errors, f"{where}:expected")
         result = expected.get("result", {})
+        reason_codes = [reason.get("code") for reason in result.get("reasons", ())
+                        if isinstance(reason, dict)]
+        run_backend = result.get("run", {}).get("spike_backend") if isinstance(result.get("run"), dict) else None
+        if (any(isinstance(code, str) and code.startswith("claim.spike_") for code in reason_codes)
+                and (not isinstance(run_backend, dict) or run_backend.get("kind") != "qualified")):
+            errors.append(f"{where}: claim.spike_* reason requires a qualified fixture spike_backend")
         check_allow_cross_field(result, errors, f"{where}:expected")
         check_response_reasons(result, registry, errors, f"{where}:expected")
         check_run_view_fields(result, registry, errors, f"{where}:expected")
@@ -3305,6 +3311,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
+               "spike_backend": {"kind": "spikes_unavailable"},
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                         "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
                "host": {"profile_id": "claude-code", "tier": "foreground_only",
@@ -3564,6 +3571,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
             "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
+            "spike_backend": {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+                "qualification_record_digest": d64, "execution_binding_digest": d64},
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,
@@ -3764,6 +3773,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
             "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
+            "spike_backend": {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+                "qualification_record_digest": d64, "execution_binding_digest": d64},
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,

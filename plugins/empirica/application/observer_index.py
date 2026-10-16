@@ -26,7 +26,7 @@ run: it counts, filters, pages and searches the published fields.
   declared order (``ORDERS``), paged by a cursor. A flag within a window (``flag`` with ``since``) is the event's own time
   (``flagged``), the same time the aggregates count it by.
 
-Known limitation (5.0.0): places and slots are recomputed from the runs as they are, never stored, so a deleted run, or a
+Known limitation (6.0.0): places and slots are recomputed from the runs as they are, never stored, so a deleted run, or a
 run whose time is recovered late, may renumber the places after it (``contracts/empirica-ui-view/v1/README.md``).
 
 Times are labels: a window counts a fact by its time. The orders that read them are declared: the needs list (oldest

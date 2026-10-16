@@ -244,6 +244,7 @@ class Observer:
                    "attention": None, "next": None, "audit": None, "progress": None, "root": None, "edges": None, "claims": None}
         # What was not read is unknown (null), never an empty list that reads as zero.
         detail = {"contract": CONTRACT, "key": row["key"], "version": version, "goal": goal,
+                  "spike_backend": None if state is None else governance.plain(state.spike_backend),
                   "governance": None if state is None else _core.governance_view(_core.governance_facts(state, None)),
                   "audit": None, "stop": None, "residuals": None, "now": None, "outstanding": None, "stale": None, "author": None, "auditor": None,
                   "audits": None, "dropped": None, "decisions": None, "steps": None, "claims": None}

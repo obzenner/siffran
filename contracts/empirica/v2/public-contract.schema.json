@@ -44,7 +44,7 @@
       "const": "empirica/public"
     },
     "version": {
-      "const": "4.0.0"
+      "const": "6.0.0"
     },
     "protocol": {
       "const": "empirica/v2"
@@ -942,7 +942,12 @@
             "audit_verdict_failed",
             "audit_pending",
             "audit_not_current",
-            "audit_reaudit_pending"
+            "audit_reaudit_pending",
+            "spike_backend",
+            "spike_backend_unavailable",
+            "spike_backend_qualified",
+            "spike_backend_record",
+            "spike_backend_execution"
           ],
           "properties": {
             "no_governance": {
@@ -1186,6 +1191,26 @@
               "minLength": 1
             },
             "pending_audit": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spike_backend": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spike_backend_unavailable": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spike_backend_qualified": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spike_backend_record": {
+              "type": "string",
+              "minLength": 1
+            },
+            "spike_backend_execution": {
               "type": "string",
               "minLength": 1
             },

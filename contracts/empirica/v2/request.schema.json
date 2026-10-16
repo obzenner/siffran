@@ -711,6 +711,7 @@
       }
     },
     "actionSpikeRequest": {
+      "description": "Request one bounded offline deterministic probe only for a run whose public spike_backend is qualified. Design comfortably below the 120-second workload limit, name every dependent file, and never treat the 210-second backend bound or 300/360-second outer transport margins as workload time. Unavailable substrate outcomes admit no result evidence.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -728,9 +729,11 @@
         },
         "command": {
           "type": "string",
-          "minLength": 1
+          "minLength": 1,
+          "description": "A small deterministic offline command: no network, download, install, daemon, or background continuation; workload hard limit 120 seconds."
         },
         "dependent_files": {
+          "description": "Every repository-relative file the command reads; the captured sandbox contains only these named files.",
           "type": "array",
           "minItems": 1,
           "uniqueItems": true,

@@ -31,7 +31,9 @@ pi install git:github.com/obzenner/siffran
 
 Then restart Pi, or run `/reload` in an existing session.
 
-5.0.0 does not read state from earlier versions; start a fresh session.
+Empirica 6 does not load `empirica.run/2`; start a fresh run/3 generation. Qualified deterministic
+spikes use an exact operator-qualified local Docker binding with no ambient host-shell fallback. See the
+[Empirica 6 upgrade guide](doc/upgrading-empirica-6.md).
 
 ## Usage
 
@@ -47,13 +49,14 @@ See the [Empirica skill](plugins/empirica/skills/empirica/SKILL.md) for how a ru
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.10.1 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 5.0.1 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 6.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## Documentation
 
 - [Empirica skill](plugins/empirica/skills/empirica/SKILL.md), with its [governance](plugins/empirica/skills/empirica/references/governance.md) and [audit](plugins/empirica/skills/empirica/references/audit.md) references
 - [Host support and versions](doc/hosts.md)
+- [Upgrading to Empirica 6](doc/upgrading-empirica-6.md)
 - [Observer UI](plugins/empirica/ui/README.md)
 - [Architecture decisions](doc/adr/)
 - [Testing](doc/testing.md)

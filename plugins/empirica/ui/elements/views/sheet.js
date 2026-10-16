@@ -16,9 +16,18 @@ export function noticeHtml(key) {
   return key ? `<div class="alert" role="alert" data-variant="destructive"><section class="flex flex-wrap items-center gap-s"><span>${t(key)}</span><button type="button" class="btn" data-variant="outline" data-size="sm" data-retry>${t("detail.retry")}</button></section></div>` : "";
 }
 
+/** Compact display of the observer-owned immutable backend binding. Digests are only abbreviated for display. */
+function spikeBackendHtml(backend) {
+  if (backend === null) return "";
+  if (backend.kind === "spikes_unavailable")
+    return `<p class="text-xs text-muted-foreground" data-spike-backend>${t("spike_backend.unavailable")}</p>`;
+  const digest = (value, label) => `<span>${t(label)} <code class="font-mono" title="${esc(value)}">${esc(`${value.slice(0, 15)}…${value.slice(-8)}`)}</code></span>`;
+  return `<p class="flex flex-wrap gap-xs text-xs text-muted-foreground" data-spike-backend><span>${t("spike_backend.qualified")}</span><span>${t("spike_backend.not_health")}</span>${digest(backend.qualification_record_digest, "spike_backend.record")}${digest(backend.execution_binding_digest, "spike_backend.execution")}</p>`;
+}
+
 /** The run's head: its standing, its goal, and one line of where it is (project, attempt, claims, last change), then the
  * session to copy. The project's repository and the full time are a hover away. */
-function headerHtml({ row, project, attempts, now }) {
+function headerHtml({ row, project, attempts, detail, now }) {
   const where = joined(
     project ? `<span title="${esc(project.repo ?? "")}" data-project>${esc(project.label)}</span>` : "",
     t("row.attempt", { at: row.generation, of: attempts.length }),
@@ -30,6 +39,7 @@ function headerHtml({ row, project, attempts, now }) {
     <h1 class="text-l font-semibold" tabindex="-1" data-title>${row.goal === null ? t("goal.unread") : esc(clip(row.goal, 160))}</h1>
     ${row.goal !== null && row.goal.length > 160 ? `<ev-more text="${esc(row.goal)}"></ev-more>` : ""}
     <p class="text-xs text-muted-foreground" data-where>${where}</p>
+    ${detail ? spikeBackendHtml(detail.spike_backend) : ""}
     ${row.session ? `<div class="flex flex-col gap-3xs text-xs">${sessionHtml(row.session)}${sessionContextHtml(row.session)}</div>` : ""}
   </header>`;
 }

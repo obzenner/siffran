@@ -616,7 +616,7 @@ class ResponseMappingTests(unittest.TestCase):
         allow = _stop(allow_result)
         self.assertEqual(allow.exit_code, 0)
         self.assertIn("Allow (converged=true)", allow.stdout)
-        self.assertIn("run_id: run-fx", allow.stdout)
+        self.assertIn(f'{author_view_labels()["run_id"]} run-fx', allow.stdout)
         pending_result = stored(json.loads(
             (fixture_root / "block-pending-audit.json").read_text()))["expected"]["result"]
         pending = _stop(pending_result)
@@ -656,7 +656,7 @@ class ResponseMappingTests(unittest.TestCase):
         self.assertIn("BEGIN UNTRUSTED EMPIRICA RUN DATA", context)
         body = context.split("-----\n", 1)[1].split("\n----- END", 1)[0]
         run = fixture["expected"]["result"]["run"]
-        self.assertIn(f"run_id: {run['id']}", body)
+        self.assertIn(f'{author_view_labels()["run_id"]} {run["id"]}', body)
         self.assertIn(run["status"], body)
         terminal = stored(json.loads((_FIXTURES / "allow-converged.json").read_text()))["expected"]
         self.assertEqual(restore_context(_typed(terminal["result"])), "")

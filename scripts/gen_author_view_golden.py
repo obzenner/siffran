@@ -50,6 +50,12 @@ def _synthetic_results() -> list[tuple[str, object]]:
     bootstrap = stored(json.loads((FIXTURES / "start-bootstrap-allow.json").read_text()))["expected"]["result"]
     all_actions = copy.deepcopy(bootstrap)
     all_actions["run"]["next_actions"] = list(next_action_surfaces())
+    qualified_backend = copy.deepcopy(bootstrap)
+    qualified_backend["run"]["spike_backend"] = {
+        "kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+        "qualification_record_digest": "sha256:" + "a" * 64,
+        "execution_binding_digest": "sha256:" + "b" * 64,
+    }
 
     approved = json.loads((ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" /
                            "fixtures" / "approved-configure-runview.json").read_text())
@@ -286,6 +292,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         ("fault-no-message", stored(json.loads((FIXTURES / "getcontract-full.json").read_text()))
          ["expected"]["result"]),
         ("all-next-actions", all_actions),
+        ("qualified-spike-backend", qualified_backend),
         ("governance-approved", approved),
         ("governance-approval-unavailable", unavailable),
         ("null", None),

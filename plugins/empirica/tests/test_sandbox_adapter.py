@@ -1012,6 +1012,7 @@ class RecordTests(unittest.TestCase):
             "adapters/sandbox/environment.py", "adapters/sandbox/execution.py",
             "adapters/sandbox/record.py",
             "adapters/sandbox/selection.py", "adapters/state/fsio.py",
+            "adapters/state/located.py", "adapters/state/repository.py",
             "application/observation.py", "application/ports.py", "application/protocol.py",
             "application/run_state.py", "application/transaction.py",
             "application/v2.py", "core/evaluation.py", "core/freshness.py", "core/run.py",
@@ -1043,6 +1044,8 @@ class RecordTests(unittest.TestCase):
             "adapters/pi/src/index.ts": "createStdioBridgeDispatch(defaultBridgeConfig())",
             "adapters/pi/src/stdio-transport.ts": "SPIKE_BRIDGE_TIMEOUT_MS",
             "adapters/pi/src/process-transport.ts": "config.timeoutMs",
+            "adapters/state/located.py": "return self.repository.compare_and_set",
+            "adapters/state/repository.py": "def compare_and_set",
         }
         for relative, source_marker in public_boundary_sources.items():
             self.assertIn(relative, expected)

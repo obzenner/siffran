@@ -23,6 +23,22 @@ Pi and Claude async promotion remains separate and unsupported.
 The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
 release evidence is the long-running scenarios (same file).
 
+## Empirica 6 spike authority
+
+Empirica **6.0.0** is the plugin major; its public wire remains `empirica/v2`, current run storage is
+`empirica.run/3`, and the observer model remains `empirica-ui-view/v1`. See the
+[upgrade guide](upgrading-empirica-6.md) and [ADR-0071](adr/0071-bind-spikes-to-qualified-docker-authority-per-run.md).
+
+An operator separately qualifies one exact local Unix Docker authority after the final tree is clean and committed.
+`StartRun` binds either that exact `docker-rust-v1` qualification and execution digest pair or
+`spikes_unavailable`; existing runs never adopt a later current record. Qualified means bound, not live health. A closed
+unavailable request admits no spike result: narrow or redesign the probe, continue research, or let an operator
+requalify for a future new run. Never repeat blindly or use an ambient host-shell fallback. Empirica performs no Docker
+installation, pull, daemon/VM start or repair, context/configuration switch, or permission change.
+
+Run/2 lacks this authority and remains unsupported/corrupt and untouched. An explicit fresh `StartRun` generation is the
+only upgrade path; no migration, loader, or compatibility branch exists.
+
 ## Pi and pi-subagents
 
 Empirica's independent audit runs through the external

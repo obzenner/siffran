@@ -1,4 +1,4 @@
-# Governed initialization (public contract 4.0.0)
+# Governed initialization (public contract 6.0.0)
 
 ## Prepare without investigating
 

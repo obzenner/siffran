@@ -396,7 +396,7 @@ class DemoStoreTests(unittest.TestCase):
 
 class RevisionTests(unittest.TestCase):
     """A configuration the human approved twice is two asks of different kinds: the first approval of the configuration
-    and one revision of it. 5.0.0 does not record whether a revision raised a ceiling, so a revision is any governance ask
+    and one revision of it. 6.0.0 does not record whether a revision raised a ceiling, so a revision is any governance ask
     after the first approval, counted exactly."""
 
     def _twice(self):

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The public contract's label (4.0.0) is the same everywhere it is checked or stated. One test names every place,
+"""The public contract's label (6.0.0) is the same everywhere it is checked or stated. One test names every place,
 so a label that moves in one place and not another fails here."""
 import json
 import re
@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 import validate_contracts as v  # noqa: E402
 
-LABEL = "4.0.0"
+LABEL = "6.0.0"
 CONTRACTS = ROOT / "contracts" / "empirica" / "v2"
 PLUGIN = ROOT / "plugins" / "empirica"
 

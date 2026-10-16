@@ -36,6 +36,18 @@ test("what the observer published for a run is on its sheet: the goal, what is o
     if (s.row.goal) assert.ok(t.includes(s.row.goal.slice(0, 40)), key);
   }
 });
+test("the run header shows both immutable spike states compactly without claiming live health", () => {
+  const unavailable = text(sheetHtml(ctx(sheets[scenarios.verification])));
+  const qualifiedSheet = sheets[scenarios.converged];
+  const qualified = text(sheetHtml(ctx(qualifiedSheet)));
+  assert.equal(qualifiedSheet.spike_backend.kind, "qualified");
+  assert.match(unavailable, /Spikes unavailable/);
+  assert.match(qualified, /Spikes bound · docker-rust-v1/);
+  assert.match(qualified, /not a live health check/);
+  assert.match(qualified, /sha256:aaaaaaaa…aaaaaaaa/);
+  assert.match(qualified, /sha256:bbbbbbbb…bbbbbbbb/);
+  assert.doesNotMatch(qualified, /unix:\/\/|\.sock|current\.json/);
+});
 test("an open claim shows everything the sheet holds about it: its sources, its decision, its spikes", () => {
   let seen = 0;
   for (const s of Object.values(sheets)) for (const own of s.claims ?? []) {

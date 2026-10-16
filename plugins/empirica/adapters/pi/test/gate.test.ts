@@ -35,6 +35,7 @@ import type { PrivateIngressRequest } from "../src/private-transport.ts";
 const AUTHOR_LABELS = PUBLIC_TOOLS.author_view.labels as Readonly<Record<string, string>>;
 
 const HANDLE = "run-handle-1";
+const UNAVAILABLE_SPIKES = { kind: "spikes_unavailable" } as const;
 
 test("Pi auditor model follows host settings precedence; identity policy owns equivalence", () => {
   const global = { subagents: { agentOverrides: {
@@ -198,7 +199,7 @@ function envelope(result: Result, requestId = "x"): Response {
   return { protocol: PROTOCOL, request_id: requestId, result };
 }
 function run(status = "active") {
-  return { id: HANDLE, status: status as never, governance: { state: "approved",
+  return { id: HANDLE, status: status as never, spike_backend: UNAVAILABLE_SPIKES, governance: { state: "approved",
     proposal: { budgets: {} } } };
 }
 
@@ -907,7 +908,8 @@ const BATCH = (promptError: string | null = null) => ({ key: `sha256:${"d".repea
   records: [{ claim_id: "C1", source_kind: "web", source_ref: "https://example.test/x" }] });
 const EVIDENCE_WAITING = (route = "human", promptError: string | null = route === "human" ? null : "unavailable",
                           code = "evidence.confirmation_required") => ({ type: "Block" as const,
-  run: { id: HANDLE, status: "active" as never, governance: null, confirmation_batch: BATCH(promptError) },
+  run: { id: HANDLE, status: "active" as never, spike_backend: UNAVAILABLE_SPIKES, governance: null,
+    confirmation_batch: BATCH(promptError) },
   reasons: [{ code, message: code === "evidence.confirmation_required" ? "Research waits on a human."
     : code.startsWith("claim.spike") ? `Spike problem: ${code}.` : "Record research for C1.",
     parameters: { route, record_ids: [`sha256:${"a".repeat(64)}`] } }] });
@@ -988,7 +990,7 @@ test("gate: with route unavailable the requirement stays a denial and nothing is
 
 function waitingRun(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {},
                     controlMode = "deliberative") {
-  return { id: HANDLE, status: "active" as never, governance: {
+  return { id: HANDLE, status: "active" as never, spike_backend: UNAVAILABLE_SPIKES, governance: {
     state: "pending", control_mode: controlMode, first_approval: false, prompt_error: null, human_wait: true,
     interactions_remaining: { proposal: 3, total: 128 },
     proposal: { budgets: {}, rationale: "sized" },

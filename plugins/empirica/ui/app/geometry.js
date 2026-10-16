@@ -428,7 +428,7 @@ export function edgePath(graph, e) {
 }
 
 /** A run's attempts as a short chain of glyphs, in the graph's px offsets: one per attempt, `step` apart in a row centred
- * under the run `below` px down, linked in order (attempt 1 first). The only relationship between runs 5.0.0 records. */
+ * under the run `below` px down, linked in order (attempt 1 first). The only relationship between runs 6.0.0 records. */
 export function attemptChain(n, below, step) {
   return Array.from({ length: n }, (_, i) => ({ x: (i - (n - 1) / 2) * step, y: below }));
 }

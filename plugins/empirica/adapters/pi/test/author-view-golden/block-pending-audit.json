@@ -8,7 +8,7 @@
       "basis": "sha256:d1365fba2169d85fd460073fc8f6ca8c5a923b80d1073d2a042cd3079a2fe63f",
       "contract": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "relevant_sections": [
           "audit",
           "children"
@@ -52,7 +52,10 @@
         "independence": null,
         "findings": []
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "spike_backend": {
+        "kind": "spikes_unavailable"
+      }
     },
     "reasons": [
       {
@@ -68,5 +71,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\nAudit: pending\n\nReasons:\n  audit.pending: Audit child is pending; wait.\n    next: host: child_event\n\nChildren:\n  audit: pending"
+  "text": "Block active — no governance\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: pending\n\nReasons:\n  audit.pending: Audit child is pending; wait.\n    next: host: child_event\n\nChildren:\n  audit: pending"
 }

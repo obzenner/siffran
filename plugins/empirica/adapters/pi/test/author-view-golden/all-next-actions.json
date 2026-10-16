@@ -20,7 +20,7 @@
       "basis": "sha256:c567b9b11be5534f8b9c90f2e12813b3cb45dbfcb677d4393083bf3f4e4dad4c",
       "contract": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "relevant_sections": [
           "core",
           "roles",
@@ -139,8 +139,11 @@
         "independence": null,
         "findings": []
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "spike_backend": {
+        "kind": "spikes_unavailable"
+      }
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run\n  human: confirmation\n  report_convergence intent=report_convergence"
+  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  empirica_observe kind=configure_run\n  host: child_reserve\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run\n  human: confirmation\n  report_convergence intent=report_convergence"
 }

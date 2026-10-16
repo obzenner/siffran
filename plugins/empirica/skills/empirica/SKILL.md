@@ -63,6 +63,12 @@ A runnable convergence workflow requires all of these capabilities:
 6. request the guarded convergence decision;
 7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
+The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does
+not disable graph refinement, research, honest residual stopping, reads, or audit of claims that need
+no experiment. Do not submit an unchanged spike request in that state and never fabricate or replace
+spike evidence with ambient host execution. A `qualified` `docker-rust-v1` value means this run is
+bound to the two published digests; it is not a claim that Docker is currently healthy.
+
 If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
 investigation and report the exact unsupported capability. Do not imitate the missing operation
 in prose or write runtime artifacts by hand.
@@ -145,11 +151,32 @@ Apply the folds in order:
    human. What still needs a confirmation, who asks, when, and how often is owned by
    [references/evidence.md](references/evidence.md) ("What still needs confirming"); a `needs-decision`
    claim is human-owned and needs no research. A summary of what a source says is not a citation.
-2. **Spike second only for `needs-experiment`.** After supporting research,
-   request a deterministic command and its non-empty dependent-file set through
-   the service. The service captures immutable bytes, runs the harness once, and
-   derives the gate solely from the process exit code.
-3. **Re-gate stale spikes.** If a bound file changes, request the spike again.
+2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView's
+   immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:
+   continue non-spike research or refine the graph, or stop with an honest residual. If it is
+   `qualified`, design a small, offline, deterministic, bounded probe and explicitly name every
+   repo-relative file it reads. The service captures only those immutable files and runs the harness
+   at most once within that application call; a result-CAS retry never reruns it, but a crash after
+   execution or a separate call may execute the same sealed request again, so the probe must be safe
+   under duplicate execution. `qualified` means bound, not currently healthy.
+
+   The command workload hard limit is **120 seconds**: design comfortably below it and split a longer
+   deterministic experiment. The backend's **210-second** whole-operation bound reserves create,
+   inspect, cleanup, absence proof, and postflight; it is not workload time. Pi's **300-second** and
+   Claude MCP's **360-second** limits are outer transport margins, never usable spike runtime.
+   The sandbox has no network/download/install, one CPU, 512 MiB memory with no swap, 128 PIDs,
+   256 open files, at most 256 captured staging files totalling 64 MiB and at most 64 MiB each, and
+   private writable tmpfs only. Stdout and stderr each have an independent 1 MiB ceiling. No daemon
+   or background continuation survives the bounded operation.
+
+   Only an inspected normal workload exit produces PASS/FAIL from its exit code. An actual workload
+   exit 124 or 125 is therefore an ordinary nonzero FAIL; a backend-enforced timeout, per-stream
+   output limit, OOM, cleanup, identity, or authority failure is unavailable and admits **no spike
+   result evidence**. Narrow or redesign after unavailable; do not treat it as FAIL, blindly retry,
+   use a host fallback, or claim evidence that was not admitted. Operator requalification can affect
+   only a future new run.
+3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the
+   bounded spike again; otherwise follow the unavailable guidance above.
 4. **Derive the result:**
    - supporting research satisfies Fold 1;
    - refuting research refutes the claim;

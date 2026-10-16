@@ -36,7 +36,7 @@ from core.freshness import execution_facts, observations_digest
 from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
-from driver import FakeClock, MemoryTimeline, clone_driver
+from driver import FakeClock, FakeSpikeAuthoritySelector, MemoryTimeline, clone_driver
 force_absent_sandbox_home()
 
 PROFILE = ConformanceCase.DEFAULT_PROFILE
@@ -379,9 +379,11 @@ def _graph(root: str, claims: list[tuple[str, str, str]], edges: list[tuple[str,
 class _Builder:
     def __init__(self, clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> None:
         self.a = _Author()
+        self.spike_authority = FakeSpikeAuthoritySelector()
         timeline = MemoryTimeline() if timeline is None else timeline
         self.store = Store(self.a.bind_driver("observer", "store", "observer fixture store", PROFILE,
-                                              clock=clock or FakeClock(T0, STEP), timeline=timeline),
+                                              clock=clock or FakeClock(T0, STEP), timeline=timeline,
+                                              spike_authority_selector=self.spike_authority),
                            timeline=timeline)
         self.drv = self.store.driver
         self.files: dict[str, bytes] = {}  # what the workspace holds, so citations quote it verbatim
@@ -394,7 +396,8 @@ class _Builder:
     # --- author and host acts ----------------------------------------------
 
     def begin(self, project: str, session: str, goal: str, graph: dict, *, repo: str | None = None,
-              surface: str | None = "human", where: tuple[str, str] | None = None, approve: bool = True, **start) -> str:
+              surface: str | None = "human", where: tuple[str, str] | None = None, approve: bool = True,
+              qualified: bool = False, **start) -> str:
         """Start a run, declare its graph and have its configuration approved. ``repo`` is the path of the repository
         the project is told to live in (its folder name is the project's name); ``surface`` is what the host observes
         it can show a human (an unattended session shows nobody); ``where`` is the (label, locator) its host recorded for
@@ -408,6 +411,7 @@ class _Builder:
                 else "pi" if zlib.crc32(session.encode()) % 3 == 0 else "claude")
         start.setdefault("invocation", {**TEST_INVOCATION, "host": host, "signal": "v2 harness",
                                         **({} if where is None else {"session": {"label": where[0], "locator": where[1]}})})
+        self.spike_authority.qualified_next = qualified
         run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
         if surface is not None:  # none: the host has not looked for a dialog (the run's recorded surface stays ``unobserved``)
             drv.trusted_human_surface(run_id, surface)  # an attended session: evidence waits on its human
@@ -635,7 +639,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
         "C0", [("C0", "ordinary", "A cold start reads the tile index from one cache file."),
                ("C1", "needs-experiment", "The cache file round-trips every tile entry."),
                ("C2", "ordinary", "The loader already isolates index parsing in one function.")],
-        [("C0", "C1"), ("C0", "C2")]))
+        [("C0", "C1"), ("C0", "C2")]), qualified=True)
     b.research(run, "C2", ref="src/loader.py")
     b.research(run, "C1", ref="src/cache.py")
     b.spike(run, "C1", "python -m pytest tests/test_cache.py", {"src/cache.py": b"cache v1\n"})

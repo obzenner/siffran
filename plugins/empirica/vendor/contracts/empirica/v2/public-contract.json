@@ -1,6 +1,6 @@
 {
   "id": "empirica/public",
-  "version": "4.0.0",
+  "version": "6.0.0",
   "protocol": "empirica/v2",
   "commands": [
     "StartRun",
@@ -625,7 +625,7 @@
       }
     },
     "spike.run": {
-      "description": "Request a deterministic harness spike against active research.",
+      "description": "Request one bounded offline deterministic spike only when RunView.spike_backend is qualified. Design the command comfortably below the 120-second workload hard limit; the 210-second backend bound and Pi 300-second and Claude MCP 360-second outer margins are not workload budgets. When spikes are unavailable, do not submit an unchanged request: continue non-spike research or graph refinement, or stop with an honest residual.",
       "surface": {
         "tool": "empirica_observe",
         "action": "spike_request"
@@ -661,7 +661,7 @@
       }
     },
     "spike.regate": {
-      "description": "Re-gate a stale spike with current prerequisites.",
+      "description": "Re-gate one stale spike with a bounded offline deterministic command only when RunView.spike_backend is qualified. A closed unavailable result admits no spike evidence; narrow or redesign the probe, continue research, or arrange operator requalification for a future new run instead of blind retries or a host fallback.",
       "surface": {
         "tool": "empirica_observe",
         "action": "spike_request"
@@ -2137,11 +2137,27 @@
     },
     "evidence/spike": {
       "title": "Spike evidence",
-      "summary": "Deterministic harness spikes and the sealed request.",
+      "summary": "Bounded offline deterministic spikes, their immutable run backend, and the sealed request.",
       "clauses": [
         {
+          "id": "evidence/spike/backend",
+          "text": "RunView.spike_backend is selected once at StartRun and is either spikes_unavailable or an exact qualified docker-rust-v1 binding with qualification-record and execution-binding digests. Qualified means bound, not currently healthy. GetArgument carries the same binding so an auditor can interpret admitted spike evidence. No current pointer, local path, socket, diagnostic, fallback, or repair instruction is public."
+        },
+        {
+          "id": "evidence/spike/design",
+          "text": "Before requesting a spike, design a bounded, offline, deterministic, small probe and name every repo-relative file it reads. The command workload hard limit is 120 seconds; split longer experiments. The backend's 210-second whole-operation bound reserves create, inspect, cleanup, absence proof, and postflight time. Pi's 300-second and Claude MCP's 360-second deadlines are outer transport margins, never usable workload runtime."
+        },
+        {
+          "id": "evidence/spike/isolation",
+          "text": "The exact Docker profile permits no network, download, or install and grants one CPU, 512 MiB memory with no swap, 128 PIDs, 256 open files, at most 256 captured staging files totalling 64 MiB with each file at most 64 MiB, and only private writable tmpfs. Stdout and stderr have independent 1 MiB ceilings. No daemon or background continuation survives the bounded operation."
+        },
+        {
+          "id": "evidence/spike/outcomes",
+          "text": "Only an inspected normal workload exit admits PASS or FAIL; exit zero passes and another workload exit fails, including actual workload exits 124 and 125. A backend-enforced timeout, per-stream output limit, OOM, cleanup failure, identity mismatch, or authority failure is unavailable and admits no spike result evidence. Redesign or narrow after unavailable; do not treat it as FAIL, repeat blindly, or fall back to an ambient host shell."
+        },
+        {
           "id": "evidence/spike/attestation",
-          "text": "A spike leaf is created only from a real harness execution and binds command, exit_code, gate, result digest, harness_request_id, prerequisite snapshot, and file bindings."
+          "text": "A spike leaf is created only from a real harness execution and binds command, exit_code, gate, result digest, harness_request_id, prerequisite snapshot, and file bindings. The harness executes at most once within one application call and a result-CAS retry never reruns it; a crash after execution or a separate call may execute the same sealed request again, so probes must be safe under duplicate execution."
         },
         {
           "id": "evidence/spike/request",
@@ -2641,7 +2657,12 @@
       "decision_approve": "approved by a human",
       "decision_reject": "rejected by a human",
       "human_answer": "human answer:",
-      "pending_audit": "for the audit to retrieve"
+      "pending_audit": "for the audit to retrieve",
+      "spike_backend": "spikes",
+      "spike_backend_unavailable": "unavailable; no spike requests (research, graph, honest stop still allowed)",
+      "spike_backend_qualified": "qualified docker-rust-v1 binding (not a live-health claim)",
+      "spike_backend_record": "qualification record:",
+      "spike_backend_execution": "execution binding:"
     }
   }
 }

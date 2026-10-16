@@ -49,7 +49,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "4.0.0"
+          "const": "6.0.0"
         },
         "digest": {
           "type": "string",
@@ -1448,6 +1448,51 @@
         }
       }
     },
+    "spikeBackend": {
+      "description": "Immutable spike authority selected once at StartRun. Qualified means this run is bound to the named exact Docker profile and qualification digests; it does not claim the backend is currently healthy. Unavailable exposes no local diagnostics or repair path.",
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "backend",
+            "profile_id",
+            "qualification_record_digest",
+            "execution_binding_digest"
+          ],
+          "properties": {
+            "kind": {
+              "const": "qualified"
+            },
+            "backend": {
+              "const": "docker"
+            },
+            "profile_id": {
+              "const": "docker-rust-v1"
+            },
+            "qualification_record_digest": {
+              "$ref": "#/$defs/digest256"
+            },
+            "execution_binding_digest": {
+              "$ref": "#/$defs/digest256"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "spikes_unavailable"
+            }
+          }
+        }
+      ]
+    },
     "runView": {
       "type": "object",
       "additionalProperties": false,
@@ -1463,6 +1508,7 @@
         "freshness",
         "children",
         "host",
+        "spike_backend",
         "next_actions",
         "untrusted_delimiters",
         "governance",
@@ -1519,6 +1565,9 @@
         },
         "host": {
           "$ref": "#/$defs/hostView"
+        },
+        "spike_backend": {
+          "$ref": "#/$defs/spikeBackend"
         },
         "terminal_note": {
           "type": "string"
@@ -2246,7 +2295,7 @@
           "const": "empirica/public"
         },
         "version": {
-          "const": "4.0.0"
+          "const": "6.0.0"
         },
         "sections": {
           "type": "array",
@@ -2402,6 +2451,7 @@
         "artifacts",
         "route_stamp",
         "investigation_stamp",
+        "spike_backend",
         "audit"
       ],
       "description": "Closed GetArgument projection; no generic argument extension map.",
@@ -2464,6 +2514,10 @@
             "null"
           ],
           "minimum": 0
+        },
+        "spike_backend": {
+          "$ref": "#/$defs/spikeBackend",
+          "description": "The exact immutable run binding an auditor uses to interpret every admitted spike artifact. This is the run's sealed binding, never current machine readiness."
         },
         "audit": {
           "$ref": "#/$defs/auditView"

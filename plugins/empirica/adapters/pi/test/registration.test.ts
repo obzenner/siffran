@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import { renderAuthorView } from "../src/author-view.ts";
 import { readStoredText } from "./stored.ts";
 import { createEmpiricaExtension, DEFAULT_SKILLS_DIR } from "../src/index.ts";
+import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 import type { Response } from "../src/contract.ts";
 import type { Request } from "../src/contract.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
@@ -123,7 +124,7 @@ test("every registered tool declares a JSON-Schema object parameters block", () 
 test("empirica_observe configure_run fails closed when the governance ingress throws", async () => {
   const pi = new FakePi();
   const configureRun = {
-    id: "obs-run", status: "active", goal: "g",
+    id: "obs-run", status: "active", goal: "g", spike_backend: { kind: "spikes_unavailable" },
     governance: { state: "pending", control_mode: "deliberative" },
   };
   const dispatch = (request: Request): Response => ({
@@ -154,7 +155,7 @@ test("empirica_observe configure_run fails closed when the governance ingress th
 
 // QUAL-2 C5 measures the final rendered text returned after mediation. The same measured
 // ceiling is enforced by Python and Pi.
-const POST_MEDIATION_CEILING = 1200;
+const POST_MEDIATION_CEILING = 1300;
 const APPROVED_CONFIGURE = JSON.parse(readStoredText(
   path.join(HERE, "fixtures", "approved-configure-runview.json"), "utf8")) as
   { type: string; converged: boolean; run: { id: string; governance: Record<string, unknown> } };
@@ -214,7 +215,7 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
 }
 
 test("Pi rendered-text ceiling matches Python and covers audit-pending and terminal views", () => {
-  assert.equal(POST_MEDIATION_CEILING, 1200, "Pi and Python must share the measured ceiling");
+  assert.equal(POST_MEDIATION_CEILING, 1300, "Pi and Python must share the measured ceiling");
   for (const name of ["block-pending-audit", "allow-converged"]) {
     const golden = JSON.parse(readStoredText(
       path.join(HERE, "author-view-golden", `${name}.json`), "utf8"));
@@ -246,8 +247,12 @@ test("empirica_observe configure_run dismiss: pending Block model-visible size s
   if (details.type === "Block")
     assert.equal(details.reasons[0].code, "governance.approval_unavailable");
   const text = out.content[0].text;
+  assert.ok(text.includes(PUBLIC_TOOLS.author_view.labels.spike_backend_unavailable),
+    "the largest view retains the unavailable spike guidance");
   assert.ok(text.length < POST_MEDIATION_CEILING,
     `post-mediation dismiss text ${text.length} must stay under ${POST_MEDIATION_CEILING}`);
+  assert.ok(Buffer.byteLength(text, "utf8") < POST_MEDIATION_CEILING,
+    `post-mediation dismiss UTF-8 bytes ${Buffer.byteLength(text, "utf8")} must stay under ${POST_MEDIATION_CEILING}`);
 });
 
 // Dialog lock: Pi runs tool calls in parallel, so the lock must be taken before the first await.

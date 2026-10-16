@@ -406,21 +406,22 @@ class SizeBudgetTests(_ServiceHarness):
     path and is not serialized onto Claude/Codex's MCP result.
 
     Measured sizes at authoring (chars of model-visible rendered text):
-        pending RunView read            855
-        approved RunView read           872
-        audit-pending RunView read      676
-        terminal RunView report         928
-        audit-pending Block             743
-        configure approve result        872
-        configure dismiss result       1059
-        configure edit->confirm result  872
-    Largest measured state = 1059 (configure dismiss); CEILING = 1200 leaves 141 chars headroom.
+        pending RunView read           1051
+        approved RunView read          1068
+        audit-pending RunView read      896
+        terminal RunView report        1147
+        audit-pending Block             992
+        configure approve result       1068
+        configure dismiss result       1255 (1257 UTF-8 bytes)
+        configure edit->confirm result 1068
+    Largest measured state = 1257 UTF-8 bytes (configure dismiss); CEILING = 1300 leaves 43 bytes headroom.
+    The character ceiling remains mirrored with Pi and the largest case also asserts the stricter UTF-8 byte size.
     Re-attaching the full presentation (dialog + scope) to the pending RunView pushes the
     JSON to 3577 chars, well past the ceiling, so the reduction is guarded rather than asserted
     only to be > 0.
     """
 
-    CEILING = 1200
+    CEILING = 1300
     ROLE_PROFILE = CLAUDE_PROFILE
 
     @staticmethod
@@ -429,6 +430,9 @@ class SizeBudgetTests(_ServiceHarness):
 
     def _text_size(self, tool_result) -> int:
         return len(tool_result["content"][0]["text"])
+
+    def _text_bytes(self, tool_result) -> int:
+        return len(tool_result["content"][0]["text"].encode("utf-8"))
 
     def _mediator(self, elicit):
         from adapters.governance import HostGovernance
@@ -508,7 +512,11 @@ class SizeBudgetTests(_ServiceHarness):
         self.assertEqual(sc["reasons"][0]["code"], "governance.approval_unavailable")
         self.assertEqual(sc["run"]["governance"]["state"], "pending")
         self.assertEqual(dialogs, 1, "dismiss is a single dialog")
+        unavailable = _proto.author_view_labels()["spike_backend_unavailable"]
+        self.assertIn(unavailable, out["content"][0]["text"],
+                      "the largest view must retain the unavailable spike guidance")
         self.assertLess(self._text_size(out), self.CEILING, "configure dismiss")
+        self.assertLess(self._text_bytes(out), self.CEILING, "configure dismiss UTF-8 bytes")
 
         # edit -> locked confirmation -> Allow + approved + edited budget + exactly two dialogs.
         self.setUp()

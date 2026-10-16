@@ -82,6 +82,9 @@
           "reviewed_deferred_scope_digest": null,
           "reviewed_claims": [],
           "findings": []
+        },
+        "spike_backend": {
+          "kind": "spikes_unavailable"
         }
       },
       "audit_role_profile": "empirica:empirica-auditor",

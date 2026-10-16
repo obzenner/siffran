@@ -442,6 +442,9 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                  "missing_capabilities": ([HOST_TIER_UNSUPPORTED[snapshot.host_tier]]
                     if snapshot.host_tier in HOST_TIER_UNSUPPORTED else []),
                  **_unreviewed_runtime(snapshot.state.invocation)},
+        # Selected exactly once at StartRun. This is the immutable run binding, not current
+        # authority-pointer or Docker health, so this pure projection performs no discovery.
+        "spike_backend": governance.plain(snapshot.state.spike_backend),
     }
 
 
@@ -590,5 +593,8 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         "claims": claims, "edges": [dict(edge) for edge in snapshot.graph["edges"]], "artifacts": artifacts,
         "route_stamp": snapshot.state.route_stamp,
         "investigation_stamp": snapshot.state.investigation_stamp,
+        # The dossier repeats the exact StartRun binding so an auditor can interpret every
+        # admitted spike artifact without consulting mutable machine authority.
+        "spike_backend": governance.plain(snapshot.state.spike_backend),
         "audit": _audit(snapshot),
     })

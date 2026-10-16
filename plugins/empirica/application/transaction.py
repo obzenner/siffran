@@ -920,6 +920,9 @@ class Coordinator:
                          "digest": _proto.contract_digest(), "relevant_sections": sections},
             "obligations": {"active": [], "deferred": []}, "residuals": [],
             "freshness": {"changes": []}, "children": [], "next_actions": [],
+            # A corrupt run has no usable immutable authority, so its failure-safe view can only
+            # state that spikes are unavailable; it never guesses a qualified binding.
+            "spike_backend": {"kind": "spikes_unavailable"},
             # Nothing about an unreadable run is known, so no audit can be claimed for it.
             "audit": {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []},
             "untrusted_delimiters": dict(_proto.untrusted_delimiters()),

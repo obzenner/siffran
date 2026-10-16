@@ -6,7 +6,7 @@
       "digest": "<contract-digest>",
       "index": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "sections": [
           {
             "id": "core",
@@ -454,11 +454,11 @@
           },
           {
             "id": "spike.run",
-            "description": "Request a deterministic harness spike against active research."
+            "description": "Request one bounded offline deterministic spike only when RunView.spike_backend is qualified. Design the command comfortably below the 120-second workload hard limit; the 210-second backend bound and Pi 300-second and Claude MCP 360-second outer margins are not workload budgets. When spikes are unavailable, do not submit an unchanged request: continue non-spike research or graph refinement, or stop with an honest residual."
           },
           {
             "id": "spike.regate",
-            "description": "Re-gate a stale spike with current prerequisites."
+            "description": "Re-gate one stale spike with a bounded offline deterministic command only when RunView.spike_backend is qualified. A closed unavailable result admits no spike evidence; narrow or redesign the probe, continue research, or arrange operator requalification for a future new run instead of blind retries or a host fallback."
           },
           {
             "id": "budget.raise",

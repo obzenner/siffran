@@ -38,6 +38,21 @@ import sut_adapter  # noqa: E402  # the only composition bridge; no load-time cy
 force_absent_sandbox_home()
 
 
+class FakeSpikeAuthoritySelector:
+    """Test-only StartRun authority observation; fixture builders choose the next immutable binding."""
+
+    def __init__(self) -> None:
+        self.qualified_next = False
+
+    def select(self):
+        from application.ports import QualifiedSpikeBackend, SpikesUnavailable
+        if not self.qualified_next:
+            return SpikesUnavailable()
+        self.qualified_next = False
+        return QualifiedSpikeBackend(
+            f"sha256:{'a' * 64}", f"sha256:{'b' * 64}")
+
+
 # ---------------------------------------------------------------------------
 # Failure signal
 # ---------------------------------------------------------------------------
@@ -431,7 +446,8 @@ _ABSENT = object()
 
 
 def new_driver(profile_id: str, *, limits: dict | None = None,
-               clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> ConformanceDriver:
+               clock: FakeClock | None = None, timeline: MemoryTimeline | None = None,
+               spike_authority_selector=None) -> ConformanceDriver:
     """Build the fake ports and compose the real v2 application/service seam through them.
 
     Fakes own only observations/transport. Composition (the ``application.v2`` import and service
@@ -454,6 +470,7 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     lim = dict(limits or {})
     return sut_adapter.bind_live(
         workspace, harness, runs, artifacts, host, profile_id, lim, clk,
+        spike_authority_selector=spike_authority_selector,
     )
 
 

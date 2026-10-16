@@ -46,7 +46,7 @@
         "basis": "sha256:912c1e34076aa02bb6bf6d099436f84cc160afde0affd97ddd6af903a55f2d62",
         "contract": {
           "id": "empirica/public",
-          "version": "4.0.0",
+          "version": "6.0.0",
           "relevant_sections": [
             "evidence/spike",
             "evidence/order"
@@ -82,7 +82,14 @@
           "independence": null,
           "findings": []
         },
-        "confirmation_batch": null
+        "confirmation_batch": null,
+        "spike_backend": {
+          "kind": "qualified",
+          "backend": "docker",
+          "profile_id": "docker-rust-v1",
+          "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
       },
       "argument": {
         "root_claim_id": "G0",
@@ -191,6 +198,13 @@
           "reviewed_deferred_scope_digest": null,
           "reviewed_claims": [],
           "findings": []
+        },
+        "spike_backend": {
+          "kind": "qualified",
+          "backend": "docker",
+          "profile_id": "docker-rust-v1",
+          "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         }
       }
     }

@@ -333,7 +333,7 @@ def ask(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
     ``configured``). Read from the items the core presents, first that applies:
 
     * the configuration, when its requirement is the human's (``governance.human_wait``: the agent asked and a host can
-      show it): ``approve_revision`` for any governance ask after the first approval (5.0.0 does not record whether a
+      show it): ``approve_revision`` for any governance ask after the first approval (6.0.0 does not record whether a
       revision raised a ceiling, so a raise is not counted), else ``approve_configuration``;
     * the first human requirement of the report (``report_requirements``): its batch (``confirmation_batch``) asks to
       ``decide_claim`` when it holds a decision, else to ``confirm_source``; the terminal stage asks ``freeze_scope``
@@ -591,6 +591,9 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     changed = view["freshness"]["changes"]
     detail = governance.plain({
         "goal": snapshot.state.goal,
+        # Public immutable StartRun binding only. The observer never consults qualification
+        # authority, current.json, Docker, or local diagnostics.
+        "spike_backend": view["spike_backend"],
         "governance": governance_view(governance_facts(snapshot.state, confirmation.interactions(snapshot))),
         "audit": {"findings": list(audit["findings"])},
         "stop": stop,

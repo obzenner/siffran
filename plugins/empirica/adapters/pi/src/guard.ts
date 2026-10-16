@@ -63,6 +63,27 @@ function isNonemptyString(value: unknown): value is string {
   return typeof value === "string" && value.length > 0;
 }
 
+const DIGEST = /^sha256:[0-9a-f]{64}$/;
+
+function assertSpikeBackend(value: unknown, branch: string): void {
+  if (!isObject(value) || Array.isArray(value))
+    throw new GuardError(`${branch}.run.spike_backend must be an object`);
+  const keys = Object.keys(value).sort().join("\0");
+  if (value.kind === "spikes_unavailable") {
+    if (keys !== "kind") throw new GuardError(`${branch}.run.spike_backend unavailable shape invalid`);
+    return;
+  }
+  const qualified = ["backend", "execution_binding_digest", "kind", "profile_id", "qualification_record_digest"]
+    .sort().join("\0");
+  if (value.kind !== "qualified" || keys !== qualified || value.backend !== "docker"
+      || value.profile_id !== "docker-rust-v1"
+      || typeof value.qualification_record_digest !== "string"
+      || !DIGEST.test(value.qualification_record_digest)
+      || typeof value.execution_binding_digest !== "string"
+      || !DIGEST.test(value.execution_binding_digest))
+    throw new GuardError(`${branch}.run.spike_backend qualified shape invalid`);
+}
+
 function assertRunSnapshot(run: unknown, branch: string): void {
   if (!isObject(run)) throw new GuardError(`${branch}.run must be an object`);
   if (!isNonemptyString(run.id))
@@ -72,6 +93,7 @@ function assertRunSnapshot(run: unknown, branch: string): void {
     !RUN_STATUSES.has(run.status as RunStatus)
   )
     throw new GuardError(`${branch}.run.status invalid: ${run.status}`);
+  assertSpikeBackend(run.spike_backend, branch);
 }
 
 /**

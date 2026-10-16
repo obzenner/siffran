@@ -74,18 +74,30 @@ experimental result, and admits no `spike` result evidence.
 
 The qualification implementation manifest uses an inclusive public-execution criterion: it binds
 all sources that select the harness, construct or invoke public `ObserveAction` transport,
-classify or enforce that transport's outer deadline, or own the Claude MCP ceiling. It also binds
+classify or enforce that transport's outer deadline, own the run repository/CAS that seals request state before
+execution, or own the Claude MCP ceiling. It also binds
 all seven runtime-loaded vendored v2 JSON documents: public contract and schema, public tool
 projection, request and response schemas, host profiles, and persisted-state schema. Root contract
 duplicates are not runtime inputs and remain outside the authority; `make vendor-check` owns their
 byte identity with the vendored copies. The source set includes the shared bridge, MCP server/public
-tools, Claude and Codex transports, Pi translate/index/stdio/process sources, and `.mcp.json`, in
+tools, Claude and Codex transports, Pi translate/index/stdio/process sources, the located repository plus filesystem
+repository and FS I/O that own the request-sealing run CAS, and `.mcp.json`, in
 addition to the sandbox/application implementation. Pi's `private-transport.ts` and
 `private_bridge.py` are deliberately outside this spike authority: their closed private-operation
 enum cannot carry public `ObserveAction` requests and they retain the ordinary 30-second bound.
 Claude and Codex public entry adapters converge on `adapters.bridge.handle`; Pi converges through
 `adapters/pi/bridge.py` to the same bridge. None owns or can select a weaker harness;
 manifest/source regressions pin those entry paths and forbid an ordinary host spike executor.
+
+Empirica 6's public backend projection is covered by `make empirica-run3-check`: both exact closed
+RunView/GetArgument shapes, no diagnostic extension, selection only at `StartRun`, run/2 rejection and untouched bytes,
+and a fresh run/3 generation. The same target binds the agent-visible 120/210/300/360 hierarchy and resource/no-evidence
+wording to the sandbox, Pi transport, and Claude MCP constants. `core/projection.py`, `core/observer.py`,
+`application/observer.py`, and the UI sources are deliberately outside `IMPLEMENTATION_SOURCE_PATHS`: they display the
+already-persisted binding and cannot select, resolve, execute, or admit a harness. The changed runtime-loaded
+`vendor/contracts/empirica/v2/public-contract.json` and response/request/public-tools schemas are inside the manifest,
+so this public-contract cutover still invalidates every earlier installed qualification. UI contract and fixture copies
+are display-only and remain byte-owned by `make contract-fixtures`/`make vendor-contracts`.
 
 Every hermetic test module or shared driver that can reach the production bridge imports
 `tests/sandbox_isolation.py` before that bridge. The helper holds a process-lifetime temporary root
@@ -189,7 +201,10 @@ The adapter classifies every `subagent` call against a reviewed inventory of the
 single and total model-visible characters and, tracked **separately** in UTF-8 bytes, the text-only
 transport envelope size. Claude/Codex MCP results contain no duplicate RunView
 `structuredContent`; Pi's validated JSON remains host-internal `details`. `MAX=<chars>` fails when
-any single result exceeds that ceiling. `make empirica-context-economy-unit-check` (part of
+any single result exceeds that ceiling. Empirica 6's mirrored Python/Pi post-mediation author-view regression uses a
+strict `<1300` ceiling; the largest measured case is the unavailable-backend configure dismissal at 1257 UTF-8 bytes,
+leaving 43 bytes while retaining the exact no-spike/research/graph/honest-stop guidance. `make
+empirica-context-economy-unit-check` (part of
 `check-static`) guards the counter's fixed layout and no-write property.
 
 ## Native logs

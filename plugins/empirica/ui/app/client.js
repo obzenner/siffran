@@ -7,6 +7,11 @@
 
 const CONTRACT = "empirica-ui-view/v1";
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
+const digest = (x) => typeof x === "string" && /^sha256:[0-9a-f]{64}$/.test(x);
+const validSpikeBackend = (x) => x === null || (isObject(x) && (x.kind === "spikes_unavailable"
+  ? Object.keys(x).length === 1
+  : x.kind === "qualified" && x.backend === "docker" && x.profile_id === "docker-rust-v1"
+    && digest(x.qualification_record_digest) && digest(x.execution_binding_digest) && Object.keys(x).length === 5));
 
 /** Whether `v` has a summary's required shape. The schema (summary.schema.json) is checked in the build; this is the cheap check at the boundary. */
 export const validSummary = (v) => isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && isObject(v.coverage)
@@ -16,7 +21,7 @@ export const validPage = (v) => isObject(v) && v.contract === CONTRACT && typeof
   && typeof v.total === "number" && (v.next === null || typeof v.next === "string") && v.rows.every((r) => isObject(r) && typeof r.key === "string" && typeof r.id === "string");
 /** Whether `v` has a sheet's required shape: a run's detail, its own row and every attempt's. */
 export const validSheet = (v) => isObject(v) && v.contract === CONTRACT && typeof v.key === "string" && typeof v.version === "string"
-  && isObject(v.row) && Array.isArray(v.attempts) && v.attempts.every((a) => isObject(a) && typeof a.key === "string");
+  && validSpikeBackend(v.spike_backend) && isObject(v.row) && Array.isArray(v.attempts) && v.attempts.every((a) => isObject(a) && typeof a.key === "string");
 
 export class Client {
   #fetch; #source; #now; #tz; #summaries = new Map(); #sheets = new Map(); #flying = new Map(); #checked = null;

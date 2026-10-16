@@ -249,7 +249,7 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 empirica-bridge-composition-check: ## Check shared production Docker composition and fail-closed authority degradation without Docker
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 
-empirica-run3-check: ## Check strict run/3 backend binding, passive selection and major-version run/2 rejection
+empirica-run3-check: ## Check strict run/3 binding, v6 closed public backend projection/guidance, and run/2 rejection
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run3_binding test_d6_strict_v2
 
 empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bootstrap process counts

@@ -10,6 +10,7 @@
     "key",
     "version",
     "goal",
+    "spike_backend",
     "governance",
     "audit",
     "stop",
@@ -45,6 +46,17 @@
         "string",
         "null"
       ]
+    },
+    "spike_backend": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/spikeBackend"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The run's immutable StartRun binding, copied from the public RunView; qualified is not a live-health claim. Null only when the run state could not be read."
     },
     "governance": {
       "oneOf": [
@@ -1064,6 +1076,52 @@
           "description": "The human's note to the author, when the receipt has one."
         }
       }
+    },
+    "spikeBackend": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "spikes_unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "backend",
+            "profile_id",
+            "qualification_record_digest",
+            "execution_binding_digest"
+          ],
+          "properties": {
+            "kind": {
+              "const": "qualified"
+            },
+            "backend": {
+              "const": "docker"
+            },
+            "profile_id": {
+              "const": "docker-rust-v1"
+            },
+            "qualification_record_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "execution_binding_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        }
+      ]
     },
     "budget": {
       "type": "object",
