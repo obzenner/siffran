@@ -49,7 +49,9 @@ environment availability are required for preflight success and installable all-
 After Docker discovery, every qualification
 operation uses only the absolute qualified CLI and a closed host environment (`LANG=C`, `LC_ALL=C`,
 and `DOCKER_HOST=<qualified Unix endpoint>`), never ambient Docker context/config, proxy or credential
-variables.
+variables. The unreachable 3C-b harness uses the same passive ambient `DOCKER_CONTEXT`-over-`DOCKER_HOST`
+discovery precedence as qualification and StartRun for both preflight and postflight; only its
+post-discovery container lifecycle uses that closed endpoint-bound environment.
 
 The closed recovery-journal v1 vocabulary is `intent` (JSON has no container ID yet), `created`
 (one full 64-hex ID), and `removing` (the same full ID while conservative removal is in progress).
@@ -82,6 +84,7 @@ journal is deleted last, after exact container absence and bounded no-follow sta
 | Target | Boundary | Why it is not in the fast gate |
 |---|---|---|
 | `make empirica-docker-execution-check` | unreachable 3C-a Docker lifecycle substrate: operator-created scaffolding, bounded process lock, immutable staging, atomic journal transitions, exact fake-CLI inspect/removal/recovery, and BaseException process-group cleanup | fake runner only; no Docker daemon and no transaction/public spike path imports the substrate |
+| `make empirica-docker-harness-check` | unreachable 3C-b exact-record `DockerSpikeHarness`: run binding, shared passive ambient pre/post authority resolution, reserved effect/cleanup/postflight deadlines, restart recovery, closed unavailable reasons, attached-versus-inspected workload outcomes, exact cleanup, and canonical result admission | fake runner only; no Docker daemon, transaction activation, bridge wiring, current-pointer authority, or host fallback |
 | `make sandbox-qualification BACKEND=docker ARGS="--probe all"` | external qualification of one exact absolute Docker CLI, local Darwin-to-Unix-to-Docker-Desktop-Linux-VM boundary, engine builtin seccomp/cgroup-v2 namespace facts, already-present digest-pinned Rust image/config, and one closed executable pull-disabled policy; security probes (including enforced memory/PID canaries) precede Rust/contract performance; selected probes report incomplete and cannot claim backend eligibility; reports and before/after resource census are written under `$TMPDIR/siffran-sandbox-qualification` unless `--output` is supplied | requires an operator-approved already-running local Docker engine and the pinned image already present; it never installs, pulls, repairs, switches context, starts/stops the daemon/VM, qualifies native Linux, or authorizes host-subprocess fallback. `make sandbox-qualification-unit-check` owns checkout delegation in `check-static`; `make empirica-sandbox-check` owns the shipped profile/runtime/record primitives in `check-core` |
 | `make sandbox-qualification-install BACKEND=docker [ARGS="--sandbox-home path"]` | reruns the complete current-code all-probe qualification and, only on success, atomically publishes immutable user-scoped authority under `~/.empirica-plugin/sandbox/qualification` (or the explicit `EMPIRICA_SANDBOX_HOME`/argument override); human reports remain under `$TMPDIR/siffran-sandbox-qualification` and are non-authoritative provenance | operator setup only, never an Empirica author action; it has the same already-running-engine/no-pull restrictions as qualification and refuses selected/incomplete evidence, unsafe ownership/modes/symlinks, or any digest/identity mismatch |
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |

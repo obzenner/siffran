@@ -16,13 +16,21 @@ from . import docker, environment
 from .record import QualificationStore
 
 
-def _inspect_runtime(current_environment: environment.EnvironmentIdentity) -> Mapping[str, Any]:
-    result = docker.qualify_docker(
-        "preflight", environment_inspector=lambda: current_environment)
-    identity = result.get("preflight")
-    if not isinstance(identity, Mapping):
-        raise docker.DockerQualificationError("Docker preflight returned no runtime identity")
-    return docker.validate_runtime_identity(identity)
+def inspect_runtime(
+    current_environment: environment.EnvironmentIdentity, *,
+    runner: docker.Runner | None = None, cli_path: str | None = None,
+    ambient_environment: Mapping[str, str] | None = None,
+) -> docker.DockerRuntimeIdentity:
+    """Single passive five-read runtime inspection used by selection and execution.
+
+    Docker context/host precedence is evaluated from the same ambient environment as
+    qualification. The closed endpoint-only environment begins only after discovery.
+    """
+    identity = docker.discover_docker(
+        runner if runner is not None else docker.BoundedRunner(),
+        cli_path=cli_path, env=ambient_environment)
+    docker.validate_runtime_identity(identity)
+    return identity
 
 
 class QualificationAuthoritySelector:
@@ -31,7 +39,7 @@ class QualificationAuthoritySelector:
     def __init__(
         self, store: QualificationStore | None = None, *,
         environment_inspector: Callable[[], environment.EnvironmentIdentity] = environment.inspect_environment,
-        runtime_inspector: Callable[[environment.EnvironmentIdentity], Mapping[str, Any]] = _inspect_runtime,
+        runtime_inspector: Callable[[environment.EnvironmentIdentity], Mapping[str, Any]] = inspect_runtime,
     ) -> None:
         self._environment_inspector = environment_inspector
         self._runtime_inspector = runtime_inspector

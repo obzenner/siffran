@@ -13,7 +13,8 @@ from .history_records import (
     OBSERVATION_ROW_KEYS, OBSERVATION_SOURCE_KEYS,
 )
 from .ports import (
-    CapturedFile, ExecutionSnapshot, HarnessResult, ObservationSnapshot, WorkspaceCapture,
+    CapturedFile, ExecutionSnapshot, HarnessResult, LegacySpikeHarness, ObservationSnapshot,
+    SpikeExecutionUnavailable, SpikeHarness, WorkspaceCapture,
 )
 
 
@@ -125,8 +126,7 @@ def build_execution_snapshot(dependent_paths, workspace):
     return ExecutionSnapshot(tuple(bindings), tuple(captured), digest)
 
 
-def execute_spike_bound(command, dependent_paths, workspace, harness):
-    """Capture once, execute from immutable bytes, and retain the exact observation basis."""
+def _capture_execution(command, dependent_paths, workspace):
     if not isinstance(command, str) or not command:
         raise ValueError("command must be a nonempty string")
     paths = _validate_dependent_paths(dependent_paths)
@@ -141,6 +141,35 @@ def execute_spike_bound(command, dependent_paths, workspace, harness):
     observations = tuple(cf.observation for cf in files)
     observation = ObservationSnapshot(
         observations, capture.basis_id, observations_digest(observations))
+    return bindings, execution, observation
+
+
+def execute_run_bound_spike(
+    *, run_id, binding, command, dependent_paths, workspace, harness: SpikeHarness,
+):
+    """Mechanically unreachable 3C-b helper for the run-bound production harness port."""
+    bindings, execution, observation = _capture_execution(
+        command, dependent_paths, workspace)
+    try:
+        result = harness.run(
+            run_id=run_id, binding=binding, command=command, snapshot=execution)
+    except SpikeExecutionUnavailable:
+        raise
+    except Exception as exc:
+        raise HarnessUnavailable("harness run failed") from exc
+    if not isinstance(result, HarnessResult):
+        raise HarnessContractError("harness must return a HarnessResult")
+    if result.snapshot_digest != execution.snapshot_digest:
+        raise HarnessContractError("harness echoed a mismatched snapshot digest")
+    return execution_facts(bindings, result), execution, observation
+
+
+def execute_spike_bound(
+    command, dependent_paths, workspace, harness: LegacySpikeHarness,
+):
+    """Qualification/test-only legacy executor; production uses ``execute_run_bound_spike``."""
+    bindings, execution, observation = _capture_execution(
+        command, dependent_paths, workspace)
     try:
         result = harness.run(command, execution)
     except Exception as exc:

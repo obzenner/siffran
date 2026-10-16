@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from enum import Enum
 from typing import Protocol
 
 from core.freshness import (FileBinding, FileObservation, canonical_digest, observations_digest,
@@ -117,5 +118,48 @@ class Workspace(Protocol):
     def observe(self, paths: tuple[str, ...]) -> WorkspaceCapture: ...
 
 
-class SpikeHarness(Protocol):
+class _SpikeUnavailableReason(str, Enum):
+    AUTHORITY_INVALID = "authority_invalid"
+    SCAFFOLDING_UNSAFE = "scaffolding_unsafe"
+    RUNTIME_BUSY = "runtime_busy"
+    RECOVERY_FAILED = "recovery_failed"
+    STAGING_FAILED = "staging_failed"
+    LIFECYCLE_FAILED = "lifecycle_failed"
+    WORKLOAD_TIMEOUT = "workload_timeout"
+    WORKLOAD_OUTPUT_LIMIT = "workload_output_limit"
+    WORKLOAD_OOM = "workload_oom"
+    WORKLOAD_STATE_INVALID = "workload_state_invalid"
+    CLEANUP_FAILED = "cleanup_failed"
+    POSTFLIGHT_CHANGED = "postflight_changed"
+
+
+class SpikeExecutionUnavailable(RuntimeError):
+    """Closed application failure; ``detail`` is diagnostic and never persisted as authority."""
+
+    REASONS = frozenset(reason.value for reason in _SpikeUnavailableReason)
+
+    def __init__(self, reason: str, detail: str):
+        try:
+            checked_reason = _SpikeUnavailableReason(reason)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("unknown spike execution unavailable reason") from exc
+        if type(reason) is not str:
+            raise ValueError("unknown spike execution unavailable reason")
+        if type(detail) is not str or not detail:
+            raise ValueError("spike execution unavailable detail must be nonempty text")
+        self.reason = checked_reason.value
+        self.detail = detail.replace("\n", " ")[:512]
+        super().__init__(f"{reason}: {self.detail}")
+
+
+class LegacySpikeHarness(Protocol):
+    """Temporary two-argument host/qualification port; 3C-c removes this path."""
+
     def run(self, command: str, snapshot: ExecutionSnapshot) -> HarnessResult: ...
+
+
+class SpikeHarness(Protocol):
+    def run(
+        self, *, run_id: str, binding: QualifiedSpikeBackend,
+        command: str, snapshot: ExecutionSnapshot,
+    ) -> HarnessResult: ...

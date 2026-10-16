@@ -1,7 +1,7 @@
-"""Unreachable Docker execution substrate: bounded lock, staging, and recovery only.
+"""Docker execution substrate: accepted lifecycle plus unreachable exact-record harness.
 
-No application transaction imports this module.  The run-bound DockerSpikeHarness is deliberately
-reserved for 3C-b; this slice owns only lifecycle mechanics exercised with fake Docker runners.
+No application transaction or bridge imports this module. The run-bound ``DockerSpikeHarness`` is
+complete for 3C-b but remains mechanically unreachable until a separately approved 3C-c.
 """
 from __future__ import annotations
 
@@ -13,17 +13,19 @@ import re
 import stat
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from adapters.state import fsio
-from application.ports import ExecutionSnapshot
-from core.freshness import validate_relative_posix_path
+from application.ports import (
+    ExecutionSnapshot, HarnessResult, QualifiedSpikeBackend, SpikeExecutionUnavailable,
+)
+from core.freshness import canonical_digest, validate_relative_posix_path
 
-from . import docker, record
+from . import docker, environment, record, selection
 
 _NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 _CLOEXEC = getattr(os, "O_CLOEXEC", 0)
@@ -44,21 +46,26 @@ def new_operation_id() -> str:
     return "o-" + uuid.uuid4().hex
 
 
-def _remaining(deadline: float, message: str) -> float:
+def _remaining(
+    deadline: float, message: str, *, clock: Callable[[], float] = time.monotonic,
+) -> float:
     if (type(deadline) not in {int, float} or isinstance(deadline, bool)
             or not math.isfinite(deadline)):
         raise ExecutionSubstrateError(message + " is malformed")
-    value = deadline - time.monotonic()
+    value = deadline - clock()
     if value <= 0:
         raise ExecutionSubstrateError(message + " expired")
     return value
 
 
 @contextmanager
-def runtime_lock(store: record.QualificationStore, deadline: float) -> Iterator[None]:
+def runtime_lock(
+    store: record.QualificationStore, deadline: float, *,
+    clock: Callable[[], float] = time.monotonic,
+) -> Iterator[None]:
     """Acquire the operator-created process lock without waiting beyond a monotonic deadline."""
     store.check_execution_scaffolding()
-    _remaining(deadline, "runtime lock deadline")
+    _remaining(deadline, "runtime lock deadline", clock=clock)
     flags = os.O_RDWR | _NOFOLLOW | _CLOEXEC
     try:
         fd = os.open(store.runtime_lock, flags)
@@ -75,7 +82,8 @@ def runtime_lock(store: record.QualificationStore, deadline: float) -> Iterator[
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
-                remaining = _remaining(deadline, "runtime lock deadline")
+                remaining = _remaining(
+                    deadline, "runtime lock deadline", clock=clock)
                 time.sleep(min(0.01, remaining))
         yield
     finally:
@@ -362,23 +370,24 @@ def _clean_incomplete_journal_entries(store: record.QualificationStore) -> None:
 
 
 def recover_operations(
-    store: record.QualificationStore, client: docker.DockerClient, deadline: float,
+    store: record.QualificationStore, client: docker.DockerClient, deadline: float, *,
+    clock: Callable[[], float] = time.monotonic,
 ) -> tuple[str, ...]:
     """Recover every exact journal while the caller holds the runtime lock."""
     store.check_execution_scaffolding()
-    _remaining(deadline, "recovery deadline")
+    _remaining(deadline, "recovery deadline", clock=clock)
     _clean_incomplete_journal_entries(store)
-    _remaining(deadline, "recovery deadline")
+    _remaining(deadline, "recovery deadline", clock=clock)
     recovered = []
     for row in store.read_journals():
-        _remaining(deadline, "recovery deadline")
+        _remaining(deadline, "recovery deadline", clock=clock)
         _authority_matches_client(store, row, client)
-        _remaining(deadline, "recovery deadline")
+        _remaining(deadline, "recovery deadline", clock=clock)
         operation_id = row["operation_id"]
         staging = store.staging / operation_id
         input_dir = staging
         network = client.policy["isolation"]["network"]
-        remaining = _remaining(deadline, "recovery deadline")
+        remaining = _remaining(deadline, "recovery deadline", clock=clock)
         cid = row["cidfile_full_id"]
         if cid is None:
             candidates = client.exact_candidates(
@@ -446,3 +455,443 @@ def recover_operations(
         store.finish_operation(operation_id, container_id)
         recovered.append(operation_id)
     return tuple(recovered)
+
+
+def _validated_capture(
+    value: object, *, output_limited: bool, output_limit_bytes: int,
+) -> docker.StreamCapture:
+    if (type(value) is not docker.StreamCapture or type(value.data) is not bytes
+            or isinstance(value.bytes_seen, bool) or type(value.bytes_seen) is not int
+            or value.bytes_seen < len(value.data) or value.bytes_seen < 0
+            or type(value.sha256) is not str or len(value.sha256) != 71
+            or not value.sha256.startswith("sha256:")
+            or any(char not in "0123456789abcdef" for char in value.sha256[7:])
+            or type(value.tail) is not str):
+        raise ExecutionSubstrateError("runner stream capture is malformed")
+    if output_limited is False:
+        expected_tail = value.data[-docker.DIAGNOSTIC_TAIL_BYTES:].decode(
+            "utf-8", errors="replace").strip()
+        if (value.bytes_seen != len(value.data) or value.bytes_seen > output_limit_bytes
+                or value.sha256 != "sha256:" + hashlib.sha256(value.data).hexdigest()
+                or value.tail != expected_tail):
+            raise ExecutionSubstrateError("runner stream capture is inconsistent")
+    return value
+
+
+def _validated_command_result(
+    value: object, *, output_limit_bytes: int,
+) -> docker.CommandResult:
+    if (type(value) is not docker.CommandResult
+            or isinstance(value.returncode, bool) or type(value.returncode) is not int
+            or type(value.timed_out) is not bool or type(value.output_limited) is not bool
+            or isinstance(value.elapsed_ms, bool) or type(value.elapsed_ms) is not int
+            or value.elapsed_ms < 0):
+        raise ExecutionSubstrateError("runner command result is malformed")
+    _validated_capture(
+        value.stdout, output_limited=value.output_limited,
+        output_limit_bytes=output_limit_bytes)
+    _validated_capture(
+        value.stderr, output_limited=value.output_limited,
+        output_limit_bytes=output_limit_bytes)
+    return value
+
+
+class _DeadlineRunner:
+    """Narrow every delegated subprocess bound to the operation's monotonic deadline."""
+
+    def __init__(
+        self, runner: docker.Runner, deadline: float, clock: Callable[[], float],
+    ) -> None:
+        self._runner, self._deadline, self._clock = runner, deadline, clock
+
+    def run(self, argv, *, timeout_seconds, output_limit_bytes, env=None):
+        remaining = _remaining(
+            self._deadline, "Docker command deadline", clock=self._clock)
+        result = self._runner.run(
+            argv, timeout_seconds=min(timeout_seconds, remaining),
+            output_limit_bytes=output_limit_bytes, env=env)
+        return _validated_command_result(result, output_limit_bytes=output_limit_bytes)
+
+
+@dataclass(frozen=True)
+class _ResolvedAuthority:
+    record: dict[str, Any]
+    environment: dict[str, Any]
+    runtime: dict[str, Any]
+    policy: dict[str, Any]
+    client: docker.DockerClient
+
+
+@dataclass(frozen=True)
+class _ExecutionPlan:
+    run_id: str
+    binding: QualifiedSpikeBackend
+    operation_id: str
+    name: str
+    labels: dict[str, str]
+    intent: dict[str, Any]
+    command: str
+    command_digest: str
+    snapshot: ExecutionSnapshot
+    output_limit_bytes: int
+
+
+def _check_binding(
+    authority: Mapping[str, Any], binding: QualifiedSpikeBackend,
+) -> None:
+    """One pure rule for exact immutable-record/run binding equality."""
+    if (authority["qualification_record_digest"] != binding.qualification_record_digest
+            or authority["execution_binding_digest"] != binding.execution_binding_digest
+            or authority["profile"]["id"] != record.PROFILE_ID):
+        raise ExecutionSubstrateError("immutable record does not match run binding")
+
+
+def _validate_request(run_id: object, command: object, snapshot: object) -> None:
+    if type(run_id) is not str or not run_id or len(run_id) > 4096:
+        raise ValueError("run_id must be bounded nonempty text")
+    if type(command) is not str or not command:
+        raise ValueError("command must be nonempty text")
+    if not isinstance(snapshot, ExecutionSnapshot):
+        raise ValueError("snapshot must be an ExecutionSnapshot")
+    try:
+        run_id.encode("utf-8")
+    except UnicodeEncodeError as exc:
+        raise ValueError("run_id must be valid UTF-8 text") from exc
+
+
+def _execution_plan(
+    *, run_id: str, binding: QualifiedSpikeBackend, command: str,
+    snapshot: ExecutionSnapshot, operation_id: str,
+    authority: Mapping[str, Any], policy: Mapping[str, Any],
+) -> _ExecutionPlan:
+    """Purely derive all persisted/container identity from bound run and authority facts."""
+    _validate_request(run_id, command, snapshot)
+    if type(binding) is not QualifiedSpikeBackend:
+        raise ValueError("binding must be an exact QualifiedSpikeBackend")
+    operation_id = _operation_id(operation_id)
+    _check_binding(authority, binding)
+    policy_digest = docker.policy_digest(policy)
+    correlation = "r-" + hashlib.sha256(run_id.encode("utf-8")).hexdigest()[:40]
+    role = "spike"
+    name = docker.NAME_PREFIX + operation_id
+    labels = docker.qualification_labels(correlation, role, policy_digest)
+    intent = {
+        "schema": record.JOURNAL_SCHEMA,
+        "operation_id": operation_id,
+        "lifecycle_state": "intent",
+        "execution_binding_digest": binding.execution_binding_digest,
+        "qualification_record_digest": binding.qualification_record_digest,
+        "policy_digest": policy_digest,
+        "run_id": correlation,
+        "role": role,
+        "name": name,
+        "labels": labels,
+        "expected_image": {
+            "repo_digest": authority["runtime"]["image_repo_digest"],
+            "config_id": authority["runtime"]["image_config_id"],
+        },
+        "full_id": None,
+        "cidfile_name": "container.cid",
+    }
+    checked_intent = record.validate_journal(intent, directory_name=operation_id)
+    return _ExecutionPlan(
+        run_id, binding, operation_id, name, labels, checked_intent, command,
+        canonical_digest(command),
+        snapshot, policy["bounds"]["workload_output_limit_bytes"])
+
+
+def _admit_result(
+    plan: _ExecutionPlan, resolved: _ResolvedAuthority, *, exit_code: int,
+    stdout: docker.StreamCapture, stderr: docker.StreamCapture,
+    staging_absent: bool, journal_absent: bool,
+) -> HarnessResult:
+    """Purely admit a result only from complete cleanup and unchanged exact authority."""
+    _check_binding(resolved.record, plan.binding)
+    if (isinstance(exit_code, bool) or not isinstance(exit_code, int)
+            or staging_absent is not True or journal_absent is not True
+            or docker.policy_digest(resolved.policy) != plan.intent["policy_digest"]):
+        raise ExecutionSubstrateError("result admission facts are incomplete or changed")
+    digest = canonical_digest({
+        "command_digest": plan.command_digest,
+        "exit_code": exit_code,
+        "stdout_sha256": stdout.sha256,
+        "stdout_bytes": stdout.bytes_seen,
+        "stderr_sha256": stderr.sha256,
+        "stderr_bytes": stderr.bytes_seen,
+        "output_limit_bytes": plan.output_limit_bytes,
+        "snapshot_digest": plan.snapshot.snapshot_digest,
+        "qualification_record_digest": plan.intent["qualification_record_digest"],
+        "execution_binding_digest": plan.intent["execution_binding_digest"],
+        "policy_digest": plan.intent["policy_digest"],
+    })
+    return HarnessResult(exit_code, digest, plan.snapshot.snapshot_digest)
+
+
+class _UnavailableSignal(Exception):
+    def __init__(self, reason: str, detail: str):
+        self.reason, self.detail = reason, detail
+        super().__init__(detail)
+
+
+class DockerSpikeHarness:
+    """Exact-record Docker harness candidate; intentionally unreachable from transaction paths."""
+
+    def __init__(
+        self, store: record.QualificationStore | None = None, *,
+        environment_inspector: Callable[[], environment.EnvironmentIdentity]
+        = environment.inspect_environment,
+        runner: docker.Runner | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        operation_id_source: Callable[[], str] = new_operation_id,
+    ) -> None:
+        self._runner = runner if runner is not None else docker.BoundedRunner()
+        self._clock = clock
+        self._operation_id_source = operation_id_source
+        try:
+            if store is not None and type(store) is not record.QualificationStore:
+                raise record.QualificationRecordError(
+                    "execution store must be an exact QualificationStore")
+            self._store = (store if store is not None else record.QualificationStore(
+                environment_inspector=environment_inspector))
+            self._environment_inspector = self._store.environment_inspector
+        except Exception as exc:
+            raise SpikeExecutionUnavailable(
+                "scaffolding_unsafe", f"{type(exc).__name__}: {exc}") from exc
+
+    def _resolve(
+        self, binding: QualifiedSpikeBackend, deadline: float,
+    ) -> _ResolvedAuthority:
+        _remaining(deadline, "authority resolution", clock=self._clock)
+        observed_environment = self._environment_inspector()
+        checked_environment = environment.validate_environment_identity(
+            observed_environment, require_available=True)
+        _remaining(deadline, "environment inspection", clock=self._clock)
+        authority = self._store.load_record(
+            binding.qualification_record_digest,
+            expected_environment=checked_environment)
+        _check_binding(authority, binding)
+        policy = docker.validate_policy({
+            **authority["profile"]["policy"], "runtime_identity": authority["runtime"]})
+        bounded_runner = _DeadlineRunner(self._runner, deadline, self._clock)
+        discovered = selection.inspect_runtime(
+            observed_environment, runner=bounded_runner,
+            cli_path=authority["runtime"]["docker_cli"])
+        checked_runtime = docker.validate_runtime_identity(discovered)
+        _remaining(deadline, "Docker discovery", clock=self._clock)
+        reloaded = self._store.load_record(
+            binding.qualification_record_digest,
+            expected_environment=checked_environment, expected_runtime=checked_runtime)
+        _check_binding(reloaded, binding)
+        if reloaded != authority:
+            raise ExecutionSubstrateError("immutable qualification record changed during resolution")
+        client = docker.DockerClient(discovered, policy, bounded_runner)
+        if client.policy != policy:
+            raise ExecutionSubstrateError("Docker client changed the exact execution policy")
+        return _ResolvedAuthority(reloaded, checked_environment, checked_runtime, policy, client)
+
+    def _bounded_client(
+        self, resolved: _ResolvedAuthority, deadline: float,
+    ) -> docker.DockerClient:
+        _remaining(deadline, "Docker phase deadline", clock=self._clock)
+        return docker.DockerClient(
+            resolved.client.identity, resolved.policy,
+            _DeadlineRunner(self._runner, deadline, self._clock))
+
+    def _cleanup_deadline(self, hard_deadline: float) -> float:
+        now = self._clock()
+        deadline = min(
+            hard_deadline - docker.POSTFLIGHT_TIMEOUT_SECONDS,
+            now + docker.CLEANUP_TIMEOUT_SECONDS)
+        _remaining(deadline, "cleanup deadline", clock=self._clock)
+        return deadline
+
+    @staticmethod
+    def _detail(exc: BaseException) -> str:
+        return f"{type(exc).__name__}: {exc}"
+
+    @staticmethod
+    def _reason_for_phase(phase: str) -> str:
+        return {
+            "staging": "staging_failed",
+            "workload": "workload_state_invalid",
+            "cleanup": "cleanup_failed",
+            "postflight": "postflight_changed",
+        }.get(phase, "lifecycle_failed")
+
+    def run(
+        self, *, run_id: str, binding: QualifiedSpikeBackend,
+        command: str, snapshot: ExecutionSnapshot,
+    ) -> HarnessResult:
+        if type(binding) is not QualifiedSpikeBackend:
+            raise SpikeExecutionUnavailable("authority_invalid", "binding type is not qualified")
+        _validate_request(run_id, command, snapshot)
+        try:
+            began = self._clock()
+        except Exception as exc:
+            raise SpikeExecutionUnavailable(
+                "authority_invalid", self._detail(exc)) from exc
+        if (type(began) not in {int, float} or isinstance(began, bool)
+                or not math.isfinite(began)):
+            raise SpikeExecutionUnavailable("authority_invalid", "monotonic clock is malformed")
+        hard_deadline = began + docker.OPERATION_TIMEOUT_SECONDS
+        effect_deadline = (
+            hard_deadline - docker.CLEANUP_TIMEOUT_SECONDS
+            - docker.POSTFLIGHT_TIMEOUT_SECONDS)
+        intent_started = False
+        phase = "authority"
+        try:
+            try:
+                try:
+                    lock = runtime_lock(self._store, effect_deadline, clock=self._clock)
+                    lock.__enter__()
+                except ExecutionSubstrateError as exc:
+                    reason = ("runtime_busy" if "expired" in str(exc)
+                              else "scaffolding_unsafe")
+                    raise SpikeExecutionUnavailable(reason, self._detail(exc)) from exc
+                try:
+                    try:
+                        resolved = self._resolve(binding, effect_deadline)
+                    except Exception as exc:
+                        raise _UnavailableSignal("authority_invalid", self._detail(exc)) from exc
+                    try:
+                        recover_operations(
+                            self._store, resolved.client, effect_deadline, clock=self._clock)
+                    except Exception as exc:
+                        raise _UnavailableSignal("recovery_failed", self._detail(exc)) from exc
+                    phase = "lifecycle"
+                    plan = _execution_plan(
+                        run_id=run_id, binding=binding, command=command, snapshot=snapshot,
+                        operation_id=self._operation_id_source(), authority=resolved.record,
+                        policy=resolved.policy)
+                    intent_started = True
+                    try:
+                        self._store.begin_operation(plan.intent)
+                        phase = "staging"
+                        staging = materialize_snapshot(
+                            self._store, plan.operation_id, plan.snapshot, resolved.policy)
+                        phase = "lifecycle"
+                        container_id, _ = resolved.client.create_container_with_identity(
+                            name=plan.name, labels=plan.labels, input_dir=staging,
+                            command=plan.command, network=resolved.policy["isolation"]["network"])
+                        self._store.write_cid(plan.operation_id, container_id)
+                        self._store.mark_created(plan.operation_id, container_id)
+                        phase = "workload"
+                        started = resolved.client.call(
+                            ("container", "start", "--attach", container_id),
+                            timeout_seconds=min(
+                                resolved.policy["bounds"]["workload_timeout_seconds"],
+                                _remaining(
+                                    effect_deadline, "workload deadline", clock=self._clock)),
+                            output_limit_bytes=plan.output_limit_bytes)
+                        if started.timed_out:
+                            raise _UnavailableSignal(
+                                "workload_timeout", "Docker start exceeded workload deadline")
+                        if started.output_limited:
+                            raise _UnavailableSignal(
+                                "workload_output_limit", "Docker start exceeded output ceiling")
+                        inspected = resolved.client.json_call_with_timeout(
+                            ("container", "inspect", container_id, "--format", "{{json .}}"),
+                            "docker post-workload inspect",
+                            min(resolved.policy["bounds"]["control_timeout_seconds"],
+                                _remaining(
+                                    effect_deadline, "workload inspect deadline",
+                                    clock=self._clock)))
+                        if not isinstance(inspected, dict):
+                            raise _UnavailableSignal(
+                                "workload_state_invalid", "post-workload inspect is malformed")
+                        resolved.client.assert_policy_inspect(
+                            inspected, container_id=container_id, input_dir=staging,
+                            name=plan.name, labels=plan.labels,
+                            network=resolved.policy["isolation"]["network"])
+                        state = inspected.get("State")
+                        if (not isinstance(state, dict) or state.get("Status") != "exited"
+                                or state.get("Running") is not False
+                                or isinstance(state.get("ExitCode"), bool)
+                                or not isinstance(state.get("ExitCode"), int)
+                                or not 0 <= state.get("ExitCode") <= 255
+                                or not isinstance(state.get("Error"), str)
+                                or type(state.get("OOMKilled")) is not bool
+                                or state.get("Error")):
+                            raise _UnavailableSignal(
+                                "workload_state_invalid", "container did not inspect as exited")
+                        if started.returncode != state["ExitCode"]:
+                            raise _UnavailableSignal(
+                                "workload_state_invalid",
+                                "attached exit differs from inspected exit")
+                        if state.get("OOMKilled") is True:
+                            raise _UnavailableSignal("workload_oom", "container was OOM-killed")
+                        exit_code = state["ExitCode"]
+                        phase = "cleanup"
+                        cleanup_deadline = self._cleanup_deadline(hard_deadline)
+                        cleanup_client = self._bounded_client(resolved, cleanup_deadline)
+                        self._store.mark_removing(plan.operation_id)
+                        cleanup_client.remove_exact(
+                            container_id=container_id, name=plan.name, labels=plan.labels,
+                            input_dir=staging, network=resolved.policy["isolation"]["network"],
+                            deadline=cleanup_deadline)
+                        _remaining(
+                            cleanup_deadline, "staging cleanup deadline", clock=self._clock)
+                        cleanup_staging(self._store, plan.operation_id, resolved.policy)
+                        _remaining(
+                            cleanup_deadline, "journal finish deadline", clock=self._clock)
+                        self._store.finish_operation(plan.operation_id, container_id)
+                        _remaining(
+                            cleanup_deadline, "cleanup completion deadline", clock=self._clock)
+                        intent_started = False
+                        phase = "postflight"
+                        postflight_deadline = min(
+                            hard_deadline,
+                            self._clock() + resolved.policy["bounds"]["postflight_timeout_seconds"])
+                        postflight = self._resolve(binding, postflight_deadline)
+                        try:
+                            staging.lstat()
+                        except FileNotFoundError:
+                            staging_absent = True
+                        else:
+                            staging_absent = False
+                        journal_absent = not any(
+                            row["operation_id"] == plan.operation_id
+                            for row in self._store.read_journals())
+                        return _admit_result(
+                            plan, postflight, exit_code=exit_code,
+                            stdout=started.stdout, stderr=started.stderr,
+                            staging_absent=staging_absent, journal_absent=journal_absent)
+                    except BaseException as failure:
+                        cleanup_failure: BaseException | None = None
+                        if intent_started:
+                            try:
+                                cleanup_deadline = self._cleanup_deadline(hard_deadline)
+                                cleanup_client = self._bounded_client(
+                                    resolved, cleanup_deadline)
+                                recover_operations(
+                                    self._store, cleanup_client, cleanup_deadline,
+                                    clock=self._clock)
+                            except BaseException as exc:
+                                cleanup_failure = exc
+                        if not isinstance(failure, Exception):
+                            if cleanup_failure is not None:
+                                raise failure from cleanup_failure
+                            raise
+                        if cleanup_failure is not None and not isinstance(cleanup_failure, Exception):
+                            raise cleanup_failure
+                        if cleanup_failure is not None:
+                            raise SpikeExecutionUnavailable(
+                                "cleanup_failed", self._detail(cleanup_failure)) from cleanup_failure
+                        if isinstance(failure, _UnavailableSignal):
+                            raise SpikeExecutionUnavailable(
+                                failure.reason, failure.detail) from failure
+                        raise SpikeExecutionUnavailable(
+                            self._reason_for_phase(phase), self._detail(failure)) from failure
+                finally:
+                    lock.__exit__(None, None, None)
+            except SpikeExecutionUnavailable:
+                raise
+            except _UnavailableSignal as failure:
+                raise SpikeExecutionUnavailable(
+                    failure.reason, failure.detail) from failure
+            except Exception as exc:
+                reason = ("scaffolding_unsafe" if phase == "authority"
+                          else self._reason_for_phase(phase))
+                raise SpikeExecutionUnavailable(reason, self._detail(exc)) from exc
+        except SpikeExecutionUnavailable:
+            raise

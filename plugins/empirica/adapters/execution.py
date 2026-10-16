@@ -148,6 +148,7 @@ class FilesystemWorkspace:
 
 
 class SubprocessSpikeHarness:
+    """Temporary host-side LegacySpikeHarness; run/3 remains guarded from this path."""
     def __init__(self, timeout_seconds: int = DEFAULT_SPIKE_TIMEOUT_SECONDS,
                  output_limit_bytes: int = DEFAULT_OUTPUT_LIMIT_BYTES):
         self.timeout_seconds, self.output_limit_bytes = timeout_seconds, output_limit_bytes

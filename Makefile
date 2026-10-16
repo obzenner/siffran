@@ -36,6 +36,7 @@ PI_CANARY_TESTS := $(SCRIPTS)/tests/test_pi_canary.py
 SANDBOX_QUALIFICATION_TESTS := $(SCRIPTS)/tests/test_sandbox_qualification.py
 EMPIRICA_SANDBOX_TESTS := $(PLUGINS_DIR)/empirica/tests/test_sandbox_adapter.py
 EMPIRICA_DOCKER_EXECUTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_docker_execution.py
+EMPIRICA_DOCKER_HARNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_docker_harness.py
 EMPIRICA_RUN3_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run3_binding.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
@@ -123,7 +124,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check sandbox-qualification-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-sandbox-check empirica-docker-execution-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, and shipped sandbox boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-sandbox-check empirica-docker-execution-check empirica-docker-harness-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, and shipped sandbox boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@$(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -524,7 +525,7 @@ pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never
 
 ## --- Qualify
 
-.PHONY: sandbox-qualification sandbox-qualification-install sandbox-qualification-unit-check empirica-sandbox-check empirica-docker-execution-check
+.PHONY: sandbox-qualification sandbox-qualification-install sandbox-qualification-unit-check empirica-sandbox-check empirica-docker-execution-check empirica-docker-harness-check
 sandbox-qualification: ## Qualify the pull-disabled local Docker spike policy outside Empirica (BACKEND=docker ARGS="--probe all")
 	@$(PYTHON) $(SCRIPTS)/sandbox_qualification.py qualify --backend $(BACKEND) $(ARGS)
 
@@ -539,6 +540,9 @@ empirica-sandbox-check: ## Test shipped Docker profile, runtime, lifecycle, reco
 
 empirica-docker-execution-check: ## Test unreachable Docker execution staging, locking and recovery with a fake CLI
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_DOCKER_EXECUTION_TESTS)
+
+empirica-docker-harness-check: ## Test the unreachable exact-record Docker harness candidate with a fake CLI
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_DOCKER_HARNESS_TESTS)
 
 .PHONY: skills-check suites-check
 skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Claude symlink and relative links (with negative controls), and test the native-qualification census

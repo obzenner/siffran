@@ -17,6 +17,7 @@ captured bytes, and results only and contain no freshness/adjudication policy.
 """
 import dataclasses
 import hashlib
+import inspect
 import sys
 import unittest
 from pathlib import Path
@@ -30,7 +31,7 @@ from application.observation import (  # noqa: E402
     build_execution_snapshot, build_observation_snapshot, execute_spike,
 )
 from application.ports import (  # noqa: E402
-    CapturedFile, ExecutionSnapshot, HarnessResult, ObservationSnapshot,
+    CapturedFile, ExecutionSnapshot, HarnessResult, LegacySpikeHarness, ObservationSnapshot,
     SpikeHarness, Workspace, WorkspaceCapture,
 )
 from core.freshness import (  # noqa: E402
@@ -431,8 +432,15 @@ class ExecutionFailClosed(unittest.TestCase):
 
 class PortShape(unittest.TestCase):
     def test_protocols_are_protocols(self):
-        for proto in (Workspace, SpikeHarness):
+        for proto in (Workspace, LegacySpikeHarness, SpikeHarness):
             self.assertTrue(hasattr(proto, "_is_protocol"))
+        legacy = inspect.signature(LegacySpikeHarness.run).parameters
+        bound = inspect.signature(SpikeHarness.run).parameters
+        self.assertEqual(tuple(legacy), ("self", "command", "snapshot"))
+        self.assertEqual(
+            tuple(bound), ("self", "run_id", "binding", "command", "snapshot"))
+        self.assertTrue(all(parameter.kind is inspect.Parameter.KEYWORD_ONLY
+                            for name, parameter in bound.items() if name != "self"))
         # capture types carry the documented fields
         cf = CapturedFile(FileObservation("a", MISSING, None), None)
         self.assertEqual(cf.observation.path, "a")

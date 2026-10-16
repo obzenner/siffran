@@ -1714,7 +1714,7 @@ def rust_probe(client: DockerClient, run_id: str, *, large: bool) -> ProbeResult
 
 
 class QualificationDockerHarness:
-    """Qualification-only implementation of the unchanged SpikeHarness port."""
+    """Qualification-only LegacySpikeHarness, never the production SpikeHarness port."""
 
     def __init__(self, client: DockerClient, run_id: str):
         self.client, self.run_id, self.counter = client, run_id, 0
