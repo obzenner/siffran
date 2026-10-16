@@ -1,8 +1,8 @@
 """Docker execution substrate and exact-record run-bound harness.
 
-Application code depends only on the run-bound port and never imports this module. The unchanged
-bridge still supplies the legacy two-argument harness, so default production composition cannot
-enter ``DockerSpikeHarness`` until a separately reviewed composition checkpoint.
+Application code depends only on the run-bound port and never imports this module.
+``adapters/bridge.py`` is the sole production composer of ``DockerSpikeHarness``; absent or unsafe
+qualification authority degrades only spike capability.
 """
 from __future__ import annotations
 

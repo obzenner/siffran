@@ -129,7 +129,10 @@ The Docker lifecycle substrate serializes lifecycle/recovery only to a supplied 
 materializes only immutable snapshot bytes below `staging/<operation-id>` with profile-bound
 256-file/64-MiB ceilings and the same deterministic cleanup entry/depth ceiling, and recovers only a
 full-ID container whose exact name, five labels, image, process, isolation, resources and mount policy
-pass inspect. For a journal with a cid, recovery inspects that recorded ID first and only a successful
+pass inspect. Docker inspect may also return unrelated labels inherited from the image; orphan recovery
+selects and revalidates only the policy's exact five-key qualification identity before removal, while
+missing, malformed or conflicting identity keys still refuse removal and caller-selected exact-candidate
+labels remain a strict five-key set. For a journal with a cid, recovery inspects that recorded ID first and only a successful
 bounded unfiltered full-ID census can prove it absent; the all-label census then rejects replacements. A successful all-label census plus exact
 inspect—not a name filter or a generic failed inspect—is the only absence/ownership basis. The
 journal is deleted last, after exact container absence and bounded no-follow staging cleanup.

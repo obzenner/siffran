@@ -716,6 +716,28 @@ def qualification_labels(run_id: str, role: str, digest: str) -> dict[str, str]:
     }
 
 
+def _closed_qualification_identity_labels(
+    policy: Mapping[str, Any], inspected_labels: Mapping[str, Any],
+) -> dict[str, str]:
+    """Select and validate only Empirica's closed identity from inspect labels."""
+    try:
+        keys = policy["container_lifecycle"]["label_keys"]
+        selected = {key: inspected_labels[key] for key in keys}
+    except (KeyError, TypeError) as exc:
+        raise DockerCleanupError("inspected qualification identity labels are incomplete") from exc
+    if any(type(key) is not str for key in keys) or any(
+            type(value) is not str for value in selected.values()):
+        raise DockerCleanupError("inspected qualification identity labels are malformed")
+    try:
+        expected = qualification_labels(
+            selected[RUN_LABEL], selected[ROLE_LABEL], policy_digest(policy))
+    except (KeyError, TypeError, DockerQualificationError) as exc:
+        raise DockerCleanupError("inspected qualification identity labels are malformed") from exc
+    if selected != expected:
+        raise DockerCleanupError("inspected qualification identity labels conflict with policy")
+    return selected
+
+
 def docker_create_argv(
     policy: Mapping[str, Any], *, input_dir: Path, name: str, labels: Mapping[str, str],
     command: str, network: str | None = None,
@@ -1249,7 +1271,8 @@ class DockerClient:
             doc = self.inspect_container(container_id)
             if not self._owned_container(doc):
                 continue
-            labels = doc["Config"]["Labels"]
+            inspected_labels = doc["Config"]["Labels"]
+            labels = _closed_qualification_identity_labels(self.policy, inspected_labels)
             self.remove_owned(container_id, labels, doc)
             recovered.append(container_id)
         return tuple(recovered)

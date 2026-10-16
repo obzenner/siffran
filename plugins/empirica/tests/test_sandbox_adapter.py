@@ -523,7 +523,7 @@ class BoundedRunnerTests(unittest.TestCase):
                 f"p=subprocess.Popen([{sys.executable!r},'-c','import time; time.sleep(60)']); "
                 f"pathlib.Path({str(pid_path)!r}).write_text(str(p.pid)); time.sleep(60)")
             result = docker.BoundedRunner().run(
-                (sys.executable, "-c", script), timeout_seconds=0.1, output_limit_bytes=4096)
+                (sys.executable, "-c", script), timeout_seconds=2.0, output_limit_bytes=4096)
             child_pid = int(pid_path.read_text())
         self.assertTrue(result.timed_out)
         self._assert_process_gone(child_pid)
@@ -661,6 +661,23 @@ class LifecycleRunner:
         raise AssertionError(f"unexpected lifecycle call: {argv}")
 
 
+class OrphanRunner(LifecycleRunner):
+    """Expose one inspected candidate even when a mutated identity no longer matches hints."""
+
+    def run(self, argv, *, timeout_seconds, output_limit_bytes, env=None):
+        args = tuple(argv[1:])
+        if args[:3] == ("container", "ls", "--all"):
+            self.calls.append(tuple(argv))
+            self.environments.append(dict(env or {}))
+            self.timeouts.append(timeout_seconds)
+            self.output_limits.append(output_limit_bytes)
+            return docker.CommandResult.fake(
+                stdout=(self.ID + "\n") if self.created and not self.removed else "")
+        return super().run(
+            argv, timeout_seconds=timeout_seconds,
+            output_limit_bytes=output_limit_bytes, env=env)
+
+
 def lifecycle_client(root: Path, runner: LifecycleRunner) -> docker.DockerClient:
     cli = fake_cli(root)
     identity = PolicyTests().identity(cli)
@@ -737,31 +754,115 @@ class LifecycleTests(unittest.TestCase):
         self.assertEqual(runner.calls, [])
 
 
-    def test_orphan_recovery_skips_mismatched_identity_and_cleanup_fails_closed(self):
-        class OrphanRunner(LifecycleRunner):
-            def run(inner, argv, *, timeout_seconds, output_limit_bytes, env=None):
-                args = tuple(argv[1:])
-                if args[:3] == ("container", "ls", "--all"):
-                    inner.calls.append(tuple(argv))
-                    return docker.CommandResult.fake(stdout=inner.ID + "\n")
-                return super(OrphanRunner, inner).run(
-                    argv, timeout_seconds=timeout_seconds,
-                    output_limit_bytes=output_limit_bytes, env=env)
+    def test_orphan_probe_recovers_inspected_image_labels_with_closed_identity_only(self):
+        class InheritedImageLabelRunner(LifecycleRunner):
+            def _build_doc(self, argv):
+                doc = super()._build_doc(argv)
+                doc["Config"]["Labels"].update({
+                    "org.opencontainers.image.ref.name": "debian",
+                    "org.opencontainers.image.version": "bookworm",
+                })
+                return doc
 
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw).resolve(strict=True)
+            runner = InheritedImageLabelRunner()
+            client = lifecycle_client(root, runner)
+            with patch.object(client, "remove_owned", wraps=client.remove_owned) as remove:
+                probe = docker.orphan_recovery_probe(client, "q123")
+        self.assertTrue(probe.passed, probe.details)
+        self.assertEqual(probe.details["created_id"], runner.ID)
+        self.assertEqual(probe.details["recovered_ids"], [runner.ID])
+        selected = remove.call_args.args[1]
+        self.assertEqual(set(selected), set(client.policy["container_lifecycle"]["label_keys"]))
+        self.assertEqual(selected, docker.qualification_labels(
+            "q123", "interrupted", docker.policy_digest(client.policy)))
+        self.assertNotIn("org.opencontainers.image.version", selected)
+        self.assertTrue(runner.removed)
+        self.assertTrue(all(
+            call[3] == runner.ID for call in runner.calls
+            if call[1:3] == ("container", "inspect")))
+
+    def test_closed_orphan_identity_rejects_missing_wrong_and_non_string_values(self):
+        with tempfile.TemporaryDirectory() as raw:
+            policy = lifecycle_client(
+                Path(raw).resolve(strict=True), LifecycleRunner()).policy
+            labels = docker.qualification_labels(
+                "q123", "interrupted", docker.policy_digest(policy))
+            for key in tuple(labels):
+                missing = dict(labels)
+                missing.pop(key)
+                wrong = {**labels, key: "unsafe/value"}
+                non_string = {**labels, key: 7}
+                for kind, candidate in (("missing", missing), ("wrong", wrong),
+                                        ("non-string", non_string)):
+                    with self.subTest(key=key, kind=kind), self.assertRaises(
+                            docker.DockerCleanupError):
+                        docker._closed_qualification_identity_labels(policy, candidate)
+            replacement = dict(labels)
+            replacement.pop(docker.RUN_LABEL)
+            replacement["org.opencontainers.image.run"] = labels[docker.RUN_LABEL]
+            with self.assertRaises(docker.DockerCleanupError):
+                docker._closed_qualification_identity_labels(policy, replacement)
+
+    def test_orphan_recovery_skips_mismatched_identity_and_never_removes(self):
+        def missing(labels):
+            labels.pop(docker.RUN_LABEL)
+
+        def wrong(labels):
+            labels[docker.SCHEMA_LABEL] = "wrong"
+
+        def non_string(labels):
+            labels[docker.RUN_LABEL] = 7
+
+        def replaced_by_extra(labels):
+            labels.pop(docker.RUN_LABEL)
+            labels["org.opencontainers.image.run"] = "q123"
+
+        cases = (
+            ("missing", missing, False),
+            ("wrong", wrong, False),
+            ("non-string", non_string, True),
+            ("unrelated-extra-cannot-replace-run", replaced_by_extra, False),
+        )
+        for name, mutate, raises in cases:
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as raw:
+                root = Path(raw).resolve(strict=True)
+                input_dir = root / "input"
+                input_dir.mkdir()
+                runner = OrphanRunner()
+                client = lifecycle_client(root, runner)
+                client.create_container(
+                    run_id="q123", role="interrupted", input_dir=input_dir, command="true")
+                mutate(runner.create_doc["Config"]["Labels"])
+                if raises:
+                    with self.assertRaises(docker.DockerCleanupError):
+                        client.recover_orphans()
+                else:
+                    self.assertEqual(client.recover_orphans(), ())
+                self.assertFalse(runner.removed)
+        residue = docker.Census((LifecycleRunner.ID,), (LifecycleRunner.ID,), (), ())
+        self.assertFalse(docker.cleanup_matches(residue, residue, ()))
+
+    def test_exact_candidates_keeps_closed_caller_label_set_invariant(self):
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve(strict=True)
             input_dir = root / "input"
             input_dir.mkdir()
-            runner = OrphanRunner()
+            runner = LifecycleRunner()
             client = lifecycle_client(root, runner)
-            client.create_container(
-                run_id="q123", role="interrupted", input_dir=input_dir, command="true")
-            runner.create_doc["Config"]["Labels"][docker.SCHEMA_LABEL] = "wrong"
-            recovered = client.recover_orphans()
-        self.assertEqual(recovered, ())
-        self.assertFalse(runner.removed)
-        residue = docker.Census((runner.ID,), (runner.ID,), (), ())
-        self.assertFalse(docker.cleanup_matches(residue, residue, ()))
+            labels = docker.qualification_labels(
+                "q123", "interrupted", docker.policy_digest(client.policy))
+            variants = ({**labels, "org.opencontainers.image.version": "bookworm"},
+                        {key: value for key, value in labels.items() if key != docker.RUN_LABEL})
+            before = len(runner.calls)
+            for candidate in variants:
+                with self.subTest(keys=sorted(candidate)), self.assertRaises(
+                        docker.DockerCleanupError):
+                    client.exact_candidates(
+                        name="siffran-qual-q123-001", labels=candidate,
+                        input_dir=input_dir, network="none")
+            self.assertEqual(len(runner.calls), before)
 
 
 class RecordTests(unittest.TestCase):
