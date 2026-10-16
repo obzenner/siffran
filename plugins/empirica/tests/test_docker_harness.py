@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-Docker tests for the mechanically unreachable 3C-b exact-record harness."""
+"""Fake-Docker tests for the exact-record harness; no Docker daemon is used."""
 from __future__ import annotations
 
 import fcntl
@@ -736,11 +736,14 @@ class FailureTests(DockerHarnessCase):
 
 
 class ReachabilityTests(unittest.TestCase):
-    def test_candidate_has_zero_public_reachability(self):
+    def test_production_composition_cannot_reach_docker_harness(self):
         plugin = Path(__file__).resolve().parents[1]
         repository = plugin.parents[1]
+        transaction = (plugin / "application" / "transaction.py").read_text(encoding="utf-8")
+        self.assertIn("execute_run_bound_spike", transaction)
+        self.assertNotIn("DockerSpikeHarness", transaction)
+        self.assertNotIn("sandbox.execution", transaction)
         files = [
-            plugin / "application" / "transaction.py",
             plugin / "application" / "v2.py",
             plugin / "adapters" / "bridge.py",
             plugin / "adapters" / "sandbox" / "__init__.py",

@@ -226,22 +226,20 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual(artifacts.values[old_key], before_artifacts)
         self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/3")
 
-    def test_every_run3_spike_is_guarded_before_workspace_artifact_and_harness(self):
-        for selected in (SpikesUnavailable(), QualifiedSpikeBackend(DIGEST_A, DIGEST_B)):
-            with self.subTest(kind=selected.persisted()["kind"]):
-                coordinator, (workspace, harness, runs, artifacts) = self.coordinator(
-                    CountingSelector(selected))
-                started = coordinator.handle(start_command(), "start")
-                before = (len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls)
-                result = coordinator.handle({
-                    "type": "ObserveAction", "run_id": started["result"]["run"]["id"],
-                    "action": {"kind": "spike_request", "claim_id": "C0",
-                               "command": "true", "dependent_files": ["x"]},
-                }, "spike")
-                self.assertEqual(result["result"], {
-                    "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
-                self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
-                                 before)
+    def test_unavailable_run3_spike_is_guarded_before_workspace_artifact_and_harness(self):
+        coordinator, (workspace, harness, runs, artifacts) = self.coordinator(
+            CountingSelector(SpikesUnavailable()))
+        started = coordinator.handle(start_command(), "start")
+        before = (len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls)
+        result = coordinator.handle({
+            "type": "ObserveAction", "run_id": started["result"]["run"]["id"],
+            "action": {"kind": "spike_request", "claim_id": "C0",
+                       "command": "true", "dependent_files": ["x"]},
+        }, "spike")
+        self.assertEqual(result["result"], {
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+        self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
+                         before)
     def test_terminal_run3_spike_is_inert_before_every_side_effect(self):
         bindings = (
             {"kind": "spikes_unavailable"},

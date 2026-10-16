@@ -538,10 +538,10 @@ sandbox-qualification-unit-check: ## Test checkout/Make delegation to the shippe
 empirica-sandbox-check: ## Test shipped Docker profile, runtime, lifecycle, record, journal and operator CLI primitives without Docker
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_SANDBOX_TESTS)
 
-empirica-docker-execution-check: ## Test unreachable Docker execution staging, locking and recovery with a fake CLI
+empirica-docker-execution-check: ## Test Docker execution staging, locking and recovery with a fake CLI
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_DOCKER_EXECUTION_TESTS)
 
-empirica-docker-harness-check: ## Test the unreachable exact-record Docker harness candidate with a fake CLI
+empirica-docker-harness-check: ## Test the exact-record Docker harness and unavailable production composition with a fake CLI
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_DOCKER_HARNESS_TESTS)
 
 .PHONY: skills-check suites-check

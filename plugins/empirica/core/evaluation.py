@@ -810,16 +810,33 @@ def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) 
 
 
 def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, Any], facts: Any) -> Decision:
-    """Purely admit immutable harness facts and plan one spike result artifact."""
+    """Purely admit immutable harness facts for an exact committed spike request."""
     state = snapshot.state
     blocked = _investigation_block(snapshot)
     if blocked is not None:
         return blocked
     if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
+    request_artifact_id = digest(request_body)
+    sealed_request = next((item for item in snapshot.history
+                           if item.get("kind") == "spike_request"
+                           and item.get("artifact_id") == request_artifact_id), None)
+    if sealed_request is None:
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
+    requests = [item for item in snapshot.history
+                if item.get("kind") == "spike_request"
+                and item.get("claim_id") == request_body["claim_id"]]
+    if not requests or requests[-1].get("artifact_id") != request_artifact_id:
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
     claim = next((c for c in snapshot.graph["claims"] if c["id"] == request_body["claim_id"]), None)
     if claim is None or claim_digest(claim) != request_body["claim_digest"]:
         return _decision(snapshot, state, "Block", reason="graph.invalid")
+    research = [item for item in active_evidence(snapshot, claim)
+                if item["kind"] == "research" and item["outcome"] == "supporting"]
+    if tuple(item["artifact_id"] for item in research) != tuple(
+            request_body["prerequisite_research_ids"]):
+        return _decision(snapshot, state, "Block", reason="claim.spike_prerequisite_missing",
+                         affected="claim:" + claim["id"])
     prior = [a for a in snapshot.history if a.get("kind") == "spike" and a.get("claim_id") == claim["id"] and a.get("claim_digest") == request_body["claim_digest"]]
     result = artifact("spike", {
         "claim_id": claim["id"], "claim_digest": request_body["claim_digest"],

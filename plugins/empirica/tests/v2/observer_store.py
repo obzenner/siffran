@@ -490,7 +490,8 @@ class _Builder:
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
         """Seed contract-valid immutable historical spike evidence without public run/3 ingress.
 
-        New run/3 public spikes are intentionally unavailable until DockerSpikeHarness integration.
+        The default production composition keeps new run/3 spikes unavailable until a
+        run-bound Docker harness is explicitly composed.
         Observer fixtures still need persisted historical request/result bindings for freshness and
         aggregation coverage, so this test-only builder uses the pure planners and existing in-memory
         repositories, validates the resulting chain through normal coordinator assembly, and invokes

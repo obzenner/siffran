@@ -49,9 +49,14 @@ environment availability are required for preflight success and installable all-
 After Docker discovery, every qualification
 operation uses only the absolute qualified CLI and a closed host environment (`LANG=C`, `LC_ALL=C`,
 and `DOCKER_HOST=<qualified Unix endpoint>`), never ambient Docker context/config, proxy or credential
-variables. The unreachable 3C-b harness uses the same passive ambient `DOCKER_CONTEXT`-over-`DOCKER_HOST`
+variables. The exact-record Docker harness uses the same passive ambient `DOCKER_CONTEXT`-over-`DOCKER_HOST`
 discovery precedence as qualification and StartRun for both preflight and postflight; only its
-post-discovery container lifecycle uses that closed endpoint-bound environment.
+post-discovery container lifecycle uses that closed endpoint-bound environment. The 3C-c application
+transaction seals a deterministic `spike_request` in one CAS before execution, keeps the immutable
+execution fact only in memory, and retries only the separate result CAS. Qualified execution is
+available only when composition supplies the run-bound harness; the unchanged bridge still supplies
+the two-argument legacy harness, whose body cannot be entered by the keyword-only call, so default
+production composition fails closed as unavailable.
 
 The closed recovery-journal v1 vocabulary is `intent` (JSON has no container ID yet), `created`
 (one full 64-hex ID), and `removing` (the same full ID while conservative removal is in progress).
@@ -72,7 +77,7 @@ file with the exact safe owner/mode/name/size, are the only incomplete entries r
 unknown residue refuses. Finalization first atomically publishes an ID-less `intent` tombstone, then
 removes cid, intent and operation directory in order, so every crash window is either a valid journal or
 that one exact empty directory.
-The unreachable 3C-a substrate serializes lifecycle/recovery only to a supplied finite monotonic deadline,
+The Docker lifecycle substrate serializes lifecycle/recovery only to a supplied finite monotonic deadline,
 materializes only immutable snapshot bytes below `staging/<operation-id>` with profile-bound
 256-file/64-MiB ceilings and the same deterministic cleanup entry/depth ceiling, and recovers only a
 full-ID container whose exact name, five labels, image, process, isolation, resources and mount policy
@@ -83,8 +88,9 @@ journal is deleted last, after exact container absence and bounded no-follow sta
 
 | Target | Boundary | Why it is not in the fast gate |
 |---|---|---|
-| `make empirica-docker-execution-check` | unreachable 3C-a Docker lifecycle substrate: operator-created scaffolding, bounded process lock, immutable staging, atomic journal transitions, exact fake-CLI inspect/removal/recovery, and BaseException process-group cleanup | fake runner only; no Docker daemon and no transaction/public spike path imports the substrate |
-| `make empirica-docker-harness-check` | unreachable 3C-b exact-record `DockerSpikeHarness`: run binding, shared passive ambient pre/post authority resolution, reserved effect/cleanup/postflight deadlines, restart recovery, closed unavailable reasons, attached-versus-inspected workload outcomes, exact cleanup, and canonical result admission | fake runner only; no Docker daemon, transaction activation, bridge wiring, current-pointer authority, or host fallback |
+| `make empirica-docker-execution-check` | Docker lifecycle substrate: operator-created scaffolding, bounded process lock, immutable staging, atomic journal transitions, exact fake-CLI inspect/removal/recovery, and BaseException process-group cleanup | fake runner only; no Docker daemon and no default production composition imports the Docker harness |
+| `make empirica-docker-harness-check` | exact-record `DockerSpikeHarness`: run binding, shared passive ambient pre/post authority resolution, reserved effect/cleanup/postflight deadlines, restart recovery, closed unavailable reasons, attached-versus-inspected workload outcomes, exact cleanup, canonical result admission, and absence from default composition | fake runner only; no Docker daemon, bridge wiring, current-pointer authority, or host fallback |
+| `make empirica-transaction-check` | 3C-c two-CAS qualified spike activation: request-before-execution, exact run-bound arguments, one execution across result-CAS retries, request-only failures, post-execution race discard, execution observation basis, and legacy-harness fail-closed composition | in-memory repositories/workspace/harness only; no Docker daemon or bridge change |
 | `make sandbox-qualification BACKEND=docker ARGS="--probe all"` | external qualification of one exact absolute Docker CLI, local Darwin-to-Unix-to-Docker-Desktop-Linux-VM boundary, engine builtin seccomp/cgroup-v2 namespace facts, already-present digest-pinned Rust image/config, and one closed executable pull-disabled policy; security probes (including enforced memory/PID canaries) precede Rust/contract performance; selected probes report incomplete and cannot claim backend eligibility; reports and before/after resource census are written under `$TMPDIR/siffran-sandbox-qualification` unless `--output` is supplied | requires an operator-approved already-running local Docker engine and the pinned image already present; it never installs, pulls, repairs, switches context, starts/stops the daemon/VM, qualifies native Linux, or authorizes host-subprocess fallback. `make sandbox-qualification-unit-check` owns checkout delegation in `check-static`; `make empirica-sandbox-check` owns the shipped profile/runtime/record primitives in `check-core` |
 | `make sandbox-qualification-install BACKEND=docker [ARGS="--sandbox-home path"]` | reruns the complete current-code all-probe qualification and, only on success, atomically publishes immutable user-scoped authority under `~/.empirica-plugin/sandbox/qualification` (or the explicit `EMPIRICA_SANDBOX_HOME`/argument override); human reports remain under `$TMPDIR/siffran-sandbox-qualification` and are non-authoritative provenance | operator setup only, never an Empirica author action; it has the same already-running-engine/no-pull restrictions as qualification and refuses selected/incomplete evidence, unsafe ownership/modes/symlinks, or any digest/identity mismatch |
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |

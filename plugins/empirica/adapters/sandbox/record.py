@@ -53,6 +53,7 @@ IMPLEMENTATION_SOURCE_PATHS = (
     "application/run_state.py",
     "application/transaction.py",
     "application/v2.py",
+    "core/evaluation.py",
     "core/freshness.py",
     "core/run.py",
     "vendor/contracts/empirica/v2/state.schema.json",

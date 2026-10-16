@@ -153,7 +153,7 @@ class SpikeExecutionUnavailable(RuntimeError):
 
 
 class LegacySpikeHarness(Protocol):
-    """Temporary two-argument host/qualification port; 3C-c removes this path."""
+    """Temporary host/qualification port retained until bridge composition is replaced."""
 
     def run(self, command: str, snapshot: ExecutionSnapshot) -> HarnessResult: ...
 

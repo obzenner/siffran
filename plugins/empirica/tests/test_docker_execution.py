@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-only tests for the unreachable 3C-a Docker lifecycle substrate."""
+"""Fake-only tests for the Docker lifecycle substrate; no Docker daemon is used."""
 from __future__ import annotations
 
 import copy

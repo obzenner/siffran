@@ -147,7 +147,7 @@ def _capture_execution(command, dependent_paths, workspace):
 def execute_run_bound_spike(
     *, run_id, binding, command, dependent_paths, workspace, harness: SpikeHarness,
 ):
-    """Mechanically unreachable 3C-b helper for the run-bound production harness port."""
+    """Capture and execute through the run-bound port used by qualified transactions."""
     bindings, execution, observation = _capture_execution(
         command, dependent_paths, workspace)
     try:

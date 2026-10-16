@@ -14,6 +14,7 @@ sys.path.insert(0, str(ROOT))
 
 import jsonschema  # noqa: E402
 from adapters.audit import child_event  # noqa: E402
+from adapters.execution import SubprocessSpikeHarness  # noqa: E402
 from adapters.git.artifact_repo import ArtifactCollision  # noqa: E402
 from application import protocol  # noqa: E402
 from application.governance import transact as governance_transact  # noqa: E402
@@ -22,6 +23,7 @@ from application.observation import observation_basis_body  # noqa: E402
 from application.snapshot import (HistoryCorrupt, assemble, graph_from_history, make_artifact,  # noqa: E402
                                   state_digest, traverse_history)
 from application.ports import (CapturedFile, HarnessResult, ObservationSnapshot,  # noqa: E402
+                               QualifiedSpikeBackend, SpikeExecutionUnavailable,
                                WorkspaceCapture)
 from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
@@ -29,9 +31,9 @@ from application.transaction import Coordinator as ProductionCoordinator  # noqa
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
     claim_conflicted, claim_digest, evaluate_snapshot, frozen_semantic_digest, independence,
-    valid_graph)
+    plan_spike_result, valid_graph)
 from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
-                            observations_digest)
+                            execution_facts, observations_digest)
 
 # Sentinel: leave the governance context author unchanged (None means set author to null).
 _KEEP = object()
@@ -175,15 +177,38 @@ class Workspace:
 
 
 class Harness:
-    def __init__(self):
+    def __init__(self, *, exit_code=0, failure=None):
         self.calls = 0
         self.before_result = None
+        self.exit_code = exit_code
+        self.failure = failure
+        self.arguments = []
 
-    def run(self, command, snapshot):
+    def run(self, *, run_id, binding, command, snapshot):
         self.calls += 1
+        self.arguments.append({
+            "run_id": run_id, "binding": binding, "command": command, "snapshot": snapshot,
+        })
         if self.before_result is not None:
             self.before_result()
-        return HarnessResult(0, canonical_digest({"command": command}), snapshot.snapshot_digest)
+        if self.failure is not None:
+            raise self.failure
+        return HarnessResult(
+            self.exit_code, canonical_digest({"command": command, "exit_code": self.exit_code}),
+            snapshot.snapshot_digest)
+
+
+QUALIFICATION_DIGEST = canonical_digest("qualified transaction record")
+EXECUTION_BINDING_DIGEST = canonical_digest("qualified transaction binding")
+
+
+class QualifiedSelector:
+    def __init__(self):
+        self.calls = 0
+
+    def select(self):
+        self.calls += 1
+        return QualifiedSpikeBackend(QUALIFICATION_DIGEST, EXECUTION_BINDING_DIGEST)
 
 
 def activate_investigation(coordinator: ProductionCoordinator, run_id: str) -> None:
@@ -652,7 +677,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_route_order_rejections_have_zero_writes_or_execution(self):
         runs, artifacts_repo, harness = Runs(), Artifacts(), Harness()
         coordinator = ProductionCoordinator(Workspace(), harness, runs, artifacts_repo,
-                                  PI_PROFILE, {})
+                                  PI_PROFILE, {}, QualifiedSelector())
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "route"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -863,7 +888,8 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = ProductionCoordinator(workspace, harness, runs, artifacts_repo, PI_PROFILE, {})
+        coordinator = ProductionCoordinator(
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, QualifiedSelector())
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -1067,8 +1093,9 @@ class D7TransactionTests(unittest.TestCase):
                                 research_author=_KEEP, request_author=_KEEP,
                                 completion_author=AUDITOR):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
+        selector = QualifiedSelector()
         coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {})
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, selector)
         started = coordinator.handle(
             {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
              "goal": "g"}, "start")
@@ -1106,7 +1133,7 @@ class D7TransactionTests(unittest.TestCase):
             "type": "ObserveAction", "run_id": run_id,
             "action": {"kind": "spike_request", "claim_id": "C0", "command": "test",
                        "dependent_files": ["src/x.py"]}}, "s")
-        self.assertEqual(response["result"]["type"], "Allow")
+        self.assertEqual(response["result"]["type"], "Allow", response)
         return coordinator, runs, artifacts_repo, workspace, harness, run_id, next(iter(runs.data))
 
     def test_spike_result_keeps_sealed_producer_across_context_change_and_result_retry(self):
@@ -1165,6 +1192,281 @@ class D7TransactionTests(unittest.TestCase):
         latest = json.loads(artifacts_repo.values[key][
             decode_state(runs.data[key].value).committed_artifact_head_id].body)
         self.assertEqual(latest["observation_basis_digest"], execution_bases[0]["artifact_id"])
+
+    def _qualified_spike_ready(self, harness=None, *, session="qualified"):
+        runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
+        harness = harness if harness is not None else Harness()
+        selector = QualifiedSelector()
+        coordinator = ProductionCoordinator(
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, selector)
+        started = coordinator.handle(
+            {"type": "StartRun", "control_mode": "deliberative",
+             "invocation": dict(TEST_INVOCATION),
+             "selector": {"project": "p", "session": session}, "goal": "g"}, "start")
+        run_id = started["result"]["run"]["id"]
+        activate_investigation(coordinator, run_id)
+        graph = {"root": "C0", "claims": [
+            {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
+            "edges": []}
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": graph}}, "graph")
+        activate_investigation(coordinator, run_id)
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "research", "claim_id": "C0",
+                                       "source_kind": "code", "result": "supports", "payload": {
+                                           "source_ref": "test_d7_transactions.py",
+                                           "citation": "Observation basis fixture."}}}, "research")
+        workspace.write("src/x.py", b"x")
+        action = {"kind": "spike_request", "claim_id": "C0", "command": "test",
+                  "dependent_files": ["src/x.py"]}
+        return (coordinator, runs, artifacts_repo, workspace, harness, selector, run_id,
+                next(iter(runs.data)), action)
+
+    @staticmethod
+    def _artifact_kinds(artifacts_repo, key):
+        return [json.loads(item.body)["kind"] for item in artifacts_repo.values[key].values()]
+
+    def test_qualified_spike_seals_request_before_exact_run_bound_execution(self):
+        for exit_code in (0, 17):
+            with self.subTest(exit_code=exit_code):
+                harness = Harness(exit_code=exit_code)
+                (coordinator, runs, artifacts_repo, workspace, _, selector, run_id, key,
+                 action) = self._qualified_spike_ready(harness, session=f"exit-{exit_code}")
+
+                def inspect_request_boundary():
+                    history = traverse_history(
+                        decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                    self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
+                    self.assertNotIn("spike", [item["kind"] for item in history])
+
+                harness.before_result = inspect_request_boundary
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                self.assertEqual(response["result"]["type"], "Allow", response)
+                self.assertEqual(harness.calls, 1)
+                self.assertEqual(selector.calls, 1)
+                arguments = harness.arguments[0]
+                self.assertEqual(arguments["run_id"], run_id)
+                self.assertEqual(arguments["binding"], QualifiedSpikeBackend(
+                    QUALIFICATION_DIGEST, EXECUTION_BINDING_DIGEST))
+                self.assertEqual(arguments["command"], action["command"])
+                self.assertEqual(
+                    [binding.path for binding in arguments["snapshot"].file_bindings],
+                    ["src/x.py"])
+                history = traverse_history(
+                    decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                result = next(item for item in history if item["kind"] == "spike")
+                self.assertEqual(result["exit_code"], exit_code)
+                self.assertEqual(result["outcome"], "pass" if exit_code == 0 else "fail")
+                basis = next(item for item in reversed(history)
+                             if item["kind"] == "observation_basis"
+                             and [source["name"] for source in item["sources"]]
+                             == ["workspace", "spike_execution"])
+                execution_source = basis["sources"][1]
+                sha256 = "sha256:" + hashlib.sha256(b"x").hexdigest()
+                expected_observation = FileObservation(
+                    "src/x.py", ObservationState.PRESENT, sha256)
+                self.assertEqual(execution_source["basis_id"], canonical_digest([
+                    ("src/x.py", ObservationState.PRESENT.value, sha256)]))
+                self.assertEqual(execution_source["digest"],
+                                 observations_digest((expected_observation,)))
+                self.assertEqual(execution_source["observations"], [{
+                    "path": "src/x.py", "state": "present", "sha256": sha256}])
+
+    def test_qualified_spike_canonicalizes_dependent_paths_before_capture_and_execution(self):
+        coordinator, _, _, workspace, harness, _, run_id, _, action = \
+            self._qualified_spike_ready(session="sorted-paths")
+        workspace.write("src/a.py", b"a")
+        action = {**action, "dependent_files": ["src/x.py", "src/a.py"]}
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        self.assertEqual(response["result"]["type"], "Allow", response)
+        self.assertEqual(
+            [binding.path for binding in harness.arguments[0]["snapshot"].file_bindings],
+            ["src/a.py", "src/x.py"])
+        self.assertIn(("src/a.py", "src/x.py"), workspace.calls)
+
+    def test_closed_execution_failure_keeps_request_and_base_exception_propagates(self):
+        failures = (
+            (SpikeExecutionUnavailable("lifecycle_failed", "injected"), "Fault"),
+            (KeyboardInterrupt(), "BaseException"),
+        )
+        for failure, expected in failures:
+            with self.subTest(expected=expected):
+                harness = Harness(failure=failure)
+                coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+                    self._qualified_spike_ready(harness, session=f"failure-{expected}")
+                if expected == "BaseException":
+                    with self.assertRaises(KeyboardInterrupt):
+                        coordinator.handle(
+                            {"type": "ObserveAction", "run_id": run_id, "action": action},
+                            "spike")
+                else:
+                    response = coordinator.handle(
+                        {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                    self.assertEqual(response["result"], {
+                        "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+                    self.assertNotIn("injected", json.dumps(response))
+                history = traverse_history(
+                    decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
+                self.assertNotIn("spike", [item["kind"] for item in history])
+
+    def test_request_conflict_replans_before_the_single_harness_call(self):
+        coordinator, runs, _, _, harness, _, run_id, _, action = \
+            self._qualified_spike_ready(session="request-conflict")
+        runs.conflicts = 1
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        self.assertEqual(response["result"]["type"], "Allow", response)
+        self.assertEqual(harness.calls, 1)
+        self.assertEqual(runs.conflicts, 0)
+
+    def test_absent_and_corrupt_runs_never_call_the_harness(self):
+        for state_kind in ("absent", "corrupt"):
+            with self.subTest(state_kind=state_kind):
+                coordinator, runs, _, _, harness, _, run_id, key, action = \
+                    self._qualified_spike_ready(session=f"preflight-{state_kind}")
+                if state_kind == "absent":
+                    runs.data.pop(key)
+                else:
+                    runs.data[key] = Corrupt("injected")
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                expected = "Inert" if state_kind == "absent" else "Block"
+                self.assertEqual(response["result"]["type"], expected, response)
+                self.assertEqual(harness.calls, 0)
+
+    def test_request_only_crash_can_retry_without_duplicate_request(self):
+        harness = Harness(failure=KeyboardInterrupt())
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+            self._qualified_spike_ready(harness, session="request-only")
+        with self.assertRaises(KeyboardInterrupt):
+            coordinator.handle(
+                {"type": "ObserveAction", "run_id": run_id, "action": action}, "first")
+        harness.failure = None
+        second = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "second")
+        self.assertEqual(second["result"]["type"], "Allow", second)
+        self.assertEqual(harness.calls, 2)
+        history = traverse_history(
+            decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+        self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
+        self.assertEqual([item["kind"] for item in history].count("spike"), 1)
+
+    def test_post_execution_terminal_graph_claim_research_and_corrupt_races_discard_fact(self):
+        for race in ("terminal", "graph", "claim", "research", "corrupt"):
+            with self.subTest(race=race):
+                harness = Harness()
+                coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+                    self._qualified_spike_ready(harness, session=f"race-{race}")
+
+                def mutate():
+                    if race == "terminal":
+                        current = runs.data[key]
+                        stopped = replace(decode_state(current.value), status="stopped_residual")
+                        runs.seq += 1
+                        runs.data[key] = Present(encode_state(stopped), Revision(str(runs.seq)))
+                    elif race == "corrupt":
+                        runs.data[key] = Corrupt("post-execution corruption")
+                    elif race == "research":
+                        changed = coordinator.handle({
+                            "type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "research", "claim_id": "C0",
+                                       "source_kind": "code", "result": "supports", "payload": {
+                                           "source_ref": "counter-proof",
+                                           "citation": "admitted evidence"}}}, "race")
+                        self.assertEqual(changed["result"]["type"], "Allow", changed)
+                    else:
+                        claim = ({"id": "C1", "text": "replacement", "gating": True,
+                                  "kind": "ordinary"} if race == "graph" else
+                                 {"id": "C0", "text": "changed", "gating": True,
+                                  "kind": "needs-experiment"})
+                        changed_graph = {"root": claim["id"], "claims": [claim], "edges": []}
+                        changed = coordinator.handle({
+                            "type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": changed_graph}}, "race")
+                        self.assertEqual(changed["result"]["type"], "Allow", changed)
+
+                harness.before_result = mutate
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                expected = "Inert" if race == "terminal" else "Block"
+                self.assertEqual(response["result"]["type"], expected, response)
+                self.assertEqual(harness.calls, 1)
+                self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
+
+    def test_concurrent_duplicate_calls_may_execute_twice_but_each_admits_once(self):
+        first_harness, second_harness = Harness(), Harness()
+        coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, action = \
+            self._qualified_spike_ready(first_harness, session="concurrent")
+        second = ProductionCoordinator(
+            workspace, second_harness, runs, artifacts_repo, PI_PROFILE, {}, QualifiedSelector())
+        second_response = []
+
+        def run_duplicate():
+            first_harness.before_result = None
+            second_response.append(second.handle(
+                {"type": "ObserveAction", "run_id": run_id, "action": action}, "second"))
+
+        first_harness.before_result = run_duplicate
+        first_response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "first")
+        self.assertEqual(first_response["result"]["type"], "Allow", first_response)
+        self.assertEqual(second_response[0]["result"]["type"], "Allow", second_response[0])
+        self.assertEqual((first_harness.calls, second_harness.calls), (1, 1))
+        history = traverse_history(
+            decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+        self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
+        self.assertEqual([item["kind"] for item in history].count("spike"), 2)
+
+    def test_legacy_harness_keyword_mismatch_fails_before_its_body(self):
+        class GuardedLegacyHarness(SubprocessSpikeHarness):
+            def __init__(self):
+                super().__init__()
+                self.body_calls = 0
+
+            def run(self, command, snapshot):
+                self.body_calls += 1
+                raise AssertionError("legacy body must remain unreachable")
+
+        harness = GuardedLegacyHarness()
+        coordinator, runs, artifacts_repo, _, _, selector, run_id, key, action = \
+            self._qualified_spike_ready(harness, session="legacy")
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        self.assertEqual(response["result"], {
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+        self.assertEqual(harness.body_calls, 0)
+        self.assertEqual(selector.calls, 1)
+        history = traverse_history(
+            decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+        self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
+        self.assertNotIn("spike", [item["kind"] for item in history])
+
+    def test_result_planner_refuses_fact_without_exact_committed_request(self):
+        harness = Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+            self._qualified_spike_ready(harness, session="missing-request")
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        self.assertEqual(response["result"]["type"], "Allow", response)
+        state = decode_state(runs.data[key].value)
+        snapshot = coordinator._assemble(
+            key, state, {"type": "GetRun", "run_id": run_id}, require_graph=True)
+        request = next(item for item in snapshot.history if item["kind"] == "spike_request")
+        without_request = replace(
+            snapshot, history=tuple(item for item in snapshot.history
+                                    if item["artifact_id"] != request["artifact_id"]))
+        execution = harness.arguments[0]["snapshot"]
+        result = HarnessResult(0, canonical_digest({"missing": "request"}),
+                               execution.snapshot_digest)
+        planned = plan_spike_result(
+            without_request, {key: value for key, value in request.items()
+                              if key != "artifact_id"},
+            execution_facts(execution.file_bindings, result))
+        self.assertEqual(planned.result_type, "Block")
+        self.assertEqual(planned.reason_code, "graph.invalid")
 
     def _active_snapshot_with_unmet_claim_and_child(self):
         """An active run with a real unmet ordinary claim (active next=research.record) and a

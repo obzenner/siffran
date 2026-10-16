@@ -11,7 +11,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
-                             valid_attribution)
+                             plan_spike_request, plan_spike_result, valid_attribution)
 from core import confirmation
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
@@ -22,10 +22,11 @@ from . import protocol as _proto
 from . import run_state
 from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
 from .location import decode_handle, encode_handle, storage_id
-from .observation import (ObservationUnavailable, build_observation_snapshot,
+from .observation import (HarnessContractError, HarnessUnavailable, ObservationUnavailable,
+                          build_observation_snapshot, execute_run_bound_spike,
                           observation_basis_body)
 from .ports import (NullSpikeAuthoritySelector, ObservationSnapshot,
-                    QualifiedSpikeBackend, SpikesUnavailable)
+                    QualifiedSpikeBackend, SpikeExecutionUnavailable, SpikesUnavailable)
 from .snapshot import (GraphInvalid, HistoryCorrupt, assemble, graph_from_history,
                        make_artifact, state_digest, traverse_history,
                        validate_investigation_history)
@@ -626,15 +627,112 @@ class Coordinator:
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
-        """No run/3 spike may reach a host harness before Docker integration."""
-        loaded = self._load(key)
-        if isinstance(loaded, CorruptLoad):
-            return self._safe_block(key, request_id, "run.corrupt")
-        if isinstance(loaded, AbsentLoad):
-            return self._inert(request_id)
-        if loaded.state.status != "active":
-            return self._inert(request_id)
-        return self._fault(request_id, "unavailable")
+        """Seal a qualified request, execute once, then retry only result admission."""
+        action = command["action"]
+        for _ in range(8):
+            loaded = self._load(key)
+            if isinstance(loaded, CorruptLoad):
+                return self._safe_block(key, request_id, "run.corrupt")
+            if isinstance(loaded, AbsentLoad):
+                return self._inert(request_id)
+            read, state = loaded.read, loaded.state
+            if state.status != "active":
+                return self._inert(request_id)
+            persisted_binding = state.spike_backend
+            if persisted_binding["kind"] == "spikes_unavailable":
+                return self._fault(request_id, "unavailable")
+            binding = QualifiedSpikeBackend(
+                persisted_binding["qualification_record_digest"],
+                persisted_binding["execution_binding_digest"],
+            )
+            try:
+                snapshot = self._assemble(key, state, command, require_graph=True)
+            except HistoryCorrupt:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._safe_block(key, request_id, "run.corrupt")
+            except GraphInvalid:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._block_from_state(key, state, command, request_id, "graph.invalid")
+            except ObservationUnavailable:
+                return self._fault(request_id, "unavailable")
+            try:
+                decision = plan_spike_request(snapshot, action)
+            except Exception:
+                return self._fault(request_id, "unavailable")
+            if decision.result_type != "Allow":
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._response(request_id, snapshot, decision)
+            request_artifact = decision.intent.artifacts[0]
+            try:
+                committed_state, _, _, _ = self._commit(
+                    key, read.revision, snapshot, state, (request_artifact,))
+            except Exception as exc:
+                if self._is_conflict(exc):
+                    continue
+                return self._fault(request_id, "unavailable")
+            committed_binding = dict(committed_state.spike_backend)
+            break
+        else:
+            return self._fault(request_id, "conflict")
+
+        try:
+            facts, _execution_snapshot, execution_observation = execute_run_bound_spike(
+                run_id=encode_handle(key), binding=binding, command=action["command"],
+                dependent_paths=tuple(sorted(action["dependent_files"])),
+                workspace=self.workspace, harness=self.harness,
+            )
+        except (SpikeExecutionUnavailable, ObservationUnavailable, HarnessUnavailable,
+                HarnessContractError, ValueError):
+            return self._fault(request_id, "unavailable")
+
+        # Keep the exact external fact and both captures in memory. Only this admission loop
+        # retries; it never calls the harness again. ``_execution_snapshot`` remains the immutable
+        # input whose digest the helper already required the harness result to echo.
+        for _ in range(8):
+            loaded = self._load(key)
+            if isinstance(loaded, CorruptLoad):
+                return self._safe_block(key, request_id, "run.corrupt")
+            if isinstance(loaded, AbsentLoad):
+                return self._inert(request_id)
+            read, state = loaded.read, loaded.state
+            if state.status != "active":
+                return self._inert(request_id)
+            if dict(state.spike_backend) != committed_binding:
+                return self._fault(request_id, "unavailable")
+            try:
+                snapshot = self._assemble(key, state, command, require_graph=True)
+            except HistoryCorrupt:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._safe_block(key, request_id, "run.corrupt")
+            except GraphInvalid:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._block_from_state(key, state, command, request_id, "graph.invalid")
+            except ObservationUnavailable:
+                return self._fault(request_id, "unavailable")
+            try:
+                decision = plan_spike_result(snapshot, request_artifact["body"], facts)
+            except Exception:
+                return self._fault(request_id, "unavailable")
+            if decision.result_type != "Allow":
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._response(request_id, snapshot, decision)
+            try:
+                committed_state, _, _, committed = self._commit(
+                    key, read.revision, snapshot, state, decision.intent.artifacts,
+                    additional_observations=(("spike_execution", execution_observation),))
+            except Exception as exc:
+                if self._is_conflict(exc):
+                    continue
+                return self._fault(request_id, "unavailable")
+            self.last_state = committed_state
+            return self._allow(request_id, committed)
+        return self._fault(request_id, "conflict")
 
     @staticmethod
     def _is_conflict(exc: Exception) -> bool:
