@@ -1,7 +1,7 @@
 {
-  "$description": "How many words a person reads at the fixed fixtures (tests/views.test.mjs, WORD BUDGET): the inbox home (rail, strip, calendar, five rows per group) and every fixture run's sheet, summed. A change may add at most 10% before the guard fails; raise a number only in a reviewed change. `p2` and `p3` are what P2 and P3 said, for the record. P3b re-baselined once for the minimal fixtures (15 sheets, not 29): each remaining sheet says what it said in P3 (226 words a sheet on average against P3's 208: the sheets that went were mostly the short one-claim ones); the inbox lost the rail lines and rows of the projects and runs that went.",
+  "$description": "How many words a person reads at the fixed fixtures (tests/views.test.mjs, WORD BUDGET): the inbox home (rail, strip, calendar, five rows per group) and every fixture run's sheet, summed. A change may add at most 10% before the guard fails; raise a number only in a reviewed change. `p2` and `p3` are what P2 and P3 said, for the record. G7b re-baselines the sheet for explicit generic request/result labels, full copyable identities, and the multi-container fixture while keeping the total below P3.",
   "inbox": 328,
-  "sheet": 3393,
+  "sheet": 3500,
   "p2": {
     "inbox": 400,
     "sheet": 8488

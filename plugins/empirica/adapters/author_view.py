@@ -478,6 +478,31 @@ def _verification_label(verification: dict[str, Any]) -> str:
     return _LABELS[_VERIFICATION[verification["status"]]]
 
 
+def _redacted_environment_plan(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    environment = value.get("environment")
+    if not isinstance(environment, (dict, list)):
+        return value
+    plan = dict(value)
+    plan["environment"] = sorted(environment if isinstance(environment, dict) else environment)
+    return plan
+
+
+def _generic_spike_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    """Public artifact with runtime-local identity and authored environment values removed."""
+    safe = dict(row)
+    if safe["kind"] == "spike_request":
+        for key in ("draft", "plan"):
+            if key in safe:
+                safe[key] = _redacted_environment_plan(safe[key])
+    if safe["kind"] == "spike":
+        facts = dict(safe["result_facts"])
+        facts.pop("run_id", None)
+        safe["result_facts"] = facts
+    return safe
+
+
 def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
     """Render the graph projection without private identity or artifact fields."""
     claims = tuple(
@@ -499,14 +524,27 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         f"  {safety.claim_id(row['from'])} -{row['type']}-> {safety.claim_id(row['to'])}"
         for row in argument["edges"]
     )
+    artifacts = argument["artifacts"]
     citations = tuple(
         line
-        for row in argument["artifacts"] if row.get("citation")
+        for row in artifacts if row.get("citation")
         for line in (
             f"  {safety.untrusted(row['citation'])}"
             + (f" — {_verification_label(row['verification'])}" if row.get("verification") else ""),
             *((f"    {_LABELS['human_note']} {safety.untrusted(row['verification']['note'])}",)
               if row.get("verification", {}).get("note") else ()),
+        )
+    )
+    result_requests = {row["request_artifact_id"] for row in artifacts if row["kind"] == "spike"}
+    spikes = tuple(
+        line
+        for row in artifacts if row["kind"] in {"spike_request", "spike"}
+        for line in (
+            f"  {_LABELS['generic_spike_request' if row['kind'] == 'spike_request' else 'generic_spike_result']} "
+            f"{safety.claim_id(row['claim_id'])} {row['artifact_id']}",
+            f"    {safety.untrusted(json.dumps(_generic_spike_evidence(row), separators=(',', ':'), ensure_ascii=False))}",
+            *((f"    {_LABELS['generic_spike_no_result']}",)
+              if row["kind"] == "spike_request" and row["artifact_id"] not in result_requests else ()),
         )
     )
     audit = argument["audit"]
@@ -516,6 +554,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         _LABELS["claims"], *claims,
         *((_LABELS["edges"], *edges) if edges else ()),
         *((_LABELS["citations"], *citations) if citations else ()),
+        *((_LABELS["generic_spikes"], *spikes) if spikes else ()),
         f"{_LABELS['audit_status']} {audit_text(audit)}",
         *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
     )

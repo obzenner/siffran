@@ -15,6 +15,7 @@ import * as path from "node:path";
 
 import {
   startRunRequest,
+  configuredSpikeProfile,
   splitLeadingFlags,
   parseInvocationFlags,
   gateFromDecision,
@@ -56,6 +57,17 @@ test("startRunRequest carries budgets only when supplied", () => {
     assert.deepEqual(req.command.budgets,
       { max_passes: 3, max_spawns: 1, max_audit_spawns: 2 });
   }
+});
+
+test("host profile is exact, optional, and only emitted when supplied", () => {
+  assert.equal(configuredSpikeProfile({}), undefined);
+  for (const spikeProfile of ["docker-isolated-v1", "docker-networked-v1"] as const) {
+    assert.equal(configuredSpikeProfile({ EMPIRICA_SPIKE_PROFILE: spikeProfile }), spikeProfile);
+    const req = startRunRequest(SEL, "g", RID, INVOCATION, { spikeProfile });
+    if (req.command.type === "StartRun") assert.equal(req.command.spike_profile, spikeProfile);
+  }
+  for (const value of ["", "docker-rust-v1", " docker-isolated-v1", "other"])
+    assert.throws(() => configuredSpikeProfile({ EMPIRICA_SPIKE_PROFILE: value }), /EMPIRICA_SPIKE_PROFILE/);
 });
 
 // --- invocation flags --------------------------------------------------------

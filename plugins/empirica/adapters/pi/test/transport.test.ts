@@ -13,7 +13,6 @@ import { fileURLToPath } from "node:url";
 import { HOST_PROFILE_ID } from "../src/host-profile.ts";
 import {
   CLAIM_ID_PATTERN,
-  DEPENDENT_FILE_PATTERN,
   OBSERVE_ACTION_OPTIONAL_KEYS,
   OBSERVE_ACTION_REQUIRED_KEYS,
   ORDINARY_BRIDGE_TIMEOUT_MS,
@@ -126,7 +125,7 @@ test("rejects when the bridge command cannot be spawned", async () => {
   );
 });
 
-test("only an exact schema-shaped public spike request gets the 300s outer margin", () => {
+test("only an exact closed generic spike envelope gets 300s; Python owns deep plan validation", () => {
   const spike = {
     protocol: "empirica/v2",
     request_id: "request-1",
@@ -136,16 +135,22 @@ test("only an exact schema-shaped public spike request gets the 300s outer margi
       action: {
         kind: "spike_request",
         claim_id: "C0",
-        command: "cargo test --offline",
-        dependent_files: ["Cargo.lock", "Cargo.toml"],
+        plan: { schema: "empirica.spike-plan-draft/2" },
       },
     },
   };
   assert.equal(ORDINARY_BRIDGE_TIMEOUT_MS, 30_000);
   assert.equal(SPIKE_BRIDGE_TIMEOUT_MS, 300_000);
   assert.equal(isExactSpikeRequest(spike), true);
+  // Deliberately incomplete beyond the schema discriminator: TypeScript classifies only the closed
+  // outer action for transport time; the Python request/core validators remain authoritative.
   assert.equal(bridgeTimeoutMs(spike, defaultBridgeConfig()), 300_000);
   assert.equal(bridgeProcessConfig(defaultBridgeConfig(), spike).timeoutMs, 300_000);
+  const deepPlanNearMiss = { ...spike, command: { ...spike.command, action: {
+    ...spike.command.action, plan: { ...spike.command.action.plan, framework_ceiling: 1 },
+  } } };
+  assert.equal(isExactSpikeRequest(deepPlanNearMiss), true,
+    "deep closed-plan validation belongs only to the Python request/core boundary");
 
   const nearMisses = [
     { ...spike, extra: true },
@@ -156,11 +161,11 @@ test("only an exact schema-shaped public spike request gets the 300s outer margi
     { ...spike, command: { ...spike.command, run_id: "" } },
     { ...spike, command: { ...spike.command, action: { ...spike.command.action, extra: true } } },
     { ...spike, command: { ...spike.command, action: { ...spike.command.action, claim_id: "bad claim" } } },
-    { ...spike, command: { ...spike.command, action: { ...spike.command.action, command: "" } } },
-    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: [] } } },
-    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: ["/absolute"] } } },
-    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: ["line\nbreak"] } } },
-    { ...spike, command: { ...spike.command, action: { ...spike.command.action, dependent_files: ["a", "a"] } } },
+    { ...spike, command: { ...spike.command, action: { kind: "spike_request", claim_id: "C0",
+      command: "old", dependent_files: ["old"] } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action, plan: null } } },
+    { ...spike, command: { ...spike.command, action: { ...spike.command.action,
+      plan: { schema: "empirica.spike-plan/1" } } } },
   ];
   for (const request of nearMisses) {
     assert.equal(isExactSpikeRequest(request), false);
@@ -177,8 +182,7 @@ test("timeout classifier mirrors every duplicated canonical request-schema seman
     Object.keys(node.properties).filter((key) => !node.required.includes(key));
   const observe = request.$defs.observeAction;
   const spike = request.$defs.actionSpikeRequest;
-  const dependentFiles = spike.properties.dependent_files;
-  const dependentFile = dependentFiles.items;
+  const plan = request.$defs.spikePlanDraft;
 
   assert.equal(request.type, "object");
   assert.equal(request.additionalProperties, false);
@@ -208,14 +212,10 @@ test("timeout classifier mirrors every duplicated canonical request-schema seman
   assert.deepEqual(SPIKE_ACTION_OPTIONAL_KEYS, optional(spike));
   assert.equal(spike.properties.kind.const, "spike_request");
   assert.deepEqual(spike.properties.claim_id, { $ref: "#/$defs/claimId" });
-  assert.equal(spike.properties.command.type, "string");
-  assert.equal(spike.properties.command.minLength, 1);
-  assert.equal(dependentFiles.type, "array");
-  assert.equal(dependentFiles.minItems, 1);
-  assert.equal(dependentFiles.uniqueItems, true);
-  assert.equal(dependentFile.type, "string");
-  assert.equal(dependentFile.minLength, 1);
-  assert.equal(DEPENDENT_FILE_PATTERN, dependentFile.pattern);
+  assert.deepEqual(spike.properties.plan, { $ref: "#/$defs/spikePlanDraft" });
+  assert.equal(plan.type, "object");
+  assert.equal(plan.additionalProperties, false);
+  assert.equal(plan.properties.schema.const, "empirica.spike-plan-draft/2");
 
   assert.equal(request.$defs.claimId.type, "string");
   assert.equal(shared.$defs.claimId.type, "string");
@@ -223,16 +223,39 @@ test("timeout classifier mirrors every duplicated canonical request-schema seman
   assert.equal(CLAIM_ID_PATTERN, shared.$defs.claimId.pattern);
 });
 
+test("generated public spike tool exposes every bounded draft field and description", () => {
+  const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const tools = JSON.parse(readFileSync(join(plugin, "vendor/contracts/empirica/v2/public-tools.json"), "utf8"));
+  const actions = tools.schemas.model.empirica_observe.properties.action.oneOf;
+  const spike = actions.find((item: { properties?: { kind?: { const?: string } } }) =>
+    item.properties?.kind?.const === "spike_request");
+  assert.ok(spike);
+  assert.match(spike.description, /generic deterministic spike plan draft/);
+  assert.deepEqual(spike.required, ["kind", "claim_id", "plan"]);
+  assert.equal("command" in spike.properties, false);
+  assert.equal("dependent_files" in spike.properties, false);
+  const plan = spike.properties.plan;
+  assert.deepEqual(new Set(plan.required), new Set(["schema", "image", "argv", "inputs", "environment"]));
+  for (const name of plan.required)
+    assert.ok(typeof plan.properties[name].description === "string" && plan.properties[name].description.length > 0, name);
+  assert.deepEqual([plan.properties.image.minLength, plan.properties.image.maxLength], [1, 255]);
+  assert.deepEqual([plan.properties.argv.minItems, plan.properties.argv.maxItems], [1, 256]);
+  assert.equal(plan.properties.inputs.maxItems, 256);
+  assert.equal(plan.properties.environment.maxProperties, 128);
+  assert.equal("containers" in plan.properties, false);
+  assert.equal("networks" in plan.properties, false);
+});
+
 test("workload, backend, Pi, and Claude timeout owners preserve strict outer margins", () => {
   const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
-  const dockerSource = readFileSync(join(plugin, "adapters/sandbox/docker.py"), "utf8");
+  const policySource = readFileSync(join(plugin, "core/spike_plan.py"), "utf8");
   const seconds = (name: string) => {
-    const match = dockerSource.match(new RegExp(`^${name} = ([0-9.]+)$`, "m"));
+    const match = policySource.match(new RegExp(`^${name} = ([0-9.]+)$`, "m"));
     assert.ok(match, `missing ${name}`);
     return Number(match[1]);
   };
   const workload = seconds("WORKLOAD_TIMEOUT_SECONDS");
-  const backend = seconds("OPERATION_TIMEOUT_SECONDS");
+  const backend = seconds("BACKEND_OPERATION_TIMEOUT_SECONDS");
   const piOuter = SPIKE_BRIDGE_TIMEOUT_MS / 1000;
   const claudeOuter = JSON.parse(readFileSync(join(plugin, ".mcp.json"), "utf8"))
     .mcpServers.empirica.tool_timeout_sec;
@@ -245,7 +268,8 @@ test("ordinary and spike test overrides are separate, positive, and bounded", ()
   const spike = {
     protocol: "empirica/v2", request_id: "spike",
     command: { type: "ObserveAction", run_id: "r", action: {
-      kind: "spike_request", claim_id: "C", command: "true", dependent_files: ["x"],
+      kind: "spike_request", claim_id: "C",
+      plan: { schema: "empirica.spike-plan-draft/2" },
     } },
   };
   const config = { command: "python3", timeoutMs: 17, spikeTimeoutMs: 23 };

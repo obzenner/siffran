@@ -10,7 +10,8 @@ const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x)
 const digest = (x) => typeof x === "string" && /^sha256:[0-9a-f]{64}$/.test(x);
 const validSpikeBackend = (x) => x === null || (isObject(x) && (x.kind === "spikes_unavailable"
   ? Object.keys(x).length === 1
-  : x.kind === "qualified" && x.backend === "docker" && x.profile_id === "docker-rust-v1"
+  : x.kind === "qualified" && x.backend === "docker"
+    && ["docker-isolated-v1", "docker-networked-v1"].includes(x.profile_id)
     && digest(x.qualification_record_digest) && digest(x.execution_binding_digest) && Object.keys(x).length === 5));
 
 /** Whether `v` has a summary's required shape. The schema (summary.schema.json) is checked in the build; this is the cheap check at the boundary. */

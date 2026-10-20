@@ -20,6 +20,9 @@ CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
 class PublicHostPathTests(ConformanceCase):
+    def start_run(self, drv, *, goal=None, **kw):
+        return super().start_qualified_run(drv, goal=goal, **kw)
+
     def test_public_tools_plus_private_host_observation_converge(self):
         drv = self.bind_driver(
             "D11", "public-host-path",
@@ -42,12 +45,19 @@ class PublicHostPathTests(ConformanceCase):
         observe(action_research(claim_id=root_id, source_kind="code", result="supports"))
 
         drv.workspace_write("src/reachable.py", b"print('reachable')\n")
-        drv.harness_complete("python src/reachable.py", 0)
+        drv.generic_harness_complete(0)
         observe(action_spike_request(
-            claim_id=root_id,
-            command="python src/reachable.py",
-            dependent_files=["src/reachable.py"],
-        ))
+            claim_id=root_id, paths=["src/reachable.py"]))
+        artifacts = self.get_argument_artifacts(drv, run_id)
+        request = self.find_one_argument_artifact(
+            artifacts, kind="spike_request", claim_id=root_id)
+        result = self.find_one_argument_artifact(
+            artifacts, kind="spike", claim_id=root_id, active=True)
+        self.assert_spike_request_artifact(
+            request, claim_id=root_id, paths=["src/reachable.py"])
+        self.assert_spike_result_artifact(
+            result, request=request, claim_id=root_id, exit_code=0,
+            spike_gate="PASS", active=True)
         observe(action_freeze())
 
         # Concrete child reservation is a host protocol operation, never a model tool action.

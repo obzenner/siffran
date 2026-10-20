@@ -96,7 +96,8 @@ class OperationalState:
         }
         if binding.get("kind") == "qualified":
             if (set(binding) != qualified or binding.get("backend") != "docker"
-                    or binding.get("profile_id") != "docker-rust-v1"
+                    or binding.get("profile_id") not in {
+                        "docker-isolated-v1", "docker-networked-v1"}
                     or any(not isinstance(binding.get(key), str)
                            or re.fullmatch(r"sha256:[0-9a-f]{64}", binding[key]) is None
                            for key in ("qualification_record_digest", "execution_binding_digest"))):

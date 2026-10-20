@@ -71,7 +71,7 @@ that boundary.
 
 | Pi surface | v2 operation | Behaviour |
 |---|---|---|
-| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. Refuses before creating a run when no verified external pi-subagents owner of the `subagent` tool is active, because no independent audit could launch (contract reason `host.subagents_*`). |
+| `/empirica <goal>` | `StartRun` | Starts a durable run, persists the opaque handle, and injects public-tool guidance. At `session_start`, optional host-process `EMPIRICA_SPIKE_PROFILE` is read once: absent leaves the core's isolated default, either exact generic profile is forwarded as `spike_profile`, and any other configured value refuses before `StartRun`; author actions and plans cannot select it. Refuses before creating a run when no verified external pi-subagents owner of the `subagent` tool is active, because no independent audit could launch (contract reason `host.subagents_*`). |
 | `empirica_observe` | `ObserveAction` | Accepts only canonical public author kinds. Trusted kinds are rejected locally and by schema. |
 | `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Returns a deterministic plain-text author view; resolves a session handle when needed. |
 | `report_convergence` | `EvaluateRun(report_convergence | stop)` | Fails closed unless the guarded response is `Allow`; `intent: stop` records an honest non-converged terminal. |
@@ -98,6 +98,33 @@ context, or tool overrides are rejected before that runtime-owned mutation.
 The adapter-private Python subprocess exposes no Pi tool. It is the imperative ingress shell for
 host-observed attribution, child events, and audit verdicts. Public tools cannot express these
 payloads.
+
+## Generic spike transport
+
+Only an exact public `ObserveAction` whose action contains `kind: spike_request`, `claim_id`, and a
+closed single-container `empirica.spike-plan-draft/2` receives Pi’s 300-second transport margin.
+Python remains authoritative for exact validation. The plan contains only a familiar already-local
+image reference, exact nonempty argv, repository-relative file/directory inputs, and a bounded
+environment map. It cannot declare profile, resources, timeout, user, workdir, network, topology,
+services, aliases, host paths, Docker options, credentials, image acquisition, or authority. The host
+resolves immutable native image identity and owns the one verdict container plus every sandbox fact.
+Environment values must never contain secrets: they persist internally and content-addressed plan
+identity can confirm guesses although public views expose names only.
+
+The workload remains 120 seconds inside the 210-second Docker operation; 300 seconds cannot extend
+it. Natural zero is `PASS`; natural nonzero is `FAIL` except 137, which is unavailable. Timeout,
+output limit, OOM, identity, staging, cleanup, recovery, or postflight uncertainty is unavailable and
+admits no result. Request/result
+evidence is rendered read-only and strips runtime-local data and raw output.
+
+`EMPIRICA_SPIKE_PROFILE` is host-process launch authority only: absent means isolated; only
+`docker-isolated-v1` and `docker-networked-v1` are accepted. Isolated permits declared internal
+private networks but denies outbound egress; networked permits declared non-internal private
+networks and outbound Internet egress. Neither permits host ingress or published ports. Operator
+qualification uses the
+explicit generic targets documented in [`doc/hosts.md`](../../../../doc/hosts.md), a 600-second
+seven-probe procedure, and an already-local image/config identity. Requalification applies only to
+future runs.
 
 ## Canonical audit call
 
@@ -126,6 +153,7 @@ previous continuation (`no-progress`).
 ## Validation
 
 Run `make check-pi` for fast deterministic adapter coverage. Run the targeted diagnostics in
-`doc/testing.md` when changing persistence or full host-flow boundaries. Profile qualification is
-operator-led via `make native-qualification`; release evidence is the long-running scenarios
+`doc/testing.md` when changing persistence or full host-flow boundaries. Generic profile
+qualification and installation use the explicit operator commands in `doc/hosts.md`; native host
+acceptance is operator-led via `make native-qualification` and the long-running scenarios
 (`.agents/skills/native-qualification/references/scenarios.md`).

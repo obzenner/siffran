@@ -8,24 +8,38 @@ import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
-from unittest.mock import patch
 
 from adapters import author_view
-from adapters.sandbox import docker, record, selection
 from adapters.state.repository import FilesystemRunRepository
 from application import protocol, run_state, v2
 from application.location import encode_handle, storage_id
-from application.ports import QualifiedSpikeBackend, SpikesUnavailable
+from application.generic_spike import GenericQualifiedBackend
+from application.ports import SpikesUnavailable
 from application.transaction import Coordinator
+from core import spike_plan
 from core.records import Conflict, Present, Revision, RunKey
 
 from governance_setup import TEST_INVOCATION
-from test_d7_transactions import Artifacts, Harness, Runs, Workspace, chain, initial
+from test_d7_transactions import Artifacts, Harness, Runs, Workspace, chain, initial, spike_action
 
 PROFILE = protocol.host_profile_id("pi")
 ROOT = Path(__file__).resolve().parents[3]
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
+
+
+def _qualified(qualification=DIGEST_A, execution=DIGEST_B):
+    return GenericQualifiedBackend(
+        "docker", "docker-isolated-v1", qualification, execution)
+
+
+def _persisted(value):
+    if type(value) is GenericQualifiedBackend:
+        return {"kind": "qualified", "backend": value.backend,
+                "profile_id": value.profile_id,
+                "qualification_record_digest": value.qualification_record_digest,
+                "execution_binding_digest": value.execution_binding_digest}
+    return value.persisted()
 
 
 def start_command(project="p", session="s"):
@@ -53,11 +67,22 @@ class CountingSelector:
         return self.value
 
 
+class RequestedProfileSelector:
+    def __init__(self):
+        self.calls = []
+
+    def select(self, *args):
+        self.calls.append(args)
+        profile = args[0] if args else "docker-isolated-v1"
+        return GenericQualifiedBackend("docker", profile, DIGEST_A, DIGEST_B)
+
+
 class PublicSpikeBackendTests(unittest.TestCase):
     def _public_views(self, binding):
         selector = CountingSelector(binding)
         coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), PROFILE, {}, selector)
-        started = coordinator.handle(start_command(session=f"public-{binding.persisted()['kind']}"), "start")
+        binding_data = _persisted(binding)
+        started = coordinator.handle(start_command(session=f"public-{binding_data['kind']}"), "start")
         run_id = started["result"]["run"]["id"]
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "route", "reason": "public projection test"}}, "route")
@@ -72,21 +97,52 @@ class PublicSpikeBackendTests(unittest.TestCase):
         protocol.schema_validator("response").validate(argument)
         return run["result"]["run"], argument["result"]["argument"], run["result"]
 
+    def test_host_start_profile_is_selected_once_and_persisted_immutably(self):
+        for configured, expected_args, expected_profile in (
+                (None, (), "docker-isolated-v1"),
+                ("docker-isolated-v1", ("docker-isolated-v1",), "docker-isolated-v1"),
+                ("docker-networked-v1", ("docker-networked-v1",), "docker-networked-v1")):
+            selector = RequestedProfileSelector()
+            coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), PROFILE, {}, selector)
+            command = start_command(session=f"profile-{configured or 'default'}")
+            if configured is not None:
+                command["spike_profile"] = configured
+            started = coordinator.handle(command, f"start-{configured}")
+            run_id = started["result"]["run"]["id"]
+            self.assertEqual(selector.calls, [expected_args])
+            self.assertEqual(started["result"]["run"]["spike_backend"]["profile_id"], expected_profile)
+            read = coordinator.handle({"type": "GetRun", "run_id": run_id}, f"read-{configured}")
+            self.assertEqual(read["result"]["run"]["spike_backend"],
+                             started["result"]["run"]["spike_backend"])
+            self.assertEqual(selector.calls, [expected_args])
+
+    def test_observe_action_cannot_request_network_profile_authority(self):
+        validator = protocol.schema_validator("request")
+        action = {**spike_action("probe.py"), "spike_profile": "docker-networked-v1"}
+        envelope = {"protocol": "empirica/v2", "request_id": "profile-in-action",
+                    "command": {"type": "ObserveAction", "run_id": "r", "action": action}}
+        clean = {**action}
+        clean.pop("spike_profile")
+        self.assertTrue(validator.is_valid({**envelope,
+                                           "command": {**envelope["command"], "action": clean}}))
+        self.assertFalse(validator.is_valid(envelope))
+
     def test_closed_binding_projects_identically_into_run_and_audit_dossier(self):
         for selected in (SpikesUnavailable("local diagnostic must not escape"),
-                         QualifiedSpikeBackend(DIGEST_A, DIGEST_B)):
-            with self.subTest(kind=selected.persisted()["kind"]):
+                         _qualified(DIGEST_A, DIGEST_B)):
+            persisted = _persisted(selected)
+            with self.subTest(kind=persisted["kind"]):
                 run, argument, result = self._public_views(selected)
-                self.assertEqual(run["spike_backend"], selected.persisted())
-                self.assertEqual(argument["spike_backend"], selected.persisted())
+                self.assertEqual(run["spike_backend"], persisted)
+                self.assertEqual(argument["spike_backend"], persisted)
                 public_text = author_view.render_author_view(result, strict=True)
                 self.assertNotIn("local diagnostic", public_text)
-                if selected.persisted()["kind"] == "spikes_unavailable":
+                if persisted["kind"] == "spikes_unavailable":
                     self.assertIn(
                         "spikes unavailable; no spike requests "
                         "(research, graph, honest stop still allowed)", public_text)
                 else:
-                    self.assertIn("qualified docker-rust-v1 binding", public_text)
+                    self.assertIn("qualified generic Docker profile binding", public_text)
                     self.assertIn("not a live-health claim", public_text)
                     self.assertIn(DIGEST_A, public_text)
                     self.assertIn(DIGEST_B, public_text)
@@ -108,11 +164,13 @@ class PublicSpikeBackendTests(unittest.TestCase):
         run, _argument, result = self._public_views(SpikesUnavailable())
         for backend in (
             {"kind": "spikes_unavailable", "diagnostic": "socket"},
-            {"kind": "qualified", "backend": "host", "profile_id": "docker-rust-v1",
+            {"kind": "qualified", "backend": "host", "profile_id": "docker-isolated-v1",
              "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
             {"kind": "qualified", "backend": "docker", "profile_id": "other",
              "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
             {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
+            {"kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
              "qualification_record_digest": "bad", "execution_binding_digest": DIGEST_B},
         ):
             candidate = copy.deepcopy(result)
@@ -122,6 +180,24 @@ class PublicSpikeBackendTests(unittest.TestCase):
                     "protocol": "empirica/v2", "request_id": "schema", "result": candidate}))
         self.assertNotIn("diagnostic", run["spike_backend"])
 
+    def test_legacy_backend_types_have_no_public_reachability(self):
+        plugin = ROOT / "plugins/empirica"
+        public_sources = [
+            plugin / "application/ports.py",
+            plugin / "application/transaction.py",
+            plugin / "application/v2.py",
+            plugin / "core/run.py",
+            plugin / "adapters/bridge.py",
+        ]
+        forbidden = (
+            "QualifiedSpikeBackend", "LegacyDockerBinding", "DockerSpikeHarness",
+            "execute_spike_bound", "docker-rust-v1", "dependent_files",
+        )
+        for source in public_sources:
+            text = source.read_text(encoding="utf-8")
+            for marker in forbidden:
+                self.assertNotIn(marker, text, f"{source}: legacy public reachability")
+
     def test_agent_spike_design_limits_are_bound_to_backend_constants(self):
         skill = (ROOT / "plugins/empirica/skills/empirica/SKILL.md").read_text()
         evidence = (ROOT / "plugins/empirica/skills/empirica/references/evidence.md").read_text()
@@ -130,26 +206,30 @@ class PublicSpikeBackendTests(unittest.TestCase):
             normalized = " ".join(text.lower().split())
             positions = [text.index(value) for value in ("120", "210", "300", "360")]
             self.assertEqual(positions, sorted(positions))
-            self.assertIn("512 MiB", text)
-            self.assertIn("128 PIDs", text)
-            self.assertIn("256 open files", text)
-            self.assertIn("256", text)
-            self.assertIn("64 MiB", text)
-            self.assertIn("1 MiB", text)
-            self.assertIn("stdout", text.lower())
-            self.assertIn("stderr", text.lower())
             self.assertIn("no spike result evidence", normalized)
             self.assertIn("result-cas", normalized)
             self.assertIn("crash", normalized)
             self.assertIn("separate call", normalized)
             self.assertIn("duplicate execution", normalized)
-        self.assertEqual((docker.WORKLOAD_TIMEOUT_SECONDS, docker.OPERATION_TIMEOUT_SECONDS),
-                         (120.0, 210.0))
-        self.assertEqual((docker.CPU_NANO, docker.MEMORY_BYTES, docker.PIDS_LIMIT,
-                          docker.NOFILE_LIMIT, docker.FSIZE_LIMIT,
-                          docker.WORKLOAD_OUTPUT_LIMIT_BYTES),
-                         (1_000_000_000, 512 * 1024 * 1024, 128, 256,
-                          64 * 1024 * 1024, 1024 * 1024))
+        resources = " ".join((skill, evidence, contract))
+        self.assertIn("stdout", resources.lower())
+        self.assertIn("stderr", resources.lower())
+        self.assertIn("512 MiB", resources)
+        self.assertIn("256 PIDs", resources)
+        self.assertIn("nofile=1024", resources)
+        self.assertIn("256 files", resources)
+        self.assertIn("64 MiB", resources)
+        self.assertIn("1 MiB", resources)
+        self.assertEqual(
+            (spike_plan.WORKLOAD_TIMEOUT_SECONDS,
+             spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS), (120, 210))
+        self.assertEqual(
+            (spike_plan.FRAMEWORK_SPIKE_POLICY.max_cpu_count,
+             spike_plan.WORK_TMPFS_BYTES, spike_plan.MEMORY_BYTES,
+             spike_plan.PIDS, spike_plan.OPEN_FILES,
+             spike_plan.MAX_FILE_SIZE_BYTES, spike_plan.STREAM_BYTES),
+            (2, 512 * 1024 * 1024, 2 * 1024 * 1024 * 1024,
+             256, 1024, 64 * 1024 * 1024, 1024 * 1024))
         mcp = json.loads((ROOT / "plugins/empirica/.mcp.json").read_text())
         self.assertEqual(mcp["mcpServers"]["empirica"]["tool_timeout_sec"], 360)
         pi_transport = (ROOT / "plugins/empirica/adapters/pi/src/stdio-transport.ts").read_text()
@@ -169,7 +249,7 @@ class Run3SchemaTests(unittest.TestCase):
         protocol.schema_validator("state").validate(unavailable)
         qualified = copy.deepcopy(self.fixture)
         qualified["spike_backend"] = {
-            "kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+            "kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
             "qualification_record_digest": DIGEST_A,
             "execution_binding_digest": DIGEST_B,
         }
@@ -178,11 +258,13 @@ class Run3SchemaTests(unittest.TestCase):
         for binding in (
             {},
             {"kind": "spikes_unavailable", "reason": "absent"},
-            {"kind": "qualified", "backend": "host", "profile_id": "docker-rust-v1",
+            {"kind": "qualified", "backend": "host", "profile_id": "docker-isolated-v1",
              "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
             {"kind": "qualified", "backend": "docker", "profile_id": "other",
              "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
             {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
+            {"kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
              "qualification_record_digest": "bad", "execution_binding_digest": DIGEST_B},
         ):
             candidate = copy.deepcopy(self.fixture)
@@ -219,7 +301,7 @@ class Run3SchemaTests(unittest.TestCase):
         for key in ("qualification_record_digest", "execution_binding_digest"):
             for impostor in (1, True, StringImpostor()):
                 with self.subTest(key=key, impostor=type(impostor).__name__):
-                    binding = QualifiedSpikeBackend(DIGEST_A, DIGEST_B).persisted()
+                    binding = _persisted(_qualified(DIGEST_A, DIGEST_B))
                     binding[key] = impostor
                     with self.assertRaises(ValueError):
                         replace(classified.state, spike_backend=binding)
@@ -232,19 +314,19 @@ class StartSelectionTests(unittest.TestCase):
         return Coordinator(*values, PROFILE, {}, selector), values
 
     def test_selects_once_persists_exact_binding_and_active_resume_does_no_work(self):
-        selector = CountingSelector(QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
+        selector = CountingSelector(_qualified(DIGEST_A, DIGEST_B))
         coordinator, (workspace, _harness, runs, artifacts) = self.coordinator(selector)
         first = coordinator.handle(start_command(), "one")
         self.assertEqual(first["result"]["type"], "Allow")
         key = next(iter(runs.data))
         self.assertEqual(runs.data[key].value["spike_backend"], {
-            "kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+            "kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
             "qualification_record_digest": DIGEST_A,
             "execution_binding_digest": DIGEST_B,
         })
         self.assertEqual(selector.calls, 1)
         before = (len(workspace.calls), artifacts.append_calls, runs.seq)
-        selector.value = QualifiedSpikeBackend(DIGEST_B, DIGEST_A)
+        selector.value = _qualified(DIGEST_B, DIGEST_A)
         second = coordinator.handle(start_command(), "two")
         self.assertEqual(second["result"]["run"]["id"], first["result"]["run"]["id"])
         self.assertEqual(selector.calls, 1)
@@ -258,14 +340,25 @@ class StartSelectionTests(unittest.TestCase):
         first = coordinator.handle(start_command(session="unavailable-sticky"), "one")
         key = next(iter(runs.data))
         self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "spikes_unavailable"})
-        selector.value = QualifiedSpikeBackend(DIGEST_A, DIGEST_B)
+        selector.value = _qualified(DIGEST_A, DIGEST_B)
         second = coordinator.handle(start_command(session="unavailable-sticky"), "two")
         self.assertEqual(second["result"]["run"]["id"], first["result"]["run"]["id"])
         self.assertEqual(selector.calls, 1)
         self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "spikes_unavailable"})
 
     def test_selector_exception_and_unknown_result_cannot_block_reasoning(self):
-        for value in (RuntimeError("broken"), object(), SpikesUnavailable("absent")):
+        class GenericBackendImpostor(GenericQualifiedBackend):
+            pass
+
+        impostor = GenericBackendImpostor(
+            "docker", "docker-isolated-v1", DIGEST_A, DIGEST_B)
+        old_binding = {
+            "backend": "docker", "profile_id": "docker-rust-v1",
+            "qualification_record_digest": DIGEST_A,
+            "execution_binding_digest": DIGEST_B,
+        }
+        for value in (RuntimeError("broken"), object(), SpikesUnavailable("absent"),
+                      old_binding, impostor):
             with self.subTest(value=type(value).__name__):
                 selector = CountingSelector(value)
                 coordinator, (_workspace, _harness, runs, _artifacts) = self.coordinator(selector)
@@ -280,7 +373,7 @@ class StartSelectionTests(unittest.TestCase):
                 self.assertEqual(routed["result"]["type"], "Allow")
 
     def test_create_race_returns_winners_binding_without_rewrite(self):
-        winner_selector = CountingSelector(QualifiedSpikeBackend(DIGEST_B, DIGEST_A))
+        winner_selector = CountingSelector(_qualified(DIGEST_B, DIGEST_A))
         winner, (_workspace, _harness, winner_runs, winner_artifacts) = self.coordinator(
             winner_selector)
         winner.handle(start_command(), "winner")
@@ -295,7 +388,7 @@ class StartSelectionTests(unittest.TestCase):
         race_runs = RaceRuns()
         race_artifacts = Artifacts()
         race_artifacts.values[key] = dict(winner_artifacts.values[key])
-        loser_selector = CountingSelector(QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
+        loser_selector = CountingSelector(_qualified(DIGEST_A, DIGEST_B))
         loser, _ = self.coordinator(
             loser_selector, runs=race_runs, artifacts=race_artifacts)
         response = loser.handle(start_command(), "loser")
@@ -305,7 +398,7 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual(loser_selector.calls, 1)
 
     def test_falsey_selector_identity_survives_service_composition(self):
-        selector = CountingSelector(QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
+        selector = CountingSelector(_qualified(DIGEST_A, DIGEST_B))
         workspace, harness, runs, artifacts = Workspace(), Harness(), Runs(), Artifacts()
         service = v2.compose(
             workspace, harness, runs, artifacts, None, PROFILE, {}, None,
@@ -359,7 +452,7 @@ class StartSelectionTests(unittest.TestCase):
     def test_terminal_run3_spike_is_inert_before_every_side_effect(self):
         bindings = (
             {"kind": "spikes_unavailable"},
-            QualifiedSpikeBackend(DIGEST_A, DIGEST_B).persisted(),
+            _persisted(_qualified(DIGEST_A, DIGEST_B)),
         )
         for binding in bindings:
             with self.subTest(kind=binding["kind"]):
@@ -383,130 +476,6 @@ class StartSelectionTests(unittest.TestCase):
                 self.assertEqual(
                     (runs.data[key], artifacts.values[key], len(workspace.calls), harness.calls,
                      artifacts.append_calls), before)
-
-
-class Store:
-    def __init__(self, outcome):
-        self.outcomes = list(outcome) if isinstance(outcome, list) else [outcome]
-        self.kwargs = []
-
-    def __bool__(self):
-        return False
-
-    def load_current(self, **kwargs):
-        self.kwargs.append(kwargs)
-        outcome = self.outcomes[min(len(self.kwargs) - 1, len(self.outcomes) - 1)]
-        if isinstance(outcome, BaseException):
-            raise outcome
-        return outcome
-
-
-class PassiveSelectorTests(unittest.TestCase):
-    def select(self, outcome):
-        if isinstance(outcome, dict):
-            outcome = {**outcome, "runtime": {"docker_cli": "/exact/docker"}}
-        store = Store(outcome)
-        runtime_calls = []
-
-        def inspect_runtime(_environment, *, cli_path):
-            runtime_calls.append(cli_path)
-            return {}
-
-        selector = selection.QualificationAuthoritySelector(
-            store,
-            environment_inspector=lambda: object(),
-            runtime_inspector=inspect_runtime,
-        )
-        with (patch.object(selection.environment, "validate_environment_identity", return_value={}),
-              patch.object(selection.docker, "validate_runtime_identity", return_value={})):
-            return selector.select(), store, runtime_calls
-
-    def test_absent_unsafe_drift_and_unexpected_errors_all_close_without_persisted_reason(self):
-        for failure in (FileNotFoundError("absent"), PermissionError("unsafe"),
-                        ValueError("drift"), RuntimeError("unexpected")):
-            with self.subTest(failure=type(failure).__name__):
-                selected, store, runtime_calls = self.select(failure)
-                self.assertIsInstance(selected, SpikesUnavailable)
-                self.assertEqual(selected.persisted(), {"kind": "spikes_unavailable"})
-                self.assertIn(type(failure).__name__, selected.diagnostic)
-                self.assertEqual(runtime_calls, [])
-                self.assertEqual(len(store.kwargs), 1)
-
-    def test_qualified_authority_and_base_exception_behavior(self):
-        selected, store, runtime_calls = self.select({
-            "qualification_record_digest": DIGEST_A,
-            "execution_binding_digest": DIGEST_B,
-        })
-        self.assertEqual(selected, QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
-        self.assertEqual(runtime_calls, ["/exact/docker"])
-        self.assertEqual(len(store.kwargs), 2)
-        self.assertEqual(set(store.kwargs[0]), {"expected_environment"})
-        self.assertEqual(
-            set(store.kwargs[1]), {"expected_environment", "expected_runtime"})
-        with self.assertRaises(KeyboardInterrupt):
-            self.select(KeyboardInterrupt())
-
-    def test_success_observes_environment_once_and_reloads_exact_current_record(self):
-        authority = {
-            "qualification_record_digest": DIGEST_A,
-            "execution_binding_digest": DIGEST_B,
-            "runtime": {"docker_cli": "/exact/docker"},
-        }
-        store = Store(authority)
-        environment_calls = []
-        selector = selection.QualificationAuthoritySelector(
-            store,
-            environment_inspector=lambda: environment_calls.append("environment") or object(),
-            runtime_inspector=lambda _value, *, cli_path: {},
-        )
-        with (patch.object(selection.environment, "validate_environment_identity", return_value={}),
-              patch.object(selection.docker, "validate_runtime_identity", return_value={})):
-            self.assertEqual(selector.select(), QualifiedSpikeBackend(DIGEST_A, DIGEST_B))
-        self.assertEqual(environment_calls, ["environment"])
-        self.assertEqual(len(store.kwargs), 2)
-
-    def test_pointer_race_fails_closed_after_one_exact_cli_inspection(self):
-        first = {
-            "qualification_record_digest": DIGEST_A,
-            "execution_binding_digest": DIGEST_B,
-            "runtime": {"docker_cli": "/exact/docker"},
-        }
-        second = {
-            **first,
-            "qualification_record_digest": "sha256:" + "c" * 64,
-        }
-        selected, store, runtime_calls = self.select([first, second])
-        self.assertIsInstance(selected, SpikesUnavailable)
-        self.assertEqual(runtime_calls, ["/exact/docker"])
-        self.assertEqual(len(store.kwargs), 2)
-
-    def test_falsey_store_and_environment_inspector_are_preserved_by_identity(self):
-        authority = {"qualification_record_digest": DIGEST_A,
-                     "execution_binding_digest": DIGEST_B,
-                     "runtime": {"docker_cli": "/exact/docker"}}
-        store = Store(authority)
-
-        class Inspector:
-            def __bool__(self):
-                return False
-
-            def __call__(self):
-                return object()
-
-        inspector = Inspector()
-        runtime_calls = []
-        selector = selection.QualificationAuthoritySelector(
-            store, environment_inspector=inspector,
-            runtime_inspector=lambda _value, *, cli_path: runtime_calls.append(cli_path) or {})
-        self.assertIs(selector._store, store)
-        with (patch.object(selection.environment, "validate_environment_identity", return_value={}),
-              patch.object(selection.docker, "validate_runtime_identity", return_value={})):
-            self.assertIsInstance(selector.select(), QualifiedSpikeBackend)
-        self.assertEqual(runtime_calls, ["/exact/docker"])
-        with tempfile.TemporaryDirectory() as temporary:
-            qualification_store = record.QualificationStore(
-                Path(temporary).resolve(), environment_inspector=inspector)
-            self.assertIs(qualification_store.environment_inspector, inspector)
 
 
 def legacy_document(state):

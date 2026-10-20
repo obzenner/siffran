@@ -21,6 +21,15 @@ from application.protocol import host_profile_id  # noqa: E402
 CODEX_PROFILE = host_profile_id("codex-cli")
 
 
+def _spike_action() -> dict:
+    return {"kind": "spike_request", "claim_id": "G0", "plan": {
+        "schema": "empirica.spike-plan-draft/2",
+        "image": "example/probe:local",
+        "argv": ["/usr/bin/python3", "/inputs/probe.py"],
+        "inputs": ["probe.py"],
+        "environment": {}}}
+
+
 class CodexAdapterConformanceTests(unittest.TestCase):
     def test_real_service_blank_goal_is_operator_visible(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -82,6 +91,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
             os.chdir(repo)
             with patch.dict(os.environ, {
                 "EMPIRICA_HOME": str(home), "EMPIRICA_REPO_DIR": str(repo),
+                "EMPIRICA_SANDBOX_HOME": str(root / "sandbox-absent"),
                 "EMPIRICA_AUTO_DELEGATION": "1",
             }, clear=False):
                 started = _start(payload)
@@ -98,7 +108,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 observe({"kind": "graph", "payload": {
                     "root": "G0",
                     "claims": [{"id": "G0", "text": "Codex drives Empirica v2.",
-                                "gating": True, "kind": "needs-experiment"}],
+                                "gating": True, "kind": "ordinary"}],
                     "edges": [],
                 }})
                 approved = observe({"kind": "configure_run",
@@ -110,8 +120,6 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",
                          "result": "supports", "payload": {"source_ref": "probe.py",
                                                                "citation": "print('reachable')"}})
-                observe({"kind": "spike_request", "claim_id": "G0",
-                         "command": "python3 probe.py", "dependent_files": ["probe.py"]})
                 observe({"kind": "freeze"})
 
                 stop_payload = {**payload, "hook_event_name": "Stop",

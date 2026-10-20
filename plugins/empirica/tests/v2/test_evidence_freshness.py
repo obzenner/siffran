@@ -5,8 +5,9 @@ These are the heart of the freshness reversal of the quarantined two-fold ``2F5`
 state-bearing request must freshly observe every active bound file, and re-gate is requested by a
 fresh canonical ``spike_request`` (the ``spike.regate`` path), never an invented wire action.
 
-D4-S2/D2C: harness results are staged BEFORE dispatching ``spike_request``; the application must
-append the sealed request before invoking the harness and appending the result. Artifact assertions
+D4-S2/D2C: fake natural verdicts are queued BEFORE dispatching ``spike_request``; the application
+must append the sealed request before invoking the generic harness and appending the result. Artifact
+assertions
 use the canonical D2C ``ArgumentView.artifacts`` ordered union (direct field access, ``sequence``
 order), never raw ``drv.artifacts()`` or JSON substring search. Cases 1–21 must not call
 ``drv.artifacts()``.
@@ -24,11 +25,14 @@ from assertions import (  # noqa: E402
 _BOUND = "src/mod.py"
 _BOUND_C0 = "src/c0.py"
 _BOUND_C1 = "src/c1.py"
-_COMMAND = "python -m pytest"
 
 
 class EvidenceFreshnessTests(ConformanceCase):
     GOAL = "Prove the spike freshness contract holds across reads."
+
+    def start_run(self, drv, *, goal=None, **kw):
+        """Every scenario binds the exact generic fake authority once at StartRun."""
+        return super().start_qualified_run(drv, goal=goal, **kw)
 
     # 7 — Research and spike submitted in separate requests combine on the same active claim
     def test_separate_research_and_spike_combine(self):
@@ -42,25 +46,22 @@ class EvidenceFreshnessTests(ConformanceCase):
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
         root_id = graph["root"]
         research_id = self.require_research_recorded(drv, run_id, root_id)
-        # Stage a passing harness BEFORE the spike_request (D4-S2).
+        # Stage a passing generic verdict before the action; execution begins only after request CAS.
         drv.workspace_write(_BOUND, b"separate-folds")
-        drv.harness_complete(_COMMAND, 0)
+        drv.generic_harness_complete(0)
         self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id=root_id, command=_COMMAND, dependent_files=[_BOUND])))
+            claim_id=root_id, paths=[_BOUND])))
         # D2C: read artifacts from ArgumentView.artifacts.
         arts = self.get_argument_artifacts(drv, run_id)
         # Assert exact sealed request prerequisites.
         req = self.find_one_argument_artifact(arts, kind="spike_request", claim_id=root_id)
-        self.assert_spike_request_artifact(req, claim_id=root_id, command=_COMMAND,
-                                           dependent_files=[_BOUND],
-                                           prerequisite_ids=[research_id])
+        self.assert_spike_request_artifact(
+            req, claim_id=root_id, paths=[_BOUND], prerequisite_ids=[research_id])
         # Assert result binding: same harness_request_id, exact gate, active, file bindings.
         res = self.find_one_argument_artifact(arts, kind="spike", claim_id=root_id, active=True)
-        self.assert_spike_result_artifact(res, harness_request_id=req["harness_request_id"],
-                                           claim_id=root_id, exit_code=0, spike_gate="pass",
-                                           command=_COMMAND, command_digest=req["command_digest"],
-                                           prerequisite_ids=req["prerequisite_research_ids"],
-                                           active=True)
+        self.assert_spike_result_artifact(
+            res, request=req, claim_id=root_id, exit_code=0, spike_gate="PASS",
+            active=True)
         self.assertEqual(res["claim_digest"], req["claim_digest"],
                          "spike result claim_digest must match the request")
         bindings = res.get("file_bindings", [])
@@ -176,10 +177,10 @@ class EvidenceFreshnessTests(ConformanceCase):
         root_id = graph["root"]
         research_id = self.require_research_recorded(drv, run_id, root_id)
         drv.workspace_write(_BOUND, b"def f(): pass")
-        # Stage deterministic completion BEFORE the spike_request (D4-S2).
-        drv.harness_complete(_COMMAND, 0)
+        # Queue deterministic completion before the action; sealed request admission still precedes effects.
+        drv.generic_harness_complete(0)
         self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id=root_id, command=_COMMAND, dependent_files=[_BOUND])))
+            claim_id=root_id, paths=[_BOUND])))
         # D2C: assert distinct typed request then result in D2C sequence order.
         arts = self.get_argument_artifacts(drv, run_id)
         self.assert_artifact_sequence_order(arts, "spike_request", "spike")
@@ -188,12 +189,12 @@ class EvidenceFreshnessTests(ConformanceCase):
         # Matching harness_request_id.
         self.assertEqual(res["harness_request_id"], req["harness_request_id"],
                          "spike result harness_request_id must match the request")
-        # Prerequisite research IDs, command/digest, file binding in the result.
-        self.assertEqual(list(req.get("prerequisite_research_ids", [])), [research_id],
-                         "spike_request must carry the ordered prerequisite research artifact IDs")
-        self.assertEqual(res["command"], _COMMAND, "spike result command must match")
-        self.assertEqual(res["command_digest"], req["command_digest"],
-                         "spike result command_digest must match the request")
+        # Generic identity and file binding in the result.
+        self.assert_spike_request_artifact(
+            req, claim_id=root_id, paths=[_BOUND], prerequisite_ids=[research_id])
+        self.assert_spike_result_artifact(
+            res, request=req, claim_id=root_id, exit_code=0, spike_gate="PASS",
+            active=True)
         self.assertEqual(res["claim_digest"], req["claim_digest"],
                          "spike result claim_digest must match the request")
         bindings = res.get("file_bindings", [])
@@ -201,7 +202,7 @@ class EvidenceFreshnessTests(ConformanceCase):
         self.assertEqual(bindings[0].get("path"), _BOUND,
                          "spike result file binding path must match the dependent file")
         self.assertEqual(res["exit_code"], 0, "spike result exit_code must be 0")
-        self.assertEqual(res["spike_gate"], "pass", "spike result spike_gate must be pass")
+        self.assertEqual(res["spike_gate"], "PASS", "spike result spike_gate must be PASS")
 
     # 11 — Passing harness exit is the only machine approval; agent/audit cannot manufacture it
     def test_only_passing_harness_exit_approves(self):
@@ -231,11 +232,9 @@ class EvidenceFreshnessTests(ConformanceCase):
                             payload={"verdict": "pass", "approved": True})))
                 else:
                     exit_code = 0 if do_setup == "passing" else 1
-                    drv.harness_complete(_COMMAND, exit_code)
+                    drv.generic_harness_complete(exit_code)
                     self.dispatch(drv, observe_action(run_id=run_id,
-                        action=action_spike_request(
-                            claim_id=root_id, command=_COMMAND,
-                            dependent_files=[_BOUND])))
+                        action=action_spike_request(claim_id=root_id, paths=[_BOUND])))
                 # D2C: inspect the typed spike result and assert exact gate.
                 claim = self.get_argument_claim(drv, run_id, root_id)
                 if expect_approved:
@@ -244,8 +243,8 @@ class EvidenceFreshnessTests(ConformanceCase):
                     arts = self.get_argument_artifacts(drv, run_id)
                     res = self.find_one_argument_artifact(arts, kind="spike",
                                                           claim_id=root_id, active=True)
-                    self.assertEqual(res["spike_gate"], "pass",
-                                     "exit 0 must produce spike_gate=pass")
+                    self.assertEqual(res["spike_gate"], "PASS",
+                                     "exit 0 must produce spike_gate=PASS")
                     self.assertEqual(res["exit_code"], 0,
                                      "exit 0 must produce exit_code=0")
                 else:
@@ -257,8 +256,8 @@ class EvidenceFreshnessTests(ConformanceCase):
                         arts = self.get_argument_artifacts(drv, run_id)
                         res = self.find_one_argument_artifact(arts, kind="spike",
                                                               claim_id=root_id, active=True)
-                        self.assertEqual(res["spike_gate"], "fail",
-                                         "nonzero exit must produce spike_gate=fail")
+                        self.assertEqual(res["spike_gate"], "FAIL",
+                                         "nonzero exit must produce spike_gate=FAIL")
                         self.assertNotEqual(res["exit_code"], 0,
                                              "nonzero exit must produce nonzero exit_code")
                         # The deterministic failure dominates even if research later conflicts.
@@ -290,9 +289,9 @@ class EvidenceFreshnessTests(ConformanceCase):
                 claim_id = graph["root"]
                 self.require_research_recorded(drv, run_id, claim_id)
                 drv.workspace_write(_BOUND, b"v1")
-                drv.harness_complete(_COMMAND, 1 if variant == "failing_spike" else 0)
+                drv.generic_harness_complete(1 if variant == "failing_spike" else 0)
                 self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-                    claim_id=claim_id, command=_COMMAND, dependent_files=[_BOUND])))
+                    claim_id=claim_id, paths=[_BOUND])))
                 if variant == "conflicted_research":
                     self.dispatch(drv, observe_action(run_id=run_id, action=action_research(
                         claim_id=claim_id, source_kind="docs", result="refutes")))
@@ -451,12 +450,12 @@ class EvidenceFreshnessTests(ConformanceCase):
         self.assertIn(_BOUND_C0, stale_paths, "only C0's file must be stale")
         self.assertNotIn(_BOUND_C1, stale_paths, "C1's file must not be stale")
         # Stage one completion and submit a fresh canonical spike_request for C0.
-        invocations_before = len(drv.harness_invocations())
-        drv.harness_complete(_COMMAND, 0)
+        invocations_before = len(drv.generic_harness_requests())
+        drv.generic_harness_complete(0)
         self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id=root_id, command=_COMMAND, dependent_files=[_BOUND_C0])))
+            claim_id=root_id, paths=[_BOUND_C0])))
         # Assert exactly one harness invocation.
-        invocations_after = len(drv.harness_invocations())
+        invocations_after = len(drv.generic_harness_requests())
         self.assertEqual(invocations_after - invocations_before, 1,
                          "re-gate must invoke the harness exactly once")
         # D2C: one superseding C0 result with exact supersedes.

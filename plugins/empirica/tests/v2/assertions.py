@@ -241,15 +241,16 @@ def _envelope(request_id: str, command: dict) -> dict:
 
 def start_run(*, goal: str, project: str = "demo", session: str = "s1",
               request_id: str | None = None, budgets: dict | None = None,
-              control_mode: str = "deliberative",
-              invocation: dict | None = None) -> dict:
-    """Build a valid StartRun envelope. Host profile selection is a driver-factory fact, never an
-    invented StartRun field — there is deliberately no ``profile_id`` parameter (D4 spec §4)."""
+              control_mode: str = "deliberative", invocation: dict | None = None,
+              spike_profile: str | None = None) -> dict:
+    """Build a valid StartRun envelope; optional profile is host-owned launch authority."""
     cmd: dict = {"type": "StartRun",
                  "selector": {"project": project, "session": session},
                  "goal": goal, "control_mode": control_mode,
                  "invocation": (invocation if invocation is not None else
                                 {**TEST_INVOCATION, "signal": "v2 harness"})}
+    if spike_profile is not None:
+        cmd["spike_profile"] = spike_profile
     if budgets is not None:
         cmd["budgets"] = budgets
     return _envelope(request_id or _rid("start"), cmd)
@@ -314,12 +315,15 @@ def action_research(*, claim_id: str, source_kind: str, result: str,
             "source_kind": source_kind, "result": result, "payload": details}
 
 
-def action_spike_request(*, claim_id: str, command: str, dependent_files: list[str]) -> dict:
-    """Canonical spike_request action. This is also the canonical request path for ``spike.regate``:
-    re-gate of a stale active head is requested by a fresh ``spike_request`` for the same claim over
-    current observations (D4 spec §4). There is no separate ``regate`` wire action kind."""
-    return {"kind": "spike_request", "claim_id": claim_id,
-            "command": command, "dependent_files": list(dependent_files)}
+def action_spike_request(*, claim_id: str, paths: list[str]) -> dict:
+    """Build the closed single-container /2 plan used by conformance scenarios."""
+    return {"kind": "spike_request", "claim_id": claim_id, "plan": {
+        "schema": "empirica.spike-plan-draft/2",
+        "image": "example/probe:local",
+        "argv": ["/usr/bin/python3", "/inputs/probe.py", "--exact-argv"],
+        "inputs": sorted(paths),
+        "environment": {"MODE": "sealed"},
+    }}
 
 
 def action_route(*, reason: str) -> dict:
@@ -469,19 +473,21 @@ def build_attribution_payload(*, subject_kind: str, subject_id: str,
 
 
 def build_evidence_leaf_payload(*, harness_request_id: str,
-                                command_digest: str,
+                                request_artifact_id: str,
+                                plan_digest: str,
+                                policy_digest: str,
+                                snapshot_digest: str,
                                 prerequisite_research_ids: list[str],
                                 file_bindings: list[dict],
                                 exit_code: int,
                                 result_digest: str) -> dict:
-    """Construct a valid D2D ``evidence_leaf`` closed payload (deterministic harness result).
-
-    Gate is derived from ``exit_code`` and is not supplied. Claim/command identity comes
-    from the sealed request and is not caller-repeated.
-    """
+    """Construct one closed generic deterministic-result evidence payload."""
     return {
         "harness_request_id": harness_request_id,
-        "command_digest": command_digest,
+        "request_artifact_id": request_artifact_id,
+        "plan_digest": plan_digest,
+        "policy_digest": policy_digest,
+        "snapshot_digest": snapshot_digest,
         "prerequisite_research_ids": list(prerequisite_research_ids),
         "file_bindings": list(file_bindings),
         "exit_code": exit_code,
@@ -909,8 +915,8 @@ class ConformanceCase(unittest.TestCase):
         return matches[0]
 
     # ---- D2C artifact assertions (D4-S2/D2C) ------------------------------
-    # Assert artifact kind, sequence, content-addressed IDs, claim/digest, command/digest,
-    # dependent files, prerequisite research IDs, exit_code/spike_gate, file bindings, and
+    # Assert artifact kind, sequence, content-addressed IDs, claim identity, closed generic request
+    # facts, exact result correlation, prerequisite research IDs, typed verdict, file bindings, and
     # optional supersedes — using direct field access on the D2C ``ArgumentView.artifacts``
     # union, never raw storage or JSON substring search.
 
@@ -945,98 +951,84 @@ class ConformanceCase(unittest.TestCase):
                              "research artifact active must match")
 
     def assert_spike_request_artifact(self, art: dict, *, claim_id: str | None = None,
-                                       command: str | None = None,
-                                       dependent_files: list[str] | None = None,
-                                       prerequisite_ids: list[str] | None = None) -> None:
+                                      paths: list[str] | None = None,
+                                      prerequisite_ids: list[str] | None = None) -> None:
+        """Assert the complete closed generic request identity admitted before effects."""
         self.assertIsInstance(art, dict, "spike_request artifact must be a dict")
-        self.assertEqual(art.get("kind"), "spike_request",
-                         "spike_request artifact kind must be 'spike_request'")
-        self.assertIn("sequence", art, "spike_request artifact must carry D2C sequence")
-        self.assertTrue(art.get("harness_request_id"),
-                        "spike_request must carry a server-generated nonempty harness_request_id")
-        self.assertTrue(art.get("artifact_id"),
-                        "spike_request must carry a content-addressed artifact_id")
-        self.assertTrue(art.get("claim_digest"),
-                        "spike_request must carry a claim_digest")
-        self.assertTrue(art.get("command_digest"),
-                        "spike_request must carry a command_digest")
-        self.assertTrue(art.get("statement_digest"),
-                        "spike_request must carry a statement_digest")
-        self.assertTrue(art.get("dependent_files"),
-                        "spike_request must carry exact nonempty dependent files")
-        self.assertTrue(art.get("prerequisite_research_ids"),
-                        "spike_request must carry ordered nonempty prerequisite research IDs")
+        self.assertEqual(art.get("kind"), "spike_request")
+        for field in ("sequence", "artifact_id", "harness_request_id", "claim_digest",
+                      "statement_digest", "draft", "draft_digest", "plan_digest",
+                      "policy_digest", "operation_timeout_seconds", "snapshot_basis_id",
+                      "snapshot_digest", "inputs",
+                      "backend", "prerequisite_research_ids"):
+            self.assertIn(field, art, f"generic spike_request must carry {field}")
+        self.assertEqual(art["draft"].get("schema"), "empirica.spike-plan-draft/2")
+        self.assertRegex(art["draft_digest"], _DIGEST_RE)
+        self.assertRegex(art["plan_digest"], _DIGEST_RE)
+        self.assertRegex(art["policy_digest"], _DIGEST_RE)
+        self.assertEqual(art["operation_timeout_seconds"], 210)
+        self.assertRegex(art["snapshot_digest"], _DIGEST_RE)
+        self.assertEqual(art["backend"].get("kind"), "qualified")
+        self.assertEqual(art["backend"].get("profile_id"), "docker-isolated-v1")
+        self.assertNotIn("command", art)
+        self.assertNotIn("command_digest", art)
+        self.assertNotIn("dependent_files", art)
         if claim_id is not None:
-            self.assertEqual(art.get("claim_id"), claim_id,
-                             "spike_request claim_id must match")
-        if command is not None:
-            self.assertEqual(art.get("command"), command,
-                             "spike_request command must match")
-        if dependent_files is not None:
-            self.assertEqual(list(art.get("dependent_files", [])), list(dependent_files),
-                             "spike_request dependent files must match exactly")
+            self.assertEqual(art.get("claim_id"), claim_id)
+        if paths is not None:
+            declared = list(art["draft"]["inputs"])
+            self.assertEqual(declared, sorted(paths))
+            bound = [item["path"] for item in art["inputs"]]
+            self.assertEqual(bound, sorted(paths))
         if prerequisite_ids is not None:
-            self.assertEqual(list(art.get("prerequisite_research_ids", [])),
-                             list(prerequisite_ids),
-                             "spike_request prerequisite research IDs must match in order")
+            self.assertEqual(art["prerequisite_research_ids"], prerequisite_ids)
 
-    def assert_spike_result_artifact(self, art: dict, *, harness_request_id: str | None = None,
-                                     claim_id: str | None = None, exit_code: int | None = None,
+    def assert_spike_result_artifact(self, art: dict, *, request: dict | None = None,
+                                     claim_id: str | None = None,
+                                     exit_code: int | None = None,
                                      spike_gate: str | None = None,
                                      supersedes: str | None = None,
-                                     command: str | None = None,
-                                     command_digest: str | None = None,
-                                     prerequisite_ids: list[str] | None = None,
                                      file_bindings: list[dict] | None = None,
                                      active: bool | None = None) -> None:
+        """Assert one typed generic result and its exact request correlation."""
         self.assertIsInstance(art, dict, "spike result artifact must be a dict")
-        self.assertEqual(art.get("kind"), "spike",
-                         "spike result artifact kind must be 'spike'")
-        self.assertIn("sequence", art, "spike result artifact must carry D2C sequence")
-        self.assertTrue(art.get("artifact_id"),
-                        "spike result must carry a content-addressed artifact_id")
-        self.assertTrue(art.get("claim_digest"),
-                        "spike result must carry a claim_digest")
-        self.assertTrue(art.get("statement_digest"),
-                        "spike result must carry a statement_digest")
-        self.assertTrue(art.get("command"), "spike result must carry the command")
-        self.assertTrue(art.get("command_digest"),
-                        "spike result must carry a command_digest")
-        self.assertIsInstance(art.get("file_bindings"), list,
-                              "spike result must carry file_bindings as a list")
-        self.assertTrue(art.get("prerequisite_research_ids"),
-                        "spike result must carry ordered nonempty prerequisite research IDs")
-        if harness_request_id is not None:
-            self.assertEqual(art.get("harness_request_id"), harness_request_id,
-                             "spike result harness_request_id must match the request")
+        self.assertEqual(art.get("kind"), "spike")
+        for field in ("sequence", "artifact_id", "harness_request_id", "claim_digest",
+                      "statement_digest", "request_artifact_id", "plan_digest",
+                      "policy_digest", "snapshot_digest", "backend", "result_facts",
+                      "file_bindings", "outcome", "spike_gate", "exit_code"):
+            self.assertIn(field, art, f"generic spike result must carry {field}")
+        self.assertNotIn("command", art)
+        self.assertNotIn("command_digest", art)
+        self.assertNotIn("dependent_files", art)
+        self.assertEqual(art["outcome"], "pass" if art["exit_code"] == 0 else "fail")
+        self.assertEqual(art["spike_gate"], "PASS" if art["exit_code"] == 0 else "FAIL")
+        self.assertEqual(art["result_facts"]["verdict"], art["spike_gate"])
+        self.assertTrue(art["result_facts"]["cleanup_proven"])
+        self.assertEqual(art["result_facts"]["exit_code"], art["exit_code"])
+        self.assertTrue(art["result_facts"]["natural_exit"])
+        self.assertFalse(art["result_facts"]["forced_termination"])
+        if request is not None:
+            for result_field, request_field in (
+                    ("harness_request_id", "harness_request_id"),
+                    ("request_artifact_id", "artifact_id"),
+                    ("plan_digest", "plan_digest"),
+                    ("policy_digest", "policy_digest"),
+                    ("snapshot_digest", "snapshot_digest"),
+                    ("backend", "backend")):
+                self.assertEqual(art[result_field], request[request_field])
         if claim_id is not None:
-            self.assertEqual(art.get("claim_id"), claim_id,
-                             "spike result claim_id must match")
+            self.assertEqual(art.get("claim_id"), claim_id)
         if exit_code is not None:
-            self.assertEqual(art.get("exit_code"), exit_code,
-                             "spike result exit_code must match")
+            self.assertEqual(art.get("exit_code"), exit_code)
         if spike_gate is not None:
-            self.assertEqual(art.get("spike_gate"), spike_gate,
-                             "spike result spike_gate must match")
+            self.assertEqual(art.get("spike_gate"), spike_gate)
         if supersedes is not None:
-            self.assertEqual(art.get("supersedes"), supersedes,
-                             "spike result supersedes must match")
-        if command is not None:
-            self.assertEqual(art.get("command"), command,
-                             "spike result command must match")
-        if command_digest is not None:
-            self.assertEqual(art.get("command_digest"), command_digest,
-                             "spike result command_digest must match")
-        if prerequisite_ids is not None:
-            self.assertEqual(list(art.get("prerequisite_research_ids", [])),
-                             list(prerequisite_ids),
-                             "spike result prerequisite research IDs must match in order")
+            self.assertEqual(art.get("supersedes"), supersedes)
         if file_bindings is not None:
-            self.assertEqual(list(art.get("file_bindings", [])), list(file_bindings),
-                             "spike result file bindings must match exactly")
+            self.assertEqual(art.get("file_bindings"), file_bindings)
         if active is not None:
-            self.assertEqual(art.get("active"), active,
-                             "spike result active must match")
+            self.assertEqual(art.get("active"), active)
 
     def assert_artifact_sequence_order(self, arts, first_kind: str, second_kind: str) -> None:
         """Assert a ``first_kind`` artifact has a lower D2C ``sequence`` than a ``second_kind``
@@ -1123,6 +1115,16 @@ class ConformanceCase(unittest.TestCase):
         if run["status"] != "active":
             raise HarnessDefect(f"StartRun must admit an ACTIVE run (prerequisite); got status={run.get('status')!r}")
         return run["id"]
+
+    def start_qualified_run(self, drv, *, goal: str | None = None, **kw) -> str:
+        """Start with one exact fake generic binding selected once by StartRun."""
+        drv.qualify_next_generic_run()
+        kw.setdefault("spike_profile", "docker-isolated-v1")
+        run_id = ConformanceCase.start_run(self, drv, goal=goal, **kw)
+        run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+        self.assertEqual(run["spike_backend"]["kind"], "qualified")
+        self.assertEqual(run["spike_backend"]["profile_id"], "docker-isolated-v1")
+        return run_id
 
     def require_admitted_child(self, drv, run_id: str, *, execution: str = "foreground") -> str:
         """Reserve a child and return the SUT-admitted child_id (prerequisite: one child admitted).
@@ -1415,73 +1417,45 @@ class ConformanceCase(unittest.TestCase):
                 "research artifact must carry a content-addressed artifact_id (prerequisite)")
         return artifact_id
 
-    def require_approved_spike(self, drv, run_id: str, claim_id: str, dependent_files: list[str],
+    def require_approved_spike(self, drv, run_id: str, claim_id: str, paths: list[str],
                                *, content: bytes = b"v1", exit_code: int = 0) -> tuple[dict, dict]:
-        """Stage harness completion BEFORE the spike_request (D4-S2), dispatch the request, then
-        use ONE GetArgument response to find the typed request and result artifacts from the D2C
-        ``ArgumentView.artifacts`` union and return them. For a passing exit, require the claim
-        state ``approved`` with matching spike evidence and freshness. Asserts no
-        freshness.changes path intersects dependent_files. Must NOT claim approval after
-        observing only a request artifact (D4-S2/D2C correction)."""
-        for p in dependent_files:
-            drv.workspace_write(p, content)
-        # Stage harness completion BEFORE dispatching spike_request (D4-S2 spec).
-        drv.harness_complete("python -m pytest", exit_code)
-        self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id=claim_id, command="python -m pytest", dependent_files=dependent_files)))
-        # Use ONE GetArgument response for artifacts, claim state, and freshness (D4-S2
-        # correction): no second GetArgument dispatch.
+        """Queue a natural verdict, then admit the closed request and correlated generic result."""
+        for path in paths:
+            drv.workspace_write(path, content)
+        before_calls = len(drv.generic_harness_requests())
+        drv.generic_harness_complete(exit_code)
+        self.dispatch(drv, observe_action(
+            run_id=run_id, action=action_spike_request(claim_id=claim_id, paths=paths)))
+        requests = drv.generic_harness_requests()
+        self.assertEqual(len(requests), before_calls + 1,
+                         "one public request must execute the generic harness exactly once")
         resp = self.dispatch(drv, get_argument(run_id=run_id))
-        try:
-            arg = self.assert_argument_view(resp["result"])
-        except AssertionError as exc:
+        arg = self.assert_argument_view(resp["result"])
+        reqs = self.find_argument_artifacts(
+            arg["artifacts"], kind="spike_request", claim_id=claim_id)
+        results = self.find_argument_artifacts(
+            arg["artifacts"], kind="spike", claim_id=claim_id)
+        if not reqs or not results:
             raise HarnessDefect(
-                f"GetArgument must return a typed argument (prerequisite): {exc}") from exc
-        arts = arg.get("artifacts")
-        if not isinstance(arts, list):
-            raise HarnessDefect("ArgumentView.artifacts must be a list (prerequisite)")
-        req_arts = self.find_argument_artifacts(arts, kind="spike_request", claim_id=claim_id)
-        res_arts = self.find_argument_artifacts(arts, kind="spike", claim_id=claim_id)
-        if not req_arts:
-            raise HarnessDefect("the sealed spike_request must be in ArgumentView.artifacts (prerequisite)")
-        if not res_arts:
-            raise HarnessDefect(
-                "the spike result must be in ArgumentView.artifacts after the request (prerequisite)")
-        req_art = req_arts[-1]  # latest
-        res_art = res_arts[-1]  # latest
-        req_id = req_art.get("harness_request_id")
-        res_id = res_art.get("harness_request_id")
-        if not req_id:
-            raise HarnessDefect(
-                "spike_request must carry a server-generated harness_request_id (prerequisite)")
-        if req_id != res_id:
-            raise HarnessDefect(
-                "spike result harness_request_id must match the request (prerequisite)")
-        # Assert no freshness.changes path intersects dependent_files (D4-S2 correction):
-        # a freshly approved spike over current observations must not report stale freshness.
-        run = resp["result"].get("run", {})
-        changed_paths = {c.get("path") for c in run.get("freshness", {}).get("changes", [])}
-        for dep in dependent_files:
-            self.assertNotIn(dep, changed_paths,
-                             f"a freshly approved spike must not report stale freshness for "
-                             f"dependent file {dep!r} (prerequisite)")
-        # Must NOT claim approval after observing only a request artifact.
+                "generic request and result must both be visible after harness completion")
+        request, result = reqs[-1], results[-1]
+        self.assert_spike_request_artifact(request, claim_id=claim_id, paths=paths)
+        self.assert_spike_result_artifact(
+            result, request=request, claim_id=claim_id, exit_code=exit_code,
+            spike_gate="PASS" if exit_code == 0 else "FAIL", active=True)
+        self.assertLess(request["sequence"], result["sequence"],
+                        "immutable request must precede result admission")
+        changed_paths = {item.get("path") for item in
+                         resp["result"]["run"]["freshness"]["changes"]}
+        for path in paths:
+            self.assertNotIn(path, changed_paths)
         if exit_code == 0:
-            claims = [c for c in arg["claims"] if c["claim_id"] == claim_id]
-            if not claims:
-                raise HarnessDefect(f"claim {claim_id!r} not found in ArgumentView (prerequisite)")
-            claim = claims[0]
+            claim = next(item for item in arg["claims"] if item["claim_id"] == claim_id)
             if claim["state"] != "approved":
                 raise HarnessDefect(
-                    f"claim {claim_id!r} must be approved (prerequisite); "
-                    f"got {claim['state']!r}")
-            # Assert the spike result is active and passing in the complete active set.
-            self.assert_spike_result_artifact(res_art, claim_id=claim_id,
-                                               exit_code=exit_code, spike_gate="pass",
-                                               active=True)
-            # Central evidence_digest assertion (D4-S2 correction).
+                    f"passing generic result must approve {claim_id!r}; got {claim['state']!r}")
             self.assert_evidence_digest(claim)
-        return req_art, res_art
+        return request, result
 
     def require_frozen_scope(self, drv, run_id: str) -> None:
         """Assert freeze committed a scope (prerequisite)."""

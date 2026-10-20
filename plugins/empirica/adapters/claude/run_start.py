@@ -11,7 +11,7 @@ import os
 from collections.abc import Mapping
 from typing import Any
 
-from adapters.invocation import provenance
+from adapters.invocation import configured_spike_profile, provenance
 
 from .correlation import PROTOCOL, request_id as new_request_id
 from .invocation import parse_invocation
@@ -81,6 +81,8 @@ def build_start_run_request(
         "invocation": invocation_provenance(payload, env),
         "control_mode": invocation.control_mode,
     }
+    if (spike_profile := configured_spike_profile(env)) is not None:
+        command["spike_profile"] = spike_profile
     budgets: dict[str, int] = {}
     for field, env_name, minimum in (
         ("max_passes", "EMPIRICA_MAX_PASSES", 1),

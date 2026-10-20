@@ -59,6 +59,7 @@ import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
 import { admitAuditPreflight, withoutThinkingLevel } from "./preflight-seam.ts";
 import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import type { SpikeProfile } from "./contract.ts";
 import { startObserver, type ObserverServer } from "./observer-ui.ts";
 import { turnEnd, type Basis } from "./turn-end.ts";
 import {
@@ -66,6 +67,7 @@ import {
   REPORT_CONVERGENCE_TOOL,
   SUBAGENT_TOOL,
   classifySubagentCall,
+  configuredSpikeProfile,
   evaluateRunRequest,
   gateFromDecision,
   getArgumentRequest,
@@ -295,6 +297,8 @@ export interface EmpiricaPiDeps {
   hostVersion?: () => unknown | Promise<unknown>;
   /** Environment consulted for the pi-subagents child-process flag (default: ``process.env``). */
   ownerEnv?: OwnerEnv;
+  /** Host-process environment read exactly at session_start for EMPIRICA_SPIKE_PROFILE. */
+  hostEnv?: Readonly<Record<string, string | undefined>>;
   /** Owner-anchored module resolution and loading (default: ``require.resolve`` from the owner + ``import``). */
   preflightImporter?: PreflightImporter;
   /** Where a notice goes when there is no UI (default: the process's stderr and exit code). */
@@ -402,6 +406,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const kickoffStartMs = deps.kickoffStartMs ?? KICKOFF_START_MS;
   // A checked-in inventory marks a reviewed version; the admission rule is ADR-0069's (HX-ADM-02).
   const inventoryFor = deps.inventoryFor ?? ((version: string) => loadInventory(version));
+  const hostEnv = deps.hostEnv ?? process.env;
+  let sessionSpikeProfile: SpikeProfile | undefined;
+  let spikeProfileRefusal: string | undefined;
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
   // instead of surfacing mid-run inside a configure_run that already dispatched.
   const governanceTimeoutMs = governanceTimeout();
@@ -568,6 +575,14 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
     pi.on("session_start", async (_event, ctx) => {
+      try {
+        sessionSpikeProfile = configuredSpikeProfile(hostEnv);
+        spikeProfileRefusal = undefined;
+      } catch (error) {
+        sessionSpikeProfile = undefined;
+        spikeProfileRefusal = describe(error);
+        say(ctx, diagnostics, `/empirica unavailable: ${spikeProfileRefusal}`, "error");
+      }
       ownerState = await observeOwner();
       const entries = ctx.sessionManager?.getEntries() ?? [];
       const terminalRuns = new Set(entries.filter((entry) => entry.customType === "empirica.run.done")
@@ -824,6 +839,10 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           say(ctx, diagnostics, "/empirica requires an idle session; retry after the current turn finishes.", "warning");
           return;
         }
+        if (spikeProfileRefusal !== undefined) {
+          say(ctx, diagnostics, `/empirica not started: ${spikeProfileRefusal}`, "error");
+          return;
+        }
         const parsed = parseInvocationFlags(args);
         const goal = parsed.goal;
         if (parsed.unknownFlags.length) {
@@ -869,6 +888,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
           };
           const response = await dispatch(startRunRequest(selectorOf(ctx), goal, randomUUID(), invocation, {
             ...startOptions, controlMode: parsed.controlMode,
+            spikeProfile: sessionSpikeProfile,
           }));
           const result = response.result;
           if ((result.type === "Allow" || result.type === "Block")

@@ -124,7 +124,7 @@ def _inprocess_import_probe(
 
 
 def _bounded_import_probe(python_executable: str) -> dict[str, Any]:
-    from adapters.sandbox.docker import BoundedRunner
+    from adapters.sandbox.process import BoundedRunner
     script = (
         "import importlib,importlib.metadata,json,sys;"
         f"sys.path.insert(0,{str(_EMPIRICA_ROOT)!r});"
@@ -192,13 +192,13 @@ def inspect_environment(
         except (OSError, TypeError, ValueError):
             executable_ok = False
         if (python["implementation"] != "CPython" or python["os_name"] != "posix"
-                or python["host_os"] != "Darwin" or not isinstance(version_info, list)
+                or python["host_os"] not in {"Darwin", "Linux"} or not isinstance(version_info, list)
                 or len(version_info) != 3 or any(type(item) is not int for item in version_info)
                 or tuple(version_info) < (3, 10, 0) or not executable_ok
                 or not _DIGEST.fullmatch(str(python["executable_sha256"]))
                 or not all(isinstance(python[key], str) and python[key]
                            for key in ("version", "cache_tag", "host_arch"))):
-            reasons.append("Python is not a canonical supported Darwin POSIX CPython >=3.10 runtime")
+            reasons.append("Python is not a canonical supported POSIX CPython >=3.10 runtime")
     if (set(capabilities) != CAPABILITY_KEYS
             or any(type(capabilities[key]) is not bool for key in capabilities)
             or not all(capabilities.values())):
@@ -273,7 +273,7 @@ def validate_environment_identity(
         version_info = python["version_info"]
         python_valid = (
             python["implementation"] == "CPython" and python["os_name"] == "posix"
-            and python["host_os"] == "Darwin" and isinstance(version_info, list)
+            and python["host_os"] in {"Darwin", "Linux"} and isinstance(version_info, list)
             and len(version_info) == 3 and all(type(item) is int for item in version_info)
             and tuple(version_info) >= (3, 10, 0) and executable == canonical
             and python["version"] == ".".join(str(item) for item in version_info)

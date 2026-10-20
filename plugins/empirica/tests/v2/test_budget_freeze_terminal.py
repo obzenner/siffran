@@ -3,7 +3,9 @@
 Owner: D7/D7-W (evaluation snapshot, budget derivation, freeze first-write-wins, terminal decision,
 single-writer transaction; terminal honesty invariant #3 from the final DAG).
 
-D4-S2/D2C: harness results are staged BEFORE dispatching spike_request. Trusted late evidence,
+D4-S2/D2C: fake natural verdicts are queued BEFORE dispatching `spike_request`, while the
+application still commits the sealed generic request before invoking the harness and admitting its
+result. Trusted late evidence,
 audit, and child terminal events are delivered through the real private composition ingress
 (``drv.trusted_evidence_leaf`` / ``drv.trusted_audit_verdict`` / ``drv.trusted_child_event``), not
 fake-only telemetry. Cases 17/21 first assert the returned response reflects the delivered event
@@ -21,7 +23,6 @@ from assertions import (  # noqa: E402
 )
 
 _BOUND = "src/mod.py"
-_COMMAND = "python -m pytest"
 
 # Terminal non-converged statuses, DERIVED from the registry (every status except active/converged).
 TERMINAL_NONCONVERGED = set(STATUSES) - {"active", "converged"}
@@ -29,6 +30,10 @@ TERMINAL_NONCONVERGED = set(STATUSES) - {"active", "converged"}
 
 class BudgetFreezeTerminalTests(ConformanceCase):
     GOAL = "Prove budget, freeze, and terminal honesty hold."
+
+    def start_run(self, drv, *, goal=None, **kw):
+        """Every scenario binds the exact generic fake authority once at StartRun."""
+        return super().start_qualified_run(drv, goal=goal, **kw)
 
     # 16 — Derivation and spawn limits enforce structured budget Blocks
     def test_derivation_and_spawn_limits_block(self):
@@ -103,9 +108,19 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             root_id = graph["root"]
             self.require_research_recorded(drv, run_id, root_id)
             drv.workspace_write(_BOUND, b"v1")
-            drv.harness_complete(_COMMAND, 0)
+            drv.generic_harness_complete(0)
             self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-                claim_id=root_id, command=_COMMAND, dependent_files=[_BOUND])))
+                claim_id=root_id, paths=[_BOUND])))
+            artifacts = self.get_argument_artifacts(drv, run_id)
+            request = self.find_one_argument_artifact(
+                artifacts, kind="spike_request", claim_id=root_id)
+            result_artifact = self.find_one_argument_artifact(
+                artifacts, kind="spike", claim_id=root_id, active=True)
+            self.assert_spike_request_artifact(
+                request, claim_id=root_id, paths=[_BOUND])
+            self.assert_spike_result_artifact(
+                result_artifact, request=request, claim_id=root_id,
+                exit_code=0, spike_gate="PASS", active=True)
             # Evaluate to consume the derivation pass (semantic progress).
             self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
             # Stop after pass budget exhausts -> stopped_budget.
@@ -440,10 +455,9 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             root_id = graph["root"]
             self.require_research_recorded(drv2, run_id, root_id)
             drv2.workspace_write(_BOUND, b"v1")
-            drv2.harness_complete(_COMMAND, 0)
+            drv2.generic_harness_complete(0)
             self.dispatch(drv2, observe_action(run_id=run_id,
-                action={"kind": "spike_request", "claim_id": root_id,
-                        "command": _COMMAND, "dependent_files": [_BOUND]}))
+                action=action_spike_request(claim_id=root_id, paths=[_BOUND])))
             self.dispatch(drv2, evaluate(run_id=run_id, intent="report_convergence"))
             resp = self.stop(drv2, run_id)
             result = self.assert_allow(resp, converged=False)
@@ -550,10 +564,9 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             root_id = graph["root"]
             self.require_research_recorded(drv, run_id, root_id)
             drv.workspace_write(_BOUND, b"v1")
-            drv.harness_complete(_COMMAND, 0)
+            drv.generic_harness_complete(0)
             self.dispatch(drv, observe_action(run_id=run_id,
-                action={"kind": "spike_request", "claim_id": root_id,
-                        "command": _COMMAND, "dependent_files": [_BOUND]}))
+                action=action_spike_request(claim_id=root_id, paths=[_BOUND])))
             self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))
             self.stop(drv, run_id)
             return "stopped_budget"

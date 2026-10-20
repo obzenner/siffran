@@ -30,7 +30,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import jsonschema
 
@@ -62,7 +63,6 @@ from sandbox_isolation import (  # noqa: E402
     ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
 
 from adapters import bridge  # noqa: E402
-from adapters.sandbox import selection  # noqa: E402
 from governance_setup import invocation_for  # noqa: E402
 force_absent_sandbox_home()
 
@@ -267,61 +267,80 @@ class BridgeV2Tests(unittest.TestCase):
                     source = path.read_text(encoding="utf-8")
                     self.assertIn("from sandbox_isolation import", source, path)
                     self.assertIn("force_absent_sandbox_home()", source, path)
-        excluded_semantic_tests = (
-            _PLUGIN_ROOT / "tests/test_sandbox_adapter.py",
-            _REPO_ROOT / "scripts/tests/test_sandbox_qualification.py",
-        )
-        for path in excluded_semantic_tests:
-            self.assertNotIn(
-                "from sandbox_isolation import", path.read_text(encoding="utf-8"), path)
         self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
         self.assertFalse(ABSENT_SANDBOX_HOME.exists())
 
-    def test_build_service_composes_one_shared_store_selector_and_docker_harness(self):
-        store, selector, harness, service = object(), object(), object(), object()
-        with (patch.object(bridge, "QualificationStore", return_value=store) as store_type,
+    def test_build_service_composes_exact_v2_authority_image_resolver_and_harness(self):
+        execution_store = object()
+        store = type("Store", (), {"execution_store": execution_store})()
+        selector, resolver, image_resolver, docker_harness, service = (
+            object(), object(), object(), object(), object())
+        with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
               patch.object(
-                  bridge, "QualificationAuthoritySelector", return_value=selector) as selector_type,
-              patch.object(bridge, "DockerSpikeHarness", return_value=harness) as harness_type,
+                  bridge, "GenericBackendSelector", return_value=selector) as selector_type,
+              patch.object(
+                  bridge, "GenericAuthorityResolver", return_value=resolver) as resolver_type,
+              patch.object(
+                  bridge, "DockerLocalImageResolver", return_value=image_resolver) as image_type,
+              patch.object(
+                  bridge, "GenericDockerHarness", return_value=docker_harness) as harness_type,
               patch.object(bridge._v2, "compose", return_value=service) as compose):
             self.assertIs(bridge.build_service(_CANONICAL_PROFILE), service)
         store_type.assert_called_once_with()
         selector_type.assert_called_once_with(store)
-        harness_type.assert_called_once_with(store)
-        self.assertIs(compose.call_args.kwargs["harness"], harness)
+        resolver_type.assert_called_once_with(store)
+        image_type.assert_called_once_with(resolver)
+        harness_type.assert_called_once_with(execution_store, resolver)
+        self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
+        self.assertIs(compose.call_args.kwargs["image_resolver"], image_resolver)
         self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
 
     def test_sandbox_constructor_failure_degrades_only_spikes(self):
-        for failing in ("QualificationStore", "QualificationAuthoritySelector", "DockerSpikeHarness"):
+        names = ("GenericQualificationStore", "GenericBackendSelector",
+                 "GenericAuthorityResolver", "DockerLocalImageResolver", "GenericDockerHarness")
+        for failing in names:
+            store_value = type("Store", (), {"execution_store": object()})()
             with self.subTest(failing=failing), \
-                    patch.object(bridge, "QualificationStore", return_value=object()) as store, \
-                    patch.object(
-                        bridge, "QualificationAuthoritySelector", return_value=object()) as selector, \
-                    patch.object(bridge, "DockerSpikeHarness", return_value=object()) as harness:
-                {"QualificationStore": store, "QualificationAuthoritySelector": selector,
-                 "DockerSpikeHarness": harness}[failing].side_effect = PermissionError("unsafe")
+                    patch.object(bridge, "GenericQualificationStore",
+                                 return_value=store_value) as store, \
+                    patch.object(bridge, "GenericBackendSelector",
+                                 return_value=object()) as selector, \
+                    patch.object(bridge, "GenericAuthorityResolver",
+                                 return_value=object()) as resolver, \
+                    patch.object(bridge, "DockerLocalImageResolver",
+                                 return_value=object()) as image_resolver, \
+                    patch.object(bridge, "GenericDockerHarness",
+                                 return_value=object()) as docker_harness:
+                {"GenericQualificationStore": store, "GenericBackendSelector": selector,
+                 "GenericAuthorityResolver": resolver,
+                 "DockerLocalImageResolver": image_resolver,
+                 "GenericDockerHarness": docker_harness}[failing].side_effect = PermissionError(
+                     "unsafe")
                 service = bridge.build_service(_CANONICAL_PROFILE)
-            from application.ports import NullSpikeAuthoritySelector, UnavailableSpikeHarness
-            self.assertIsInstance(service._harness, UnavailableSpikeHarness)
+            from application.ports import NullSpikeAuthoritySelector
+            self.assertIsNone(service._harness)
             self.assertIsInstance(
                 service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
 
     def test_bridge_construction_performs_no_docker_discovery(self):
-        with patch.object(
-                bridge.QualificationAuthoritySelector, "select",
-                side_effect=AssertionError("selection is StartRun-only")) as selected:
+        store = SimpleNamespace(execution_store=object())
+        selector = SimpleNamespace(select=Mock(
+            side_effect=AssertionError("selection is StartRun-only")))
+        with patch.object(bridge, "GenericQualificationStore", return_value=store), \
+                patch.object(bridge, "GenericBackendSelector", return_value=selector), \
+                patch.object(bridge, "GenericAuthorityResolver", return_value=object()), \
+                patch.object(bridge, "DockerLocalImageResolver", return_value=object()), \
+                patch.object(bridge, "GenericDockerHarness", return_value=object()):
             service = bridge.build_service(_CANONICAL_PROFILE)
         self.assertTrue(callable(service.dispatch))
-        selected.assert_not_called()
+        selector.select.assert_not_called()
 
     def test_start_run_with_absent_authority_binds_unavailable_without_docker_reads(self):
         self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
         self.assertFalse(ABSENT_SANDBOX_HOME.exists())
-        with tempfile.TemporaryDirectory() as home, patch.object(
-                selection.docker, "discover_docker",
-                side_effect=AssertionError("absent authority must precede Docker discovery")) as docker:
+        with tempfile.TemporaryDirectory() as home:
             saved = os.environ.get("EMPIRICA_HOME")
             os.environ["EMPIRICA_HOME"] = str(Path(home).resolve())
             try:
@@ -341,7 +360,6 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertIn(response["result"]["type"], {"Allow", "Block"}, response)
         self.assertEqual(
             service._coordinator.last_state.spike_backend, {"kind": "spikes_unavailable"})
-        docker.assert_not_called()
 
     def test_unsafe_authority_does_not_block_nonspike_read(self):
         saved = os.environ["EMPIRICA_SANDBOX_HOME"]

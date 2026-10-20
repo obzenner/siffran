@@ -12,8 +12,8 @@ Design rules (D4 spec §3, §8):
 * the driver and fakes contain NO branch on an expected reason/status — they never compute
   approval, reason codes, claim state, audit coverage, budgets, context relevance, or convergence;
 * fakes own only observations and transport facts: workspace bytes/errors + SHA-256 digests,
-  deterministic harness exit + sealed command bindings, clock ticks, CAS storage, host child
-  events;
+  a programmable closed generic harness, an exact one-shot fake authority selector, clock ticks,
+  CAS storage, and host child events;
 * no expected-answer stub and no second domain model;
 * stdlib + ``hashlib`` only (jsonschema is used by the assertion layer, not the driver).
 """
@@ -30,8 +30,10 @@ if str(_TESTS) not in sys.path:
     sys.path.insert(0, str(_TESTS))
 from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
-from application.ports import CapturedFile, HarnessResult, WorkspaceCapture  # noqa: E402
-from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
+from application import generic_spike  # noqa: E402
+from application.ports import CapturedFile, WorkspaceCapture  # noqa: E402
+from core.canonical import canonical_digest  # noqa: E402
+from core.freshness import (FileObservation, ObservationState,  # noqa: E402
                             observations_digest)
 
 import sut_adapter  # noqa: E402  # the only composition bridge; no load-time cycle
@@ -44,12 +46,14 @@ class FakeSpikeAuthoritySelector:
     def __init__(self) -> None:
         self.qualified_next = False
 
-    def select(self):
-        from application.ports import QualifiedSpikeBackend, SpikesUnavailable
+    def select(self, requested_profile=None):
+        from application.generic_spike import GenericQualifiedBackend
+        from application.ports import SpikesUnavailable
         if not self.qualified_next:
             return SpikesUnavailable()
         self.qualified_next = False
-        return QualifiedSpikeBackend(
+        return GenericQualifiedBackend(
+            "docker", requested_profile or "docker-isolated-v1",
             f"sha256:{'a' * 64}", f"sha256:{'b' * 64}")
 
 
@@ -78,17 +82,16 @@ class ConformanceDriver(Protocol):
     def workspace_write(self, path: str, content: bytes) -> None: ...
     def workspace_delete(self, path: str) -> None: ...
     def workspace_error(self, path: str, code: str) -> None: ...
-    def harness_complete(self, command: str, exit_code: int) -> None: ...
     def reload(self) -> "ConformanceDriver": ...
     def compact(self) -> dict: ...
     def artifacts(self) -> tuple[dict, ...]: ...
     def operational_state(self) -> dict: ...
-    # D4-S2 policy-free telemetry seams: observation history (path batches/results) and harness
-    # invocation attestations. Trusted lifecycle events use the real private composition ingress
-    # (trusted_child_event/trusted_evidence_leaf/trusted_audit_verdict); fake telemetry alone is
-    # insufficient. These transport seams never derive claim/audit/run policy.
+    # D4-S2 policy-free observation telemetry. Trusted lifecycle events use the real private
+    # composition ingress; fake telemetry alone is insufficient and never derives policy.
     def workspace_observe_history(self) -> tuple: ...
-    def harness_invocations(self) -> tuple[dict, ...]: ...
+    def qualify_next_generic_run(self) -> None: ...
+    def generic_harness_complete(self, exit_code: int) -> None: ...
+    def generic_harness_requests(self) -> tuple: ...
     def trusted_child_event(self, run_id: str, child_id: str, event: dict) -> dict: ...
     def trusted_evidence_leaf(self, run_id: str, payload: dict) -> dict: ...
     def trusted_evidence_presentation(self, run_id: str, payload: dict) -> dict: ...
@@ -247,6 +250,9 @@ class FakeWorkspace:
     def basis_of(observations) -> str:
         return observations_digest(tuple(observations))
 
+    def capture_inputs(self, declarations) -> WorkspaceCapture:
+        return self.observe([path.rstrip("/") for path in declarations])
+
     def observe(self, paths: list[str]) -> WorkspaceCapture:
         self.observe_calls += 1
         # Collapse duplicates after normalization; order is lexical (D1 §6).
@@ -290,42 +296,53 @@ class FakeWorkspace:
         return tuple(self._observe_history)
 
 
-class FakeSpikeHarness:
-    """``SpikeHarness.run`` port. Owns the deterministic exit code + sealed command binding.
+class FakeLocalImageResolver:
+    def resolve(self, reference, backend):
+        return generic_spike.LocalImageResolution(
+            reference, "sha256:" + "2" * 64,
+            "linux", "arm64", "linux", "aarch64", (), 8, backend)
 
-    Sealing is a transport fact: it records the command, its SHA-256 digest, the exit code, the
-    gate derived mechanically from the exit code (pass iff 0), and the per-file bindings taken
-    from the observations the SUT passes in. It never decides claim state or approval. The staged
-    ``files`` content is intentionally NOT a parameter: file bindings come from the observations
-    the SUT requests through the Workspace port, so a separate ``files`` argument would be dead,
-    misleading input (Sol finding).
+
+class FakeGenericHarness:
+    """Closed programmable generic harness; it records requests and derives typed result facts only.
+
+    A completion is queued before the public request, but no result exists until ``run`` receives
+    the application's sealed request. This preserves request-before-effects ordering while keeping
+    the conformance suite independent of Docker and host execution.
     """
 
     def __init__(self) -> None:
-        self._next_exit: int | None = None
-        self._history: list[dict] = []
+        self._completions: list[int] = []
+        self._requests: list[generic_spike.GenericHarnessRequest] = []
 
-    def complete(self, command: str, exit_code: int) -> None:
-        self._next_exit = int(exit_code)
+    def complete(self, exit_code: int) -> None:
+        if type(exit_code) is not int:
+            raise TypeError("generic fixture exit code must be an integer")
+        self._completions.append(exit_code)
 
-    def run(self, command: str, snapshot) -> HarnessResult:
-        exit_code = self._next_exit if self._next_exit is not None else 1
-        self._next_exit = None
-        command_digest = "sha256:" + hashlib.sha256(command.encode("utf-8")).hexdigest()
-        bindings = [{"path": b.path, "sha256": b.sha256} for b in snapshot.file_bindings]
-        attestation = {
-            "command": command,
-            "command_digest": command_digest,
-            "exit_code": exit_code,
-            "gate": "pass" if exit_code == 0 else "fail",
-            "file_bindings": bindings,
-        }
-        self._history.append(attestation)
-        result_digest = canonical_digest(attestation)
-        return HarnessResult(exit_code, result_digest, snapshot.snapshot_digest)
+    def requests(self) -> tuple[generic_spike.GenericHarnessRequest, ...]:
+        return tuple(self._requests)
 
-    def invocations(self) -> tuple[dict, ...]:
-        return tuple(self._history)
+    def run(self, request):
+        self._requests.append(request)
+        if not self._completions:
+            return generic_spike.GenericHarnessUnavailable(
+                generic_spike.GenericUnavailableReason.AUTHORITY_INVALID)
+        exit_code = self._completions.pop(0)
+        facts = generic_spike.GenericOperationFacts(
+            canonical_digest("operation"), request.backend.qualification_record_digest,
+            request.backend.execution_binding_digest, request.plan.image.image_id,
+            request.snapshot.snapshot_digest,
+            canonical_digest("process"), canonical_digest("topology"),
+            canonical_digest("timing"))
+        stdout = generic_spike.GenericStreamFact(0, canonical_digest("stdout:verdict"))
+        stderr = generic_spike.GenericStreamFact(0, canonical_digest("stderr:verdict"))
+        return generic_spike.GenericHarnessResult(
+            request.run_id, request.backend, request.plan_digest, request.policy_digest,
+            request.snapshot.snapshot_digest, facts, stdout, stderr, True, False, exit_code,
+            generic_spike.GenericVerdict.PASS if exit_code == 0
+            else generic_spike.GenericVerdict.FAIL,
+            True, request.backend.execution_binding_digest)
 
 
 class FakeRunRepository:
@@ -459,7 +476,9 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     """
     workspace = FakeWorkspace()
     workspace.write(CITED_SOURCE[0], f"# Cited\n\n{CITED_SOURCE[1]}\n".encode())
-    harness = FakeSpikeHarness()
+    harness = FakeGenericHarness()
+    resolver = FakeLocalImageResolver()
+    selector = spike_authority_selector or FakeSpikeAuthoritySelector()
     runs = FakeRunRepository()
     artifacts = FakeArtifactRepository()
     host = FakeHostChildSink()
@@ -470,7 +489,7 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     lim = dict(limits or {})
     return sut_adapter.bind_live(
         workspace, harness, runs, artifacts, host, profile_id, lim, clk,
-        spike_authority_selector=spike_authority_selector,
+        spike_authority_selector=selector, image_resolver=resolver,
     )
 
 
@@ -485,6 +504,10 @@ def clone_driver(drv) -> ConformanceDriver:
     inner = copy.deepcopy(runs._runs if recording else runs)
     if recording:
         inner = _RecordingRuns(inner, timeline=copy.deepcopy(runs._timeline), clock=clock.read)
-    return sut_adapter.bind_live(copy.deepcopy(drv._workspace), copy.deepcopy(drv._harness), inner,
-                                 copy.deepcopy(drv._artifacts), copy.deepcopy(drv._host), drv._profile_id,
-                                 dict(drv._limits), clock)
+    return sut_adapter.bind_live(
+        copy.deepcopy(drv._workspace), copy.deepcopy(drv._harness), inner,
+        copy.deepcopy(drv._artifacts), copy.deepcopy(drv._host), drv._profile_id,
+        dict(drv._limits), clock,
+        spike_authority_selector=copy.deepcopy(
+            drv._service._coordinator.spike_authority_selector),
+        image_resolver=copy.deepcopy(drv._service._coordinator.image_resolver))

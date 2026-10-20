@@ -102,59 +102,68 @@ Research outcomes:
 - any current refuting research refutes the claim;
 - no current research leaves it open.
 
-## Fold 2: spike
+## Fold 2: generic spike
 
-Only a `needs-experiment` claim requires Fold 2. Supporting Fold-1 research must
-already exist. Before designing a spike, read the RunView's immutable `spike_backend`:
+Only a `needs-experiment` claim requires Fold 2, and supporting Fold-1 research must already exist.
+Read the RunView’s immutable `spike_backend` first:
 
-- `spikes_unavailable`: do not submit an unchanged spike request. Continue non-spike research,
-  refine the graph to claims the available evidence can answer, or stop with an honest residual.
-  Never fabricate evidence or run the command through an ambient host fallback.
-- `qualified` / `docker-rust-v1`: this run is bound to the published qualification-record and
-  execution-binding digests. That is not a guarantee the backend is currently healthy.
+- `spikes_unavailable`: do not submit an unchanged request. Continue non-spike research, refine the
+  graph, or stop with an honest residual. Never fabricate evidence or use an ambient host fallback.
+- `qualified` / `docker-isolated-v1` or `docker-networked-v1`: this run is bound to exact
+  qualification-record and execution-binding digests. Bound does not mean currently healthy. The
+  host selected the profile once at `StartRun`; the plan cannot select or change it.
 
-For a qualified run, submit a `spike_request` with a small, bounded, offline, deterministic command
-and a non-empty list naming **every** repo-relative file it reads:
+Submit exactly `{"kind":"spike_request","claim_id":...,"plan":...}`. The `plan` must be one closed
+`empirica.spike-plan-draft/2` with exactly five root fields:
 
-```json
-{
-  "kind": "spike_request",
-  "claim_id": "G1",
-  "command": "python3 -m json.tool contracts/empirica/v2/public-contract.json",
-  "dependent_files": ["contracts/empirica/v2/public-contract.json"]
-}
-```
+1. `schema`: exactly `empirica.spike-plan-draft/2`.
+2. `image`: one syntactically valid already-local Docker name/tag, repository digest, full image ID,
+   or unambiguous ID prefix. The host resolves locality and immutable native-platform identity; no
+   image inventory, pull, build, or install is available to the author.
+3. `argv`: one nonempty exact executable/argument vector. A shell is used only when explicitly named.
+4. `inputs`: zero or more canonical non-overlapping repository-relative file/directory declarations.
+   The host expands them once into a sorted bounded captured-file union, excluding symlinks and `.git`.
+5. `environment`: at most 128 bounded name/value overrides. `HOME` and `TMPDIR` are framework-owned.
+   Values persist verbatim and must never contain credentials or secrets; content-addressed plan
+   identity can confirm guessed low-entropy values although public views expose names only.
 
-The service—not the author—captures a coherent workspace tree, seals the request,
-runs the harness at most once within that application call, records file hashes, and derives pass/fail
-from an inspected normal workload exit. A result-CAS retry never reruns the harness, but a crash after
-execution or a separate call may execute the same sealed request again; make the probe safe under duplicate
-execution. The command workload hard limit is **120 seconds**; design comfortably
-below it and split a longer deterministic experiment. The backend's **210-second** whole-operation
-bound reserves create, inspect, cleanup, absence proof, and postflight; it is not workload time. Pi's
-**300-second** and Claude MCP's **360-second** limits are outer transport margins, not workload budgets.
-Do not claim 300 or 360 seconds of usable spike runtime.
+Do not add authority, profile, resources, timeout, user, workdir, network, topology, services,
+aliases, Docker options, host paths, credentials, image acquisition, or derived capture facts.
+Consult the public tool schema for exact bounds rather than inventing a field.
 
-The sandbox permits no network, download, or install. It has one CPU, 512 MiB memory with no swap,
-128 PIDs, 256 open files, at most 256 staged files totalling 64 MiB with each file at most 64 MiB, and
-private writable tmpfs only. Stdout and stderr each have an independent 1 MiB ceiling (up to 1 MiB
-each, not 1 MiB aggregate). It permits no daemon or background continuation. Because the captured
-sandbox contains only the bound files, explicitly name every file the command reads. Do not submit an
-`evidence_leaf` or a claimed gate.
+The service captures all declared files in one workspace basis, seals immutable input/plan/policy
+identities, and commits the request before effects. The harness runs at most once within that
+application call. A result-CAS retry never reruns it, but a crash or separate call may execute the
+sealed request again, so the workload must be deterministic, bounded, safe under duplicate
+execution, and must not depend on unqualified ambient services. `docker-isolated-v1` denies outbound
+network egress; `docker-networked-v1` expressly permits outbound Internet egress from the one verdict
+container on its host-created private bridge.
 
-An inspected exit zero is PASS and another inspected workload exit is FAIL. Actual workload exits 124
-and 125 remain ordinary nonzero results. A backend-enforced timeout, stdout or stderr output limit,
-OOM, cleanup failure, identity mismatch, or authority failure is **unavailable**, not FAIL, and admits
-**no spike result evidence**. Narrow or redesign the probe after unavailable, continue research, or
-arrange operator requalification for a future new run; do not blindly retry or use a host fallback.
+The host owns one verdict container, fixed uid/gid 65534, `/work`, `/tmp`, one read-only `/inputs`
+tree, and the selected network profile. Fixed policy is `min(2, NCPU)` CPU, 2 GiB memory with no
+extra swap, 256 PIDs, `nofile=1024`, `fsize=64 MiB`, `core=0`, executable 512-MiB `/work`, noexec
+64-MiB `/tmp`, 64-MiB shm, and independent 1-MiB stdout/stderr limits. Capture allows 256 files,
+64 MiB aggregate, and 64 MiB per file. Isolated uses network none; networked uses one private bridge
+with outbound egress and no host ingress or published ports.
 
-A passing exit code satisfies Fold 2 only while every bound file remains current.
-A changed binding makes the spike stale. Request the same canonical `spike_request` path again only
-while this run remains qualified; there is no separate re-gate operation.
+The exact production workload limit is **120 seconds** inside the backend's **210-second** operation.
+Pi's **300-second** and Claude MCP's **360-second** limits are outer transport margins.
+
+Only the verdict container's inspected **natural exit** produces a verdict: zero is uppercase
+`PASS`; nonzero is uppercase `FAIL` except 137, which is unavailable. Timeout, forced termination,
+stdout/stderr overflow, OOM, capture/staging failure, image/platform/create/attach/inspect ambiguity,
+identity mismatch, cleanup/recovery failure, or postflight/authority failure is **unavailable** and
+admits **no spike result evidence**. Narrow or redesign after unavailable,
+continue research, or arrange operator requalification for a future run; never infer FAIL, blindly
+retry, or use a host fallback.
+
+A passing result satisfies Fold 2 only while every bound file remains current. Re-submit the same
+closed plan through `spike_request` only when a changed binding requires re-gating and this run
+remains qualified; there is no separate re-gate action.
 
 ## Choosing a falsifier
 
-Prefer the cheapest command that would fail if the claim were false:
+Prefer the cheapest plan whose verdict container would fail if the claim were false:
 
 - a focused test for behavior;
 - schema validation for wire compatibility;
@@ -162,9 +171,9 @@ Prefer the cheapest command that would fail if the claim were false:
 - a deterministic benchmark only when the claim is quantitative;
 - a small boundary probe against the real adapter rather than a duplicate model.
 
-Do not use a test that merely restates the implementation. Predict the expected
-failure or result before running the command, then compare it with the observed
-exit code and output.
+Do not use a plan that merely restates the implementation. Predict the verdict before requesting
+it, then compare that prediction with the admitted typed verdict and content-addressed stream
+identities. Raw output is not evidence and is never projected.
 
 ## Trusted boundary
 

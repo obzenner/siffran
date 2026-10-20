@@ -173,9 +173,35 @@ class NoFallbackTests(unittest.TestCase):
             self.assertIn(f"goal: {wrapped(argument['goal'])}", text, name)
             for claim in argument["claims"]:
                 self.assertIn(f": {wrapped(claim['text'])}", text, name)
-            self.assertNotIn("sha256:", text)
-            self.assertNotIn("artifact_id", text)
+            spikes = [row for row in argument["artifacts"] if row["kind"] in {"spike_request", "spike"}]
+            if spikes:
+                self.assertIn("generic spike evidence (read-only)", text)
+                for row in spikes:
+                    self.assertIn(row["artifact_id"], text)
+                    safe = author_view._generic_spike_evidence(row)
+                    self.assertIn(wrapped(json.dumps(safe, separators=(",", ":"), ensure_ascii=False)), text)
+                    if row["kind"] == "spike":
+                        self.assertNotIn('"run_id":', json.dumps(safe, separators=(",", ":")))
+                self.assertNotRegex(text, r"DOCKER_HOST|docker\.sock|current\.json|container\.cid|staging")
+            else:
+                self.assertNotIn("sha256:", text)
+                self.assertNotIn("artifact_id", text)
             self.assertNotIn("route_stamp", text)
+
+    def test_generic_request_redacts_authored_environment_values(self):
+        row = {
+            "kind": "spike_request",
+            "draft": {"schema": "empirica.spike-plan-draft/2", "image": "example:local",
+                      "argv": ["probe"], "inputs": [],
+                      "environment": {"TOKEN": "secret-value"}},
+            "plan": {"schema": "empirica.spike-plan/2", "image": {}, "argv": ["probe"],
+                     "declared_inputs": [], "environment": {"TOKEN": "secret-value"}},
+        }
+        safe = author_view._generic_spike_evidence(row)
+        self.assertEqual(safe["draft"]["environment"], ["TOKEN"])
+        self.assertEqual(safe["plan"]["environment"], ["TOKEN"])
+        self.assertNotIn("secret-value", json.dumps(safe))
+        self.assertEqual(row["draft"]["environment"]["TOKEN"], "secret-value")
 
     def test_contract_results_are_plain_text(self):
         from application.protocol import contract_result

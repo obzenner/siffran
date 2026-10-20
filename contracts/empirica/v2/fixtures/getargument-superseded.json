@@ -60,7 +60,7 @@
         "spike_backend": {
           "kind": "qualified",
           "backend": "docker",
-          "profile_id": "docker-rust-v1",
+          "profile_id": "docker-isolated-v1",
           "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         }
@@ -118,16 +118,49 @@
             "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "kind": "spike_request",
             "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-            "harness_request_id": "h0",
-            "command": "pytest -q tests/a_test.py",
-            "command_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-            "dependent_files": [
-              "src/a.py",
-              "tests/a_test.py"
-            ],
+            "harness_request_id": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
             "prerequisite_research_ids": [
               "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-            ]
+            ],
+            "draft": {
+              "schema": "empirica.spike-plan-draft/2",
+              "image": "example/probe@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "argv": [
+                "/usr/bin/python3",
+                "/input/probe.py"
+              ],
+              "inputs": [
+                "src/a.py",
+                "tests/a_test.py"
+              ],
+              "environment": []
+            },
+            "draft_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "plan_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "snapshot_basis_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "snapshot_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "inputs": [
+              {
+                "path": "src/a.py",
+                "sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+                "bytes": 0
+              },
+              {
+                "path": "tests/a_test.py",
+                "sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+                "bytes": 0
+              }
+            ],
+            "backend": {
+              "kind": "qualified",
+              "backend": "docker",
+              "profile_id": "docker-isolated-v1",
+              "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "producer_model": null,
+            "operation_timeout_seconds": 210
           },
           {
             "sequence": 2,
@@ -138,9 +171,7 @@
             "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "active": false,
             "outcome": "fail",
-            "harness_request_id": "h0",
-            "command": "pytest -q tests/a_test.py",
-            "command_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "harness_request_id": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
             "prerequisite_research_ids": [
               "sha256:1111111111111111111111111111111111111111111111111111111111111111"
             ],
@@ -155,8 +186,58 @@
               }
             ],
             "exit_code": 1,
-            "spike_gate": "fail",
-            "supersedes": null
+            "spike_gate": "FAIL",
+            "supersedes": null,
+            "request_artifact_id": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+            "plan_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "snapshot_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "backend": {
+              "kind": "qualified",
+              "backend": "docker",
+              "profile_id": "docker-isolated-v1",
+              "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "result_facts": {
+              "run_id": "r-11111111111111111111111111111111",
+              "backend": {
+                "kind": "qualified",
+                "backend": "docker",
+                "profile_id": "docker-isolated-v1",
+                "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "plan_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "snapshot_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "operation_facts": {
+                "operation_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                "qualification_record_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+                "execution_binding_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+                "image_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+                "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+                "process_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+                "topology_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+                "timing_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "verdict": "FAIL",
+              "cleanup_proven": true,
+              "postflight_identity_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "harness_result_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "stdout": {
+                "bytes_seen": 0,
+                "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "stderr": {
+                "bytes_seen": 0,
+                "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "natural_exit": true,
+              "forced_termination": false,
+              "exit_code": 1
+            },
+            "producer_model": null
           },
           {
             "sequence": 3,
@@ -165,16 +246,49 @@
             "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "kind": "spike_request",
             "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
-            "harness_request_id": "h1",
-            "command": "pytest -q tests/a_test.py",
-            "command_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
-            "dependent_files": [
-              "src/a.py",
-              "tests/b_test.py"
-            ],
+            "harness_request_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
             "prerequisite_research_ids": [
               "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-            ]
+            ],
+            "draft": {
+              "schema": "empirica.spike-plan-draft/2",
+              "image": "example/probe@sha256:1111111111111111111111111111111111111111111111111111111111111111",
+              "argv": [
+                "/usr/bin/python3",
+                "/input/probe.py"
+              ],
+              "inputs": [
+                "src/a.py",
+                "tests/b_test.py"
+              ],
+              "environment": []
+            },
+            "draft_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "plan_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "snapshot_basis_id": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "snapshot_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "inputs": [
+              {
+                "path": "src/a.py",
+                "sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+                "bytes": 0
+              },
+              {
+                "path": "tests/b_test.py",
+                "sha256": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+                "bytes": 0
+              }
+            ],
+            "backend": {
+              "kind": "qualified",
+              "backend": "docker",
+              "profile_id": "docker-isolated-v1",
+              "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "producer_model": null,
+            "operation_timeout_seconds": 210
           },
           {
             "sequence": 4,
@@ -185,9 +299,7 @@
             "statement_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
             "active": true,
             "outcome": "pass",
-            "harness_request_id": "h1",
-            "command": "pytest -q tests/a_test.py",
-            "command_digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+            "harness_request_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
             "prerequisite_research_ids": [
               "sha256:1111111111111111111111111111111111111111111111111111111111111111"
             ],
@@ -202,8 +314,58 @@
               }
             ],
             "exit_code": 0,
-            "spike_gate": "pass",
-            "supersedes": "sha256:6666666666666666666666666666666666666666666666666666666666666666"
+            "spike_gate": "PASS",
+            "supersedes": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+            "request_artifact_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+            "plan_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+            "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+            "snapshot_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+            "backend": {
+              "kind": "qualified",
+              "backend": "docker",
+              "profile_id": "docker-isolated-v1",
+              "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+            },
+            "result_facts": {
+              "run_id": "r-11111111111111111111111111111111",
+              "backend": {
+                "kind": "qualified",
+                "backend": "docker",
+                "profile_id": "docker-isolated-v1",
+                "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+              },
+              "plan_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "policy_digest": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+              "snapshot_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+              "operation_facts": {
+                "operation_digest": "sha256:3333333333333333333333333333333333333333333333333333333333333333",
+                "qualification_record_digest": "sha256:4444444444444444444444444444444444444444444444444444444444444444",
+                "execution_binding_digest": "sha256:5555555555555555555555555555555555555555555555555555555555555555",
+                "image_digest": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+                "input_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+                "process_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+                "topology_digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
+                "timing_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+              },
+              "verdict": "PASS",
+              "cleanup_proven": true,
+              "postflight_identity_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "harness_result_digest": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+              "stdout": {
+                "bytes_seen": 0,
+                "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "stderr": {
+                "bytes_seen": 0,
+                "sha256": "sha256:0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "natural_exit": true,
+              "forced_termination": false,
+              "exit_code": 0
+            },
+            "producer_model": null
           }
         ],
         "route_stamp": 1,
@@ -223,7 +385,7 @@
         "spike_backend": {
           "kind": "qualified",
           "backend": "docker",
-          "profile_id": "docker-rust-v1",
+          "profile_id": "docker-isolated-v1",
           "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         }

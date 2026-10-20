@@ -31,9 +31,10 @@ pi install git:github.com/obzenner/siffran
 
 Then restart Pi, or run `/reload` in an existing session.
 
-Empirica 6 does not load `empirica.run/2`; start a fresh run/3 generation. Qualified deterministic
-spikes use an exact operator-qualified local Docker binding with no ambient host-shell fallback. See the
-[Empirica 6 upgrade guide](doc/upgrading-empirica-6.md).
+Empirica `6.0.0` uses wire `empirica/v2` and exact `empirica.run/3` state. Deterministic spikes
+are closed single-container `empirica.spike-plan-draft/2` workloads bound once to an operator-qualified
+`docker-isolated-v1` or `docker-networked-v1` authority, with no command-string or ambient
+host-shell fallback. See the [Empirica 6 upgrade guide](doc/upgrading-empirica-6.md).
 
 ## Usage
 

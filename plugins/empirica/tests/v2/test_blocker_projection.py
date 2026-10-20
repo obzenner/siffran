@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import unittest
 
+from application import generic_spike
 from application.location import decode_handle
-from application.observation import build_execution_snapshot
-from application.ports import HarnessResult, ObservationSnapshot
-from core.canonical import canonical_digest
+from application.ports import ObservationSnapshot
+from core import spike_plan
+from core.spike_plan_draft import canonicalize_spike_plan_draft
 from core.evaluation import plan_spike_request, plan_spike_result
-from core.freshness import execution_facts, observations_digest
+from core.freshness import FileObservation, ObservationState, observations_digest
+from observer_store import _generic_spike_action, _GenericFixtureHarness
 
 from assertions import (
     ConformanceCase,
@@ -31,30 +33,40 @@ class BlockerProjectionTests(ConformanceCase):
         """Persist validated historical spike evidence without run/3 ingress or a harness."""
         for path in paths:
             drv.workspace_write(path, content)
-        action = {"kind": "spike_request", "claim_id": claim_id,
-                  "command": "historical probe", "dependent_files": list(paths)}
+        action = _generic_spike_action(claim_id, list(paths))
         coordinator = drv._service._coordinator
         key = decode_handle(run_id)
         self.assertIsNotNone(key)
         loaded = coordinator._load(key)
         command = {"type": "ObserveAction", "run_id": run_id, "action": action}
         snapshot = coordinator._assemble(key, loaded.state, command, require_graph=True)
-        request = plan_spike_request(snapshot, action)
+        backend = generic_spike.GenericQualifiedBackend(
+            "docker", "docker-isolated-v1", "sha256:" + "a" * 64,
+            "sha256:" + "b" * 64)
+        sealed = generic_spike.prepare_generic_spike(
+            canonicalize_spike_plan_draft(action["plan"]), drv._workspace,
+            coordinator.image_resolver, backend)
+        request = plan_spike_request(
+            snapshot, action, generic_spike.sealed_request_facts(sealed, backend))
         self.assertEqual(request.result_type, "Allow")
         state, _, _, _ = coordinator._commit(
             key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
-        execution = build_execution_snapshot(tuple(paths), drv._workspace)
-        result = HarnessResult(
-            0, canonical_digest({"historical": action["command"]}), execution.snapshot_digest)
-        capture = drv._workspace.observe(tuple(paths))
-        observations = tuple(item.observation for item in capture.files)
+        request_body = request.intent.artifacts[0]["body"]
+        harness_run_id = "r-" + request.intent.artifacts[0]["artifact_id"].split(":", 1)[1][:32]
+        harness_request = generic_spike.GenericHarnessRequest(
+            harness_run_id, backend, sealed.plan, sealed.plan.digest,
+            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
+        result = _GenericFixtureHarness(0).run(harness_request)
+        observations = tuple(FileObservation(
+            binding.path, ObservationState.PRESENT, binding.sha256)
+            for binding in sealed.snapshot.file_bindings)
         observed = ObservationSnapshot(
-            observations, capture.basis_id, observations_digest(observations))
+            observations, sealed.snapshot.basis_id, observations_digest(observations))
         loaded = coordinator._load(key)
         snapshot = coordinator._assemble(key, state, command, require_graph=True)
         planned = plan_spike_result(
-            snapshot, request.intent.artifacts[0]["body"],
-            execution_facts(execution.file_bindings, result))
+            snapshot, request_body,
+            generic_spike.sealed_result_facts(result))
         self.assertEqual(planned.result_type, "Allow")
         coordinator._commit(
             key, loaded.read.revision, snapshot, state, planned.intent.artifacts,

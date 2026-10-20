@@ -46,6 +46,7 @@ if _REPO_ROOT is None:
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
+from test_d7_transactions import spike_action  # noqa: E402
 from application.protocol import host_profile_id, stored  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
@@ -309,8 +310,7 @@ def _build_action_sample(kind: str) -> dict:
                 "result": "supports", "payload": {
                     "source_ref": "src/example.py:1", "citation": "Observed line."}}
     if kind == "spike_request":
-        return {"kind": "spike_request", "claim_id": "C0", "command": "pytest",
-                "dependent_files": ["f.py"]}
+        return spike_action()
     if kind == "configure_run":
         return {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1,
                                                        "max_audit_spawns": 2},

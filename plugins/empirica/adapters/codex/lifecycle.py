@@ -24,7 +24,7 @@ from pathlib import Path
 
 from adapters.state import project_id, run_id
 from adapters import bridge as application_bridge
-from adapters.invocation import provenance, split_leading_flags
+from adapters.invocation import configured_spike_profile, provenance, split_leading_flags
 from adapters.public_tools import TOOL_NAMES
 from .transport import CODEX_PROFILE_ID
 
@@ -117,6 +117,8 @@ def build_start_run_request(
             profile_id=CODEX_PROFILE_ID, human_surface="unavailable",  # no human ingress: nobody to look for
         ),
     }
+    if (spike_profile := configured_spike_profile(env)) is not None:
+        command["spike_profile"] = spike_profile
     budgets: dict[str, int] = {}
     if (passes := _positive_env(env, "EMPIRICA_MAX_PASSES")) is not None:
         budgets["max_passes"] = passes
@@ -182,7 +184,10 @@ def _start(payload: dict) -> dict | None:
     unknown = [flag for flag in leading if flag != "--auto"]
     if unknown:
         return {"systemMessage": "empirica activation failed: unknown flags: " + " ".join(unknown)}
-    request = build_start_run_request(payload)
+    try:
+        request = build_start_run_request(payload)
+    except ValueError as error:
+        return {"systemMessage": f"empirica activation failed: {error}"}
     response = _dispatch(request)
     result = response.get("result", {}) if isinstance(response, dict) else {}
     if result.get("type") == "Fault":

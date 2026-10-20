@@ -54,11 +54,13 @@ expectThrow("Allow run.status invalid", ok({ type: "Allow", converged: true, run
 expectThrow("Allow run.spike_backend missing", ok({ type: "Allow", converged: false, run: { id: "r", status: "active" } } as never));
 for (const [label, spike_backend] of [
   ["unavailable extra field", { kind: "spikes_unavailable", diagnostic: "socket path" }],
-  ["qualified missing digest", { kind: "qualified", backend: "docker", profile_id: "docker-rust-v1",
+  ["qualified missing digest", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
     qualification_record_digest: `sha256:${"a".repeat(64)}` }],
-  ["qualified wrong backend", { kind: "qualified", backend: "host", profile_id: "docker-rust-v1",
+  ["qualified wrong backend", { kind: "qualified", backend: "host", profile_id: "docker-isolated-v1",
     qualification_record_digest: `sha256:${"a".repeat(64)}`, execution_binding_digest: `sha256:${"b".repeat(64)}` }],
-  ["qualified bad digest", { kind: "qualified", backend: "docker", profile_id: "docker-rust-v1",
+  ["qualified old profile", { kind: "qualified", backend: "docker", profile_id: "docker-rust-v1",
+    qualification_record_digest: `sha256:${"a".repeat(64)}`, execution_binding_digest: `sha256:${"b".repeat(64)}` }],
+  ["qualified bad digest", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
     qualification_record_digest: "sha256:no", execution_binding_digest: `sha256:${"b".repeat(64)}` }],
 ] as const) expectThrow(`Allow run.spike_backend ${label}`, ok({ type: "Allow", converged: false,
   run: { id: "r", status: "active", spike_backend } } as never));
@@ -66,10 +68,11 @@ for (const [label, spike_backend] of [
 test("guard accepts both exact spike backend shapes", () => {
   const digest = (c: string) => `sha256:${c.repeat(64)}`;
   assertResponse(ok({ type: "Allow", converged: false, run: run() }), RID);
-  assertResponse(ok({ type: "Allow", converged: false, run: { ...run(), spike_backend: {
-    kind: "qualified", backend: "docker", profile_id: "docker-rust-v1",
-    qualification_record_digest: digest("a"), execution_binding_digest: digest("b"),
-  } } }), RID);
+  for (const profile_id of ["docker-isolated-v1", "docker-networked-v1"] as const)
+    assertResponse(ok({ type: "Allow", converged: false, run: { ...run(), spike_backend: {
+      kind: "qualified", backend: "docker", profile_id,
+      qualification_record_digest: digest("a"), execution_binding_digest: digest("b"),
+    } } }), RID);
 });
 
 // --- Allow cross invariant mutations (D6-C C3) ------------------------------

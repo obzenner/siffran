@@ -1,0 +1,314 @@
+{
+  "absence_stderr": {
+    "container_no_such": "Error: No such container: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "container_not_found": "Error response from daemon: container aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa not found",
+    "network_no_such": "Error: No such network: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "network_not_found": "Error response from daemon: network bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb not found"
+  },
+  "capabilities": [
+    {
+      "cpu_cfs_quota": true,
+      "host_architecture": "x86_64",
+      "host_os": "Linux",
+      "mem_total": 17179869184,
+      "memory_limit": true,
+      "name": "linux-rootful-amd64-default-seccomp",
+      "ncpu": 8,
+      "operating_system": "Ubuntu 24.04",
+      "pids_limit": true,
+      "platform_name": "Docker Engine - Community",
+      "security_options": [
+        "name=seccomp,profile=default",
+        "name=cgroupns"
+      ],
+      "server_architecture": "x86_64",
+      "server_os": "linux",
+      "swap_limit": true
+    },
+    {
+      "cpu_cfs_quota": true,
+      "host_architecture": "amd64",
+      "host_os": "Linux",
+      "mem_total": 17179869184,
+      "memory_limit": true,
+      "name": "linux-rootless-amd64-builtin-seccomp",
+      "ncpu": 8,
+      "operating_system": "Debian GNU/Linux",
+      "pids_limit": true,
+      "platform_name": "Docker Engine - Community",
+      "security_options": [
+        "name=rootless",
+        "name=cgroupns",
+        "name=seccomp,profile=builtin"
+      ],
+      "server_architecture": "amd64",
+      "server_os": "linux",
+      "swap_limit": true
+    },
+    {
+      "cpu_cfs_quota": true,
+      "host_architecture": "arm64",
+      "host_os": "Darwin",
+      "mem_total": 17179869184,
+      "memory_limit": true,
+      "name": "desktop-macos-arm64-containerd",
+      "ncpu": 8,
+      "operating_system": "Docker Desktop",
+      "pids_limit": true,
+      "platform_name": "Docker Desktop",
+      "security_options": [
+        "name=cgroupns",
+        "name=seccomp,profile=builtin"
+      ],
+      "server_architecture": "aarch64",
+      "server_os": "linux",
+      "swap_limit": true
+    },
+    {
+      "cpu_cfs_quota": true,
+      "host_architecture": "x86_64",
+      "host_os": "Darwin",
+      "mem_total": 17179869184,
+      "memory_limit": true,
+      "name": "desktop-macos-amd64-classic",
+      "ncpu": 8,
+      "operating_system": "Docker Desktop",
+      "pids_limit": true,
+      "platform_name": "Docker Desktop",
+      "security_options": [
+        "name=seccomp,profile=default",
+        "name=cgroupns"
+      ],
+      "server_architecture": "amd64",
+      "server_os": "linux",
+      "swap_limit": true
+    }
+  ],
+  "docker_cli_create_contract": {
+    "cidfile_create_mode_under_umask_077": "0600",
+    "cidfile_preexisting_error": "container ID file found, make sure the other container isn't running or delete /private/run/container.cid",
+    "forbidden_default_namespace_flags": [
+      "--pid",
+      "--uts"
+    ]
+  },
+  "image_optional_forms": [
+    {
+      "Architecture": "amd64",
+      "Id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "Os": "linux",
+      "name": "missing"
+    },
+    {
+      "Architecture": "aarch64",
+      "Id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "Os": "linux",
+      "Volumes": null,
+      "name": "null"
+    },
+    {
+      "Architecture": "arm64",
+      "Id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "Os": "linux",
+      "Volumes": {},
+      "name": "empty"
+    },
+    {
+      "Architecture": "amd64",
+      "Id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "Os": "linux",
+      "Volumes": {
+        "/data": {}
+      },
+      "name": "declared"
+    }
+  ],
+  "network_endpoint_forms": [
+    {
+      "EndpointID": "",
+      "NetworkID": "",
+      "name": "none-attached"
+    },
+    {
+      "EndpointID": "",
+      "NetworkID": "0000000000000000000000000000000000000000000000000000000000000000",
+      "name": "failed-start-none"
+    },
+    {
+      "EndpointID": "3333333333333333333333333333333333333333333333333333333333333333",
+      "NetworkID": "2222222222222222222222222222222222222222222222222222222222222222",
+      "name": "attached-private-bridge"
+    }
+  ],
+  "provenance": {
+    "absence_forms": [
+      "moby/libnetwork/error.go ErrNoSuchNetwork: network %s not found (Docker 24-29 daemon response)",
+      "moby/client/network_inspect.go empty-ID fallback: No such network: %s",
+      "docker/cli errdefs formatting: Error response from daemon: <message>",
+      "G12 independent implementation review B5 recorded Docker 24-29 output"
+    ],
+    "cidfile_contract": [
+      "moby/container/idfile/idfile.go New: O_CREATE|O_EXCL|O_WRONLY mode 0666",
+      "moby/container/idfile/idfile.go preexisting-file refusal",
+      "child umask 077 derives owner-only 0600"
+    ],
+    "generator_independence": "This generator imports no Empirica planner, admission, or runtime module.",
+    "static_inspect": [
+      "G11 local Docker probe h1-container-inspect.json; bundle manifest sha256:7ac2c9d9a37c2afa71967a9f65124c613bdb9b7748ee65a1bc066e4405acd575",
+      "G11 local Docker probe h2-static-inspect.json; bundle manifest sha256:7ac2c9d9a37c2afa71967a9f65124c613bdb9b7748ee65a1bc066e4405acd575"
+    ]
+  },
+  "schema": "siffran.empirica.test-fixture.docker-generic-linux/2",
+  "source": "G12 pinned from the G11 Docker probe corpus plus verbatim docker/cli and moby 20.10-29 not-found/cidfile behavior; independent literals, not planner output",
+  "static_container_inspect": {
+    "Config": {
+      "Cmd": [
+        "/inputs/a.py",
+        "--exact"
+      ],
+      "Entrypoint": [
+        "python"
+      ],
+      "Env": [
+        "PATH=/usr/local/bin:/usr/bin:/bin",
+        "HOME=/work",
+        "MODE=test",
+        "TMPDIR=/tmp"
+      ],
+      "ExposedPorts": null,
+      "Image": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "Labels": {
+        "image.label": "kept"
+      },
+      "User": "65534:65534",
+      "Volumes": null,
+      "WorkingDir": "/work"
+    },
+    "HostConfig": {
+      "CapAdd": null,
+      "CapDrop": [
+        "ALL"
+      ],
+      "CgroupnsMode": "private",
+      "DeviceCgroupRules": null,
+      "DeviceRequests": null,
+      "Devices": [],
+      "IpcMode": "private",
+      "Memory": 2147483648,
+      "MemorySwap": 2147483648,
+      "NanoCpus": 2000000000,
+      "NetworkMode": "none",
+      "PidMode": "",
+      "PidsLimit": 256,
+      "PortBindings": {},
+      "Privileged": false,
+      "PublishAllPorts": false,
+      "ReadonlyRootfs": true,
+      "SecurityOpt": [
+        "no-new-privileges:true"
+      ],
+      "ShmSize": 67108864,
+      "Tmpfs": {
+        "/tmp": "rw,nodev,nosuid,noexec,size=67108864,mode=1777",
+        "/work": "rw,nodev,nosuid,exec,size=536870912,mode=1777"
+      },
+      "UTSMode": "",
+      "Ulimits": [
+        {
+          "Hard": 1024,
+          "Name": "nofile",
+          "Soft": 1024
+        },
+        {
+          "Hard": 67108864,
+          "Name": "fsize",
+          "Soft": 67108864
+        },
+        {
+          "Hard": 0,
+          "Name": "core",
+          "Soft": 0
+        }
+      ],
+      "UsernsMode": "",
+      "VolumesFrom": null
+    },
+    "Id": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "Image": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "Mounts": [
+      {
+        "Destination": "/inputs",
+        "Mode": "",
+        "Propagation": "rprivate",
+        "RW": false,
+        "Source": "/stage/root",
+        "Type": "bind"
+      }
+    ],
+    "Networks": {
+      "none": {
+        "EndpointID": "",
+        "NetworkID": ""
+      }
+    },
+    "State": {
+      "Error": "",
+      "ExitCode": 0,
+      "OOMKilled": false,
+      "Running": false,
+      "Status": "created"
+    }
+  },
+  "terminal_forms": [
+    {
+      "State": {
+        "Error": "",
+        "ExitCode": 0,
+        "OOMKilled": false,
+        "Running": false,
+        "Status": "exited"
+      },
+      "name": "natural-pass"
+    },
+    {
+      "State": {
+        "Error": "",
+        "ExitCode": 125,
+        "OOMKilled": false,
+        "Running": false,
+        "Status": "exited"
+      },
+      "name": "natural-fail-125"
+    },
+    {
+      "State": {
+        "Error": "",
+        "ExitCode": 137,
+        "OOMKilled": false,
+        "Running": false,
+        "Status": "exited"
+      },
+      "name": "exit-137-unavailable"
+    },
+    {
+      "State": {
+        "Error": "failed to create task: OCI runtime create failed",
+        "ExitCode": 127,
+        "OOMKilled": false,
+        "Running": false,
+        "Status": "created"
+      },
+      "name": "failed-start-created"
+    },
+    {
+      "State": {
+        "Error": "",
+        "ExitCode": 0,
+        "OOMKilled": false,
+        "Running": true,
+        "Status": "running"
+      },
+      "name": "timeout-running"
+    }
+  ]
+}

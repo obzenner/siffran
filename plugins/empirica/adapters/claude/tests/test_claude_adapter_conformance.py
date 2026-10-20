@@ -26,6 +26,15 @@ from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 
+def _spike_action() -> dict:
+    return {"kind": "spike_request", "claim_id": "G0", "plan": {
+        "schema": "empirica.spike-plan-draft/2",
+        "image": "example/probe:local",
+        "argv": ["/usr/bin/python3", "/inputs/probe.py"],
+        "inputs": ["probe.py"],
+        "environment": {}}}
+
+
 class ClaudeReachabilityTests(unittest.TestCase):
     def test_real_service_blank_goal_is_operator_visible(self):
         with tempfile.TemporaryDirectory() as raw:
@@ -53,6 +62,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
             env = {
                 "EMPIRICA_HOME": str(root / "state"),
                 "EMPIRICA_REPO_DIR": str(root),
+                "EMPIRICA_SANDBOX_HOME": str(root / "sandbox-absent"),
             }
             payload = {
                 "session_id": "claude-reachability",
@@ -84,7 +94,7 @@ class ClaudeReachabilityTests(unittest.TestCase):
                     observe({"kind": "graph", "payload": {
                         "root": "G0",
                         "claims": [{"id": "G0", "text": "Claude can drive v2.",
-                                    "gating": True, "kind": "needs-experiment"}],
+                                    "gating": True, "kind": "ordinary"}],
                         "edges": [],
                     }})
                     approved = observe({"kind": "configure_run",
@@ -97,9 +107,6 @@ class ClaudeReachabilityTests(unittest.TestCase):
                              "source_kind": "code", "result": "supports",
                              "payload": {"source_ref": "probe.py",
                                          "citation": "print('reachable')"}})
-                    observe({"kind": "spike_request", "claim_id": "G0",
-                             "command": "python3 probe.py",
-                             "dependent_files": ["probe.py"]})
                     observe({"kind": "freeze"})
 
                     agent_payload = {

@@ -28,6 +28,7 @@ from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 import jsonschema  # noqa: E402
 
 from adapters import bridge  # noqa: E402
+from core import spike_plan  # noqa: E402
 from adapters.claude import (  # noqa: E402
     CLAUDE_PROFILE_ID,
     PROTOCOL,
@@ -155,6 +156,35 @@ class CorrelationTests(unittest.TestCase):
             correlate({"request_id": "one"}, "not-a-dict")
 
 
+class GenericMcpContractTests(unittest.TestCase):
+    def test_claude_mcp_timeout_and_generic_action_keep_strict_outer_margins(self) -> None:
+        manifest = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        timeout = manifest["mcpServers"]["empirica"]["tool_timeout_sec"]
+        self.assertEqual((spike_plan.WORKLOAD_TIMEOUT_SECONDS,
+                          spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS, timeout),
+                         (120, 210, 360))
+        self.assertLess(spike_plan.WORKLOAD_TIMEOUT_SECONDS,
+                        spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS)
+        self.assertLess(spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS, timeout)
+        tools = json.loads((PLUGIN_ROOT / "vendor/contracts/empirica/v2/public-tools.json").read_text())
+        actions = tools["schemas"]["model"]["empirica_observe"]["properties"]["action"]["oneOf"]
+        spike = next(item for item in actions
+                     if item["properties"]["kind"].get("const") == "spike_request")
+        self.assertEqual(set(spike["required"]), {"kind", "claim_id", "plan"})
+        self.assertEqual(spike["properties"]["plan"]["properties"]["schema"]["const"],
+                         "empirica.spike-plan-draft/2")
+        self.assertNotIn("command", spike["properties"])
+        self.assertNotIn("dependent_files", spike["properties"])
+
+    def test_generic_result_facts_are_readable_from_public_argument_fixture(self) -> None:
+        fixture = json.loads((PLUGIN_ROOT.parents[1] / "contracts/empirica/v2/fixtures/getargument-spike-approved.json").read_text())
+        artifacts = fixture["expected"]["result"]["argument"]["artifacts"]
+        result = next(item for item in artifacts if item["kind"] == "spike")
+        self.assertEqual(result["result_facts"]["verdict"], "PASS")
+        self.assertTrue(result["result_facts"]["cleanup_proven"])
+        self.assertIn("operation_facts", result["result_facts"])
+
+
 class StartRunTests(unittest.TestCase):
     def test_the_host_records_where_the_session_can_be_found_and_never_invents_it(self) -> None:
         # U1-11: the payload's session_id and transcript_path are the locator; with neither path the id alone; a payload
@@ -185,6 +215,21 @@ class StartRunTests(unittest.TestCase):
         self.assertNotIn("modes", request["command"])
         self.assertTrue(request["command"]["selector"]["project"])
         self.assertTrue(request["command"]["selector"]["session"])
+
+    def test_spike_profile_is_optional_exact_host_launch_authority(self) -> None:
+        omitted = build_start_run_request(_payload(command_args="goal"), environ={})
+        self.assertNotIn("spike_profile", omitted["command"])
+        for profile in ("docker-isolated-v1", "docker-networked-v1"):
+            request = build_start_run_request(
+                _payload(command_args="goal"), environ={"EMPIRICA_SPIKE_PROFILE": profile})
+            _assert_valid(request)
+            self.assertEqual(request["command"]["spike_profile"], profile)
+        for malformed in ("", "docker-rust-v1", " docker-isolated-v1", "other"):
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(
+                    ValueError, "EMPIRICA_SPIKE_PROFILE"):
+                build_start_run_request(
+                    _payload(command_args="goal"),
+                    environ={"EMPIRICA_SPIKE_PROFILE": malformed})
 
     def test_actor_field_is_never_emitted_even_when_model_present(self) -> None:
         request = build_start_run_request(

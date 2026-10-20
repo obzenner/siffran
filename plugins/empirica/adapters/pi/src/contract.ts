@@ -50,6 +50,8 @@ export interface InvocationProvenance {
   };
 }
 
+export type SpikeProfile = "docker-isolated-v1" | "docker-networked-v1";
+
 export interface StartRunCommand {
   type: "StartRun";
   control_mode: "auto" | "deliberative";
@@ -57,6 +59,22 @@ export interface StartRunCommand {
   goal: string;
   invocation: InvocationProvenance;
   budgets?: Budgets;
+  /** Optional host-launch authority selected before StartRun; never author-controlled. */
+  spike_profile?: SpikeProfile;
+}
+
+export interface SpikePlanDraft {
+  schema: "empirica.spike-plan-draft/2";
+  image: string;
+  argv: string[];
+  inputs: string[];
+  environment: Record<string, string>;
+}
+
+export interface SpikeRequestAction {
+  kind: "spike_request";
+  claim_id: string;
+  plan: SpikePlanDraft;
 }
 
 export interface ResolveRunCommand {
@@ -169,7 +187,7 @@ export type SpikeBackend =
   | {
       kind: "qualified";
       backend: "docker";
-      profile_id: "docker-rust-v1";
+      profile_id: SpikeProfile;
       qualification_record_digest: string;
       execution_binding_digest: string;
     };

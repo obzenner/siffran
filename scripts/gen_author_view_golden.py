@@ -32,6 +32,7 @@ GOLDEN_DIR = ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" / "autho
 GOLDEN_SOURCES = [
     "start-bootstrap-allow",
     "getargument-active",
+    "getargument-spike-approved",
     "allow-converged",
     "allow-stopped-budget",
     "allow-stopped-frozen",
@@ -52,7 +53,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
     all_actions["run"]["next_actions"] = list(next_action_surfaces())
     qualified_backend = copy.deepcopy(bootstrap)
     qualified_backend["run"]["spike_backend"] = {
-        "kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
+        "kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
         "qualification_record_digest": "sha256:" + "a" * 64,
         "execution_binding_digest": "sha256:" + "b" * 64,
     }
@@ -277,7 +278,16 @@ def _synthetic_results() -> list[tuple[str, object]]:
     unreviewed_runtime = copy.deepcopy(bootstrap)
     unreviewed_runtime["run"]["host"]["unreviewed_runtime"] = {"package": "pi-subagents", "version": "0.99.0"}
 
+    # A request committed before unavailable effects remains explicit and must never be rendered as a failed result.
+    request_only = copy.deepcopy(stored(json.loads(
+        (FIXTURES / "getargument-spike-approved.json").read_text()))["expected"]["result"])
+    request_only["argument"]["artifacts"] = [
+        row for row in request_only["argument"]["artifacts"] if row["kind"] != "spike"]
+    request_only["argument"]["claims"][0]["active_evidence_ids"] = [
+        row["artifact_id"] for row in request_only["argument"]["artifacts"] if row["kind"] == "research"]
+
     return [
+        ("getargument-request-only", request_only),
         ("host-unreviewed-runtime", unreviewed_runtime),
         *waiting.items(),
         *evidence.items(),

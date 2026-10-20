@@ -6,8 +6,9 @@
 
 Accepted D2A `ArgumentView.evidence` exposes only a reduced research/spike summary. It cannot express
 D1's immutable sealed `spike_request`, request-before-result order, exact prerequisite snapshot,
-command/file binding, deterministic gate, or supersession. D4-S2 therefore invented raw
-`drv.artifacts()` keys and told production to align to tests, violating the D2A public-boundary rule.
+closed generic plan and input binding, deterministic verdict, or supersession. D4-S2 therefore
+invented raw `drv.artifacts()` keys and told production to align to tests, violating the D2A
+public-boundary rule.
 
 D2C makes the D1 provenance observable through one canonical typed projection. It does not add a
 command, action, reason, next action, status, host tier, or runtime implementation.
@@ -33,7 +34,7 @@ Add required closed PublicContract vocabularies:
 "claim_kinds": ["ordinary", "needs-experiment", "needs-decision"],
 "artifact_kinds": ["research", "spike_request", "spike"],
 "artifact_outcomes": ["supporting", "refuting", "pass", "fail"],
-"spike_gates": ["pass", "fail"]
+"spike_gates": ["PASS", "FAIL"]
 ```
 
 Schemas and validators derive these values from the loaded registry; no Python expected tables.
@@ -77,15 +78,22 @@ No spike fields.
 Additional required:
 
 ```text
-harness_request_id       nonempty opaque identifier
-command                  nonempty
-command_digest           digest256
-ordered dependent_files  nonempty unique strict normalized repo-relative POSIX paths
+harness_request_id       nonempty content-addressed request identity
+superseded draft          unreleased multi-container author shape (replaced by the Empirica 6 MVP)
+draft_digest             digest256
+plan_digest              digest256
+policy_digest            digest256
+snapshot_basis_id        digest256
+snapshot_digest          digest256
+inputs                    nonempty sealed input summaries with exact file_bindings
+backend                   exact immutable qualified generic binding
 ordered prerequisite_research_ids  nonempty unique digest256 array
 ```
 
-It has no caller-selected gate/exit/outcome, no active approval flag, no file result binding, and no
-supersedes. Its statement digest covers the exact sealed snapshot.
+It has no caller-selected profile, policy, authority, capture fact, verdict, exit, outcome, active
+approval flag, result binding, or supersedes. The draft is author-visible but closed; framework
+sealing captures every declared input in one canonical observation basis and derives the plan,
+policy, snapshot, and backend identities. Its statement digest covers that exact sealed request.
 
 ### Spike result artifact
 
@@ -95,17 +103,21 @@ Additional required:
 active                     boolean
 outcome                    pass | fail
 harness_request_id         nonempty; matches one prior spike_request
-command                    nonempty
-command_digest             digest256
 ordered prerequisite_research_ids  nonempty unique digest256 array
 file_bindings              nonempty array of closed {path, sha256}; path normalized and unique
 exit_code                  integer
-spike_gate                 pass | fail, mechanically equivalent to exit_code == 0
+spike_gate                 PASS | FAIL, derived only from the verdict container's natural exit
 supersedes                 digest256 | null
+request_artifact_id        digest256; exact prior request artifact
+plan_digest                digest256; exact request echo
+policy_digest              digest256; exact request echo
+snapshot_digest            digest256; exact request echo
+backend                    exact immutable request backend echo
+result_facts               closed generic operation/container/verdict/cleanup/postflight facts
 ```
 
-No source fields or dependent_files duplicate. Result statement digest covers exact result,
-prerequisites, and bindings.
+No source fields or authored command/dependent-file aliases. Result statement digest covers the
+exact request correlation, generic result facts, prerequisites, and bindings.
 
 ## Mechanical invariants
 
@@ -115,15 +127,18 @@ enum, digest, and path invariant. `validate_contracts.py` additionally enforces 
 1. `sequence` values are unique and strictly increasing in array order;
 2. `artifact_id` values are globally unique;
 3. every spike result references exactly one earlier spike_request with matching claim ID/digest,
-   harness_request_id, command/digest, and ordered prerequisite IDs;
+   harness/request artifact identities, plan/policy/snapshot/backend identities, and ordered
+   prerequisite IDs;
 4. each spike_request has at most one direct result with the same harness_request_id;
-5. `spike_gate == pass` iff `exit_code == 0`; immutable result outcome is `pass` iff gate pass,
-   otherwise `fail`; live stale/indeterminate evaluation belongs to RunView freshness/claim state and
-   never rewrites an artifact outcome;
+5. `spike_gate == PASS` iff the verdict container naturally exits zero; `FAIL` requires a natural
+   nonzero verdict exit. Immutable dossier outcome is lowercase `pass` iff gate PASS, otherwise
+   lowercase `fail`. Timeout, forced termination, output limit, OOM, capture, staging, lifecycle,
+   cleanup, journal, identity, authority, or postflight ambiguity produces no result artifact;
 6. every prerequisite ID names an earlier supporting research artifact for the same claim digest;
    `active` is the current projection and may now be false after later supersession—the sealed request
    proves that the application selected the active snapshot at request time;
-7. file binding paths exactly equal the sealed request's dependent_files in the same order;
+7. file binding paths and hashes exactly equal the sealed request inputs captured from the draft in
+   one canonical observation basis;
 8. non-null supersedes names an earlier spike result for the same claim, never a request/research;
 9. for each claim, `active_evidence_ids` equals, in artifact sequence order, the complete set of
    currently active research/spike artifact IDs matching both that claim's ID and current wording
@@ -155,13 +170,14 @@ Update GetArgument fixtures to show:
 - audited current gating coverage.
 
 Add one-mutation negatives for every discriminator branch and each procedural invariant: result before
-request, mismatch harness/claim/command/prerequisites/files, duplicate/nonmonotonic sequence or ID,
-wrong gate/exit, bad supersedes, prerequisite pointing to request/refuting/wrong claim, superseded
-spike still active, active spike with inactive prerequisite, omitted/extra/cross-claim active evidence
-ID (including two claim IDs sharing one wording digest), wrong canonical evidence digest, ordinary
-approved research-only positive, `needs-experiment` approved without spike negative, `needs-decision`
-approved negative, approved with active refuting/failing evidence, `needs-experiment` approved with
-stale spike binding, old `evidence` field, and private capability/native IDs.
+request, mismatch harness/claim/plan/policy/snapshot/backend/prerequisites/files, duplicate or
+nonmonotonic sequence/ID, wrong typed verdict/natural exit/outcome, bad supersedes, prerequisite
+pointing to request/refuting/wrong claim, superseded spike still active, active spike with inactive
+prerequisite, omitted/extra/cross-claim active evidence ID (including two claim IDs sharing one
+wording digest), wrong canonical evidence digest, ordinary approved research-only positive,
+`needs-experiment` approved without spike negative, `needs-decision` approved negative, approved with
+active refuting/failing evidence, `needs-experiment` approved with stale spike binding, the removed
+command/dependent-file shape, old `evidence` field, and private capability/native IDs.
 
 Fixtures are materialized/correlated from canonical registry data where applicable. No validator-only
 wire vocabulary.

@@ -66,8 +66,9 @@ A runnable convergence workflow requires all of these capabilities:
 The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does
 not disable graph refinement, research, honest residual stopping, reads, or audit of claims that need
 no experiment. Do not submit an unchanged spike request in that state and never fabricate or replace
-spike evidence with ambient host execution. A `qualified` `docker-rust-v1` value means this run is
-bound to the two published digests; it is not a claim that Docker is currently healthy.
+spike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or
+`docker-networked-v1` value means this run is bound to the two published digests; it is not a
+claim that Docker is currently healthy.
 
 If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
 investigation and report the exact unsupported capability. Do not imitate the missing operation
@@ -154,27 +155,37 @@ Apply the folds in order:
 2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView's
    immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:
    continue non-spike research or refine the graph, or stop with an honest residual. If it is
-   `qualified`, design a small, offline, deterministic, bounded probe and explicitly name every
-   repo-relative file it reads. The service captures only those immutable files and runs the harness
+   `qualified`, construct exactly `{"kind":"spike_request","claim_id":...,"plan":...}` with a
+   closed `empirica.spike-plan-draft/2` containing exactly `schema`, `image`, `argv`, `inputs`,
+   and `environment`. Name one already-local Docker image by familiar name/tag, repository digest,
+   full image ID, or unambiguous ID prefix; Empirica never inventories, pulls, builds, or installs it.
+   Supply one exact nonempty executable/argument vector, zero or more repository-relative files or
+   directories, and at most 128 environment overrides. `HOME` and `TMPDIR` are framework-owned.
+   Never put credentials or secrets in environment values: values persist in the immutable request,
+   and content-addressed plan identity can confirm guessed low-entropy values even though public
+   views expose names only. Never add authority, profile, resources, timeout, user, workdir, network,
+   topology, service, alias, host path, Docker option, image acquisition, or derived capture facts.
+
+   The service captures only the declared immutable files and runs the harness
    at most once within that application call; a result-CAS retry never reruns it, but a crash after
    execution or a separate call may execute the same sealed request again, so the probe must be safe
    under duplicate execution. `qualified` means bound, not currently healthy.
 
-   The command workload hard limit is **120 seconds**: design comfortably below it and split a longer
-   deterministic experiment. The backend's **210-second** whole-operation bound reserves create,
-   inspect, cleanup, absence proof, and postflight; it is not workload time. Pi's **300-second** and
-   Claude MCP's **360-second** limits are outer transport margins, never usable spike runtime.
-   The sandbox has no network/download/install, one CPU, 512 MiB memory with no swap, 128 PIDs,
-   256 open files, at most 256 captured staging files totalling 64 MiB and at most 64 MiB each, and
-   private writable tmpfs only. Stdout and stderr each have an independent 1 MiB ceiling. No daemon
-   or background continuation survives the bounded operation.
+   The host owns one verdict container, fixed uid/gid 65534, `/work`, `/tmp`, one read-only `/inputs`
+   tree, network profile, cleanup, and the fixed framework policy: `min(2, NCPU)` CPU, 2 GiB memory
+   with no extra swap, 256 PIDs, `nofile=1024`, `fsize=64 MiB`, `core=0`, executable 512 MiB `/work`,
+   noexec 64 MiB `/tmp`, 64 MiB shm, and independent 1 MiB stdout/stderr limits. Capture permits at
+   most 256 files, 64 MiB aggregate, and 64 MiB per file. The 120-second production workload runs
+   inside the 210-second operation; Pi's 300-second and Claude MCP's 360-second limits remain outer
+   transport margins. Isolated uses network none; networked uses one private bridge with outbound
+   egress and no host ingress or published ports.
 
-   Only an inspected normal workload exit produces PASS/FAIL from its exit code. An actual workload
-   exit 124 or 125 is therefore an ordinary nonzero FAIL; a backend-enforced timeout, per-stream
-   output limit, OOM, cleanup, identity, or authority failure is unavailable and admits **no spike
-   result evidence**. Narrow or redesign after unavailable; do not treat it as FAIL, blindly retry,
-   use a host fallback, or claim evidence that was not admitted. Operator requalification can affect
-   only a future new run.
+   Only the verdict container's inspected natural exit produces uppercase `PASS`/`FAIL`: zero is
+   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Timeout, forced
+   termination, output limit, OOM, cleanup, capture, image, platform, identity, or authority failure
+   is unavailable and admits **no spike result evidence**. Narrow or redesign after unavailable; do
+   not treat it as FAIL, blindly retry, use a host fallback, or claim evidence that was not admitted.
+   Operator requalification can affect only a future new run.
 3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the
    bounded spike again; otherwise follow the unavailable guidance above.
 4. **Derive the result:**

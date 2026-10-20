@@ -101,13 +101,13 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   arrow, Page and Home/End keys, resets on a double-click and is a separator saying the width; the width is remembered and
   clamped between `width.sheet-min` and what leaves the main area `width.main-min`, below both the sheet is the whole width,
   and the map refits beside it): one line of where the run is (project, attempt, claims, last
-  change; the repository and the full time on hover), the session to copy, then its immutable spike capability (`unavailable`, or
-  `docker-rust-v1` with abbreviated qualification and execution digests and an explicit "not live health" note), then **Now** or **Outcome** (what is owed, in the order the report asks it,
+  change; the repository and the full time on hover), the session to copy, then its immutable read-only spike capability (`unavailable`, which is not a Needs Human item, or
+  `docker-isolated-v1` / `docker-networked-v1` with copyable qualification and execution identities and an explicit "not live health" note), then **Now** or **Outcome** (what is owed, in the order the report asks it,
   or that the run ended, its scope, what it left unresolved *as recorded when it stopped* and, only if the files changed,
   **Unresolved against the workspace now**); **Audit** (every verdict, newest first as the observer serves them, with its auditor and how
   independent it was; whether the latest still covers the argument is said on it, once); **Claims** as the support graph (the root, each claim's supporters nested
   beneath it, a claim that supports several named again where it recurs), each one line that opens in place to its sources and
-  quotes, the human's answer, each spike's command, result and bound files, review and independence, and the decisions made on
+  quotes, the human's answer, and each closed single-container generic `/2` spike request/result pair. A request disclosure shows only sealed artifact and execution identities, requested and sealed local-image identity, raw-to-canonical native platform, exact argv, the fixed numeric user and work directories, environment names only (no value, fingerprint or length; required content-addressed identities can confirm guessed low-entropy values, so authored values must never contain secrets), captured input declarations, paths, counts, sizes and digests (never contents), the selected profile, and all persisted framework limits including the 120-second workload / 210-second operation bounds. Its result disclosure shows the immutable request and operation identities, producer model attribution, realized-image identity, one natural exit and uppercase verdict, independent stdout/stderr byte counts plus digests, verified cleanup and verified postflight. The UI has no legacy `/1` topology or service/container grid and never shows raw output, host paths, credentials, environment values, staging paths, endpoints, attach/inspect facts or destructive runtime identifiers. The rest of a claim shows review and independence, and the decisions made on
   it; **Dropped claims** with the gate's own reason; **Human decisions**, each attached to what it decided (the claim, a link to
   it; the source; or the plan); **Attempts** side by side; **History** with the files
   that changed since; **Governance and audit**.

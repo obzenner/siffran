@@ -556,6 +556,26 @@ function verificationLabel(verification: Json): string {
 }
 
 /** Render the graph projection without private identity or artifact fields. */
+function redactedEnvironmentPlan(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  const source = value as Json;
+  if (source.environment === null || typeof source.environment !== "object") return value;
+  const plan = structuredClone(source);
+  plan.environment = Array.isArray(source.environment)
+    ? [...source.environment].sort()
+    : Object.keys(source.environment).sort();
+  return plan;
+}
+
+function genericSpikeEvidence(item: Json): Json {
+  const safe = structuredClone(item);
+  if (safe.kind === "spike_request") for (const key of ["draft", "plan"])
+    if (Object.hasOwn(safe, key)) safe[key] = redactedEnvironmentPlan(safe[key]);
+  if (safe.kind === "spike" && safe.result_facts && typeof safe.result_facts === "object")
+    delete safe.result_facts.run_id;
+  return safe;
+}
+
 function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
   const labels = LABELS as Record<string, string>;
   const claims = (argument.claims as Json[]).flatMap((item) => {
@@ -572,7 +592,8 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
   });
   const edges = (argument.edges as Json[]).map((item) =>
     `  ${claimId(item.from, safety)} -${item.type}-> ${claimId(item.to, safety)}`);
-  const citations = (argument.artifacts as Json[]).filter((item) => item.citation).flatMap((item) => {
+  const artifacts = argument.artifacts as Json[];
+  const citations = artifacts.filter((item) => item.citation).flatMap((item) => {
     const verification = item.verification as Json | undefined;
     return [
       `  ${untrusted(item.citation, safety)}` +
@@ -580,12 +601,26 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
       ...(verification?.note ? [`    ${LABELS.human_note} ${untrusted(verification.note, safety)}`] : []),
     ];
   });
+  const resultRequests = new Set(artifacts.filter((item) => item.kind === "spike")
+    .map((item) => item.request_artifact_id));
+  const spikes = artifacts.filter((item) => item.kind === "spike_request" || item.kind === "spike")
+    .flatMap((item) => {
+      const request = item.kind === "spike_request";
+      return [
+        `  ${request ? labels.generic_spike_request : labels.generic_spike_result} ` +
+          `${claimId(item.claim_id, safety)} ${item.artifact_id}`,
+        `    ${untrusted(JSON.stringify(genericSpikeEvidence(item)), safety)}`,
+        ...(request && !resultRequests.has(item.artifact_id)
+          ? [`    ${labels.generic_spike_no_result}`] : []),
+      ];
+    });
   return [
     `${LABELS.goal} ${untrusted(argument.goal, safety)}`,
     `${LABELS.root_claim_id} ${claimId(argument.root_claim_id, safety)}`,
     LABELS.claims, ...claims,
     ...(edges.length ? [LABELS.edges, ...edges] : []),
     ...(citations.length ? [LABELS.citations, ...citations] : []),
+    ...(spikes.length ? [labels.generic_spikes, ...spikes] : []),
     `${LABELS.audit_status} ${auditText(argument.audit)}`,
     ...(argument.audit.findings as unknown[]).map(
       (item) => `  ${LABELS.finding} ${untrusted(item, safety)}`),

@@ -6,13 +6,14 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from core.context_selector import select_sections
+from core.freshness import FileObservation, ObservationState, observations_digest
 from core import governance
 from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_exclusions,
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
-                             plan_spike_request, plan_spike_result, valid_attribution)
-from core import confirmation
+                             preflight_spike_request, plan_spike_request, plan_spike_result, valid_attribution)
+from core import confirmation, spike_plan, spike_plan_draft
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
 from core.ports import RunRepository
@@ -22,11 +23,16 @@ from . import protocol as _proto
 from . import run_state
 from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
 from .location import decode_handle, encode_handle, storage_id
-from .observation import (HarnessContractError, HarnessUnavailable, ObservationUnavailable,
-                          build_observation_snapshot, execute_run_bound_spike,
+from .observation import (ObservationUnavailable, build_observation_snapshot,
                           observation_basis_body)
-from .ports import (NullSpikeAuthoritySelector, ObservationSnapshot,
-                    QualifiedSpikeBackend, SpikeExecutionUnavailable, SpikesUnavailable)
+from .generic_spike import (
+    GenericHarnessRequest, GenericHarnessResult, GenericHarnessUnavailable,
+    GenericQualifiedBackend, NullLocalImageResolver, prepare_generic_spike,
+    reobserve_authority,
+    reobserve_generic_spike, sealed_request_facts,
+    sealed_result_facts, validate_generic_harness_result,
+)
+from .ports import NullSpikeAuthoritySelector, ObservationSnapshot
 from .snapshot import (GraphInvalid, HistoryCorrupt, assemble, graph_from_history,
                        make_artifact, state_digest, traverse_history,
                        validate_investigation_history)
@@ -79,12 +85,14 @@ def complete_start_ceilings(command: Mapping[str, Any],
 
 class Coordinator:
     def __init__(self, workspace: Any, harness: Any, runs: RunRepository[Any], artifacts: Any,
-                 profile_id: str, limits: Mapping[str, int], spike_authority_selector: Any = None):
+                 profile_id: str, limits: Mapping[str, int], spike_authority_selector: Any = None,
+                 image_resolver: Any = None):
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
         self.profile_id, self.limits = profile_id, limits
         self.spike_authority_selector = (spike_authority_selector
                                          if spike_authority_selector is not None
                                          else NullSpikeAuthoritySelector())
+        self.image_resolver = image_resolver if image_resolver is not None else NullLocalImageResolver()
         self.last_state: OperationalState | None = None
         self.last_snapshot: EvaluationSnapshot | None = None
         self.injected_run_ids: set[str] = set()
@@ -186,12 +194,21 @@ class Coordinator:
         else:
             key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
         try:
-            selected = self.spike_authority_selector.select()
-        except Exception as exc:  # an injected selector cannot prevent ordinary reasoning
-            selected = SpikesUnavailable(f"{type(exc).__name__}: {exc}")
-        spike_backend = (selected.persisted()
-                         if isinstance(selected, (QualifiedSpikeBackend, SpikesUnavailable))
-                         else SpikesUnavailable("selector returned an unknown value").persisted())
+            requested_profile = command.get("spike_profile")
+            selected = (self.spike_authority_selector.select()
+                        if requested_profile is None
+                        else self.spike_authority_selector.select(requested_profile))
+        except Exception:
+            selected = None
+        if type(selected) is GenericQualifiedBackend:
+            spike_backend = {
+                "kind": "qualified", "backend": selected.backend,
+                "profile_id": selected.profile_id,
+                "qualification_record_digest": selected.qualification_record_digest,
+                "execution_binding_digest": selected.execution_binding_digest,
+            }
+        else:
+            spike_backend = {"kind": "spikes_unavailable"}
         empty = build_observation_snapshot((), self.workspace)
         basis_artifact = self._observation_basis_artifact(empty)
         state = self._initial_state(
@@ -627,8 +644,13 @@ class Coordinator:
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
-        """Seal a qualified request, execute once, then retry only result admission."""
+        """Capture and seal once, request-CAS before effects, then result-CAS without rerun."""
         action = command["action"]
+        draft = None
+        sealed = None
+        backend = None
+        request_artifact = None
+        committed_binding = None
         for _ in range(8):
             loaded = self._load(key)
             if isinstance(loaded, CorruptLoad):
@@ -638,14 +660,16 @@ class Coordinator:
             read, state = loaded.read, loaded.state
             if state.status != "active":
                 return self._inert(request_id)
-            persisted_binding = state.spike_backend
-            if persisted_binding["kind"] == "spikes_unavailable":
+            persisted = dict(state.spike_backend)
+            if persisted.get("kind") == "spikes_unavailable":
                 return self._fault(request_id, "unavailable")
-            binding = QualifiedSpikeBackend(
-                persisted_binding["qualification_record_digest"],
-                persisted_binding["execution_binding_digest"],
-            )
             try:
+                backend = GenericQualifiedBackend(
+                    persisted["backend"], persisted["profile_id"],
+                    persisted["qualification_record_digest"],
+                    persisted["execution_binding_digest"])
+                if draft is None:
+                    draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
                 snapshot = self._assemble(key, state, command, require_graph=True)
             except HistoryCorrupt:
                 if not self._revision_unchanged(key, read.revision):
@@ -657,40 +681,96 @@ class Coordinator:
                 return self._block_from_state(key, state, command, request_id, "graph.invalid")
             except ObservationUnavailable:
                 return self._fault(request_id, "unavailable")
+            except (KeyError, TypeError, ValueError):
+                return self._safe_block(key, request_id, "run.corrupt")
+            preflight = preflight_spike_request(snapshot, action)
+            if preflight is not None:
+                if not self._revision_unchanged(key, read.revision):
+                    continue
+                return self._response(request_id, snapshot, preflight)
+            if sealed is None:
+                try:
+                    sealed = prepare_generic_spike(
+                        draft, self.workspace, self.image_resolver, backend)
+                except Exception:
+                    return self._fault(request_id, "unavailable")
             try:
-                decision = plan_spike_request(snapshot, action)
+                decision = plan_spike_request(
+                    snapshot, action, sealed_request_facts(sealed, backend))
             except Exception:
                 return self._fault(request_id, "unavailable")
             if decision.result_type != "Allow":
                 if not self._revision_unchanged(key, read.revision):
                     continue
                 return self._response(request_id, snapshot, decision)
-            request_artifact = decision.intent.artifacts[0]
+            proposed = decision.intent.artifacts[0]
+            if request_artifact is None:
+                request_artifact = proposed
+            elif proposed != request_artifact:
+                return self._fault(request_id, "conflict")
+            prior_request = next((item for item in reversed(snapshot.history)
+                                  if item.get("kind") == "spike_request"
+                                  and item.get("claim_id") == action["claim_id"]
+                                  and item.get("draft_digest") == sealed.draft_digest), None)
+            prior_result = (None if prior_request is None else next(
+                (item for item in snapshot.history
+                 if item.get("kind") == "spike"
+                 and item.get("request_artifact_id") == prior_request.get("artifact_id")), None))
+            if (prior_request is not None and prior_result is None
+                    and prior_request.get("artifact_id") != request_artifact["artifact_id"]):
+                return self._fault(request_id, "conflict")
+            exact_request = next((item for item in snapshot.history
+                                  if item.get("kind") == "spike_request"
+                                  and item.get("artifact_id") == request_artifact["artifact_id"]), None)
+            if exact_request is not None:
+                exact_result = next((item for item in snapshot.history
+                                     if item.get("kind") == "spike"
+                                     and item.get("request_artifact_id")
+                                     == request_artifact["artifact_id"]), None)
+                if exact_result is not None:
+                    self.last_state = state
+                    return self._allow(request_id, snapshot)
+                committed_binding = persisted
+                break
             try:
-                committed_state, _, _, _ = self._commit(
+                committed_request_state, _, _, _ = self._commit(
                     key, read.revision, snapshot, state, (request_artifact,))
             except Exception as exc:
                 if self._is_conflict(exc):
                     continue
                 return self._fault(request_id, "unavailable")
-            committed_binding = dict(committed_state.spike_backend)
+            committed_binding = dict(committed_request_state.spike_backend)
             break
         else:
             return self._fault(request_id, "conflict")
 
+        assert sealed is not None and backend is not None and request_artifact is not None
+        harness_run_id = "r-" + request_artifact["artifact_id"].split(":", 1)[1][:32]
+        harness_request = GenericHarnessRequest(
+            harness_run_id, backend, sealed.plan, sealed.plan.digest,
+            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
         try:
-            facts, _execution_snapshot, execution_observation = execute_run_bound_spike(
-                run_id=encode_handle(key), binding=binding, command=action["command"],
-                dependent_paths=tuple(sorted(action["dependent_files"])),
-                workspace=self.workspace, harness=self.harness,
-            )
-        except (SpikeExecutionUnavailable, ObservationUnavailable, HarnessUnavailable,
-                HarnessContractError, ValueError):
+            harness_value = validate_generic_harness_result(
+                harness_request, self.harness.run(harness_request))
+        except Exception:
             return self._fault(request_id, "unavailable")
+        if type(harness_value) is GenericHarnessUnavailable:
+            return self._fault(request_id, "unavailable")
+        if type(harness_value) is not GenericHarnessResult:
+            return self._fault(request_id, "unavailable")
+        if not reobserve_generic_spike(sealed, self.workspace):
+            return self._fault(request_id, "unavailable")
+        if not reobserve_authority(
+                sealed, draft, backend, self.image_resolver):
+            return self._fault(request_id, "unavailable")
+        result_facts = sealed_result_facts(harness_value)
+        result_observations = tuple(FileObservation(
+            binding.path, ObservationState.PRESENT, binding.sha256)
+            for binding in sealed.snapshot.file_bindings)
+        post_plan_observation = ObservationSnapshot(
+            result_observations, sealed.snapshot.basis_id,
+            observations_digest(result_observations))
 
-        # Keep the exact external fact and both captures in memory. Only this admission loop
-        # retries; it never calls the harness again. ``_execution_snapshot`` remains the immutable
-        # input whose digest the helper already required the harness result to echo.
         for _ in range(8):
             loaded = self._load(key)
             if isinstance(loaded, CorruptLoad):
@@ -715,7 +795,7 @@ class Coordinator:
             except ObservationUnavailable:
                 return self._fault(request_id, "unavailable")
             try:
-                decision = plan_spike_result(snapshot, request_artifact["body"], facts)
+                decision = plan_spike_result(snapshot, request_artifact["body"], result_facts)
             except Exception:
                 return self._fault(request_id, "unavailable")
             if decision.result_type != "Allow":
@@ -725,7 +805,7 @@ class Coordinator:
             try:
                 committed_state, _, _, committed = self._commit(
                     key, read.revision, snapshot, state, decision.intent.artifacts,
-                    additional_observations=(("spike_execution", execution_observation),))
+                    post_plan_observation=post_plan_observation)
             except Exception as exc:
                 if self._is_conflict(exc):
                     continue
@@ -743,7 +823,8 @@ class Coordinator:
         return self._present(latest) and latest.revision == revision
 
     def _post_plan(self, snapshot: EvaluationSnapshot, state: OperationalState,
-                   domain: tuple[dict[str, Any], ...]) -> EvaluationSnapshot:
+                   domain: tuple[dict[str, Any], ...],
+                   post_plan_observation: ObservationSnapshot | None = None) -> EvaluationSnapshot:
         history = tuple(snapshot.history) + tuple(_history_item(item) for item in domain)
         graph = graph_from_history(
             state, history, required=state.selected_graph_artifact_id is not None)
@@ -751,7 +832,21 @@ class Coordinator:
         after_heads = captured_heads(history, graph)
         if before_heads == after_heads:
             return replace(snapshot, state=state, history=history, graph=graph)
-        observation = build_observation_snapshot(after_heads, self.workspace)
+        if post_plan_observation is None:
+            observation = build_observation_snapshot(after_heads, self.workspace)
+        else:
+            by_path = {item.path: item for item in snapshot.observations}
+            for item in post_plan_observation.observations:
+                prior = by_path.get(item.path)
+                if prior is not None and prior != item:
+                    raise ObservationUnavailable("post-plan observation changed during execution")
+                by_path[item.path] = item
+            rows = tuple(by_path[path] for path in sorted(by_path))
+            basis_id = digest([(item.path, item.state.value, item.sha256) for item in rows])
+            observation = ObservationSnapshot(rows, basis_id, observations_digest(rows))
+        if tuple(item.path for item in observation.observations) != tuple(sorted({
+                binding.path for head in after_heads for binding in head.file_bindings})):
+            raise ObservationUnavailable("post-plan observation coverage differs")
         return replace(
             snapshot, state=state, history=history, graph=graph,
             observations=observation.observations,
@@ -766,7 +861,8 @@ class Coordinator:
 
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,
                 next_state: OperationalState, domain: tuple[dict[str, Any], ...],
-                additional_observations=()):
+                additional_observations=(),
+                post_plan_observation: ObservationSnapshot | None = None):
         reachable = {item["artifact_id"] for item in snapshot.history}
         unique: dict[str, dict[str, Any]] = {}
         for item in domain:
@@ -786,7 +882,8 @@ class Coordinator:
         # Every committed write records the pre-plan workspace capture over active spike heads that
         # the snapshot evaluated against, plus any sealed spike-execution capture. The manifest's
         # observation_digest is post-plan so newly admitted spikes project as immediately current.
-        planned = self._post_plan(snapshot, next_state, effective)
+        planned = self._post_plan(
+            snapshot, next_state, effective, post_plan_observation)
         next_state = replace(next_state, observation_basis_digest=basis_artifact["artifact_id"])
         history = planned.history
         if basis_changed and basis_new:

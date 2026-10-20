@@ -41,17 +41,19 @@ def _admit_limits(limits: object) -> Mapping[str, int]:
 
 class _Service:
     __slots__ = ("_workspace", "_harness", "_runs", "_artifacts", "_host", "_profile_id",
-                 "_limits", "_clock", "_coordinator")
+                 "_limits", "_clock", "_image_resolver", "_coordinator")
 
     def __init__(self, workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-                 spike_authority_selector=None):
+                 spike_authority_selector=None, image_resolver=None):
         self._workspace, self._harness, self._runs = workspace, harness, runs
         self._artifacts, self._host, self._profile_id = artifacts, host, profile_id
         self._limits, self._clock = _admit_limits(limits), clock
+        self._image_resolver = image_resolver
         selector = (spike_authority_selector if spike_authority_selector is not None
                     else NullSpikeAuthoritySelector())
         self._coordinator = Coordinator(
-            workspace, harness, runs, artifacts, profile_id, self._limits, selector)
+            workspace, harness, runs, artifacts, profile_id, self._limits, selector,
+            image_resolver)
 
     def dispatch(self, raw: dict) -> dict:
         return _proto.dispatch_request(raw, self._handler)
@@ -65,7 +67,8 @@ class _Service:
     def reload(self) -> "_Service":
         return _Service(self._workspace, self._harness, self._runs, self._artifacts,
                         self._host, self._profile_id, self._limits, self._clock,
-                        self._coordinator.spike_authority_selector)
+                        self._coordinator.spike_authority_selector,
+                        self._image_resolver)
 
     def compact(self) -> dict:
         snapshot = self._coordinator.last_snapshot
@@ -237,7 +240,7 @@ class _Service:
 
 
 def compose(workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-            spike_authority_selector=None):
+            spike_authority_selector=None, image_resolver=None):
     return _Service(
         workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-        spike_authority_selector)
+        spike_authority_selector, image_resolver)

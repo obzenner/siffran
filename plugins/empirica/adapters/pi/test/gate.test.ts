@@ -230,6 +230,8 @@ interface WireOptions {
   presentation?: "throw" | "fault";
   /** Replaces the fixture owner registrations before ``session_start`` (default: one healthy owner). */
   owners?: ToolInfo[];
+  /** Host-process environment read at session_start for the optional spike profile. */
+  hostEnv?: Readonly<Record<string, string | undefined>>;
   /** Environment the owner resolver sees (default: none set). */
   env?: OwnerEnv;
   /** Replaces the audit-contract resolver (default: a fixture that answers `bedrock/auditor-model`). */
@@ -312,6 +314,7 @@ async function wire(
         type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
     ownerEnv: options.env ?? {},
+    hostEnv: options.hostEnv ?? {},
     hostVersion: options.hostVersion ?? (() => "1.1.0"),
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
     ...(options.kickoffStartMs ? { kickoffStartMs: options.kickoffStartMs } : {}),
@@ -373,6 +376,25 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.match(w.pi.userMessages[0], /operation="GetRun"/);
   assert.match(w.pi.userMessages[0], /Pi calls the\npackaged auditor/);
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
+});
+
+test("/empirica reads one exact spike profile at session_start and malformed config never dispatches", async () => {
+  for (const profile of ["docker-isolated-v1", "docker-networked-v1"] as const) {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true,
+      (provider, model) => `${String(provider)}/${String(model)}`,
+      { hostEnv: { EMPIRICA_SPIKE_PROFILE: profile } });
+    await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "tui" });
+    assert.equal(w.requests.length, 1);
+    if (w.requests[0].command.type === "StartRun")
+      assert.equal(w.requests[0].command.spike_profile, profile);
+  }
+  const malformed = await wire(() => { throw new Error("no dispatch expected"); }, true,
+    (provider, model) => `${String(provider)}/${String(model)}`,
+    { hostEnv: { EMPIRICA_SPIKE_PROFILE: "docker-rust-v1" } });
+  const ui = new FakeUi();
+  await malformed.pi.command("empirica").handler("goal", { ui, mode: "tui" });
+  assert.equal(malformed.requests.length, 0);
+  assert.ok(ui.notifications.some((item) => /EMPIRICA_SPIKE_PROFILE/.test(item.message)));
 });
 
 test("/empirica records where the session can be found, from the session manager, and nothing it did not give", async () => {

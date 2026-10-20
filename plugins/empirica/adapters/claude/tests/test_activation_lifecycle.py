@@ -224,6 +224,19 @@ class HookNativeBehaviorTests(unittest.TestCase):
         self.assertEqual(value["decision"], "block")
         self.assertIn("unknown flags: --cli-exec --multi-provider", value["reason"])
 
+    def test_malformed_spike_profile_surfaces_exact_validation_error(self) -> None:
+        from adapters.claude import lifecycle
+
+        message = "EMPIRICA_SPIKE_PROFILE must be docker-isolated-v1 or docker-networked-v1"
+        output = io.StringIO()
+        with patch.object(lifecycle, "_payload", return_value={}), \
+             patch.object(lifecycle, "dispatch_start_run", side_effect=ValueError(message)), \
+             redirect_stdout(output):
+            self.assertEqual(lifecycle.run_start_main(), 0)
+        value = json.loads(output.getvalue())
+        self.assertEqual(value["decision"], "block")
+        self.assertEqual(value["reason"], "Empirica did not start: " + message)
+
     def test_start_transport_exception_and_malformed_result_are_operator_visible(self) -> None:
         from adapters.claude import lifecycle
         for returned, side_effect in (({"result": []}, None), (None, RuntimeError("bridge down"))):

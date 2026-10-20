@@ -1,0 +1,129 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica-docker-spike/v1/support-contract.schema.json",
+  "title": "Empirica Docker spike internal support contract",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "contract_id", "status", "host_support", "image_resolution", "sandbox_policy", "lifecycle", "destructive_authority", "qualification", "observer", "unsupported", "adapter_mapping", "release_matrix"],
+  "properties": {
+    "schema": {"const": "siffran.empirica.docker-spike-support/1"},
+    "contract_id": {"const": "empirica-docker-spike-support-v1"},
+    "status": {"const": "internal-current-only"},
+    "host_support": {"$ref": "#/$defs/hostSupport"},
+    "image_resolution": {"$ref": "#/$defs/imageResolution"},
+    "sandbox_policy": {"$ref": "#/$defs/sandboxPolicy"},
+    "lifecycle": {"$ref": "#/$defs/lifecycle"},
+    "destructive_authority": {"$ref": "#/$defs/destructiveAuthority"},
+    "qualification": {"$ref": "#/$defs/qualification"},
+    "observer": {"$ref": "#/$defs/observer"},
+    "unsupported": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+    "adapter_mapping": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/mapping"}},
+    "release_matrix": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/releaseCell"}}
+  },
+  "$defs": {
+    "stringArray": {"type": "array", "items": {"type": "string", "minLength": 1}},
+    "hostSupport": {
+      "type": "object", "additionalProperties": false,
+      "required": ["profiles", "server_os", "canonical_architectures", "required_security", "required_resource_flags", "endpoint", "diagnostics_only"],
+      "properties": {
+        "profiles": {"type": "array", "minItems": 2, "maxItems": 2, "items": {"enum": ["docker-isolated-v1", "docker-networked-v1"]}},
+        "server_os": {"const": "linux"},
+        "canonical_architectures": {"type": "array", "items": {"enum": ["amd64", "arm64"]}},
+        "required_security": {"type": "array", "items": {"enum": ["cgroupns", "seccomp-default-or-builtin"]}},
+        "required_resource_flags": {"type": "array", "items": {"enum": ["MemoryLimit", "SwapLimit", "CpuCfsQuota", "PidsLimit"]}},
+        "endpoint": {"const": "local-unix-socket"},
+        "diagnostics_only": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "imageResolution": {
+      "type": "object", "additionalProperties": false,
+      "required": ["acquisition", "identity", "platform", "declared_volumes", "refusals"],
+      "properties": {
+        "acquisition": {"const": "already-local-only"},
+        "identity": {"const": "daemon-image-id"},
+        "platform": {"const": "canonical-native-server-platform"},
+        "declared_volumes": {"const": "forbidden"},
+        "refusals": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "sandboxPolicy": {
+      "type": "object", "additionalProperties": false,
+      "required": ["uid", "gid", "workdir", "inputs", "tmpdir", "cpu_max", "memory_bytes", "memory_swap_bytes", "pids", "nofile", "fsize_bytes", "core_bytes", "workload_seconds", "operation_seconds", "stream_bytes", "capture_files", "capture_bytes", "capture_file_bytes", "work_tmpfs_bytes", "tmp_tmpfs_bytes", "shm_bytes"],
+      "properties": {
+        "uid": {"const": 65534}, "gid": {"const": 65534}, "workdir": {"const": "/work"},
+        "inputs": {"const": "/inputs"}, "tmpdir": {"const": "/tmp"}, "cpu_max": {"const": 2},
+        "memory_bytes": {"const": 2147483648}, "memory_swap_bytes": {"const": 2147483648},
+        "pids": {"const": 256}, "nofile": {"const": 1024}, "fsize_bytes": {"const": 67108864},
+        "core_bytes": {"const": 0}, "workload_seconds": {"const": 120}, "operation_seconds": {"const": 210},
+        "stream_bytes": {"const": 1048576}, "capture_files": {"const": 256},
+        "capture_bytes": {"const": 67108864}, "capture_file_bytes": {"const": 67108864},
+        "work_tmpfs_bytes": {"const": 536870912}, "tmp_tmpfs_bytes": {"const": 67108864},
+        "shm_bytes": {"const": 67108864}
+      }
+    },
+    "lifecycle": {
+      "type": "object", "additionalProperties": false,
+      "required": ["states", "isolated_network", "networked_prestart", "running_membership", "fast_exit_fallback", "pass", "fail", "unavailable"],
+      "properties": {
+        "states": {"$ref": "#/$defs/stringArray"},
+        "isolated_network": {"const": "none"},
+        "networked_prestart": {"const": "exact-owned-private-bridge-with-no-live-endpoints"},
+        "running_membership": {"const": "qualification-only-sole-verdict-endpoint"},
+        "fast_exit_fallback": {"const": "prestart-owned-empty-bridge-plus-exact-container-network-configuration"},
+        "pass": {"const": "natural-exit-0"}, "fail": {"const": "natural-exit-nonzero-except-137"},
+        "unavailable": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "destructiveAuthority": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source", "cidfile", "absence", "ambiguity", "operator_recovery"],
+      "properties": {
+        "source": {"const": "durably-recorded-64-hex-full-id-only"},
+        "cidfile": {"const": "docker-created-owner-only-optional-until-create-success"},
+        "absence": {"const": "exact-recorded-id-error-form"},
+        "ambiguity": {"const": "retain-journal-and-staging"},
+        "operator_recovery": {"const": "inspect-private-operation-id-before-explicit-removal"}
+      }
+    },
+    "qualification": {
+      "type": "object", "additionalProperties": false,
+      "required": ["probes", "deadline_seconds", "candidate", "installation", "image_tools"],
+      "properties": {
+        "probes": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"enum": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"]}},
+        "deadline_seconds": {"const": 60}, "candidate": {"const": "private-mode-0600-only"},
+        "installation": {"const": "separate-explicit-revalidation-and-atomic-publication"},
+        "image_tools": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "observer": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema", "environment", "streams", "private_exclusions", "provenance"],
+      "properties": {
+        "schema": {"const": "empirica-ui-view/v1"}, "environment": {"const": "names-only"},
+        "streams": {"const": "independent-counts-and-digests-no-content"},
+        "private_exclusions": {"$ref": "#/$defs/stringArray"},
+        "provenance": {"const": "request-result-and-producer-identities"}
+      }
+    },
+    "mapping": {
+      "type": "object", "additionalProperties": false,
+      "required": ["id", "obligation", "cli_input", "daemon_observation", "allowed_forms", "refusal_reason", "evidence"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9-]+$"}, "obligation": {"type": "string", "minLength": 1},
+        "cli_input": {"type": "string", "minLength": 1}, "daemon_observation": {"type": "string", "minLength": 1},
+        "allowed_forms": {"$ref": "#/$defs/stringArray"}, "refusal_reason": {"type": "string", "minLength": 1},
+        "evidence": {"type": "string", "minLength": 1}
+      }
+    },
+    "releaseCell": {
+      "type": "object", "additionalProperties": false,
+      "required": ["tier", "host", "architecture", "store", "status"],
+      "properties": {
+        "tier": {"enum": [1, 2]},
+        "host": {"enum": ["linux-rootful", "linux-rootless", "docker-desktop-macos"]},
+        "architecture": {"enum": ["amd64", "arm64"]}, "store": {"enum": ["classic", "containerd", "either"]},
+        "status": {"enum": ["fixture-proven", "live-qualification-required"]}
+      }
+    }
+  }
+}

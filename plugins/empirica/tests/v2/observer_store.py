@@ -24,15 +24,12 @@ from sandbox_isolation import force_absent_sandbox_home
 
 import governance_setup
 from governance_setup import TEST_INVOCATION, sized_configure_run
-from application.location import decode_handle, storage_id
-from application.observation import build_execution_snapshot
-from application.ports import HarnessResult, ObservationSnapshot
+from application import generic_spike
+from application.location import storage_id
 from application.observer import Project, run_key
 from assertions import (ConformanceCase, action_graph, get_argument, get_run, action_investigate, action_research,
-                        action_spike_request, evaluate, observe_action)
+                        evaluate, observe_action)
 from core.canonical import canonical_digest
-from core.evaluation import plan_spike_request, plan_spike_result
-from core.freshness import execution_facts, observations_digest
 from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
@@ -43,6 +40,38 @@ PROFILE = ConformanceCase.DEFAULT_PROFILE
 #: The store's clock: 2026-09-28T09:00Z at the first write, then one minute per write.
 T0 = 1790586000.0
 STEP = 60.0
+
+
+def _generic_spike_action(claim_id: str, paths: list[str]) -> dict:
+    return {"kind": "spike_request", "claim_id": claim_id, "plan": {
+        "schema": "empirica.spike-plan-draft/2",
+        "image": "example/probe:local",
+        "argv": ["/usr/bin/python3", "/inputs/probe.py", "--exact-argv"],
+        "inputs": sorted(paths),
+        "environment": {"MODE": "observer-secret-value"},
+    }}
+
+
+class _GenericFixtureHarness:
+    def __init__(self, exit_code: int):
+        self.exit_code = exit_code
+
+    def run(self, request):
+        facts = generic_spike.GenericOperationFacts(
+            canonical_digest("operation"), request.backend.qualification_record_digest,
+            request.backend.execution_binding_digest, request.plan.image.image_id,
+            request.snapshot.snapshot_digest,
+            canonical_digest("process"), canonical_digest("topology"),
+            canonical_digest("timing"))
+        stdout = generic_spike.GenericStreamFact(0, canonical_digest("stdout:verdict"))
+        stderr = generic_spike.GenericStreamFact(0, canonical_digest("stderr:verdict"))
+        return generic_spike.GenericHarnessResult(
+            request.run_id, request.backend, request.plan_digest, request.policy_digest,
+            request.snapshot.snapshot_digest, facts, stdout, stderr, True, False,
+            self.exit_code,
+            generic_spike.GenericVerdict.PASS if self.exit_code == 0
+            else generic_spike.GenericVerdict.FAIL,
+            True, request.backend.execution_binding_digest)
 
 
 @dataclass
@@ -495,64 +524,24 @@ class _Builder:
             run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions})
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
-        """Seed contract-valid immutable historical spike evidence without public run/3 ingress.
-
-        The default production composition keeps new run/3 spikes unavailable until a
-        run-bound Docker harness is explicitly composed.
-        Observer fixtures still need persisted historical request/result bindings for freshness and
-        aggregation coverage, so this test-only builder uses the pure planners and existing in-memory
-        repositories, validates the resulting chain through normal coordinator assembly, and invokes
-        no harness or subprocess.
-        """
+        """Seed one generic request/result through the real transaction with a fake harness."""
+        del command
         for path, content in files.items():
             self.write(path, content)
-        action = action_spike_request(
-            claim_id=claim, command=command, dependent_files=sorted(files))
+        action = _generic_spike_action(claim, list(files))
         coordinator = self.drv._service._coordinator
-        key = decode_handle(run_id)
-        assert key is not None
-        loaded = coordinator._load(key)
-        before_state = loaded.read
-        before_artifacts = tuple(self.drv._artifacts.all())
-        snapshot = coordinator._assemble(key, loaded.state, {
-            "type": "ObserveAction", "run_id": run_id, "action": action,
-        }, require_graph=True)
-        request = plan_spike_request(snapshot, action)
-        if request.result_type == "Block":
-            assert request.reason_code == "claim.spike_prerequisite_missing", request
-            assert request.affected_obligation_id == "claim:" + claim, request
-            assert not request.intent.artifacts, request
-            after = coordinator._load(key)
-            assert after.read.value == before_state.value and after.read.revision == before_state.revision
-            assert tuple(self.drv._artifacts.all()) == before_artifacts
-            return
-        assert request.result_type == "Allow", request
-        state, _, _, _ = coordinator._commit(
-            key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
-
-        paths = tuple(sorted(files))
-        execution = build_execution_snapshot(paths, self.drv._workspace)
-        result = HarnessResult(
-            exit_code, canonical_digest({"command": command}), execution.snapshot_digest)
-        facts = execution_facts(execution.file_bindings, result)
-        capture = self.drv._workspace.observe(paths)
-        observations = tuple(item.observation for item in capture.files)
-        execution_observation = ObservationSnapshot(
-            observations, capture.basis_id, observations_digest(observations))
-
-        loaded = coordinator._load(key)
-        snapshot = coordinator._assemble(key, state, {
-            "type": "ObserveAction", "run_id": run_id, "action": action,
-        }, require_graph=True)
-        planned = plan_spike_result(snapshot, request.intent.artifacts[0]["body"], facts)
-        assert planned.result_type == "Allow", planned
-        coordinator._commit(
-            key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
-            additional_observations=(("spike_execution", execution_observation),))
-        # Prove the persisted chain remains readable by the real codec/history traversal.
-        checked = coordinator._load(key)
-        coordinator._assemble(key, checked.state, {"type": "GetRun", "run_id": run_id},
-                              require_graph=False)
+        before = coordinator.harness
+        coordinator.harness = _GenericFixtureHarness(exit_code)
+        try:
+            result = coordinator.handle({
+                "type": "ObserveAction", "run_id": run_id, "action": action,
+            }, "observer-spike")
+        finally:
+            coordinator.harness = before
+        if result["result"]["type"] == "Block":
+            assert result["result"]["reasons"][0]["code"] == "claim.spike_prerequisite_missing"
+        else:
+            assert result["result"]["type"] == "Allow", result
 
     def freeze(self, run_id: str):
         self.a.require_frozen_scope(self.drv, run_id)
@@ -639,7 +628,8 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
         "C0", [("C0", "ordinary", "A cold start reads the tile index from one cache file."),
                ("C1", "needs-experiment", "The cache file round-trips every tile entry."),
                ("C2", "ordinary", "The loader already isolates index parsing in one function.")],
-        [("C0", "C1"), ("C0", "C2")]), qualified=True)
+        [("C0", "C1"), ("C0", "C2")]), qualified=True,
+        spike_profile="docker-networked-v1")
     b.research(run, "C2", ref="src/loader.py")
     b.research(run, "C1", ref="src/cache.py")
     b.spike(run, "C1", "python -m pytest tests/test_cache.py", {"src/cache.py": b"cache v1\n"})
@@ -679,7 +669,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     # harbor: out of passes.
     run = b.begin("harbor", "s-budget", "Find why the nightly import is slow.", _graph(
         "C0", [("C0", "needs-experiment", "The import spends most of its time in one query.")], []),
-        budgets={"max_spawns": 1, "max_passes": 1})
+        budgets={"max_spawns": 1, "max_passes": 1}, qualified=True)
     b.research(run, "C0", ref="import/query.sql")
     b.spike(run, "C0", "python bench/import.py", {"import/query.sql": b"select 1\n"})
     b.evaluate(run, "report_convergence")
@@ -708,7 +698,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     run = b.begin("lumen", "s-retry", "Choose the colour space for exported previews.", _graph(
         "C0", [("C0", "ordinary", "Previews look the same in every supported viewer."),
                ("C1", "needs-experiment", "Converting to sRGB keeps every swatch within tolerance.")],
-        [("C0", "C1")]))
+        [("C0", "C1")]), qualified=True)
     b.research(run, "C0", ref="docs/viewers.md")
     b.research(run, "C1", ref="src/colour.py")
     b.spike(run, "C1", "python -m pytest tests/test_colour.py", {"src/colour.py": b"srgb\n"})
@@ -874,22 +864,23 @@ def build_hetero_templates() -> Store:
         three = _graph("C0", [("C0", "ordinary", "The guide matches the code."),
                               ("C1", "needs-experiment", "The core tests pass."),
                               ("C2", "needs-experiment", "The util tests pass.")], [("C0", "C1"), ("C0", "C2")])
-        run = b.begin("hetero", "t-a", "Keep the core path fast.", two)
+        run = b.begin("hetero", "t-a", "Keep the core path fast.", two, qualified=True)
         b.research(run, "C1", ref="src/core/a.py")
         b.spike(run, "C1", "pytest tests/core", bind("src/core/a.py", "src/core/b.py", "src/util/x.py"))
-        run = b.begin("hetero", "t-b", "Document the core and util paths.", three)
+        run = b.begin("hetero", "t-b", "Document the core and util paths.", three,
+                      qualified=True)
         b.research(run, "C1", ref="src/core/b.py")
         b.spike(run, "C1", "pytest tests/core", bind("src/core/b.py", "src/core/c.py"))
         b.research(run, "C2", ref="src/util/x.py")
         b.spike(run, "C2", "pytest tests/util", bind("docs/guide.md", "src/util/x.py"))
-        run = b.begin("hetero", "t-c", "Drop the old core helper.", two)
+        run = b.begin("hetero", "t-c", "Drop the old core helper.", two, qualified=True)
         b.research(run, "C1", ref="src/core/a.py")
         b.spike(run, "C1", "pytest tests/t1.py", bind("src/core/a.py", "src/core/c.py", "tests/t1.py"))
         b.evaluate(run, "stop")
         run = b.begin("hetero", "t-d", "Read the util module once.", _graph(
             "C0", [("C0", "ordinary", "The util module is read once.")], []))
         b.research(run, "C0", ref="src/util/y.py")
-        run = b.begin("hetero", "t-e", "Cache the util results.", two)
+        run = b.begin("hetero", "t-e", "Cache the util results.", two, qualified=True)
         b.research(run, "C1", ref="src/util/y.py")
         b.spike(run, "C1", "pytest tests/util", bind("src/util/y.py", "src/core/a.py"))
         b.research(run, "C0", ref="src/core/a.py")
@@ -985,7 +976,7 @@ def _varied(b: "_Builder", n: int, goal: str, thing: str, name: str, repo: str |
         run = b.begin(name, session, goal, _graph(
             "C0", [("C0", "ordinary", f"{subject} does what the goal asks."),
                    ("C1", "needs-experiment", f"The tests for {thing} pass."),
-                   ("C2", "ordinary", f"{subject} has one owner module.")], [("C0", "C1"), ("C0", "C2")]), repo=repo)
+                   ("C2", "ordinary", f"{subject} has one owner module.")], [("C0", "C1"), ("C0", "C2")]), repo=repo, qualified=True)
         b.research(run, "C2", ref=path)
         b.research(run, "C1", ref=path)
         b.spike(run, "C1", f"python -m pytest {check}", {check: f"check {n}\n".encode()})
@@ -1002,7 +993,7 @@ def _varied(b: "_Builder", n: int, goal: str, thing: str, name: str, repo: str |
     elif shape == 2:  # an audit caught a problem
         run = b.begin(name, session, goal, _graph(
             "C0", [("C0", "ordinary", f"{subject} handles every input it is given."),
-                   ("C1", "needs-experiment", f"The edge-case test for {thing} passes.")], [("C0", "C1")]), repo=repo)
+                   ("C1", "needs-experiment", f"The edge-case test for {thing} passes.")], [("C0", "C1")]), repo=repo, qualified=True)
         b.research(run, "C0", ref=path)
         b.research(run, "C1", ref=path)
         b.spike(run, "C1", f"python -m pytest {check} -k edge", {check: f"edge {n}\n".encode()})

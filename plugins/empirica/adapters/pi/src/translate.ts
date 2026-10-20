@@ -16,6 +16,7 @@ import {
   type Request,
   type Result,
   type RunSelector,
+  type SpikeProfile,
 } from "./contract.ts";
 import type { SubagentInventory } from "./subagent-inventory.ts";
 
@@ -50,11 +51,26 @@ export function parseInvocationFlags(args: string): ParsedInvocationFlags {
 
 // --- Pi invocation -> Request -----------------------------------------------
 
+export const SPIKE_PROFILE_ENV = "EMPIRICA_SPIKE_PROFILE";
+const SPIKE_PROFILES = new Set<SpikeProfile>(["docker-isolated-v1", "docker-networked-v1"]);
+
+/** Read one exact host-process profile at session start; configured malformed values refuse. */
+export function configuredSpikeProfile(
+  environ: Readonly<Record<string, string | undefined>>,
+): SpikeProfile | undefined {
+  if (!Object.hasOwn(environ, SPIKE_PROFILE_ENV)) return undefined;
+  const value = environ[SPIKE_PROFILE_ENV];
+  if (!SPIKE_PROFILES.has(value as SpikeProfile))
+    throw new Error(`${SPIKE_PROFILE_ENV} must be docker-isolated-v1 or docker-networked-v1`);
+  return value as SpikeProfile;
+}
+
 export interface StartRunOptions {
   controlMode?: "auto" | "deliberative";
   maxPasses?: number;
   maxSpawns?: number;
   maxAuditSpawns?: number;
+  spikeProfile?: SpikeProfile;
 }
 
 export function startRunRequest(
@@ -71,6 +87,7 @@ export function startRunRequest(
     invocation,
     control_mode: options.controlMode ?? "deliberative",
   };
+  if (options.spikeProfile !== undefined) command.spike_profile = options.spikeProfile;
   if (options.maxPasses !== undefined || options.maxSpawns !== undefined
       || options.maxAuditSpawns !== undefined) {
     const budgets: Budgets = {};

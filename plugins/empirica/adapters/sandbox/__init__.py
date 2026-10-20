@@ -1,1 +1,1 @@
-"""Shipped Docker sandbox profile, runtime, qualification authority, and operator CLI."""
+"""Closed generic Docker plans, immutable qualification authority, and bounded execution."""

@@ -142,6 +142,7 @@
     "not_asked"
   ],
   "spike": [
+    "requested",
     "current",
     "stale",
     "superseded"

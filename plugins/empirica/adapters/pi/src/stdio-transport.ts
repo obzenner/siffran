@@ -37,13 +37,11 @@ export const ROOT_OPTIONAL_KEYS: readonly string[] = [];
 export const OBSERVE_ACTION_REQUIRED_KEYS = ["type", "run_id", "action"] as const;
 export const OBSERVE_ACTION_OPTIONAL_KEYS = ["observed_at"] as const;
 export const SPIKE_ACTION_REQUIRED_KEYS = [
-  "kind", "claim_id", "command", "dependent_files",
+  "kind", "claim_id", "plan",
 ] as const;
 export const SPIKE_ACTION_OPTIONAL_KEYS: readonly string[] = [];
-export const CLAIM_ID_PATTERN = "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])";
-export const DEPENDENT_FILE_PATTERN = "^[^/].*$";
+export const CLAIM_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])";
 const CLAIM_ID = new RegExp(CLAIM_ID_PATTERN);
-const DEPENDENT_FILE = new RegExp(DEPENDENT_FILE_PATTERN);
 
 export interface StdioBridgeConfig {
   /** Executable to run (e.g. "python3"). */
@@ -104,11 +102,9 @@ export function isExactSpikeRequest(value: unknown): boolean {
       || action.kind !== "spike_request"
       || typeof action.claim_id !== "string"
       || !CLAIM_ID.test(action.claim_id)
-      || typeof action.command !== "string" || action.command.length === 0
-      || !Array.isArray(action.dependent_files) || action.dependent_files.length === 0
-      || !action.dependent_files.every((item) => typeof item === "string"
-        && item.length > 0 && DEPENDENT_FILE.test(item))) return false;
-  return new Set(action.dependent_files).size === action.dependent_files.length;
+      || !object(action.plan)
+      || action.plan.schema !== "empirica.spike-plan-draft/2") return false;
+  return true;
 }
 
 function admittedOverride(value: number | undefined, maximum: number, name: string): number {

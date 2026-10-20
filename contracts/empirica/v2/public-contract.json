@@ -191,8 +191,8 @@
     "fail"
   ],
   "spike_gates": [
-    "pass",
-    "fail"
+    "PASS",
+    "FAIL"
   ],
   "attribution_subject_kinds": [
     "auditor"
@@ -284,7 +284,7 @@
         "predicate": "governance.approved",
         "obligation_id": "obligation.approval",
         "must": "Obtain exact host-mediated approval for the current run configuration.",
-   "waiting": "Waiting for a human to approve the run's configuration in the host's dialog."
+        "waiting": "Waiting for a human to approve the run's configuration in the host's dialog."
       },
       {
         "predicate": "investigation.recorded",
@@ -505,7 +505,7 @@
         "properties": {
           "root": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           },
           "claims": {
             "type": "array",
@@ -579,7 +579,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           },
           "source_kind": {
             "enum": [
@@ -625,7 +625,7 @@
       }
     },
     "spike.run": {
-      "description": "Request one bounded offline deterministic spike only when RunView.spike_backend is qualified. Design the command comfortably below the 120-second workload hard limit; the 210-second backend bound and Pi 300-second and Claude MCP 360-second outer margins are not workload budgets. When spikes are unavailable, do not submit an unchanged request: continue non-spike research or graph refinement, or stop with an honest residual.",
+      "description": "Submit one closed generic spike plan draft only for a run with an exact immutable generic Docker binding; unavailable substrate admits no evidence.",
       "surface": {
         "tool": "empirica_observe",
         "action": "spike_request"
@@ -635,33 +635,96 @@
         "additionalProperties": false,
         "required": [
           "claim_id",
-          "command",
-          "dependent_files"
+          "plan"
         ],
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           },
-          "command": {
-            "type": "string",
-            "minLength": 1
-          },
-          "dependent_files": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "pattern": "^[^/].*$"
-            }
+          "plan": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema",
+              "image",
+              "argv",
+              "inputs",
+              "environment"
+            ],
+            "properties": {
+              "schema": {
+                "const": "empirica.spike-plan-draft/2",
+                "description": "Exact minimal single-container author draft schema."
+              },
+              "image": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^(?!.*\\s).+$",
+                "description": "Already-local Docker name/tag, repository digest, full image ID, or unambiguous ID prefix; locality and ambiguity are host-resolved."
+              },
+              "argv": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                ],
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "description": "Exact executable and argument vector; no shell is injected."
+              },
+              "inputs": {
+                "type": "array",
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?!/)(?!.*\\\\)(?!.*//).+$"
+                },
+                "description": "Repository-relative file or directory declarations; host expansion excludes symlinks and .git and seals one canonical captured-file union."
+              },
+              "environment": {
+                "type": "object",
+                "maxProperties": 128,
+                "propertyNames": {
+                  "allOf": [
+                    {
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                    },
+                    {
+                      "not": {
+                        "enum": [
+                          "HOME",
+                          "TMPDIR"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "description": "Bounded authored overrides; HOME and TMPDIR are framework-owned and values must never contain secrets."
+              }
+            },
+            "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
           }
         }
       }
     },
     "spike.regate": {
-      "description": "Re-gate one stale spike with a bounded offline deterministic command only when RunView.spike_backend is qualified. A closed unavailable result admits no spike evidence; narrow or redesign the probe, continue research, or arrange operator requalification for a future new run instead of blind retries or a host fallback.",
+      "description": "Submit one closed generic spike plan draft only for a run with an exact immutable generic Docker binding; unavailable substrate admits no evidence.",
       "surface": {
         "tool": "empirica_observe",
         "action": "spike_request"
@@ -671,27 +734,90 @@
         "additionalProperties": false,
         "required": [
           "claim_id",
-          "command",
-          "dependent_files"
+          "plan"
         ],
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           },
-          "command": {
-            "type": "string",
-            "minLength": 1
-          },
-          "dependent_files": {
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-              "type": "string",
-              "minLength": 1,
-              "pattern": "^[^/].*$"
-            }
+          "plan": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "schema",
+              "image",
+              "argv",
+              "inputs",
+              "environment"
+            ],
+            "properties": {
+              "schema": {
+                "const": "empirica.spike-plan-draft/2",
+                "description": "Exact minimal single-container author draft schema."
+              },
+              "image": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 255,
+                "pattern": "^(?!.*\\s).+$",
+                "description": "Already-local Docker name/tag, repository digest, full image ID, or unambiguous ID prefix; locality and ambiguity are host-resolved."
+              },
+              "argv": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 256,
+                "prefixItems": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 4096
+                  }
+                ],
+                "items": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "description": "Exact executable and argument vector; no shell is injected."
+              },
+              "inputs": {
+                "type": "array",
+                "maxItems": 256,
+                "uniqueItems": true,
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 1024,
+                  "pattern": "^(?!/)(?!.*\\\\)(?!.*//).+$"
+                },
+                "description": "Repository-relative file or directory declarations; host expansion excludes symlinks and .git and seals one canonical captured-file union."
+              },
+              "environment": {
+                "type": "object",
+                "maxProperties": 128,
+                "propertyNames": {
+                  "allOf": [
+                    {
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                    },
+                    {
+                      "not": {
+                        "enum": [
+                          "HOME",
+                          "TMPDIR"
+                        ]
+                      }
+                    }
+                  ]
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "maxLength": 4096
+                },
+                "description": "Bounded authored overrides; HOME and TMPDIR are framework-owned and values must never contain secrets."
+              }
+            },
+            "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
           }
         }
       }
@@ -1060,7 +1186,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           }
         }
       },
@@ -1083,7 +1209,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           }
         }
       },
@@ -1106,7 +1232,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           }
         }
       },
@@ -1193,7 +1319,7 @@
         "properties": {
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           }
         }
       },
@@ -1328,7 +1454,7 @@
           },
           "claim_id": {
             "type": "string",
-            "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
           }
         }
       },
@@ -1616,7 +1742,7 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
             }
           },
           "deferred_scope_digest": {
@@ -1958,7 +2084,7 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
             }
           },
           "asking": {
@@ -2013,7 +2139,7 @@
         },
         {
           "id": "roles/harness",
-          "text": "The deterministic harness executes a declared command and reports exit code and file bindings; it must not decide claim meaning or convergence."
+          "text": "The deterministic harness executes a sealed generic container plan and reports typed bounded result facts; it must not decide claim meaning or convergence."
         },
         {
           "id": "roles/auditor",
@@ -2137,27 +2263,31 @@
     },
     "evidence/spike": {
       "title": "Spike evidence",
-      "summary": "Bounded offline deterministic spikes, their immutable run backend, and the sealed request.",
+      "summary": "Bounded deterministic generic spikes, their immutable run backend, and the sealed request.",
       "clauses": [
         {
           "id": "evidence/spike/backend",
-          "text": "RunView.spike_backend is selected once at StartRun and is either spikes_unavailable or an exact qualified docker-rust-v1 binding with qualification-record and execution-binding digests. Qualified means bound, not currently healthy. GetArgument carries the same binding so an auditor can interpret admitted spike evidence. No current pointer, local path, socket, diagnostic, fallback, or repair instruction is public."
+          "text": "RunView.spike_backend is selected once at StartRun and is either spikes_unavailable or an exact qualified generic Docker profile binding with qualification-record and execution-binding digests. Qualified means bound, not currently healthy. GetArgument carries the same binding so an auditor can interpret admitted spike evidence. No current pointer, local path, socket, diagnostic, fallback, or repair instruction is public."
+        },
+        {
+          "id": "evidence/spike/qualification",
+          "text": "An operator qualifies an already-local probe image with make generic-sandbox-qualification PROFILE=<docker-isolated-v1|docker-networked-v1> PROBE_IMAGE=repository@sha256:<64-lowercase-hex> PROBE_CONFIG=sha256:<64-lowercase-hex>; install uses the corresponding generic-sandbox-qualification-install target and repeats the complete procedure. One 600-second deadline covers seven ordered probes: network, natural-1, natural-124, natural-125, output-limit, timeout, and oom, followed by exact pre/post container/network census equality. A failure publishes nothing. Records bind exact CLI, local Unix endpoint, engine, environment, implementation, image/config, profile, outcomes, and execution identities. The probe identity is qualification evidence only, not a runtime-plan allowlist or public image catalog. Requalification is explicit after any bound change, and a new installed pointer applies only to a future run."
         },
         {
           "id": "evidence/spike/design",
-          "text": "Before requesting a spike, design a bounded, offline, deterministic, small probe and name every repo-relative file it reads. The command workload hard limit is 120 seconds; split longer experiments. The backend's 210-second whole-operation bound reserves create, inspect, cleanup, absence proof, and postflight time. Pi's 300-second and Claude MCP's 360-second deadlines are outer transport margins, never usable workload runtime."
+          "text": "Before requesting a spike, submit exactly kind, claim_id, and one closed empirica.spike-plan-draft/2 with exactly schema, image, argv, inputs, and environment. Image is a syntactically valid already-local Docker name/tag, repository digest, full image ID, or unambiguous ID prefix; the host resolves locality, ambiguity, immutable daemon image ID, Linux OS, and canonical native architecture before effects. Argv is one exact nonempty executable/argument vector. Inputs are a bounded canonical closure of repository-relative file/directory declarations; the host expands them once into a sorted captured-file union, excluding symlinks and .git. Environment is a bounded map of at most 128 overrides; HOME and TMPDIR are framework-owned and refused. Values persist verbatim internally and must never contain credentials or secrets; read-only public projections expose names only, although content-addressed plan identities can confirm guessed low-entropy values. The author supplies no authority, profile, resource, timeout, user, workdir, network, topology, service, alias, host path, Docker option, credential, image acquisition, or derived capture fact. The framework owns one verdict container, fixed uid/gid 65534, /work, /tmp, /inputs, host-selected network profile, R7 resource policy, the 120-second production workload limit, and the sealed 210-second whole-operation bound. Natural exit 137 is unavailable, never FAIL; Pi's 300-second and Claude MCP's 360-second deadlines remain outer transport margins."
         },
         {
           "id": "evidence/spike/isolation",
-          "text": "The exact Docker profile permits no network, download, or install and grants one CPU, 512 MiB memory with no swap, 128 PIDs, 256 open files, at most 256 captured staging files totalling 64 MiB with each file at most 64 MiB, and only private writable tmpfs. Stdout and stderr have independent 1 MiB ceilings. No daemon or background continuation survives the bounded operation."
+          "text": "The isolated profile uses Docker network none. The networked profile creates one private non-internal bridge for the verdict container, permits outbound egress, and still prohibits public ports, host ingress, host networking, host mounts, Docker socket access, image acquisition, and ambient host fallback. The host enforces read-only root, dropped capabilities, no-new-privileges, fixed uid/gid 65534, /work and /tmp tmpfs, one read-only /inputs tree, min(2, engine NCPU) CPU, 2 GiB memory with no extra swap, 256 PIDs, nofile 1024, fsize 64 MiB, core zero, 64-MiB shm, and independent 1-MiB streams. Capture permits 256 files and 64 MiB total with a 64-MiB per-file maximum. No daemon or background continuation survives exact-ID cleanup."
         },
         {
           "id": "evidence/spike/outcomes",
-          "text": "Only an inspected normal workload exit admits PASS or FAIL; exit zero passes and another workload exit fails, including actual workload exits 124 and 125. A backend-enforced timeout, per-stream output limit, OOM, cleanup failure, identity mismatch, or authority failure is unavailable and admits no spike result evidence. Redesign or narrow after unavailable; do not treat it as FAIL, repeat blindly, or fall back to an ambient host shell."
+          "text": "Only the exactly one verdict container's inspected natural exit admits uppercase PASS or FAIL: zero passes and every nonzero integer fails, including natural exits 124 and 125. Service exits do not decide the verdict and services may be forcibly terminated after the verdict. A backend-enforced timeout, per-stream output limit, OOM, capture, staging, create, attach, inspect, identity, recovery, cleanup, postflight, or authority ambiguity is unavailable and admits no spike result evidence. Redesign or narrow after unavailable; do not infer FAIL, repeat blindly, or fall back to an ambient host shell."
         },
         {
           "id": "evidence/spike/attestation",
-          "text": "A spike leaf is created only from a real harness execution and binds command, exit_code, gate, result digest, harness_request_id, prerequisite snapshot, and file bindings. The harness executes at most once within one application call and a result-CAS retry never reruns it; a crash after execution or a separate call may execute the same sealed request again, so probes must be safe under duplicate execution."
+          "text": "A spike leaf is created only from a typed generic harness result and binds the exact request artifact, plan, policy, snapshot, backend identities, operation/image/input/process/topology/timing facts, bounded stream digests and counts, natural verdict, cleanup proof, postflight identity, and producer. The harness executes at most once within one application call and a result-CAS retry never reruns it; a crash after request commit or a separate call may execute the same sealed request again, so plans must be safe under duplicate execution."
         },
         {
           "id": "evidence/spike/request",
@@ -2165,7 +2295,7 @@
         },
         {
           "id": "evidence/spike/exit_code",
-          "text": "exit_code is the sole machine approval authority; gate is derived from exit_code and is never caller-selected."
+          "text": "The verdict container's natural exit_code is the sole machine approval authority: zero derives uppercase PASS and nonzero derives uppercase FAIL. The gate is never caller-selected."
         },
         {
           "id": "evidence/spike/missing",
@@ -2415,7 +2545,7 @@
         },
         {
           "id": "trusted/ingress/evidence_sealed",
-          "text": "An evidence_leaf is a deterministic spike result; its file_bindings, exit_code, command digest, prerequisite research IDs, and result digest correlate exactly and in order to the admitted sealed spike result bindings, not only to request dependent paths."
+          "text": "An evidence_leaf is a deterministic generic spike result; its request artifact, file bindings, plan/policy/snapshot identities, backend identities, typed operation facts, natural exit, prerequisite research IDs, and result digest correlate exactly and in order to the admitted sealed result."
         },
         {
           "id": "trusted/ingress/confirmation",
@@ -2519,7 +2649,7 @@
         },
         {
           "id": "governance/invocation",
-          "text": "StartRun requires a nonblank verbatim goal and trusted invocation provenance naming host, interactive observation, signal, and operator delegation. Auto requires interactive=true or the host profile's delegation_env (currently EMPIRICA_AUTO_DELEGATION) set to 1; unknown or non-interactive provenance without delegation fails closed before a run exists."
+          "text": "StartRun requires a nonblank verbatim goal and trusted invocation provenance naming host, interactive observation, signal, and operator delegation. Auto requires interactive=true or the host profile's delegation_env (currently EMPIRICA_AUTO_DELEGATION) set to 1; unknown or non-interactive provenance without delegation fails closed before a run exists. The optional host-process EMPIRICA_SPIKE_PROFILE is omitted for the isolated default or is exactly docker-isolated-v1 or docker-networked-v1; malformed configured values refuse before StartRun, and no author action, prompt, plan, tool payload, or child may supply profile authority."
         },
         {
           "id": "governance/decision_timeout",
@@ -2660,9 +2790,13 @@
       "pending_audit": "for the audit to retrieve",
       "spike_backend": "spikes",
       "spike_backend_unavailable": "unavailable; no spike requests (research, graph, honest stop still allowed)",
-      "spike_backend_qualified": "qualified docker-rust-v1 binding (not a live-health claim)",
+      "spike_backend_qualified": "qualified generic Docker profile binding (not a live-health claim)",
       "spike_backend_record": "qualification record:",
-      "spike_backend_execution": "execution binding:"
+      "spike_backend_execution": "execution binding:",
+      "generic_spikes": "generic spike evidence (read-only)",
+      "generic_spike_request": "immutable request",
+      "generic_spike_result": "admitted result",
+      "generic_spike_no_result": "no result evidence admitted"
     }
   }
 }

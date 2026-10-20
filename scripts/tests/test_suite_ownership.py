@@ -114,6 +114,14 @@ class SuiteOwnership(unittest.TestCase):
             self.assertTrue(self.fast[name], f"check-{name} selects no test file")
         self.assertIn("plugins/empirica/tests/v2/test_a1_boundaries.py", self.fast["evidence"])
         self.assertNotIn("plugins/empirica/tests/v2/test_a1_boundaries.py", self.fast["core"])
+        self.assertIn(
+            "plugins/empirica/tests/v2/test_budget_freeze_terminal.py", self.fast["core"])
+        self.assertIn(
+            "plugins/empirica/tests/v2/test_evidence_freshness.py", self.fast["evidence"])
+        self.assertIn(
+            "plugins/empirica/tests/v2/test_public_host_path.py", self.fast["evidence"])
+        self.assertIn(
+            "plugins/empirica/tests/test_execution_adapter.py", self.fast["core"])
 
     def test_the_same_basename_in_another_directory_is_unowned(self):
         # core runs plugins/methodologist/tests/test_core.py; a new test_core.py elsewhere must not ride on its name

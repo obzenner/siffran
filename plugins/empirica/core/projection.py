@@ -11,7 +11,7 @@ from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSU
                          active_evidence, audit_blocker, audit_covers, audit_pending, bootstrap_status, latest_audit_verdict,
                          claim_blockers, claim_digest, confirmation_batch, derive_claims,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
-                         evidence_digest, independence, pending_decisions, pending_human, pending_terminal,
+                         evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
                          progress_basis, report_requirements, terminal_batch, REPORT_STAGES, Requirement)
 
 
@@ -532,12 +532,26 @@ def _human_decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> d
 
 
 def spike_result(art: Mapping[str, Any], active: bool) -> dict[str, Any]:
-    """The dossier's statement of one executed spike: what ran, how it ended, and the files it was bound to. The one place
-    these facts are read from the artifact (``project_argument`` and the observer both); the command's output is not retained."""
-    return {"active": active, "outcome": art["outcome"], "harness_request_id": art["harness_request_id"],
-            "command": art["command"], "command_digest": art["command_digest"],
-            "prerequisite_research_ids": art["prerequisite_research_ids"], "file_bindings": art["file_bindings"],
-            "exit_code": art["exit_code"], "spike_gate": art["spike_gate"], "supersedes": art.get("supersedes")}
+    """Project one closed generic result without raw output or host-local execution data."""
+    return {
+        "active": active, "outcome": art["outcome"],
+        "harness_request_id": art["harness_request_id"],
+        "request_artifact_id": art["request_artifact_id"],
+        "plan_digest": art["plan_digest"], "policy_digest": art["policy_digest"],
+        "snapshot_digest": art["snapshot_digest"], "backend": art["backend"],
+        "prerequisite_research_ids": art["prerequisite_research_ids"],
+        "file_bindings": art["file_bindings"], "exit_code": art["exit_code"],
+        "spike_gate": art["spike_gate"], "result_facts": art["result_facts"],
+        "supersedes": art.get("supersedes"),
+        "producer_model": identity_pair(art.get("producer")),
+    }
+
+
+def _redacted_spike_draft(value: Mapping[str, Any]) -> dict[str, Any]:
+    """Public draft projection: preserve declared names, never authored environment values."""
+    draft = governance.plain(value)
+    draft["environment"] = sorted(draft["environment"])
+    return draft
 
 
 def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
@@ -575,9 +589,17 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                            if key in art})
             common["verification"] = _verification(snapshot, art)
         elif kind == "spike_request":
-            common.update(harness_request_id=art["harness_request_id"], command=art["command"],
-                          command_digest=art["command_digest"], dependent_files=art["dependent_files"],
-                          prerequisite_research_ids=art["prerequisite_research_ids"])
+            common.update(
+                harness_request_id=art["harness_request_id"],
+                draft=_redacted_spike_draft(art["draft"]),
+                draft_digest=art["draft_digest"], plan_digest=art["plan_digest"],
+                policy_digest=art["policy_digest"],
+                operation_timeout_seconds=art["operation_timeout_seconds"],
+                snapshot_basis_id=art["snapshot_basis_id"],
+                snapshot_digest=art["snapshot_digest"],
+                inputs=art["plan"]["captured_files"],
+                backend=art["backend"], producer_model=identity_pair(art.get("producer")),
+                prerequisite_research_ids=art["prerequisite_research_ids"])
         else:
             common.update(spike_result(art, art["artifact_id"] in active_ids))
         artifacts.append(common)

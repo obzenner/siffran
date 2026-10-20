@@ -947,7 +947,11 @@
             "spike_backend_unavailable",
             "spike_backend_qualified",
             "spike_backend_record",
-            "spike_backend_execution"
+            "spike_backend_execution",
+            "generic_spikes",
+            "generic_spike_request",
+            "generic_spike_result",
+            "generic_spike_no_result"
           ],
           "properties": {
             "no_governance": {
@@ -1211,6 +1215,22 @@
               "minLength": 1
             },
             "spike_backend_execution": {
+              "type": "string",
+              "minLength": 1
+            },
+            "generic_spikes": {
+              "type": "string",
+              "minLength": 1
+            },
+            "generic_spike_request": {
+              "type": "string",
+              "minLength": 1
+            },
+            "generic_spike_result": {
+              "type": "string",
+              "minLength": 1
+            },
+            "generic_spike_no_result": {
               "type": "string",
               "minLength": 1
             },

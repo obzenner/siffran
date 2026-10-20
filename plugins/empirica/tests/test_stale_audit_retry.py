@@ -8,15 +8,17 @@ from dataclasses import replace
 
 from test_d7_transactions import (Artifacts, Harness, Runs, Workspace,
                                   activate_investigation, chain, decode_state, encode_state,
-                                  traverse_history)
-from application.observation import build_execution_snapshot
-from application.ports import HarnessResult, ObservationSnapshot
+                                  spike_action, traverse_history)
+from application import generic_spike
+from application.ports import ObservationSnapshot
 from application.transaction import Coordinator as ProductionCoordinator
 from adapters.audit import child_event
 from adapters.audit_protocol import AuditProtocol, AuditProtocolError, IdentityObservation
 from adapters.identity import POLICY_VERSION, observe
+from core import spike_plan
 from core.evaluation import audit_binding, plan_spike_request, plan_spike_result
-from core.freshness import canonical_digest, execution_facts, observations_digest
+from core.freshness import FileObservation, ObservationState, observations_digest
+from core.spike_plan_draft import canonicalize_spike_plan_draft
 from core.records import Corrupt, Present, Revision
 from governance_setup import SIZED_RATIONALE, TEST_INVOCATION, approve_current, end_with_consent
 from application.protocol import host_profile_id  # noqa: E402
@@ -73,30 +75,49 @@ class StaleAuditRetryTests(unittest.TestCase):
         return self.coordinator.handle({"type": "ObserveAction", "run_id": self.run_id,
                                         "action": action}, "action")["result"]
 
-    def seed_historical_spike(self, action):
-        """Persist historical request/result evidence without the unavailable run/3 spike ingress."""
+    def seed_historical_spike(self, paths, *, claim_id="G0"):
+        """Persist generic request/result evidence without requiring installed authority."""
+        action = spike_action(*tuple(paths), claim_id=claim_id)
         loaded = self.coordinator._load(self.key)
         command = {"type": "ObserveAction", "run_id": self.run_id, "action": action}
         snapshot = self.coordinator._assemble(
             self.key, loaded.state, command, require_graph=True)
-        request = plan_spike_request(snapshot, action)
+        backend = generic_spike.GenericQualifiedBackend(
+            "docker", "docker-isolated-v1", "sha256:" + "a" * 64,
+            "sha256:" + "b" * 64)
+
+        class LocalImage:
+            @staticmethod
+            def resolve(reference, selected):
+                return generic_spike.LocalImageResolution(
+                    reference, "sha256:" + "c" * 64, "linux", "amd64",
+                    "linux", "amd64", (), 2, selected)
+
+        sealed = generic_spike.prepare_generic_spike(
+            canonicalize_spike_plan_draft(action["plan"]), self.workspace,
+            LocalImage(), backend)
+        request = plan_spike_request(
+            snapshot, action, generic_spike.sealed_request_facts(sealed, backend))
         self.assertEqual(request.result_type, "Allow")
         state, _, _, _ = self.coordinator._commit(
             self.key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
-        paths = tuple(action["dependent_files"])
-        execution = build_execution_snapshot(paths, self.workspace)
-        result = HarnessResult(
-            0, canonical_digest({"command": action["command"]}), execution.snapshot_digest)
-        capture = self.workspace.observe(paths)
-        observations = tuple(item.observation for item in capture.files)
+        request_body = request.intent.artifacts[0]["body"]
+        harness_run_id = "r-" + request.intent.artifacts[0]["artifact_id"].split(":", 1)[1][:32]
+        harness_request = generic_spike.GenericHarnessRequest(
+            harness_run_id, backend, sealed.plan, sealed.plan.digest,
+            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
+        result = Harness().run(harness_request)
+        observations = tuple(FileObservation(
+            binding.path, ObservationState.PRESENT, binding.sha256)
+            for binding in sealed.snapshot.file_bindings)
         observed = ObservationSnapshot(
-            observations, capture.basis_id, observations_digest(observations))
+            observations, sealed.snapshot.basis_id, observations_digest(observations))
         loaded = self.coordinator._load(self.key)
         snapshot = self.coordinator._assemble(
             self.key, state, command, require_graph=True)
         planned = plan_spike_result(
-            snapshot, request.intent.artifacts[0]["body"],
-            execution_facts(execution.file_bindings, result))
+            snapshot, request_body,
+            generic_spike.sealed_result_facts(result))
         self.assertEqual(planned.result_type, "Allow")
         self.coordinator._commit(
             self.key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
@@ -253,9 +274,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
             "result": "supports", "payload": {"source_ref": "notes.md", "citation": "tested"}})
         self.workspace.write("source.py", b"original")
-        self.seed_historical_spike({
-            "kind": "spike_request", "claim_id": "G0", "command": "test",
-            "dependent_files": ["source.py"]})
+        self.seed_historical_spike(["source.py"])
         old = self.pending()
         self.workspace.write("source.py", b"changed")
         fresh = self.prepare()

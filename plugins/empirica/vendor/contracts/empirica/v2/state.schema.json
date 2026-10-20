@@ -52,7 +52,10 @@
               "const": "docker"
             },
             "profile_id": {
-              "const": "docker-rust-v1"
+              "enum": [
+                "docker-isolated-v1",
+                "docker-networked-v1"
+              ]
             },
             "qualification_record_digest": {
               "$ref": "#/$defs/digest256"
@@ -926,7 +929,7 @@
     },
     "claimId": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
     }
   }
 }

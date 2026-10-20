@@ -86,8 +86,9 @@ def closure_offenders(node, path="", found=None):
     """Return the paths of every open (non-closed) or unresolved object-capable schema node.
 
     A model-facing schema node is an offender when any of the following holds:
-      * it is object-capable (``_object_capable``) but does not close with
-        ``additionalProperties: false``;
+      * it is object-capable (``_object_capable``) but neither closes with
+        ``additionalProperties: false`` nor declares a typed value schema and bounded
+        ``propertyNames`` for a deliberately dynamic map;
       * it declares a ``properties`` map with an unconstrained property schema ``{}`` (an open
         property that admits any object);
       * it carries a ``$ref`` -- a projected model-facing schema must be fully dereferenced, so
@@ -104,7 +105,20 @@ def closure_offenders(node, path="", found=None):
         return found
     if "$ref" in node:
         found.append(path)
-    if _object_capable(node) and node.get("additionalProperties") is not False:
+    additional = node.get("additionalProperties")
+    names = node.get("propertyNames")
+    name_pattern = None
+    if isinstance(names, dict):
+        name_pattern = names.get("pattern")
+        if name_pattern is None and isinstance(names.get("allOf"), list):
+            name_pattern = next((item.get("pattern") for item in names["allOf"]
+                                 if isinstance(item, dict) and item.get("pattern")), None)
+    bounded_map = (
+        isinstance(additional, dict) and bool(additional)
+        and bool(name_pattern)
+        and type(node.get("maxProperties")) is int and node["maxProperties"] >= 0
+    )
+    if _object_capable(node) and additional is not False and not bounded_map:
         found.append(path)
     # An unconstrained property schema {} is open even inside a closed parent.
     props = node.get("properties")
@@ -143,6 +157,12 @@ class SchemaCompletenessTests(unittest.TestCase):
         self.assertIn(".properties.x", closure_offenders(
             {"type": "object", "additionalProperties": False,
              "properties": {"x": {"$ref": "#/$defs/foo"}}}))
+        # A deliberately dynamic map is closed by bounded key syntax and a typed value schema.
+        self.assertEqual(closure_offenders({
+            "type": "object", "maxProperties": 2,
+            "propertyNames": {"pattern": "^[A-Z]+$", "maxLength": 8},
+            "additionalProperties": {"type": "string"},
+        }), [])
         # A nested open object inside a closed parent is flagged at its own path.
         parent = {"type": "object", "additionalProperties": False,
                   "properties": {"child": {"type": "object", "additionalProperties": True}}}

@@ -76,7 +76,7 @@ function assertSpikeBackend(value: unknown, branch: string): void {
   const qualified = ["backend", "execution_binding_digest", "kind", "profile_id", "qualification_record_digest"]
     .sort().join("\0");
   if (value.kind !== "qualified" || keys !== qualified || value.backend !== "docker"
-      || value.profile_id !== "docker-rust-v1"
+      || !new Set(["docker-isolated-v1", "docker-networked-v1"]).has(String(value.profile_id))
       || typeof value.qualification_record_digest !== "string"
       || !DIGEST.test(value.qualification_record_digest)
       || typeof value.execution_binding_digest !== "string"

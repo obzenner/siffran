@@ -33,7 +33,7 @@ See [governance](../../skills/empirica/references/governance.md) for configurati
 
 | Codex surface | Mapping | Behaviour |
 |---|---|---|
-| explicit `$empirica ...` | `StartRun` | Best-effort activation; injects the opaque handle and public-tool instructions. |
+| explicit `$empirica ...` | `StartRun` | Best-effort activation; injects the opaque handle and public-tool instructions. Optional host-process `EMPIRICA_SPIKE_PROFILE` is absent for the isolated default or exactly one generic profile; malformed values refuse before dispatch and prompts/actions/plans cannot set it. |
 | MCP `empirica_observe` | `ObserveAction` | Public route, graph, research, spike request, freeze, and configuration only; concrete reservation is host-owned. |
 | MCP `empirica_read` | `GetRun`, `GetArgument`, `GetContract`, `RestoreRun` | Complete typed public read surface. |
 | MCP `report_convergence` | `EvaluateRun` | Public guarded decision; never trusted ingress. |
@@ -43,9 +43,28 @@ Compaction restore is not provided on Codex: there is no `SessionStart` hook, an
 hook action `restore` is unknown to the dispatcher. After compaction the author re-reads the run
 with `empirica_read` (`RestoreRun`); Stop still fails closed for an active run.
 
-The deterministic spike harness remains the sole machine approver. Audit can block but cannot
+The deterministic generic spike harness remains the sole machine approver. Audit can block but cannot
 manufacture evidence. `evidence_leaf`, attribution, child events, and audit verdicts have no MCP
 schema and are admitted only by adapter-private calls after host observation.
+
+A public spike action contains exactly `kind`, `claim_id`, and a closed
+`empirica.spike-plan-draft/2`: one familiar already-local image reference, exact nonempty argv,
+repository-relative file/directory inputs, and a bounded environment map. The plan cannot contain
+profile, resources, timeout, user, workdir, network, topology, services, aliases, host paths, Docker
+options, credentials, image acquisition, or runtime authority. The host resolves immutable native
+image identity and owns the one verdict container plus every sandbox fact. Environment values must
+never contain secrets: they persist internally and content-addressed plan identity can confirm guesses
+although public views expose names only. Natural zero is `PASS`; nonzero is `FAIL` except 137, which
+is unavailable; every substrate ambiguity admits no result.
+
+Codex uses the shared 120-second workload and 210-second Docker operation budgets within the
+360-second MCP ceiling. `EMPIRICA_SPIKE_PROFILE` is read from the launching host process only;
+absence selects isolated, and only `docker-isolated-v1` or `docker-networked-v1` is accepted.
+Isolated permits declared internal private networks but denies outbound egress; networked permits
+declared non-internal private networks and outbound Internet egress. Neither permits host ingress or
+published ports. The
+operator qualification/install commands and 600-second seven-probe procedure are documented in
+[`doc/hosts.md`](../../../../doc/hosts.md); requalification affects future runs only.
 
 ## Hook trust
 

@@ -52,7 +52,7 @@
       "spike_backend": {
         "kind": "qualified",
         "backend": "docker",
-        "profile_id": "docker-rust-v1",
+        "profile_id": "docker-isolated-v1",
         "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
       }
@@ -81,5 +81,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\nspikes qualified docker-rust-v1 binding (not a live-health claim)\n  qualification record: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  execution binding: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAudit: required\n\nReasons:\n  claim.spike_stale: Spike prerequisites changed; re-gate.\n    params: changes=<<<EMPIRICA_UNTRUSTED_DATA>>>src/lib.py<<<END_EMPIRICA_UNTRUSTED_DATA>>>: present\n    next: empirica_observe kind=spike_request\n\nFreshness:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>src/lib.py<<<END_EMPIRICA_UNTRUSTED_DATA>>>: present"
+  "text": "Block active — no governance\nrun_id: run-fx\nspikes qualified generic Docker profile binding (not a live-health claim)\n  qualification record: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  execution binding: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAudit: required\n\nReasons:\n  claim.spike_stale: Spike prerequisites changed; re-gate.\n    params: changes=<<<EMPIRICA_UNTRUSTED_DATA>>>src/lib.py<<<END_EMPIRICA_UNTRUSTED_DATA>>>: present\n    next: empirica_observe kind=spike_request\n\nFreshness:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>src/lib.py<<<END_EMPIRICA_UNTRUSTED_DATA>>>: present"
 }

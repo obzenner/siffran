@@ -64,7 +64,7 @@
         "spike_backend": {
           "kind": "qualified",
           "backend": "docker",
-          "profile_id": "docker-rust-v1",
+          "profile_id": "docker-isolated-v1",
           "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
         }

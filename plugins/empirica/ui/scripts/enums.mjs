@@ -30,7 +30,7 @@ export const PATHS = {
   record_class: [[...SHEET_CLAIM, "records", "[]", "class"]],
   decision: [[...SHEET_CLAIM, "decision", "status"]],
   spike: [[...SHEET_CLAIM, "proof", "[]", "state"]],
-  spike_outcome: [[...SHEET_CLAIM, "proof", "[]", "outcome"], [...SHEET_CLAIM, "proof", "[]", "gate"]],
+  spike_outcome: [[...SHEET_CLAIM, "proof", "[]", "result", "outcome"]],
   mode: [["run", "governance", "mode"]],
   approval: [["run", "governance", "approval"]],
   why: [["run", "dropped", "[]", "why"]],

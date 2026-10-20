@@ -1,6 +1,7 @@
 # Empirica 2.0 D7/D7-W — application transactions and single-writer proof
 
-**Status:** Implemented; fields were extended in Empirica 4.0.0 by ADR 0055/0060.
+**Status:** Implemented historical single-writer design, extended through Empirica `6.0.0`; current
+wire is `empirica/v2` and current persisted state is exactly `empirica.run/3`.
 
 **Normative inputs:** D0, D1, D1-H, accepted D2/D2A/D2B/D2C/D2D/D2E, D3, D4, D5/D5-F, D6, final-DAG §5/§7/§9.
 
@@ -46,13 +47,20 @@ Acting on an overclaim is a stop condition.
 
 ### 5.1 Committed-history head amendment
 
-The D6 `empirica.run/2` state schema is internally amended with one required nullable field:
+The current `empirica.run/3` state schema requires both the committed-history head and one immutable
+run-selected spike backend:
 
 ```text
 committed_artifact_head_id   digest256 | null
+spike_backend                {kind: spikes_unavailable} | exact qualified generic Docker binding
 ```
 
-This is the sole committed-history visibility pointer: the content digest of the most recent `transaction_manifest` artifact reachable from this state. It is not a second state model, policy, or persisted projection. The `state_schema` remains `empirica.run/2`; no compatibility or version bump. State schema, fixtures, and codec are amended to include this field. The `run_state` codec only validates the **head field grammar** — that `committed_artifact_head_id` is either `null` or a well-formed `digest256`. State written before the amendment (without the field) classifies as `current_corrupt` — D7 is the first to write real state. Manifest traversal corruption (§7.2) is snapshot/history corruption, not a codec classification: it produces a `run.corrupt` Block, never `current_corrupt`.
+The head is the sole committed-history visibility pointer: the content digest of the most recent
+`transaction_manifest` artifact reachable from this state. The backend is selected exactly once by
+`StartRun`; only an exact `GenericQualifiedBackend` persists as qualified, while every exception,
+unknown value, old shape, or subclass freezes `spikes_unavailable`. Neither field is a second state
+model, policy cache, or persisted projection. The strict codec accepts only `empirica.run/3`; it never
+translates another state family.
 
 ### 5.2 State authority rules
 
@@ -77,14 +85,20 @@ One immutable operational value type lives in `core/run.py`:
 
 ```text
 OperationalState (frozen dataclass):
-  protocol, state_schema, goal, status, modes, budgets,
+  protocol, state_schema, goal, invocation, status, budgets, governance,
   selected_graph_artifact_id, frozen_claim_ids, frozen_semantic_digest,
   route_stamp, investigation_stamp, stamp_seq,
-  last_derivation_digest, children,
-  committed_artifact_head_id
+  last_derivation_digest, children, observation_basis_digest,
+  committed_artifact_head_id, spike_backend
 ```
 
-Exact fields match the D6 `empirica.run/2` schema plus the committed head. `application/run_state.py` remains the sole schema classifier/codec constructing `OperationalState` from raw JSON and encoding it back. No duplicate dict or dataclass. Core evaluation returns a pure next `OperationalState` (or `StateIntent`) without importing `application`. The core produces the full next `OperationalState` with the **prior head unchanged**; the coordinator then uses `dataclasses.replace(state, committed_artifact_head_id=manifest_id)` to set the committed head to the appended manifest's content digest **before** CAS — not after CAS success. CAS compares and sets the **replaced** state; the state written on success already carries the new head.
+Exact fields match the current `empirica.run/3` schema. `application/run_state.py` remains the sole
+schema classifier/codec constructing `OperationalState` from raw JSON and encoding it back. No
+duplicate dict or dataclass. Core evaluation returns a pure next `OperationalState` (or
+`StateIntent`) without importing `application`. The core produces the full next state with the prior
+head unchanged; the coordinator replaces `committed_artifact_head_id` with the appended manifest's
+content digest before CAS. CAS compares and sets that replaced state; the successful write already
+carries the new head and the immutable StartRun backend.
 
 ## 7. Transaction manifest and committed history
 
@@ -133,12 +147,25 @@ Retrying the same artifact content is idempotent (content-addressed set union). 
 
 A `spike_request` ObserveAction executes as two commits:
 
-1. **Request commit:** append `spike_request` domain artifact + manifest, CAS state with committed head. This publishes the request before harness execution.
-2. **Execute once:** run the harness against the immutable `ExecutionSnapshot` (captured bytes) after the request commit. Result facts are stable. The harness receives no workspace or ambient authority; exit code is the sole spike-gate authority.
-3. **Result commit:** append spike-result domain artifact + manifest, CAS state.
-4. **Conflict:** a CAS conflict on the result commit revalidates and retries the result commit without automatic harness rerun (the result facts are immutable).
+1. **Capture and request commit:** validate the current closed author draft (the multi-container shape described here was superseded by the Empirica 6 MVP), observe every
+   declared input in one canonical basis, seal draft/plan/policy/snapshot/backend facts, append the
+   `spike_request` artifact plus manifest, and CAS the state. This publishes immutable authority
+   before any sandbox effect.
+2. **Execute once:** after request CAS, invoke `GenericDockerHarness` with the immutable
+   `GenericHarnessRequest`. It receives captured bytes and the run-bound backend, never a workspace,
+   host command string, credential, profile choice, or ambient authority.
+3. **Validate result:** accept only a closed `GenericHarnessResult` whose run/backend/plan/policy/
+   snapshot/operation/container/cleanup/postflight facts exactly echo the request. Only the verdict
+   container's natural zero/nonzero exit yields uppercase `PASS`/`FAIL`; every substrate ambiguity
+   yields unavailable and no result.
+4. **Result commit:** freshly re-observe exact bindings, append the lowercase `pass`/`fail` result
+   artifact plus manifest, and CAS state.
+5. **Conflict:** a result-CAS conflict revalidates and retries only result admission with the same
+   immutable result facts. It never invokes the harness again in that call.
 
-A crash after the request commit leaves a reachable request without a result (safe) or an unreachable physical orphan (safe). Exit code only is authority for `spike_gate`.
+A crash after request commit leaves a reachable request without a result and may be retried by a
+separate call. A crash before request CAS performs no sandbox effect. An unreachable physical orphan
+remains harmless. No result can be admitted without the exact committed request.
 
 ## 8. Identity and location
 
@@ -205,7 +232,9 @@ For any **no-active-path** mutating transaction (including genesis), D7 uses the
 
 ### 8.4 Bridge composition
 
-`application/location.py` defines DTO/protocol/codec only. `adapters/state/located.py` is the concrete facade wrapping `FilesystemRunRepository` + `GenerationAllocator`. `compose` keeps its current signature and receives `runs` as the located facade; no concrete allocator import or extra parameter. The repository root is a construction-time fact from the current repo (cwd), never a request wire field. Concrete filesystem workspace/harness ports are added only if D7's real bridge needs them. The D4 test fake is upgraded as a storage fake (using real storage interfaces) with no policy.
+`application/location.py` defines DTO/protocol/codec only. `adapters/state/located.py` is the concrete facade wrapping `FilesystemRunRepository` + `GenerationAllocator`. `compose` keeps its current signature and receives `runs` as the located facade; no concrete allocator import or extra parameter. The repository root is a construction-time fact from the current repo, never a request wire field.
+The bridge composes only the generic authority store, selector, resolver, and harness. The D4 test
+fake implements the same closed generic request/result ports and executes no Docker or host command.
 
 ## 9. Workspace and observation integration
 
@@ -277,11 +306,11 @@ project_argument(snapshot: EvaluationSnapshot) -> ArgumentView
   Launch rejection refunds exactly once to the recorded class; every used counter must reconcile to
   non-refunded durable children. Purpose text has no authority to select audit capacity.
 - Route before investigation: route and investigation are positive, strictly ordered first-write
-  witnesses. Research, spikes, executable children, trusted audit facts, and convergence require
-  both. Candidate rejection precedes domain artifacts, budget/child mutation, harness execution,
-  manifests, and CAS. Reachable investigative artifacts persist the exact witness pair; mismatch is
-  `run.corrupt`. Native Claude/Pi pre-tool gates deny investigation before execution. Honest stop and
-  preparation-only graph/configuration/freeze remain available.
+  witnesses. Research, generic spikes, executable children, trusted audit facts, and convergence
+  require both. Candidate rejection precedes domain artifacts, budget/child mutation, generic
+  harness execution, manifests, and CAS. Reachable investigative artifacts persist the exact witness
+  pair; mismatch is `run.corrupt`. Native Claude/Pi pre-tool gates deny investigation before
+  execution. Honest stop and preparation-only graph/configuration/freeze remain available.
 - Freeze first-write-wins: ordered `frozen_claim_ids` and canonical `frozen_semantic_digest` are set atomically only when both are null; repeated freeze is `Inert` unchanged. The digest binds exact committed claim records and sorted edges with frozen endpoints. Candidate mismatch is zero-write `graph.invalid`; persisted mismatch is `run.corrupt`. Later claims and cross-scope edges remain deferred and audit-invalidating.
 - Terminal status first wins: once non-`active`, no later event changes status or produces convergence.
 
@@ -354,7 +383,9 @@ Per-slice runtime is measured, not suggested. Each slice reports physical LOC de
 - **Idempotent append:** retry re-appends same content → no duplicate.
 - **Corrupt/absent fail closed:** corrupt manifest chain or selected persisted graph → `run.corrupt` Block; absent selector → `Inert` `no_run`; null graph pointer is valid until an operation requires a graph.
 - **Manifest traversal:** cyclic/missing/duplicate/wrong-kind manifest → `run.corrupt` Block; orphan ignored; selected graph reachable.
-- **Spike two-commit:** request committed before harness; execute once; result committed; conflict retries result commit without rerun; crash-safe orphan.
+- **Generic spike two-CAS:** closed request committed before effects; one generic harness call;
+  exact typed result committed after fresh binding observation; result conflict retries without a
+  rerun; request-only crash state remains safe.
 - **Terminal response exact:** GetRun/GetArgument/RestoreRun/Evaluate(stop/report_convergence) on terminal → Allow (converged iff status converged); Evaluate(continue)/ObserveAction/ingress on terminal → Inert `no_run`.
 
 ### D7-W red tests
@@ -375,7 +406,8 @@ Stop and escalate if:
 
 - a D7 operation requires a **public schema change** (new command/action/reason/status/section/host tier, or new public response field). The internal `committed_artifact_head_id` amendment is allowed.
 - a **second state model** would be required (persisted snapshot/projection/verdict).
-- **v1** behavior (migration, legacy decode, backward compatibility) is required.
+- an operation requires accepting an alternate state family, compatibility decoder, command-spike
+  port, or host execution fallback;
 - **D8/D9/D10 behavior** is required to produce a truthful result and cannot be honestly `unsupported`/closed. (Zero-budget child denial is the only admitted D8-related behavior.)
 - the runtime **cannot stay ≤ 9,457** after D7 additions.
 - acting on a discovery overclaim (§4) would be required.
