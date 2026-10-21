@@ -76,6 +76,37 @@ class QueueRunner:
         return self.outputs.pop(0)
 
 
+class DockerCli:
+    """The five passive reads answered as docker/cli does, from the independent fixture.
+
+    `info --format` executes on the Go struct `dockerInfo`: `{{json .}}` yields the Engine-API
+    JSON, while a map-style `index .` template fails exactly as the CLI does.
+    """
+
+    def __init__(self):
+        self.info = json.loads(FIXTURE.read_text(encoding="utf-8"))["docker_info"]
+        self.calls = []
+
+    def run(self, argv, **kwargs):
+        self.calls.append((tuple(argv), kwargs))
+        args, fake = tuple(argv[1:]), process.CommandResult.fake
+        if args == ("context", "show"):
+            return fake(stdout="desktop-linux\n")
+        if args[:2] == ("context", "inspect"):
+            return fake(stdout='"unix:///Users/me/.docker/run/docker.sock"\n')
+        if args == ("version", "--format", "{{json .Client.Version}}"):
+            return fake(stdout='"29.7.2"\n')
+        if args[:2] == ("version", "--format") and ".Server.Platform.Name" in args[2]:
+            return fake(stdout=json.dumps(self.info["version_server_projection"]) + "\n")
+        if args == ("info", "--format", "{{json .}}"):
+            return fake(stdout=json.dumps(self.info["json_form"]) + "\n")
+        if args[:2] == ("info", "--format") and "index ." in args[2]:
+            return fake(self.info["struct_template_returncode"],
+                        stderr="template: :1:12: executing \"\" at <index . \"OSType\">: "
+                               + self.info["struct_template_error"] + "\n")
+        raise AssertionError(f"unexpected docker/cli call {args}")
+
+
 class FakeStore:
     def __init__(self, record):
         self.record = record
@@ -205,11 +236,48 @@ class RuntimeCapabilityTests(unittest.TestCase):
         self.assertEqual(len(runner.calls), 5)
         self.assertTrue(all(call[1]["output_limit_bytes"] == 64 * 1024
                             and call[1]["timeout_seconds"] <= 5 for call in runner.calls))
-        self.assertNotIn("{{json .}}", runner.calls[-1][0][-1])
+        self.assertEqual(runner.calls[-1][0][1:], ("info", "--format", "{{json .}}"))
         self.assertEqual([call[0][1:3] for call in runner.calls],
                          [("context", "show"), ("context", "inspect"),
                           ("version", "--format"), ("version", "--format"),
                           ("info", "--format")])
+
+    def test_docker_29_info_json_is_read_struct_safely_and_projected(self):
+        cli = DockerCli()
+        observed = authority.inspect_current_runtime(
+            desktop_runtime(), deadline=time.monotonic() + 10, runner=cli,
+            host_facts=("Darwin", "arm64")).runtime
+        self.assertEqual(len(cli.calls), 5)
+        self.assertEqual(cli.calls[-1][0][1:], ("info", "--format", "{{json .}}"))
+        self.assertEqual(
+            {key: observed[key] for key in (
+                "server_version", "server_architecture", "platform_name", "operating_system",
+                "security_options", "memory_limit", "swap_limit", "ncpu")},
+            {"server_version": "29.7.2", "server_architecture": "arm64",
+             "platform_name": "Docker Desktop 4.90.0 (238679)",
+             "operating_system": "Docker Desktop",
+             "security_options": ["name=cgroupns", "name=seccomp,profile=builtin"],
+             "memory_limit": True, "swap_limit": True, "ncpu": 8})
+        # Only the named JSON keys are projected; the rest of the document is not retained.
+        self.assertNotIn("docker-desktop", json.dumps(observed))
+        self.assertNotIn("ClientInfo", json.dumps(observed))
+
+    def test_map_style_info_template_fails_as_docker_cli_does(self):
+        cli = DockerCli()
+        refused = cli.run((CLI, "info", "--format", '{"OSType":{{json (index . "OSType")}}}'))
+        self.assertEqual(refused.returncode, 1)
+        self.assertIn(b"can't index item of type system.dockerInfo", refused.stderr.data)
+
+        class StructUnsafe(DockerCli):
+            def run(self, argv, **kwargs):
+                if tuple(argv[1:3]) == ("info", "--format"):
+                    argv = (*argv[:3], '{"OSType":{{json (index . "OSType")}}}')
+                return super().run(argv, **kwargs)
+
+        with self.assertRaisesRegex(authority.GenericQualificationError, "Docker info read failed"):
+            authority.inspect_current_runtime(
+                desktop_runtime(), deadline=time.monotonic() + 10, runner=StructUnsafe(),
+                host_facts=("Darwin", "arm64"))
 
     def test_record_binds_semantic_authority_and_implementation(self):
         record = qualification_record()

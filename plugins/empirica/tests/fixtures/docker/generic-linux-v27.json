@@ -95,6 +95,41 @@
       "--uts"
     ]
   },
+  "docker_info": {
+    "json_form": {
+      "Architecture": "aarch64",
+      "CPUShares": true,
+      "CgroupDriver": "cgroupfs",
+      "CgroupVersion": "2",
+      "ClientInfo": {
+        "Context": "desktop-linux",
+        "Version": "29.7.2"
+      },
+      "CpuCfsQuota": true,
+      "ID": "pinned-sample",
+      "MemTotal": 8217473024,
+      "MemoryLimit": true,
+      "NCPU": 8,
+      "Name": "docker-desktop",
+      "OSType": "linux",
+      "OperatingSystem": "Docker Desktop",
+      "PidsLimit": true,
+      "SecurityOptions": [
+        "name=seccomp,profile=builtin",
+        "name=cgroupns"
+      ],
+      "ServerVersion": "29.7.2",
+      "SwapLimit": true
+    },
+    "struct_template_error": "error calling index: can't index item of type system.dockerInfo",
+    "struct_template_returncode": 1,
+    "version_server_projection": {
+      "Arch": "arm64",
+      "Os": "linux",
+      "PlatformName": "Docker Desktop 4.90.0 (238679)",
+      "Version": "29.7.2"
+    }
+  },
   "image_merged_config_forms": [
     {
       "Config": {
@@ -186,6 +221,10 @@
       "docker/cli cli/command/container/create.go cidFile.Write records the ID only after ContainerCreate returns; an empty file can coexist with a created container",
       "docker/cli cli/command/container/create.go cidFile.Close removes an unwritten file only on a non-killed exit",
       "child umask 077 derives owner-only 0600"
+    ],
+    "docker_info": [
+      "docker/cli cli/command/system/info.go: dockerInfo{*system.Info; ClientInfo; ServerErrors} is a Go struct; --format executes on it, so `index` fails (\"can't index item of type system.dockerInfo\") and field names differ from JSON keys (CPUCfsQuota vs CpuCfsQuota); {{json .}} marshals it with the Engine-API JSON tags, promoting system.Info keys to the top level",
+      "G17 live Docker Desktop 4.90.0, CLI/Engine 29.7.2, linux/arm64, containerd store: {{json .}} 13045 bytes; OSType, Architecture, OperatingSystem, SecurityOptions, MemoryLimit, SwapLimit and the version projection are the live values; the other json_form keys are representative literals of the same JSON shape"
     ],
     "generator_independence": "This generator imports no Empirica planner, admission, or runtime module.",
     "static_inspect": [

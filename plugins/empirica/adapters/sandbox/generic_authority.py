@@ -342,19 +342,10 @@ def inspect_current_runtime(
         '{"Version":{{json .Server.Version}},"Os":{{json .Server.Os}},'
         '"Arch":{{json .Server.Arch}},"PlatformName":{{json .Server.Platform.Name}}}'),
         "Docker server version read"), "Docker server version")
-    info = _strict_json(read(("info", "--format",
-        '{"OSType":{{json (index . "OSType")}},'
-        '"Architecture":{{json (index . "Architecture")}},'
-        '"OperatingSystem":{{json (index . "OperatingSystem")}},'
-        '"SecurityOptions":{{json (index . "SecurityOptions")}},'
-        '"MemoryLimit":{{json (index . "MemoryLimit")}},'
-        '"SwapLimit":{{json (index . "SwapLimit")}},'
-        '"CpuCfsQuota":{{json (index . "CpuCfsQuota")}},'
-        '"PidsLimit":{{json (index . "PidsLimit")}},'
-        '"NCPU":{{json (index . "NCPU")}},"MemTotal":{{json (index . "MemTotal")}},'
-        '"CgroupVersion":{{json (index . "CgroupVersion")}},'
-        '"CgroupDriver":{{json (index . "CgroupDriver")}}}'),
-        "Docker info read"), "Docker info")
+    # docker/cli formats `info` over a Go struct (no `index`, field names differ from JSON keys),
+    # so read the Engine-API JSON whole and project only the keys used below by their JSON names.
+    info = _strict_json(read(("info", "--format", "{{json .}}"), "Docker info read"),
+                        "Docker info")
     if type(client) is not str or type(server) is not dict or type(info) is not dict:
         raise GenericQualificationError("Docker version/info projection is malformed")
     raw_os = server.get("Os") or info.get("OSType")

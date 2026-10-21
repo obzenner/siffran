@@ -119,6 +119,10 @@ def fixture() -> dict:
                 "docker/cli cli/command/container/create.go cidFile.Close removes an unwritten file only on a non-killed exit",
                 "child umask 077 derives owner-only 0600"
             ],
+            "docker_info": [
+                "docker/cli cli/command/system/info.go: dockerInfo{*system.Info; ClientInfo; ServerErrors} is a Go struct; --format executes on it, so `index` fails (\"can't index item of type system.dockerInfo\") and field names differ from JSON keys (CPUCfsQuota vs CpuCfsQuota); {{json .}} marshals it with the Engine-API JSON tags, promoting system.Info keys to the top level",
+                "G17 live Docker Desktop 4.90.0, CLI/Engine 29.7.2, linux/arm64, containerd store: {{json .}} 13045 bytes; OSType, Architecture, OperatingSystem, SecurityOptions, MemoryLimit, SwapLimit and the version projection are the live values; the other json_form keys are representative literals of the same JSON shape"
+            ],
             "generator_independence": "This generator imports no Empirica planner, admission, or runtime module."
         },
         "static_container_inspect": static_container,
@@ -137,6 +141,23 @@ def fixture() -> dict:
                            "maintainer": "upstream"}}},
             {"name": "cmd-null-no-arguments", "Config": {"Cmd": None}},
         ],
+        "docker_info": {
+            "json_form": {
+                "ID": "pinned-sample", "Name": "docker-desktop", "ServerVersion": "29.7.2",
+                "OSType": "linux", "Architecture": "aarch64",
+                "OperatingSystem": "Docker Desktop",
+                "SecurityOptions": ["name=seccomp,profile=builtin", "name=cgroupns"],
+                "MemoryLimit": True, "SwapLimit": True, "CpuCfsQuota": True,
+                "CPUShares": True, "PidsLimit": True, "NCPU": 8, "MemTotal": 8217473024,
+                "CgroupVersion": "2", "CgroupDriver": "cgroupfs",
+                "ClientInfo": {"Version": "29.7.2", "Context": "desktop-linux"},
+            },
+            "version_server_projection": {
+                "Version": "29.7.2", "Os": "linux", "Arch": "arm64",
+                "PlatformName": "Docker Desktop 4.90.0 (238679)"},
+            "struct_template_error": "error calling index: can't index item of type system.dockerInfo",
+            "struct_template_returncode": 1,
+        },
         "absence_stdout": "[]\n",
         "absence_returncode": 1,
         "absence_stderr": {
