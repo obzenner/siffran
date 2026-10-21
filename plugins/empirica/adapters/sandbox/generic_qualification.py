@@ -108,11 +108,12 @@ class ProbeObservation:
     cleanup_proven: bool
     duration_ms: int
     running_network_membership: bool
+    realization_digest: str | None = None
 
     def to_data(self) -> dict[str, Any]:
         return {name: getattr(self, name) for name in (
             "name", "expected", "observed", "operation_digest", "cleanup_proven",
-            "duration_ms", "running_network_membership")}
+            "duration_ms", "running_network_membership", "realization_digest")}
 
 
 class QualificationProbeKernel(Protocol):
@@ -138,7 +139,7 @@ def _positive_ms(value: object, where: str, *, allow_zero: bool = True) -> int:
 
 def validate_probe(value: object, index: int) -> dict[str, Any]:
     fields = {"name", "expected", "observed", "operation_digest", "cleanup_proven",
-              "duration_ms", "running_network_membership"}
+              "duration_ms", "running_network_membership", "realization_digest"}
     if type(value) is not dict or set(value) != fields or index >= len(PROBE_ORDER):
         raise GenericQualificationFailure(
             QualificationReason.INSTALL_VALIDATION_FAILED, "qualification probe shape is unknown")
@@ -150,6 +151,14 @@ def validate_probe(value: object, index: int) -> dict[str, Any]:
             QualificationReason.INSTALL_VALIDATION_FAILED, "qualification probe outcome differs")
     _strict_digest(row["operation_digest"], "probe operation digest")
     _positive_ms(row["duration_ms"], "probe duration")
+    # A verdict probe records the container's observed top-level `Image` realization digest; an
+    # unavailable probe admits no result, so it records none.
+    if row["expected"] in {"PASS", "FAIL"}:
+        _strict_digest(row["realization_digest"], "probe realization digest")
+    elif row["realization_digest"] is not None:
+        raise GenericQualificationFailure(
+            QualificationReason.INSTALL_VALIDATION_FAILED,
+            "unavailable probe cannot claim a realization digest")
     return row
 
 
@@ -519,6 +528,7 @@ class ProductionProbeKernel:
             result = execution.execute_generic_operation(
                 self.store, operation, snapshot, effects, backend_deadline=deadline,
                 postflight=lambda limit: self.backend.execution_binding_digest,
+                authority=authority.authority_facts(self.runtime),
                 clock=self.clock, qualification_controls=controls)
         except execution.GenericExecutionUnavailable as exc:
             caught = exc
@@ -555,7 +565,11 @@ class ProductionProbeKernel:
                     QualificationReason.CLEANUP_UNAVAILABLE,
                     "qualification probe cleanup is incomplete after: " + str(caught))
         if observed != expected:
-            if result is not None and result.exit_code == 46:
+            # A fast egress failure can exit before running membership is observed, leaving no
+            # result; the natural attach exit still identifies it.
+            if (result is not None and result.exit_code == 46) or (
+                    name == "network-profile" and attach is not None
+                    and attach.natural_exit is True and attach.process.returncode == 46):
                 raise GenericQualificationFailure(
                     QualificationReason.NETWORK_EGRESS_UNAVAILABLE,
                     "networked Docker profile could not prove outbound HTTP egress")
@@ -583,7 +597,7 @@ class ProductionProbeKernel:
         duration = int((self.clock() - began) * 1000)
         return ProbeObservation(
             name, expected, observed, operation.digest, True, duration,
-            running["running"])
+            running["running"], None if result is None else result.realization_digest)
 
     def _assert_empty(self) -> None:
         try:

@@ -79,7 +79,7 @@
       "required": ["source", "cidfile", "absence", "ambiguity", "operator_recovery"],
       "properties": {
         "source": {"const": "durably-recorded-64-hex-full-id-only"},
-        "cidfile": {"const": "docker-created-owner-only-optional-until-create-success"},
+        "cidfile": {"const": "docker-created-owner-only-empty-or-missing-is-never-absence"},
         "absence": {"const": "exact-recorded-id-error-form"},
         "ambiguity": {"const": "retain-journal-and-staging"},
         "operator_recovery": {"const": "inspect-private-operation-id-before-explicit-removal"}

@@ -118,13 +118,11 @@ admits no result. Request/result
 evidence is rendered read-only and strips runtime-local data and raw output.
 
 `EMPIRICA_SPIKE_PROFILE` is host-process launch authority only: absent means isolated; only
-`docker-isolated-v1` and `docker-networked-v1` are accepted. Isolated permits declared internal
-private networks but denies outbound egress; networked permits declared non-internal private
-networks and outbound Internet egress. Neither permits host ingress or published ports. Operator
-qualification uses the
-explicit generic targets documented in [`doc/hosts.md`](../../../../doc/hosts.md), a 600-second
-seven-probe procedure, and an already-local image/config identity. Requalification applies only to
-future runs.
+`docker-isolated-v1` and `docker-networked-v1` are accepted. Isolated has no network; networked
+gives the one verdict container a private bridge with outbound egress only. Every agent-visible
+limit and refusal reason is public-contract clause `evidence/spike/limits` (GetContract section
+`evidence/spike`). Operator qualification uses the explicit generic targets documented in
+[`doc/hosts.md`](../../../../doc/hosts.md). Requalification applies only to future runs.
 
 ## Canonical audit call
 

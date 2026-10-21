@@ -60,11 +60,11 @@ is unavailable; every substrate ambiguity admits no result.
 Codex uses the shared 120-second workload and 210-second Docker operation budgets within the
 360-second MCP ceiling. `EMPIRICA_SPIKE_PROFILE` is read from the launching host process only;
 absence selects isolated, and only `docker-isolated-v1` or `docker-networked-v1` is accepted.
-Isolated permits declared internal private networks but denies outbound egress; networked permits
-declared non-internal private networks and outbound Internet egress. Neither permits host ingress or
-published ports. The
-operator qualification/install commands and 600-second seven-probe procedure are documented in
-[`doc/hosts.md`](../../../../doc/hosts.md); requalification affects future runs only.
+Isolated has no network; networked gives the one verdict container a private bridge with outbound
+egress only. Every agent-visible limit and refusal reason is public-contract clause
+`evidence/spike/limits` (GetContract section `evidence/spike`). The operator qualification and
+install commands are documented in [`doc/hosts.md`](../../../../doc/hosts.md); requalification
+affects future runs only.
 
 ## Hook trust
 

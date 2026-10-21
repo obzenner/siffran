@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from adapters.state import fsio
-from application.generic_spike import GenericQualifiedBackend
-from core import spike_plan
 from core.freshness import validate_digest256
 
 from . import common, planner
@@ -29,7 +27,7 @@ _STATES = (
     "cleanup", "removed",
 )
 _RANK = {name: index for index, name in enumerate(_STATES)}
-_FIELDS = {"schema", "operation_id", "compiler", "operation_digest", "operation",
+_FIELDS = {"schema", "operation_id", "authority", "operation_digest", "operation",
            "state", "events", "resource_ids", "diagnostics"}
 
 
@@ -41,7 +39,11 @@ class GenericJournalError(RuntimeError):
 class GenericJournal:
     directory: Path
     document: dict[str, Any]
-    operation: planner.ResolvedDockerOperation
+    operation: "JournalOperation"
+
+    @property
+    def authority(self) -> dict[str, Any]:
+        return self.document["authority"]
 
     @property
     def container_id(self) -> str | None:
@@ -159,44 +161,85 @@ def _atomic(path: Path, data: bytes) -> None:
         raise GenericJournalError("journal cannot be published atomically") from exc
 
 
-def _backend(value: object) -> GenericQualifiedBackend:
-    fields = {"kind", "backend", "profile_id", "qualification_record_digest",
-              "execution_binding_digest"}
-    if type(value) is not dict or set(value) != fields or value.get("kind") != "qualified":
-        raise GenericJournalError("journal backend is malformed")
+_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+_LABEL_BYTES = 64 * 1024
+_DIAGNOSTIC_FIELDS = frozenset({"kind", "returncode", "stderr_bytes", "stderr_sha256",
+                                "stderr_tail"})
+
+
+@dataclass(frozen=True, slots=True)
+class JournalResource:
+    """The persisted correlation facts of one owned resource; never destructive authority."""
+    name: str
+    labels: tuple[tuple[str, str], ...]
+
+
+@dataclass(frozen=True, slots=True)
+class JournalOperation:
+    """The closed cleanup view recovery needs, read from the persisted operation data only.
+
+    It never asks the current planner to reproduce the operation, so an unfinished journal stays
+    recoverable after a plugin, planner, or implementation change.
+    """
+    operation_id: str
+    container: JournalResource
+    network: JournalResource | None
+
+
+def _resource(value: object, operation_id: str, kind: str) -> JournalResource:
+    if type(value) is not dict:
+        raise GenericJournalError(f"journal {kind} correlation is malformed")
+    name, labels = value.get("name"), value.get("labels")
+    if (type(name) is not str or _NAME.fullmatch(name) is None or type(labels) is not dict
+            or not labels or len(labels) > 64
+            or any(type(key) is not str or type(item) is not str or not key
+                   for key, item in labels.items())
+            or len(json.dumps(labels).encode("utf-8")) > _LABEL_BYTES
+            or labels.get("io.siffran.empirica.operation") != operation_id
+            or labels.get("io.siffran.empirica.resource") != kind):
+        raise GenericJournalError(f"journal {kind} correlation is malformed")
+    return JournalResource(name, tuple(sorted(labels.items())))
+
+
+def _operation_view(document: Mapping[str, Any]) -> JournalOperation:
+    operation = document.get("operation")
+    if type(operation) is not dict or operation.get("operation_id") != document.get("operation_id"):
+        raise GenericJournalError("journal operation data is not self-consistent")
     try:
-        return GenericQualifiedBackend(
-            value["backend"], value["profile_id"], value["qualification_record_digest"],
-            value["execution_binding_digest"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise GenericJournalError("journal backend is malformed") from exc
+        # A diagnostic identity only: recovery never recompiles or re-hashes the operation, so a
+        # journal written by an older planner remains recoverable.
+        validate_digest256(document.get("operation_digest"))
+    except (TypeError, ValueError) as exc:
+        raise GenericJournalError("journal operation digest is malformed") from exc
+    network = operation.get("network")
+    return JournalOperation(
+        document["operation_id"],
+        _resource(operation.get("container"), document["operation_id"], "container"),
+        None if network is None else _resource(network, document["operation_id"], "network"))
 
 
-def _reconstruct(document: Mapping[str, Any]) -> planner.ResolvedDockerOperation:
-    compiler = document.get("compiler")
-    fields = {"request", "backend", "run_id", "staging_token"}
-    if type(compiler) is not dict or set(compiler) != fields:
-        raise GenericJournalError("journal compiler input is not closed")
-    try:
-        request = spike_plan.sealed_request_from_data(compiler["request"])
-        backend = _backend(compiler["backend"])
-        operation = planner.compile_docker_operation(
-            request, backend, compiler["run_id"], document["operation_id"],
-            compiler["staging_token"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise GenericJournalError("journal compiler input cannot reconstruct") from exc
-    if (operation.digest != document.get("operation_digest")
-            or operation.to_data() != document.get("operation")):
-        raise GenericJournalError("journal operation differs from reconstruction")
-    return operation
+# A Docker-written cidfile is one 64-hex ID; a longer readable file is malformed, not authority.
+CIDFILE_BYTES = 4096
+DAEMON_IDENTITY = ("endpoint", "server_os", "server_architecture")
 
 
-def validate_document(value: object, directory_name: str) -> tuple[dict[str, Any], planner.ResolvedDockerOperation]:
+def daemon_identity(value: object) -> dict[str, str]:
+    """Which daemon owns the recorded IDs. Capability facts are not identity: passive
+    verification and postflight enforce them for new execution, never for recovery."""
+    if not isinstance(value, Mapping) or any(
+            type(value.get(key)) is not str or not value[key] for key in DAEMON_IDENTITY):
+        raise GenericJournalError("journal Docker daemon identity is malformed")
+    return {key: value[key] for key in DAEMON_IDENTITY}
+
+
+def validate_document(value: object, directory_name: str) -> tuple[dict[str, Any], JournalOperation]:
     if type(value) is not dict or set(value) != _FIELDS or value.get("schema") != JOURNAL_SCHEMA \
             or value.get("operation_id") != directory_name \
             or common.OPERATION_ID.fullmatch(directory_name) is None:
         raise GenericJournalError("journal shape or identity is invalid")
-    operation = _reconstruct(value)
+    operation = _operation_view(value)
+    if value.get("authority") != daemon_identity(value.get("authority")):
+        raise GenericJournalError("journal Docker daemon identity is malformed")
     state = value.get("state")
     events = value.get("events")
     ids = value.get("resource_ids")
@@ -222,8 +265,8 @@ def validate_document(value: object, directory_name: str) -> tuple[dict[str, Any
         raise GenericJournalError("journal state differs from events")
     for diagnostic in diagnostics:
         if (type(diagnostic) is not dict
-                or set(diagnostic) != {"kind", "returncode", "stderr_bytes", "stderr_sha256",
-                                      "stderr_tail"}
+                or set(diagnostic) not in (_DIAGNOSTIC_FIELDS,
+                                           _DIAGNOSTIC_FIELDS | {"realization_digest"})
                 or type(diagnostic["kind"]) is not str
                 or type(diagnostic["returncode"]) is not int
                 or isinstance(diagnostic["returncode"], bool)
@@ -232,6 +275,8 @@ def validate_document(value: object, directory_name: str) -> tuple[dict[str, Any
                 or len(diagnostic["stderr_tail"].encode("utf-8")) > 4096):
             raise GenericJournalError("journal diagnostic is malformed")
         validate_digest256(diagnostic["stderr_sha256"])
+        if "realization_digest" in diagnostic:
+            validate_digest256(diagnostic["realization_digest"])
     checked = json.loads(json.dumps(value))
     return checked, operation
 
@@ -255,26 +300,26 @@ class GenericJournalStore:
             raise GenericJournalError("journal operation ID is malformed")
         return self.root / operation_id
 
-    def begin(self, operation: planner.ResolvedDockerOperation) -> GenericJournal:
+    def begin(self, operation: planner.ResolvedDockerOperation, *,
+              authority: Mapping[str, Any]) -> GenericJournal:
+        """Persist the closed operation data and the identity of the daemon it runs on."""
         self.check()
         if type(operation) is not planner.ResolvedDockerOperation:
             raise GenericJournalError("journal requires exact operation")
         directory = self._directory(operation.operation_id)
-        try:
-            directory.mkdir(mode=0o700)
-            fsio._fsync_dir(directory)
-        except OSError as exc:
-            raise GenericJournalError("journal allocation failed or already exists") from exc
         document = {
             "schema": JOURNAL_SCHEMA, "operation_id": operation.operation_id,
-            "compiler": {"request": operation.request.to_data(),
-                         "backend": operation.backend.to_data(), "run_id": operation.run_id,
-                         "staging_token": operation.staging_token},
+            "authority": daemon_identity(authority),
             "operation_digest": operation.digest, "operation": operation.to_data(),
             "state": "intent", "events": [],
             "resource_ids": {"container": None, "network": None}, "diagnostics": [],
         }
         validate_document(document, operation.operation_id)
+        try:
+            directory.mkdir(mode=0o700)
+            fsio._fsync_dir(directory)
+        except OSError as exc:
+            raise GenericJournalError("journal allocation failed or already exists") from exc
         _atomic(directory / "journal.json", fsio.dump_json(document))
         return self.load(operation.operation_id)
 
@@ -297,21 +342,26 @@ class GenericJournalStore:
         if children not in (("journal.json",), ("container.cid", "journal.json")):
             raise GenericJournalError("journal contains foreign residue")
         if "container.cid" in children:
-            _read(directory / "container.cid", allow_empty=True, maximum=64)
+            _read(directory / "container.cid", allow_empty=True, maximum=CIDFILE_BYTES)
         return GenericJournal(directory, document, operation)
 
-    def scan(self) -> tuple[GenericJournal, ...]:
+    def operation_ids(self) -> tuple[str, ...]:
+        """Bounded names of unfinished journals; loading each is separate so a failure keeps its ID."""
         self.check()
-        rows = tuple(sorted(self.root.iterdir()))
+        rows = tuple(sorted(item.name for item in self.root.iterdir()))
         if len(rows) > MAX_JOURNALS:
             raise GenericJournalError("journal count exceeds bound")
+        for name in rows:
+            if common.OPERATION_ID.fullmatch(name) is None:
+                raise GenericJournalError("journal root contains foreign residue")
+        return rows
+
+    def scan(self) -> tuple[GenericJournal, ...]:
         result = []
         total = 0
-        for path in rows:
-            if common.OPERATION_ID.fullmatch(path.name) is None:
-                raise GenericJournalError("journal root contains foreign residue")
-            row = self.load(path.name)
-            total += sum(item.lstat().st_size for item in path.iterdir())
+        for name in self.operation_ids():
+            row = self.load(name)
+            total += sum(item.lstat().st_size for item in row.directory.iterdir())
             if total > MAX_TOTAL_BYTES:
                 raise GenericJournalError("journal aggregate bytes exceed bound")
             result.append(row)
@@ -343,17 +393,17 @@ class GenericJournalStore:
         return self.load(operation_id)
 
     def read_cidfile(self, operation_id: str) -> str | None:
+        """Return the Docker-written full ID, or None when the cidfile is missing, empty, or not
+        exactly one full ID (the exact-name candidate set then decides).
+
+        None is never an absence proof: docker/cli creates the file before `ContainerCreate` and
+        writes the ID only afterwards, so an empty file can coexist with a created container. An
+        unsafe file identity still fails closed.
+        """
         raw = _read(self._directory(operation_id) / "container.cid", allow_empty=True,
-                    allow_missing=True, maximum=64)
-        if not raw:
-            return None
-        try:
-            text = raw.decode("ascii")
-        except UnicodeDecodeError as exc:
-            raise GenericJournalError("cidfile is not ASCII") from exc
-        if _FULL_ID.fullmatch(text) is None:
-            raise GenericJournalError("cidfile does not contain one exact full ID")
-        return text
+                    allow_missing=True, maximum=CIDFILE_BYTES)
+        text = (raw or b"").decode("ascii", errors="replace")
+        return text if _FULL_ID.fullmatch(text) else None
 
     def finish(self, operation_id: str) -> None:
         row = self.load(operation_id)
@@ -373,16 +423,6 @@ class GenericJournalStore:
             path.unlink()
         row.directory.rmdir()
         fsio._fsync_dir(self.root)
-
-
-def diagnostic(kind: str, result: Any) -> dict[str, Any]:
-    tail = result.stderr.tail
-    encoded = tail.encode("utf-8")
-    if len(encoded) > 4096:
-        tail = encoded[-4096:].decode("utf-8", errors="replace")
-    return {"kind": kind, "returncode": result.returncode,
-            "stderr_bytes": result.stderr.bytes_seen,
-            "stderr_sha256": result.stderr.sha256, "stderr_tail": tail}
 
 
 def _pairs(rows: list[tuple[str, Any]]) -> dict[str, Any]:

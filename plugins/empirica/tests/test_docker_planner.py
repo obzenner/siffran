@@ -46,6 +46,7 @@ def operation(profile="docker-isolated-v1"):
 def static_document(op, *, network_id=None):
     """Hydrate only operation identities into an independently pinned Docker inspect document."""
     document = copy.deepcopy(FIXTURE["static_container_inspect"])
+    document["Name"] = "/" + op.container.name
     document["Config"].update(
         Image=op.plan.image.image_id, Entrypoint=[op.plan.argv[0]],
         Cmd=list(op.plan.argv[1:]),
@@ -63,8 +64,8 @@ class PlannerTests(unittest.TestCase):
         op = operation()
         self.assertIsNone(op.network)
         self.assertEqual([item.kind for item in op.commands], [
-            "container_create", "container_static_inspect", "container_start_attach",
-            "container_terminal_inspect", "container_remove", "container_absence"])
+            "container_create", "container_start_attach",
+            "container_terminal_inspect"])
         argv = op.command("container_create").argv
         self.assertEqual(argv[:2], ("container", "create"))
         for pair in (
@@ -182,7 +183,6 @@ class AdmissionTests(unittest.TestCase):
             lambda d: d["Config"].__setitem__("User", "0:0"),
             lambda d: d["Config"].__setitem__("Env", ["HOME=/bad", "TMPDIR=/tmp", "MODE=test"]),
             lambda d: d["Config"]["Labels"].__setitem__("io.siffran.empirica.run", "other"),
-            lambda d: d["Config"].__setitem__("ExposedPorts", {"80/tcp": {}}),
             lambda d: d["Config"].__setitem__("Volumes", {"/data": {}}),
             lambda d: d["HostConfig"].__setitem__("Privileged", True),
             lambda d: d["HostConfig"].__setitem__("PidMode", "host"),
@@ -213,6 +213,22 @@ class AdmissionTests(unittest.TestCase):
                 admission.admit_static_container(
                     op, document, container_full_id=C0,
                     network_full_id=None, staging_path=Path("/stage/root"))
+
+    def test_image_exposed_ports_metadata_is_not_a_policy_refusal(self):
+        """N-B2: `EXPOSE` is image metadata; publication is HostConfig and stays refused."""
+        op = operation()
+        document = static_document(op)
+        document["Config"]["ExposedPorts"] = {"6379/tcp": {}}
+        admission.admit_static_container(op, document, container_full_id=C0,
+                                         network_full_id=None, staging_path=Path("/stage/root"))
+        for key, value in (("PortBindings", {"6379/tcp": [{"HostPort": "6379"}]}),
+                           ("PublishAllPorts", True)):
+            changed = copy.deepcopy(document)
+            changed["HostConfig"][key] = value
+            with self.subTest(key=key), self.assertRaises(admission.DockerObservationError):
+                admission.admit_static_container(
+                    op, changed, container_full_id=C0, network_full_id=None,
+                    staging_path=Path("/stage/root"))
 
     def test_daemon_real_pid_and_uts_default_forms_are_narrow(self):
         op = operation()
@@ -246,7 +262,13 @@ class AdmissionTests(unittest.TestCase):
                 network_full_id=N0, staging_path=Path("/stage/root"))
 
     def test_exact_absence_accepts_pinned_docker_variants_only_for_recorded_id(self):
-        empty = admission.stream(b"")
+        def raw(argv, stdout, stderr, rc=FIXTURE["absence_returncode"]):
+            return admission.RawProcessObservation(
+                argv, True, rc, False, False, False, admission.stream(stdout),
+                admission.stream(stderr.encode()))
+
+        real = FIXTURE["absence_stdout"].encode()
+        self.assertEqual(real, b"[]\n")
         for resource, key, full in (
             ("container", "container_no_such", C0),
             ("container", "container_not_found", C0),
@@ -254,17 +276,17 @@ class AdmissionTests(unittest.TestCase):
             ("network", "network_not_found", N0),
         ):
             argv = (resource, "inspect", full)
-            raw = admission.RawProcessObservation(
-                argv, True, 1, False, False, False, empty,
-                admission.stream(FIXTURE["absence_stderr"][key].encode()))
-            admission.admit_exact_absence(raw, argv, resource)
-            for bad in (
-                FIXTURE["absence_stderr"][key].replace(full, "c" * 64),
-                FIXTURE["absence_stderr"][key] + " ambiguous trailing text",
-            ):
-                changed = admission.RawProcessObservation(
-                    argv, True, 1, False, False, False, empty,
-                    admission.stream(bad.encode()))
+            stderr = FIXTURE["absence_stderr"][key]
+            for stdout in (real, b"[]", b""):
+                admission.admit_exact_absence(raw(argv, stdout, stderr), argv, resource)
+            refused = (
+                raw(argv, real, stderr.replace(full, "c" * 64)),
+                raw(argv, real, stderr + " ambiguous trailing text"),
+                raw(argv, b'[{"Id": "' + full.encode() + b'"}]\n', stderr),
+                raw(argv, b"[]\n[]\n", stderr),
+                raw(argv, real, stderr, rc=0),
+            )
+            for changed in refused:
                 with self.assertRaises(admission.DockerObservationError):
                     admission.admit_exact_absence(changed, argv, resource)
 

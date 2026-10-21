@@ -139,12 +139,11 @@ execution, and must not depend on unqualified ambient services. `docker-isolated
 network egress; `docker-networked-v1` expressly permits outbound Internet egress from the one verdict
 container on its host-created private bridge.
 
-The host owns one verdict container, fixed uid/gid 65534, `/work`, `/tmp`, one read-only `/inputs`
-tree, and the selected network profile. Fixed policy is `min(2, NCPU)` CPU, 2 GiB memory with no
-extra swap, 256 PIDs, `nofile=1024`, `fsize=64 MiB`, `core=0`, executable 512-MiB `/work`, noexec
-64-MiB `/tmp`, 64-MiB shm, and independent 1-MiB stdout/stderr limits. Capture allows 256 files,
-64 MiB aggregate, and 64 MiB per file. Isolated uses network none; networked uses one private bridge
-with outbound egress and no host ingress or published ports.
+The host owns one verdict container and every sandbox fact. Any tool works as argv, including
+toolchain commands whose words resemble Docker options (`ps --pid 1`, `make build`). The complete,
+drift-checked limitation set (what you choose, what the host fixes, what is never available, the
+verdict rule, and each refusal `reason` with a one-line hint) is public-contract clause
+`evidence/spike/limits`; read it with `GetContract` section `evidence/spike`.
 
 The exact production workload limit is **120 seconds** inside the backend's **210-second** operation.
 Pi's **300-second** and Claude MCP's **360-second** limits are outer transport margins.
@@ -153,9 +152,11 @@ Only the verdict container's inspected **natural exit** produces a verdict: zero
 `PASS`; nonzero is uppercase `FAIL` except 137, which is unavailable. Timeout, forced termination,
 stdout/stderr overflow, OOM, capture/staging failure, image/platform/create/attach/inspect ambiguity,
 identity mismatch, cleanup/recovery failure, or postflight/authority failure is **unavailable** and
-admits **no spike result evidence**. Narrow or redesign after unavailable,
-continue research, or arrange operator requalification for a future run; never infer FAIL, blindly
-retry, or use a host fallback.
+admits **no spike result evidence**. The Fault carries one closed `reason` whenever the cause is
+attributable (for example `image-not-local` or `lifecycle-unavailable`): act on its hint, which may
+be to narrow or redesign, continue research, or arrange operator requalification for a future run.
+A Fault without a reason is an internal host failure: retry once, then ask the operator. Never
+infer FAIL or use a host fallback.
 
 A passing result satisfies Fold 2 only while every bound file remains current. Re-submit the same
 closed plan through `spike_request` only when a changed binding requires re-gating and this run

@@ -331,7 +331,7 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 		printf '$(DIM)adrs not installed — skipping$(RESET)\n'; \
 	fi
 
-.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check
+.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits
 contract-fixtures: ## Regenerate the Empirica wire-fixture fields (contracts/empirica/v2/fixtures, from the real service), and the observer fixtures from build_store's FIXTURE_SCENARIOS through the real service and observer, into contracts/empirica-ui-view/v1/fixtures and its byte copy plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures (the built-in demo)
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
@@ -345,8 +345,12 @@ contract-schemas: ## Regenerate shared Empirica schema definitions and local emb
 contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_sync_schema_defs.py
 
-empirica-docker-support-contract-check: dev-python ## Validate the current-only normative Docker spike support contract and its adapter mappings
+empirica-docker-support-contract-check: dev-python ## Validate the current-only normative Docker spike support contract, its emitted refusal codes, and the public evidence/spike/limits clause against the code constants
 	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py
+	@$(DEV_PYTHON) -m unittest -q scripts/tests/test_validate_docker_spike_contract.py
+
+empirica-spike-limits: dev-python ## Rewrite the public-contract evidence/spike/limits clause from the code constants (then make vendor-contracts)
+	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py --write-limits
 
 contract-check: dev-python ## Validate schemas, shared definitions, wire fixtures and conformance; the observer fixtures: both copies byte-equal, no drift from a regeneration, the UI-view validator, the schema-derived generator (every declared enum value producible), and the contract id equal to its folder
 	@printf '$(BOLD)==> contracts$(RESET)\n'

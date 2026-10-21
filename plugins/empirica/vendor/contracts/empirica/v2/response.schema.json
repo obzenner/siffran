@@ -3773,6 +3773,23 @@
         "message": {
           "type": "string"
         },
+        "reason": {
+          "description": "Closed spike refusal reason; each value has a hint in public-contract clause evidence/spike/limits.",
+          "enum": [
+            "image-not-local",
+            "image-reference-ambiguous",
+            "image-platform-mismatch",
+            "image-declares-volumes",
+            "malformed-required-result",
+            "authority-drift",
+            "capture-invalid",
+            "spikes-unavailable",
+            "authority-invalid",
+            "lifecycle-unavailable",
+            "cleanup-unavailable",
+            "postflight-changed"
+          ]
+        },
         "fail_direction": {
           "enum": [
             "open",

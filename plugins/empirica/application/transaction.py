@@ -27,6 +27,7 @@ from .observation import (ObservationUnavailable, build_observation_snapshot,
                           observation_basis_body)
 from .generic_spike import (
     GenericHarnessRequest, GenericHarnessResult, GenericHarnessUnavailable,
+    SPIKE_FAULT_REASONS, GenericPreparationReason, GenericPreparationUnavailable,
     GenericQualifiedBackend, NullLocalImageResolver, prepare_generic_spike,
     reobserve_authority,
     reobserve_generic_spike, sealed_request_facts,
@@ -662,7 +663,8 @@ class Coordinator:
                 return self._inert(request_id)
             persisted = dict(state.spike_backend)
             if persisted.get("kind") == "spikes_unavailable":
-                return self._fault(request_id, "unavailable")
+                return self._fault(request_id, "unavailable",
+                                   GenericPreparationReason.SPIKES_UNAVAILABLE.value)
             try:
                 backend = GenericQualifiedBackend(
                     persisted["backend"], persisted["profile_id"],
@@ -692,6 +694,8 @@ class Coordinator:
                 try:
                     sealed = prepare_generic_spike(
                         draft, self.workspace, self.image_resolver, backend)
+                except GenericPreparationUnavailable as exc:
+                    return self._fault(request_id, "unavailable", exc.reason.value)
                 except Exception:
                     return self._fault(request_id, "unavailable")
             try:
@@ -755,14 +759,16 @@ class Coordinator:
         except Exception:
             return self._fault(request_id, "unavailable")
         if type(harness_value) is GenericHarnessUnavailable:
-            return self._fault(request_id, "unavailable")
+            # The closed reason only; the private detail never leaves the host.
+            return self._fault(request_id, "unavailable", harness_value.reason.value)
         if type(harness_value) is not GenericHarnessResult:
             return self._fault(request_id, "unavailable")
         if not reobserve_generic_spike(sealed, self.workspace):
-            return self._fault(request_id, "unavailable")
-        if not reobserve_authority(
-                sealed, draft, backend, self.image_resolver):
-            return self._fault(request_id, "unavailable")
+            return self._fault(request_id, "unavailable",
+                               GenericPreparationReason.CAPTURE_INVALID.value)
+        changed = reobserve_authority(sealed, draft, backend, self.image_resolver)
+        if changed is not None:
+            return self._fault(request_id, "unavailable", changed.value)
         result_facts = sealed_result_facts(harness_value)
         result_observations = tuple(FileObservation(
             binding.path, ObservationState.PRESENT, binding.sha256)
@@ -1036,8 +1042,12 @@ class Coordinator:
                 "result": {"type": "Inert", "reason": "no_run"}}
 
     @staticmethod
-    def _fault(request_id: str, code: str):
+    def _fault(request_id: str, code: str, reason: str | None = None):
         allowed = {"invalid_request", "unsupported", "conflict", "corrupt_run", "corrupt_artifacts", "unavailable"}
-        return {"protocol": _proto.protocol_id(), "request_id": request_id,
-                "result": {"type": "Fault", "code": code if code in allowed else "unsupported",
-                           "fail_direction": "closed"}}
+        result = {"type": "Fault", "code": code if code in allowed else "unsupported",
+                  "fail_direction": "closed"}
+        if reason is not None:
+            if reason not in SPIKE_FAULT_REASONS:
+                raise ValueError("spike fault reason is not closed")
+            result["reason"] = reason
+        return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}

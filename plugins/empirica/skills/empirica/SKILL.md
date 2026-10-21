@@ -171,21 +171,20 @@ Apply the folds in order:
    execution or a separate call may execute the same sealed request again, so the probe must be safe
    under duplicate execution. `qualified` means bound, not currently healthy.
 
-   The host owns one verdict container, fixed uid/gid 65534, `/work`, `/tmp`, one read-only `/inputs`
-   tree, network profile, cleanup, and the fixed framework policy: `min(2, NCPU)` CPU, 2 GiB memory
-   with no extra swap, 256 PIDs, `nofile=1024`, `fsize=64 MiB`, `core=0`, executable 512 MiB `/work`,
-   noexec 64 MiB `/tmp`, 64 MiB shm, and independent 1 MiB stdout/stderr limits. Capture permits at
-   most 256 files, 64 MiB aggregate, and 64 MiB per file. The 120-second production workload runs
-   inside the 210-second operation; Pi's 300-second and Claude MCP's 360-second limits remain outer
-   transport margins. Isolated uses network none; networked uses one private bridge with outbound
-   egress and no host ingress or published ports.
+   Any tool works as argv (`cargo build`, `npm run build`, `pytest -k load`, `go test ./...`) inside
+   one host-fixed container: uid/gid 65534, `/work` = `HOME`, read-only `/inputs`, 1 MiB per stream,
+   and the host-selected network profile. The 120-second workload runs inside the 210-second
+   operation; Pi's 300-second and Claude MCP's 360-second limits are outer transport margins. The
+   one complete list of what you choose, what the host fixes, what is never available, and every
+   refusal `reason` with its hint is public-contract clause `evidence/spike/limits` (`GetContract`
+   section `evidence/spike`).
 
    Only the verdict container's inspected natural exit produces uppercase `PASS`/`FAIL`: zero is
-   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Timeout, forced
-   termination, output limit, OOM, cleanup, capture, image, platform, identity, or authority failure
-   is unavailable and admits **no spike result evidence**. Narrow or redesign after unavailable; do
-   not treat it as FAIL, blindly retry, use a host fallback, or claim evidence that was not admitted.
-   Operator requalification can affect only a future new run.
+   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Any other outcome is a
+   spike Fault `unavailable` and admits **no spike result evidence**. The Fault carries one closed
+   `reason` whenever the cause is attributable: act on its hint. A Fault without a reason is an
+   internal host failure: retry once, then ask the operator. Never treat it as FAIL, use a host
+   fallback, or claim evidence that was not admitted. Operator requalification can affect only a future run.
 3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the
    bounded spike again; otherwise follow the unavailable guidance above.
 4. **Derive the result:**

@@ -24,7 +24,7 @@ IMAGE_INSPECT_FORMAT = (
     '"Volumes":{{json (index .Config "Volumes")}}}'
 )
 CONTAINER_INSPECT_FORMAT = (
-    '{"Id":{{json .Id}},"Image":{{json .Image}},"Config":{'
+    '{"Id":{{json .Id}},"Name":{{json .Name}},"Image":{{json .Image}},"Config":{'
     '"Image":{{json (index .Config "Image")}},'
     '"Entrypoint":{{json (index .Config "Entrypoint")}},'
     '"Cmd":{{json (index .Config "Cmd")}},'
@@ -32,7 +32,6 @@ CONTAINER_INSPECT_FORMAT = (
     '"WorkingDir":{{json (index .Config "WorkingDir")}},'
     '"User":{{json (index .Config "User")}},'
     '"Labels":{{json (index .Config "Labels")}},'
-    '"ExposedPorts":{{json (index .Config "ExposedPorts")}},'
     '"Volumes":{{json (index .Config "Volumes")}}},"HostConfig":{'
     '"NetworkMode":{{json (index .HostConfig "NetworkMode")}},'
     '"IpcMode":{{json (index .HostConfig "IpcMode")}},'
@@ -87,7 +86,11 @@ CONTAINER_CREATE_FLAGS = CONTAINER_CREATE_VALUE_FLAGS | CONTAINER_CREATE_BOOLEAN
 
 
 def _admit_compiled_create_flags(argv: tuple[str, ...], image_id: str) -> None:
-    """Assert the emitted pre-image option grammar; Docker-default PID/UTS are never flags."""
+    """Assert the emitted pre-image option grammar; Docker-default PID/UTS are never flags.
+
+    Only the pre-image region is Docker option syntax: `--pid` and `--uts` are not in the closed
+    allowlist, so the loop refuses them there, while guest argv after the image is never scanned.
+    """
     if argv[:2] != ("container", "create"):
         raise DockerPlanCompileError("container create command prefix differs")
     index = 2
@@ -99,8 +102,8 @@ def _admit_compiled_create_flags(argv: tuple[str, ...], image_id: str) -> None:
             index += 2
         else:
             raise DockerPlanCompileError("container create contains an unsupported option")
-    if index >= len(argv) or "--pid" in argv or "--uts" in argv:
-        raise DockerPlanCompileError("container create image boundary or namespace defaults differ")
+    if index >= len(argv):
+        raise DockerPlanCompileError("container create image boundary is absent")
 
 
 class DockerPlanCompileError(ValueError):
@@ -279,7 +282,8 @@ def compile_docker_operation(
         "--pids-limit", str(policy.pids),
         "--ulimit", f"nofile={policy.open_files}:{policy.open_files}",
         "--ulimit", f"fsize={policy.max_file_size_bytes}:{policy.max_file_size_bytes}",
-        "--ulimit", "core=0:0", "--shm-size", f"{policy.shm_bytes}b",
+        "--ulimit", f"core={policy.core_bytes}:{policy.core_bytes}",
+        "--shm-size", f"{policy.shm_bytes}b",
         "--tmpfs", f"{FIXED_WORKDIR}:rw,nodev,nosuid,exec,size={policy.work_tmpfs_bytes},mode=1777",
         "--tmpfs", f"{FIXED_TMPDIR}:rw,nodev,nosuid,noexec,size={policy.tmp_tmpfs_bytes},mode=1777",
         "--mount", f"type=bind,source=staging-token:{staging_token},destination={FIXED_INPUTS},readonly,bind-propagation=rprivate",
@@ -291,29 +295,18 @@ def compile_docker_operation(
     create.extend(plan.argv[1:])
     create_tuple = tuple(create)
     _admit_compiled_create_flags(create_tuple, plan.image.image_id)
-    commands.extend((
-        DockerCommand("container_create", create_tuple),
-        DockerCommand("container_static_inspect", (
-            "container", "inspect", "--format", CONTAINER_INSPECT_FORMAT, container_token)),
-    ))
+    # The static inspect targets the cidfile/exact-name candidate before its ID is recorded, so it
+    # is issued by the lifecycle with that candidate rather than compiled against the ID token.
+    commands.append(DockerCommand("container_create", create_tuple))
     if network is not None:
         commands.append(DockerCommand("network_prestart_inspect", (
             "network", "inspect", "--format", NETWORK_INSPECT_FORMAT,
             network.full_id_token)))
     commands.append(DockerCommand("container_start_attach", (
         "container", "start", "--attach", container_token)))
-    commands.extend((
-        DockerCommand("container_terminal_inspect", (
-            "container", "inspect", "--format", CONTAINER_INSPECT_FORMAT, container_token)),
-        DockerCommand("container_remove", (
-            "container", "rm", "--force", "--volumes", container_token)),
-        DockerCommand("container_absence", ("container", "inspect", container_token)),
-    ))
-    if network is not None:
-        commands.extend((
-            DockerCommand("network_remove", ("network", "rm", network.full_id_token)),
-            DockerCommand("network_absence", ("network", "inspect", network.full_id_token)),
-        ))
+    # Removal and exact absence are built by the lifecycle from durably recorded full IDs only.
+    commands.append(DockerCommand("container_terminal_inspect", (
+        "container", "inspect", "--format", CONTAINER_INSPECT_FORMAT, container_token)))
     try:
         return ResolvedDockerOperation(
             operation_id, run_id, request, backend, staging_token, container, network,

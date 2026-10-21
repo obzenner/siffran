@@ -50,7 +50,8 @@ def qualification_record(profile="docker-isolated-v1"):
         "busybox:local", D1, "linux", "linux", "x86_64", "amd64", ())
     probes = tuple(qualification.ProbeObservation(
         name, expected, expected, D0, True, index + 1,
-        name == "network-profile" and profile == "docker-networked-v1")
+        name == "network-profile" and profile == "docker-networked-v1",
+        D0 if expected in {"PASS", "FAIL"} else None)
         for index, (name, expected) in enumerate(zip(
             qualification.PROBE_ORDER, qualification.PROBE_EXPECTED)))
     return qualification.build_candidate_record(

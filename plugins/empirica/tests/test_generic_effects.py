@@ -91,10 +91,15 @@ class ConcreteEffectsTests(unittest.TestCase):
         self.assertNotIn("do-not-disclose", str(caught.exception))
         marker.unlink()
         owner = self.owner()
-        for argv in (("image", "pull", "x"), ("context", "use", "x"),
-                     ("container", "rm", "pull")):
-            with self.assertRaises(effects.GenericEffectsError):
+        for argv in (("image", "pull", "x"), ("context", "use", "x"), ("system", "prune"),
+                     ("container", "run", "x"), ("container",)):
+            with self.assertRaises(effects.GenericEffectsRefused) as caught:
                 owner.run(argv, timeout_seconds=1)
+            self.assertIs(caught.exception.before_launch, True)
+        # Docker stops flag parsing at the image (SetInterspersed(false)); guest words after the
+        # subcommand are operands, never control-plane authority.
+        self.assertEqual(owner._argv(("container", "rm", "pull")),
+                         (str(self.cli), "container", "rm", "pull"))
 
 
 if __name__ == "__main__":

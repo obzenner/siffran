@@ -68,75 +68,60 @@ class GenericDockerHarness(application.GenericSpikeHarness):
     def run(self, request: application.GenericHarnessRequest):
         if type(request) is not application.GenericHarnessRequest:
             return application.GenericHarnessUnavailable(
-                application.GenericUnavailableReason.CAPTURE_INVALID)
+                application.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE)
         deadline = self.clock() + spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS
-        phase = "authority"
+        resolving = True
         try:
             with runtime_lock(self.store, deadline, clock=self.clock), ExitStack() as owners:
                 authority = self._resolve(request.backend, deadline)
-                phase = "recovery"
-
-                def recovery_effects(operation: planner.ResolvedDockerOperation):
-                    historical = self._resolve(operation.backend, deadline)
-                    effect = self.effects_factory(historical)
-                    return effect
-
+                facts = generic_authority.authority_facts(authority.runtime)
+                effect = self.effects_factory(authority)
+                owners.callback(effect.close)
+                resolving = False
+                # Unfinished journals are recovered with the current effects when their persisted
+                # endpoint/platform facts equal these; no historical implementation is re-resolved.
                 execution.recover_generic_operations(
-                    self.store, recovery_effects, deadline=deadline, clock=self.clock)
-                phase = "lifecycle"
+                    self.store, effect, authority=facts, deadline=deadline, clock=self.clock)
                 operation_id = self.operation_id_factory()
                 sealed_request = spike_plan.SealedSpikeRequest(
                     request.plan, spike_plan.FRAMEWORK_SPIKE_POLICY)
                 operation = planner.compile_docker_operation(
                     sealed_request, request.backend, request.run_id, operation_id,
                     _staging_token(operation_id, request.snapshot.snapshot_digest))
-                effect = self.effects_factory(authority)
-                owners.callback(effect.close)
 
                 def postflight(limit: float) -> str:
-                    nonlocal phase
                     try:
                         current = self._resolve(request.backend, limit)
-                    except Exception:
-                        phase = "postflight"
-                        raise
-                    if (generic_authority.authority_facts(current.runtime)
-                            != generic_authority.authority_facts(authority.runtime)):
-                        phase = "postflight"
-                        raise execution.GenericExecutionUnavailable("qualified authority drifted")
+                        drifted = generic_authority.authority_facts(current.runtime) != facts
+                    except Exception as exc:
+                        raise execution.GenericPostflightChanged(
+                            "qualified authority is unavailable after the spike") from exc
+                    if drifted:
+                        raise execution.GenericPostflightChanged("qualified authority drifted")
                     return current.backend.execution_binding_digest
 
                 result = execution.execute_generic_operation(
                     self.store, operation, request.snapshot, effect,
-                    backend_deadline=deadline, postflight=postflight, clock=self.clock)
-                phase = "conversion"
-                facts = application.GenericOperationFacts(
+                    backend_deadline=deadline, postflight=postflight, authority=facts,
+                    clock=self.clock)
+                operation_facts = application.GenericOperationFacts(
                     result.operation_digest, request.backend.qualification_record_digest,
                     request.backend.execution_binding_digest, result.image_digest,
                     result.input_digest, result.process_digest, result.topology_digest,
                     result.timing_digest)
                 converted = application.GenericHarnessResult(
                     request.run_id, request.backend, request.plan_digest,
-                    request.policy_digest, request.snapshot.snapshot_digest, facts,
+                    request.policy_digest, request.snapshot.snapshot_digest, operation_facts,
                     result.stdout, result.stderr, True, False, result.exit_code,
                     result.verdict, result.cleanup_proven, result.postflight_identity_digest)
                 return application.validate_generic_harness_result(request, converted)
-        except execution.GenericExecutionUnavailable as exc:
-            text = str(exc).lower()
-            if phase == "authority":
-                reason = application.GenericUnavailableReason.AUTHORITY_INVALID
-            elif phase == "postflight" or "postflight" in text:
-                reason = application.GenericUnavailableReason.POSTFLIGHT_CHANGED
-            elif phase == "recovery" or "cleanup" in text or "absence" in text:
-                reason = application.GenericUnavailableReason.CLEANUP_UNAVAILABLE
-            else:
-                reason = application.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE
-            return application.GenericHarnessUnavailable(reason, str(exc))
-        except Exception:
-            reason = (application.GenericUnavailableReason.AUTHORITY_INVALID
-                      if phase == "authority"
-                      else application.GenericUnavailableReason.CLEANUP_UNAVAILABLE
-                      if phase in {"recovery", "postflight"}
+        except Exception as exc:
+            # The typed exception owns its reason. Before execution (the runtime lock, scaffolding,
+            # authority, effects) a failure is `authority-invalid`; any other untyped failure is
+            # lifecycle.
+            reason = (application.GenericUnavailableReason.AUTHORITY_INVALID if resolving
+                      else exc.reason if isinstance(exc, execution.GenericExecutionUnavailable)
                       else application.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE)
-            return application.GenericHarnessUnavailable(
-                reason, f"{phase} failed without a safely attributable Docker detail")
+            detail = (str(exc) if isinstance(exc, execution.GenericExecutionUnavailable)
+                      else "failed without a safely attributable Docker detail")
+            return application.GenericHarnessUnavailable(reason, detail)

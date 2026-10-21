@@ -138,6 +138,27 @@ class WorkspaceCaptureAdapterTests(unittest.TestCase):
                 with self.subTest(declaration=declaration), self.assertRaises(OSError):
                     FilesystemWorkspace(root).capture_inputs((declaration,))
 
+    def test_leaf_swapped_for_a_fifo_is_refused_without_blocking(self):
+        """N-L2: the leaf open is non-blocking, so a FIFO swapped in after the walk cannot wedge."""
+        import threading
+        from core.freshness import ObservationState
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            os.mkfifo(root / "swapped")
+            fd = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+            self.addCleanup(os.close, fd)
+            result = []
+            reader = threading.Thread(
+                target=lambda: result.append(FilesystemWorkspace._read_at(fd, "swapped")),
+                daemon=True)
+            reader.start()
+            reader.join(5)
+            if reader.is_alive():
+                with open(root / "swapped", "wb"):
+                    pass  # release the blocked open so the daemon thread can finish
+                self.fail("a FIFO leaf blocked the capture read")
+            self.assertIs(result[0].observation.state, ObservationState.NON_REGULAR)
+
     def test_capture_inputs_rejects_file_growth_during_bounded_read(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -82,9 +82,7 @@ class NetworkMembershipObservation:
     attached_container_ids: tuple[str, ...]
 
 
-@dataclass(frozen=True, slots=True)
-class AdmittedCommand:
-    pass
+ABSENCE_STDOUT = frozenset({b"", b"[]", b"[]\n"})
 
 
 def admit_created_full_id(value: RawProcessObservation, argv: tuple[str, ...]) -> str:
@@ -116,7 +114,8 @@ def admit_exact_absence(value: RawProcessObservation, argv: tuple[str, ...], res
     recorded_id = full_id(argv[2], "absence command full ID")
     raw = admit_process(value, argv, stdout_ceiling=MAX_CONTROL_BYTES,
                         stderr_ceiling=MAX_CONTROL_BYTES, require_success=False)
-    if raw.returncode == 0 or raw.stdout.data:
+    # docker/cli `inspect.Inspect` flushes an empty JSON list (`[]\n`) before exiting 1.
+    if raw.returncode == 0 or raw.stdout.data not in ABSENCE_STDOUT:
         raise DockerObservationError("recorded resource remains present")
     text = raw.stderr.data.decode("utf-8", errors="replace").strip()
     escaped = re.escape(recorded_id)
@@ -129,33 +128,61 @@ def admit_exact_absence(value: RawProcessObservation, argv: tuple[str, ...], res
         raise DockerObservationError("absence command failed without exact-ID absence proof")
 
 
-def admit_recovery_network(
-    operation: planner.ResolvedDockerOperation,
+def admit_owned_container(
+    document: object,
+    *, container_full_id: str,
+    name: str,
+    labels: tuple[tuple[str, str], ...],
+) -> None:
+    """Ownership only: exact `Id`, exact compiled `Name`, and every Empirica ownership label.
+
+    This predicate grants nothing by itself; it decides whether a cidfile or exact-name candidate
+    may be durably recorded. Security policy is a separate gate whose refusal removes the
+    recorded ID instead of stranding it.
+    """
+    row = _mapping(document, "owned container inspect")
+    if full_id(row.get("Id"), "owned container Id") != full_id(container_full_id):
+        raise DockerObservationError("owned container Id differs")
+    if row.get("Name") not in ("/" + name, name):
+        raise DockerObservationError("owned container name differs")
+    config = _mapping(row.get("Config"), "owned container Config")
+    observed = _labels(config.get("Labels"))
+    if not labels or any(observed.get(key) != value for key, value in labels):
+        raise DockerObservationError("owned container labels differ")
+
+
+def admit_owned_network(
+    operation: object,
     document: object,
     *, network_full_id: str,
     container_full_id: str | None,
 ) -> NetworkMembershipObservation:
-    if operation.network is None:
-        raise DockerObservationError("isolated operation has no recovery network")
-    row = _mapping(document, "recovery network inspect")
-    full = full_id(network_full_id, "recovery network Id")
-    if (full_id(row.get("Id"), "recovery network inspect Id") != full
+    """An exact owned bridge, attached to nothing or only to `container_full_id`.
+
+    `operation` is compiled or journal-persisted data: only `operation.network.labels` is read,
+    so a journal written by an older planner is judged by the labels it persisted.
+    """
+    if getattr(operation, "network", None) is None:
+        raise DockerObservationError("isolated operation has no owned network")
+    row = _mapping(document, "network inspect")
+    full = full_id(network_full_id, "network Id")
+    if (full_id(row.get("Id"), "network inspect Id") != full
             or row.get("Driver") != "bridge" or row.get("Internal") is not False):
-        raise DockerObservationError("recovery bridge identity differs")
+        raise DockerObservationError("owned bridge identity differs")
     labels = _labels(row.get("Labels"))
     if any(labels.get(key) != value for key, value in operation.network.labels):
-        raise DockerObservationError("recovery network ownership labels differ")
+        raise DockerObservationError("network ownership labels differ")
     containers = row.get("Containers")
     if containers is None:
         containers = {}
     if not isinstance(containers, Mapping):
-        raise DockerObservationError("recovery network membership is malformed")
+        raise DockerObservationError("network membership is malformed")
     observed = tuple(sorted(containers))
     for item in observed:
-        full_id(item, "recovery attached container Id")
+        full_id(item, "attached container Id")
     permitted = () if container_full_id is None else (full_id(container_full_id),)
     if observed not in ((), permitted):
-        raise DockerObservationError("recovery network has foreign attachments")
+        raise DockerObservationError("network has foreign attachments")
     return NetworkMembershipObservation(full, observed)
 
 
@@ -187,26 +214,6 @@ def admit_process(value: object, argv: tuple[str, ...], *, stdout_ceiling: int,
         raise DockerObservationError("Docker control command failed")
     _stream(value.stdout, stdout_ceiling, "stdout")
     _stream(value.stderr, stderr_ceiling, "stderr")
-    return value
-
-
-def admit_attach(value: object, argv: tuple[str, ...], *, stdout_ceiling: int,
-                 stderr_ceiling: int, require_natural: bool) -> RawAttachObservation:
-    if type(value) is not RawAttachObservation:
-        raise DockerObservationError("attach observation is malformed")
-    process = admit_process(value.process, argv, stdout_ceiling=stdout_ceiling,
-                            stderr_ceiling=stderr_ceiling, require_success=False)
-    if (type(value.natural_exit) is not bool or type(value.forced_exit) is not bool
-            or value.natural_exit == value.forced_exit):
-        raise DockerObservationError("attach termination ownership is ambiguous")
-    if value.natural_exit:
-        if (type(value.exit_code) is not int or isinstance(value.exit_code, bool)
-                or not 0 <= value.exit_code <= 255 or process.returncode != value.exit_code):
-            raise DockerObservationError("natural attach exit differs")
-    elif value.exit_code is not None:
-        raise DockerObservationError("forced attach cannot claim a natural exit")
-    if require_natural and not value.natural_exit:
-        raise DockerObservationError("verdict attach did not end naturally")
     return value
 
 
@@ -387,8 +394,10 @@ def admit_static_container(
     labels = _labels(config.get("Labels"))
     if any(labels.get(key) != value for key, value in operation.container.labels):
         raise DockerObservationError("container ownership labels differ")
-    if not _empty(config.get("ExposedPorts")) or not _empty(config.get("Volumes")):
-        raise DockerObservationError("container ports or image volumes appeared")
+    # `Config.ExposedPorts` is image `EXPOSE` metadata merged by Docker; it publishes nothing.
+    # Publication is `HostConfig.PortBindings`/`PublishAllPorts`, which stay refused below.
+    if not _empty(config.get("Volumes")):
+        raise DockerObservationError("container image volumes appeared")
     for field in ("PortBindings", "Devices", "DeviceRequests", "DeviceCgroupRules",
                   "VolumesFrom", "CapAdd"):
         if not _empty(host.get(field)):
@@ -542,7 +551,7 @@ def admit_prestart_network(
     *, network_full_id: str,
 ) -> NetworkMembershipObservation:
     """Admit the exact owned bridge before start; real Docker has no live endpoints yet."""
-    observed = admit_recovery_network(
+    observed = admit_owned_network(
         operation, document, network_full_id=network_full_id, container_full_id=None)
     if observed.attached_container_ids:
         raise DockerObservationError("prestart private bridge has a foreign attachment")
@@ -555,23 +564,11 @@ def admit_network_membership(
     *, network_full_id: str,
     container_full_id: str,
 ) -> NetworkMembershipObservation:
-    if operation.network is None or operation.backend.profile_id != "docker-networked-v1":
+    """Qualification only: the exact owned bridge has exactly the verdict container attached."""
+    if operation.backend.profile_id != "docker-networked-v1":
         raise DockerObservationError("operation has no private network membership invariant")
-    row = _mapping(document, "network inspect")
-    full = full_id(network_full_id, "network Id")
-    if (full_id(row.get("Id"), "network inspect Id") != full
-            or row.get("Driver") != "bridge" or row.get("Internal") is not False):
-        raise DockerObservationError("private bridge identity differs")
-    labels = _labels(row.get("Labels"))
-    if any(labels.get(key) != value for key, value in operation.network.labels):
-        raise DockerObservationError("network ownership labels differ")
-    containers = row.get("Containers")
-    if not isinstance(containers, Mapping):
-        raise DockerObservationError("network membership is malformed")
-    expected_container = full_id(container_full_id, "attached container Id")
-    observed = tuple(sorted(containers))
-    for item in observed:
-        full_id(item, "attached container Id")
-    if observed != (expected_container,):
+    observed = admit_owned_network(operation, document, network_full_id=network_full_id,
+                                   container_full_id=container_full_id)
+    if observed.attached_container_ids != (full_id(container_full_id),):
         raise DockerObservationError("private bridge membership differs")
-    return NetworkMembershipObservation(full, observed)
+    return observed

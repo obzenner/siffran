@@ -30,7 +30,8 @@ def image(arch="amd64", volumes=()):
 def probes(profile="docker-isolated-v1"):
     return tuple(qualification.ProbeObservation(
         name, expected, expected, D0, True, index + 1,
-        name == "network-profile" and profile == "docker-networked-v1")
+        name == "network-profile" and profile == "docker-networked-v1",
+        D0 if expected in {"PASS", "FAIL"} else None)
         for index, (name, expected) in enumerate(zip(
             qualification.PROBE_ORDER, qualification.PROBE_EXPECTED)))
 
@@ -66,7 +67,8 @@ class FakeKernel:
                 qualification.QualificationReason.PROBE_FAILED, "injected probe failure")
         return qualification.ProbeObservation(
             name, expected, expected, D0, True, len(self.calls),
-            name == "network-profile" and self.profile == "docker-networked-v1")
+            name == "network-profile" and self.profile == "docker-networked-v1",
+            D0 if expected in {"PASS", "FAIL"} else None)
 
     def cleanup_proof(self):
         return dict(self.cleanup)
@@ -265,6 +267,9 @@ class ProductionProbeKernelTests(unittest.TestCase):
         self.assertEqual([item.observed for item in observations],
                          list(qualification.PROBE_EXPECTED))
         self.assertTrue(all(item.cleanup_proven for item in observations))
+        # N-M2: verdict probes record the observed realization digest; unavailable ones none.
+        self.assertEqual([item.realization_digest for item in observations],
+                         [D0, D0, None, None, D0])
         self.assertEqual(kernel.cleanup_proof(), CLEAN)
         natural = dict(made)["natural-125"]
         self.assertTrue(natural.attached)
@@ -363,6 +368,35 @@ class ProductionProbeKernelTests(unittest.TestCase):
             kernel.run("network-profile", "PASS", deadline=time.monotonic() + 55)
         self.assertIs(caught.exception.reason,
                       qualification.QualificationReason.NETWORK_EGRESS_UNAVAILABLE)
+
+    def test_fast_egress_failure_before_running_membership_keeps_its_specific_reason(self):
+        """N-L1: wget exits 46 before the running-membership poll observes the container."""
+        class FastEgressFailure(FakeDocker):
+            def attach(self, argv, *, timeout_seconds, stdout_limit, stderr_limit):
+                self.attached = True
+                self.exit_code = 46
+                return admission.RawAttachObservation(
+                    self.raw(argv, 46, stderr="wget: bad address"), True, False, 46)
+
+        kernel, _ = self.kernel("docker-networked-v1", fake_type=FastEgressFailure)
+        with self.assertRaises(qualification.GenericQualificationFailure) as caught:
+            kernel.run("network-profile", "PASS", deadline=time.monotonic() + 55)
+        self.assertIs(caught.exception.reason,
+                      qualification.QualificationReason.NETWORK_EGRESS_UNAVAILABLE)
+        self.assertEqual(qualification.generic_journal.GenericJournalStore(self.store).scan(), ())
+
+    def test_unavailable_probe_cannot_claim_a_realization_digest(self):
+        row = qualification.ProbeObservation(
+            "output-overflow", "UNAVAILABLE_OUTPUT_LIMIT", "UNAVAILABLE_OUTPUT_LIMIT", D0,
+            True, 1, False, D0).to_data()
+        with self.assertRaisesRegex(qualification.GenericQualificationFailure, "cannot claim"):
+            qualification.validate_probe(row, 2)
+        qualification.validate_probe({**row, "realization_digest": None}, 2)
+        row = qualification.ProbeObservation(
+            "realization", "PASS", "PASS", D0, True, 1, False, None).to_data()
+        with self.assertRaisesRegex(qualification.GenericQualificationFailure, "realization"):
+            qualification.validate_probe(row, 0)
+        qualification.validate_probe({**row, "realization_digest": D0}, 0)
 
 
 class InstallSeparationTests(unittest.TestCase):

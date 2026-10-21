@@ -1,7 +1,11 @@
 # Empirica 2.0 D5/D5-F — pure freshness and immutable generic-spike contracts
 
-**Status:** Implemented historical design lineage, revised in place for Empirica `6.0.0`, wire
-`empirica/v2`, and state `empirica.run/3`.
+**Status:** Superseded. Its Docker sandbox, qualification, and outcome sections describe an earlier
+unreleased design and are not current; the current design is
+[`empirica-6-docker-spike-mvp.md`](empirica-6-docker-spike-mvp.md), the current limits are
+public-contract clause `evidence/spike/limits`, and the normative support contract is
+[`contracts/empirica-docker-spike/v1`](../../../contracts/empirica-docker-spike/v1/README.md). The
+pure-core/adapter ownership decision below remains current.
 
 ## Purpose and preserved decision
 

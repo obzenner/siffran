@@ -170,12 +170,17 @@ class GenericSpikeApplicationTests(unittest.TestCase):
         selected, source, resolver = backend(), Workspace(), Resolver()
         sealed = subject.prepare_generic_spike(draft(), source, resolver, selected)
         self.assertTrue(subject.reobserve_generic_spike(sealed, source))
-        self.assertTrue(subject.reobserve_authority(sealed, draft(), selected, resolver))
+        self.assertIsNone(subject.reobserve_authority(sealed, draft(), selected, resolver))
         source.files["src/a.py"] = b"changed"
         self.assertFalse(subject.reobserve_generic_spike(sealed, source))
         moved = Resolver(subject.LocalImageResolution(
             "python:3.12", D0, "linux", "arm64", "linux", "arm64", (), 14, selected))
-        self.assertFalse(subject.reobserve_authority(sealed, draft(), selected, moved))
+        self.assertIs(subject.reobserve_authority(sealed, draft(), selected, moved),
+                      subject.GenericPreparationReason.AUTHORITY_DRIFT)
+        gone = Resolver(subject.LocalImageResolutionUnavailable(
+            subject.GenericPreparationReason.IMAGE_NOT_LOCAL))
+        self.assertIs(subject.reobserve_authority(sealed, draft(), selected, gone),
+                      subject.GenericPreparationReason.IMAGE_NOT_LOCAL)
 
     def test_sealed_request_contains_no_bytes_or_old_partitions(self):
         selected = backend()

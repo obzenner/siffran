@@ -63,14 +63,14 @@ def fixture() -> dict:
          "ExitCode": 0, "OOMKilled": False, "Error": ""}},
     ]
     static_container = {
-        "Id": "a" * 64, "Image": "sha256:" + "0" * 64,
+        "Id": "a" * 64, "Name": "/fixture-container-name", "Image": "sha256:" + "0" * 64,
         "Config": {
             "Image": "sha256:" + "1" * 64, "Entrypoint": ["python"],
             "Cmd": ["/inputs/a.py", "--exact"],
             "Env": ["PATH=/usr/local/bin:/usr/bin:/bin", "HOME=/work", "MODE=test",
                     "TMPDIR=/tmp"],
             "WorkingDir": "/work", "User": "65534:65534", "Labels": {"image.label": "kept"},
-            "ExposedPorts": None, "Volumes": None,
+            "Volumes": None,
         },
         "HostConfig": {
             "NetworkMode": "none", "IpcMode": "private", "PidMode": "", "UTSMode": "",
@@ -110,11 +110,13 @@ def fixture() -> dict:
                 "moby/libnetwork/error.go ErrNoSuchNetwork: network %s not found (Docker 24-29 daemon response)",
                 "moby/client/network_inspect.go empty-ID fallback: No such network: %s",
                 "docker/cli errdefs formatting: Error response from daemon: <message>",
-                "G12 independent implementation review B5 recorded Docker 24-29 output"
+                "G12 independent implementation review B5 recorded Docker 24-29 output",
+                "docker/cli cli/command/inspect/inspector.go Flush (v20.10 IndentedInspector, v24-v28 elementsInspector, master jsonInspector): no elements writes \"[]\\n\" to stdout, then Inspect returns StatusError{StatusCode: 1}"
             ],
             "cidfile_contract": [
-                "moby/container/idfile/idfile.go New: O_CREATE|O_EXCL|O_WRONLY mode 0666",
-                "moby/container/idfile/idfile.go preexisting-file refusal",
+                "docker/cli cli/command/container/create.go newCIDFile: os.Stat refuses a preexisting path, then os.Create (O_RDWR|O_CREATE|O_TRUNC, mode 0666) before ContainerCreate",
+                "docker/cli cli/command/container/create.go cidFile.Write records the ID only after ContainerCreate returns; an empty file can coexist with a created container",
+                "docker/cli cli/command/container/create.go cidFile.Close removes an unwritten file only on a non-killed exit",
                 "child umask 077 derives owner-only 0600"
             ],
             "generator_independence": "This generator imports no Empirica planner, admission, or runtime module."
@@ -125,7 +127,18 @@ def fixture() -> dict:
             "cidfile_preexisting_error":
                 "container ID file found, make sure the other container isn't running or delete /private/run/container.cid",
             "cidfile_create_mode_under_umask_077": "0600",
+            "flag_parsing_stops_at_image": "docker/cli create.go flags.SetInterspersed(false)",
         },
+        "image_merged_config_forms": [
+            {"name": "exposed-ports-metadata", "Config": {"ExposedPorts": {"6379/tcp": {}}}},
+            {"name": "inherited-env-and-labels", "Config": {
+                "Env": ["PATH=/usr/local/bin:/usr/bin:/bin", "LANG=C.UTF-8", "IMAGE_ONLY=1"],
+                "Labels": {"org.opencontainers.image.title": "kept",
+                           "maintainer": "upstream"}}},
+            {"name": "cmd-null-no-arguments", "Config": {"Cmd": None}},
+        ],
+        "absence_stdout": "[]\n",
+        "absence_returncode": 1,
         "absence_stderr": {
             "container_no_such": "Error: No such container: " + "a" * 64,
             "container_not_found": "Error response from daemon: container " + "a" * 64 + " not found",

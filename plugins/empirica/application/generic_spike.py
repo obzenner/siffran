@@ -21,6 +21,8 @@ class GenericPreparationReason(str, Enum):
     MALFORMED_REQUIRED_RESULT = "malformed-required-result"
     AUTHORITY_DRIFT = "authority-drift"
     CAPTURE_INVALID = "capture-invalid"
+    # The run is bound to `spikes_unavailable`; raised by the transaction, never by preparation.
+    SPIKES_UNAVAILABLE = "spikes-unavailable"
 
 
 class GenericPreparationUnavailable(ValueError):
@@ -257,13 +259,19 @@ def reobserve_authority(
     draft: SpikePlanDraft,
     backend: GenericQualifiedBackend,
     resolver: LocalImageResolver,
-) -> bool:
+) -> GenericPreparationReason | None:
+    """None when the image and engine still equal the sealed ones; otherwise the closed reason
+    (the resolver's own, such as `image-not-local`, or `authority-drift` for a changed match)."""
     try:
         value = resolver.resolve(draft.image, backend)
         image, engine_ncpu = _resolved_image(draft, backend, value)
+    except GenericPreparationUnavailable as exc:
+        return exc.reason
     except Exception:
-        return False
-    return image == sealed.plan.image and engine_ncpu == sealed.plan.engine_ncpu
+        return GenericPreparationReason.MALFORMED_REQUIRED_RESULT
+    if image == sealed.plan.image and engine_ncpu == sealed.plan.engine_ncpu:
+        return None
+    return GenericPreparationReason.AUTHORITY_DRIFT
 
 
 def reobserve_generic_spike(sealed: GenericSealedCapture, workspace: Workspace) -> bool:
@@ -378,11 +386,15 @@ class GenericHarnessResult:
 
 
 class GenericUnavailableReason(str, Enum):
-    CAPTURE_INVALID = "capture_invalid"
-    AUTHORITY_INVALID = "authority_invalid"
-    LIFECYCLE_UNAVAILABLE = "lifecycle_unavailable"
-    CLEANUP_UNAVAILABLE = "cleanup_unavailable"
-    POSTFLIGHT_CHANGED = "postflight_changed"
+    AUTHORITY_INVALID = "authority-invalid"
+    LIFECYCLE_UNAVAILABLE = "lifecycle-unavailable"
+    CLEANUP_UNAVAILABLE = "cleanup-unavailable"
+    POSTFLIGHT_CHANGED = "postflight-changed"
+
+
+# The closed agent-visible spike Fault `reason` vocabulary (public-contract `evidence/spike/limits`).
+SPIKE_FAULT_REASONS = tuple(item.value for item in GenericPreparationReason) + tuple(
+    item.value for item in GenericUnavailableReason)
 
 
 @dataclass(frozen=True, slots=True)

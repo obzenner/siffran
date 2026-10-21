@@ -58,22 +58,26 @@ names only.
 `docker-isolated-v1`, or set exactly `docker-isolated-v1` or `docker-networked-v1` before `StartRun`. A malformed value
 refuses before run creation. The action and plan cannot change it.
 
-Use an already-local probe image and exact config identity. Qualification never pulls or changes Docker:
+Use an already-local, server-native Linux image that has the qualification tools. Qualification never pulls or changes
+Docker, and it is separate from installation:
 
 ```text
-make generic-sandbox-qualification PROFILE=docker-isolated-v1 \
-  PROBE_IMAGE=repository@sha256:<64-lowercase-hex> PROBE_CONFIG=sha256:<64-lowercase-hex>
-make generic-sandbox-qualification-install PROFILE=docker-isolated-v1 \
-  PROBE_IMAGE=repository@sha256:<64-lowercase-hex> PROBE_CONFIG=sha256:<64-lowercase-hex>
+make generic-docker-qualify-candidate PROFILE=docker-isolated-v1 IMAGE=<local-ref> \
+  DOCKER=<absolute-docker-cli> OUT=<absolute-private-candidate.json> WORK=<absolute-private-work-root>
+make generic-docker-install-candidate PROFILE=docker-isolated-v1 \
+  CANDIDATE=<absolute-private-candidate.json> SANDBOX_HOME=<absolute-private-sandbox-home>
 ```
 
-Repeat with `PROFILE=docker-networked-v1` if needed. `qualify` writes JSON and Markdown reports outside the repository;
-`install` repeats the complete procedure and publishes only on success. The 600-second qualification runs ordered probes
-`network`, `natural-1`, `natural-124`, `natural-125`, `output-limit`, `timeout`, and `oom`, and requires exact pre/post
-census equality for containers and networks. Any failure leaves no installed record.
+Repeat with `PROFILE=docker-networked-v1` if needed. The qualify command writes only a private mode-0600 candidate; the
+install command revalidates it against the current semantic authority and implementation and atomically publishes the
+record and pointer. One 60-second deadline covers five ordered probes, `realization`, `natural-125`, `output-overflow`,
+`timeout`, and `network-profile`, each through the production lifecycle with exact-ID cleanup. Any failure leaves no
+installed record. See [hosts](hosts.md) for the exact variables, and public-contract clause `evidence/spike/limits`
+for every limit an agent sees.
 
-After changing plugin code, contracts, host adapters, Docker CLI bytes, selected local Unix endpoint, engine facts,
-environment identity, or probe image/config, re-run qualification and install. The new pointer affects future runs only.
+After changing plugin code, contracts, host adapters, the selected local Unix endpoint, or semantic Docker capabilities,
+qualify and install again. The new pointer affects future runs only. An unfinished spike operation from an older plugin
+build is still recovered by the new build on the same endpoint.
 
 ## Admission and audit behavior
 

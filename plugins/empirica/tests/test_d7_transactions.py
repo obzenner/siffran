@@ -1409,12 +1409,101 @@ class D7TransactionTests(unittest.TestCase):
                     response = coordinator.handle(
                         {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
                     self.assertEqual(response["result"], {
-                        "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+                        "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+                        "reason": expected})
                     self.assertNotIn("injected", json.dumps(response))
                 history = traverse_history(
                     decode_state(runs.data[key].value), artifacts_repo.values[key].values())
                 self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)
                 self.assertNotIn("spike", [item["kind"] for item in history])
+
+    def test_each_preparation_refusal_projects_its_closed_reason_before_any_request(self):
+        class RefusingResolver(ImageResolver):
+            def __init__(self, reason):
+                super().__init__()
+                self.reason = reason
+
+            def resolve(self, reference, backend):
+                self.calls.append((reference, backend))
+                if self.reason is generic_spike.GenericPreparationReason.IMAGE_PLATFORM_MISMATCH:
+                    return generic_spike.LocalImageResolution(
+                        reference, self.image_id, "linux", "amd64", "linux", "aarch64",
+                        (), 8, backend)
+                if self.reason is generic_spike.GenericPreparationReason.IMAGE_DECLARES_VOLUMES:
+                    return generic_spike.LocalImageResolution(
+                        reference, self.image_id, "linux", "arm64", "linux", "aarch64",
+                        ("/data",), 8, backend)
+                return generic_spike.LocalImageResolutionUnavailable(self.reason)
+
+        reasons = (generic_spike.GenericPreparationReason.IMAGE_NOT_LOCAL,
+                   generic_spike.GenericPreparationReason.IMAGE_REFERENCE_AMBIGUOUS,
+                   generic_spike.GenericPreparationReason.IMAGE_PLATFORM_MISMATCH,
+                   generic_spike.GenericPreparationReason.IMAGE_DECLARES_VOLUMES)
+        for reason in reasons:
+            with self.subTest(reason=reason.value):
+                harness = Harness()
+                coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+                    self._qualified_spike_ready(harness, session=f"prep-{reason.value}",
+                                                resolver=RefusingResolver(reason))
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+                    "reason": reason.value})
+                self.assertEqual(harness.calls, 0)
+                self.assertNotIn("spike_request", self._artifact_kinds(artifacts_repo, key))
+        coordinator, _, _, workspace, harness, _, run_id, _, action = \
+            self._qualified_spike_ready(session="prep-capture-invalid")
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id,
+             "action": spike_action("src/absent.py")}, "spike")
+        self.assertEqual(response["result"].get("reason"), "capture-invalid", response)
+        self.assertEqual(harness.calls, 0)
+
+    def test_post_execution_reobservation_failures_carry_their_closed_reason(self):
+        class Resolver(ImageResolver):
+            gone = False
+
+            def resolve(self, reference, backend):
+                if self.gone:
+                    self.calls.append((reference, backend))
+                    return generic_spike.LocalImageResolutionUnavailable(
+                        generic_spike.GenericPreparationReason.IMAGE_NOT_LOCAL)
+                return super().resolve(reference, backend)
+
+        import importlib.util
+        script = Path(__file__).resolve().parents[3] / "scripts" / "validate_docker_spike_contract.py"
+        spec = importlib.util.spec_from_file_location("validate_docker_spike_contract", script)
+        validator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(validator)
+        cases = (  # (cause, reason, the remedy its hint must state)
+            ("input changed", "capture-invalid", "inputs changed"),
+            ("tag moved", "authority-drift", "pin a full image ID or repo@sha256"),
+            ("image deleted", "image-not-local", "not in the local daemon"))
+        for case, reason, remedy in cases:
+            self.assertIn(remedy, validator.REASON_HINTS[reason])
+            with self.subTest(case=case):
+                harness, resolver = Harness(), Resolver()
+                coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, action = \
+                    self._qualified_spike_ready(harness, session=f"reobserve-{reason}",
+                                                resolver=resolver)
+
+                def drift(workspace=workspace, resolver=resolver, case=case):
+                    if case == "input changed":
+                        workspace.write("src/x.py", b"changed during the spike")
+                    elif case == "tag moved":
+                        resolver.image_id = "sha256:" + "9" * 64
+                    else:
+                        resolver.gone = True
+
+                harness.before_result = drift
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+                    "reason": reason})
+                self.assertEqual(harness.calls, 1)
+                self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
 
     def test_request_conflict_replans_before_the_single_harness_call(self):
         coordinator, runs, _, _, harness, _, run_id, _, action = \
@@ -1564,8 +1653,10 @@ class D7TransactionTests(unittest.TestCase):
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
         self.assertEqual(response["result"], {
-            "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+            "reason": "authority-invalid"})
         self.assertNotIn("PRIVATE_STUCK_OPERATION", json.dumps(response))
+        self.assertNotIn("o-123", json.dumps(response))
         history = traverse_history(
             decode_state(runs.data[key].value), artifacts_repo.values[key].values())
         self.assertEqual([item["kind"] for item in history].count("spike_request"), 1)

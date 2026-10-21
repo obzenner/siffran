@@ -665,8 +665,11 @@ function renderValid(row: Json): string {
     const safety = PUBLIC_CONTRACT.untrusted_delimiters as TextSafety;
     return `${LABELS.block}\n${reasonLines((row.reasons as Json[]).map((item) => reason(item, safety))).join("\n")}`;
   }
-  if (row.type === "Fault")
-    return `${LABELS.fault} ${row.code} (${row.fail_direction})${row.message === undefined ? "" : `: ${row.message}`}`;
+  if (row.type === "Fault") {
+    const reason = row.reason === undefined
+      ? "" : ` reason ${row.reason} (GetContract evidence/spike: evidence/spike/limits)`;
+    return `${LABELS.fault} ${row.code} (${row.fail_direction})${reason}${row.message === undefined ? "" : `: ${row.message}`}`;
+  }
   return LABELS.inert;
 }
 

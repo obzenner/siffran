@@ -612,8 +612,10 @@ def _render_valid(result: dict[str, Any]) -> str:
         return _LABELS["block"] + "\n" + "\n".join(_reason_lines(
             tuple(_reason(row, safety) for row in result["reasons"])))
     if result["type"] == "Fault":
+        reason = (f" reason {result['reason']} (GetContract evidence/spike: evidence/spike/limits)"
+                  if "reason" in result else "")
         message = f": {result['message']}" if "message" in result else ""
-        return f"{_LABELS['fault']} {result['code']} ({result['fail_direction']}){message}"
+        return f"{_LABELS['fault']} {result['code']} ({result['fail_direction']}){reason}{message}"
     return _LABELS["inert"]
 
 

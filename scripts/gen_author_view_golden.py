@@ -314,6 +314,8 @@ def _synthetic_results() -> list[tuple[str, object]]:
                           "fail_direction": "closed", "message": "no eval"}),
         ("fault-open", {"type": "Fault", "code": "unavailable",
                         "fail_direction": "open", "message": "bridge"}),
+        ("fault-spike-reason", {"type": "Fault", "code": "unavailable",
+                                "fail_direction": "closed", "reason": "lifecycle-unavailable"}),
         ("inert", {"type": "Inert", "reason": "no_run"}),
     ]
 

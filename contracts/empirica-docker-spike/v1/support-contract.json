@@ -16,7 +16,7 @@
     "identity": "daemon-image-id",
     "platform": "canonical-native-server-platform",
     "declared_volumes": "forbidden",
-    "refusals": ["not-local", "ambiguous-reference", "malformed-inspect", "platform-mismatch", "declared-volumes", "required-tool-missing", "uid-65534-unusable"]
+    "refusals": ["image-not-local", "image-reference-ambiguous", "image-malformed", "image-platform-mismatch", "image-declares-volumes", "image-tool-missing", "image-uid65534-unusable"]
   },
   "sandbox_policy": {
     "uid": 65534,
@@ -53,7 +53,7 @@
   },
   "destructive_authority": {
     "source": "durably-recorded-64-hex-full-id-only",
-    "cidfile": "docker-created-owner-only-optional-until-create-success",
+    "cidfile": "docker-created-owner-only-empty-or-missing-is-never-absence",
     "absence": "exact-recorded-id-error-form",
     "ambiguity": "retain-journal-and-staging",
     "operator_recovery": "inspect-private-operation-id-before-explicit-removal"
@@ -72,7 +72,7 @@
     "private_exclusions": ["environment-values", "raw-stream-content", "host-paths", "credentials", "docker-endpoint", "cidfile", "journal", "container-id", "network-id"],
     "provenance": "request-result-and-producer-identities"
   },
-  "unsupported": ["runtime-schema-v1", "multi-container-topology", "host-network", "published-ports", "privileged", "host-mounts", "image-pull-build-load-login", "remote-docker-endpoint", "windows-containers", "automatic-qualification-or-installation"],
+  "unsupported": ["runtime-schema-v1", "multi-container-topology", "host-network", "published-ports", "privileged", "host-mounts", "devices-and-gpus", "image-declared-volumes", "cross-architecture-or-emulation", "selinux-enforcing-hosts", "podman", "kubernetes", "docker-in-docker", "image-pull-build-load-login", "registry-credentials", "remote-docker-endpoint", "windows-containers", "wsl2-and-native-windows-hosts", "automatic-qualification-or-installation"],
   "adapter_mapping": [
     {
       "id": "default-namespaces",
@@ -80,16 +80,16 @@
       "cli_input": "container create --ipc private --cgroupns private; no --pid or --uts",
       "daemon_observation": "HostConfig.IpcMode and PidMode are empty or private, UTSMode is empty, CgroupnsMode is empty or private",
       "allowed_forms": ["PidMode empty", "PidMode private", "IpcMode empty", "IpcMode private", "UTSMode empty", "CgroupnsMode empty", "CgroupnsMode private"],
-      "refusal_reason": "container-host-namespace-appeared",
+      "refusal_reason": "lifecycle-unavailable",
       "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#static_container_inspect"
     },
     {
       "id": "cidfile-authority",
-      "obligation": "Docker creates a fresh owner-only cidfile; the host never precreates it.",
-      "cli_input": "container create --cidfile <reserved-absent-path> under umask 077",
-      "daemon_observation": "optional regular owner file mode 0600 containing one 64-hex container ID",
-      "allowed_forms": ["absent before create", "absent after failed create", "owner-only file after successful create"],
-      "refusal_reason": "cidfile-container-ownership-refused",
+      "obligation": "Docker creates a fresh owner-only cidfile; the host never precreates it. An empty, missing, or malformed cidfile is never absence: the journal is retained and the next recovery's exact-name, label-verified candidate set decides (zero proves absence, one is adopted and removed by full ID, more fail closed).",
+      "cli_input": "container create --cidfile <reserved-absent-path> under umask 077; container ls --all --no-trunc --filter name=^/?<name>$",
+      "daemon_observation": "optional regular owner file mode 0600 containing one 64-hex container ID; otherwise exact-name candidates verified by Id, Name and every ownership label",
+      "allowed_forms": ["absent before create", "owner-only file after successful create", "missing, empty, or malformed after any other create (deferred to recovery)"],
+      "refusal_reason": "cleanup-unavailable",
       "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#docker_cli_create_contract"
     },
     {
@@ -98,7 +98,7 @@
       "cli_input": "network create --driver bridge; container create --network <full-id>",
       "daemon_observation": "prestart network inspect has exact ID/labels/bridge/internal=false/Containers empty; terminal container names the exact network",
       "allowed_forms": ["NetworkMode full ID", "NetworkMode framework name", "prestart Containers empty"],
-      "refusal_reason": "private-bridge-identity-or-attachment-differs",
+      "refusal_reason": "lifecycle-unavailable",
       "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#network_endpoint_forms"
     },
     {
@@ -107,7 +107,7 @@
       "cli_input": "container start --attach concurrently with bounded inspect",
       "daemon_observation": "network Containers has exactly the recorded container full ID before attach completion",
       "allowed_forms": ["sole endpoint while running", "fast production exit uses prestart safe fallback"],
-      "refusal_reason": "qualification-running-membership-unobserved",
+      "refusal_reason": "probe-failed",
       "evidence": "G11 probe corpus running-only bridge-membership observation"
     },
     {
@@ -125,16 +125,16 @@
       "cli_input": "container start --attach <full-id>",
       "daemon_observation": "terminal State exited, not running, no OOM/error, attach and inspect exit agree",
       "allowed_forms": ["exit 0 PASS", "exit 1-136 FAIL", "exit 138-255 FAIL"],
-      "refusal_reason": "natural-verdict-unavailable",
+      "refusal_reason": "lifecycle-unavailable",
       "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#terminal_forms"
     },
     {
       "id": "exact-cleanup",
       "obligation": "Cleanup is proved by exact recorded full-ID absence, not remove success.",
       "cli_input": "container/network rm <recorded-full-id>; inspect <same-full-id>",
-      "daemon_observation": "anchored No such resource: ID or resource ID not found",
+      "daemon_observation": "nonzero exit; stdout empty or the docker/cli empty JSON list []; anchored No such resource: ID or resource ID not found",
       "allowed_forms": ["No such container: exact-ID", "container exact-ID not found", "No such network: exact-ID", "network exact-ID not found"],
-      "refusal_reason": "exact-id-absence-unproved",
+      "refusal_reason": "cleanup-unavailable",
       "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#absence_stderr"
     },
     {

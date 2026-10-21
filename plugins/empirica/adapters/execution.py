@@ -32,7 +32,10 @@ class FilesystemWorkspace:
                     part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory_fd)
                 os.close(directory_fd)
                 directory_fd = next_fd
-            file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW, dir_fd=directory_fd)
+            # O_NONBLOCK: a leaf swapped for a FIFO opens without blocking and is then refused as
+            # non-regular; it has no effect on reading a regular file.
+            file_fd = os.open(parts[-1], os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                              dir_fd=directory_fd)
             before = os.fstat(file_fd)
             if not stat.S_ISREG(before.st_mode) or before.st_size > maximum:
                 return CapturedFile(

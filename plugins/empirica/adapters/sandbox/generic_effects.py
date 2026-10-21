@@ -12,7 +12,7 @@ from . import process
 CONTROL_BYTES = 256 * 1024
 _ALLOWED = frozenset({
     ("container", "create"), ("container", "inspect"), ("container", "start"),
-    ("container", "rm"), ("network", "create"), ("network", "inspect"),
+    ("container", "rm"), ("container", "ls"), ("network", "create"), ("network", "inspect"),
     ("network", "rm"), ("network", "ls"),
 })
 _ENV_KEYS = frozenset({"LANG", "LC_ALL", "DOCKER_HOST", "DOCKER_CONFIG"})
@@ -20,6 +20,11 @@ _ENV_KEYS = frozenset({"LANG", "LC_ALL", "DOCKER_HOST", "DOCKER_CONFIG"})
 
 class GenericEffectsError(RuntimeError):
     pass
+
+
+class GenericEffectsRefused(GenericEffectsError):
+    """Raised before any process launch, so no Docker effect can have happened."""
+    before_launch = True
 
 
 def _cli(value: Path) -> Path:
@@ -79,13 +84,16 @@ class ConcreteGenericEffects:
         self.runner = process.BoundedRunner(cwd=cwd, umask=0o077) if runner is None else runner
 
     def _argv(self, argv: tuple[str, ...]) -> tuple[str, ...]:
+        """Admit only the closed `(argv[0], argv[1])` subcommand vocabulary.
+
+        Later tokens are option values or, after the image, the author's guest argv: Docker stops
+        flag parsing at the image (`SetInterspersed(false)`) and the planner proves the pre-image
+        flags, so a guest word such as `build` or `--pid` is never Docker authority.
+        """
         if (type(argv) is not tuple or len(argv) < 2
                 or any(type(item) is not str or "\x00" in item for item in argv)
                 or argv[:2] not in _ALLOWED):
-            raise GenericEffectsError("Docker argv is outside the closed lifecycle vocabulary")
-        forbidden = {"pull", "build", "load", "login", "context", "system", "daemon"}
-        if any(item in forbidden for item in argv):
-            raise GenericEffectsError("Docker acquisition or daemon authority is forbidden")
+            raise GenericEffectsRefused("Docker argv is outside the closed lifecycle vocabulary")
         return (str(self.cli), *argv)
 
     @staticmethod

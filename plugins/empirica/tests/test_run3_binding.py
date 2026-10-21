@@ -216,7 +216,11 @@ class PublicSpikeBackendTests(unittest.TestCase):
         self.assertIn("stderr", resources.lower())
         self.assertIn("512 MiB", resources)
         self.assertIn("256 PIDs", resources)
-        self.assertIn("nofile=1024", resources)
+        self.assertIn("nofile 1024", resources)
+        # The one agent-visible limitation set; scripts/validate_docker_spike_contract.py checks
+        # that it equals its rendering from the code constants.
+        self.assertIn("evidence/spike/limits", skill)
+        self.assertIn("evidence/spike/limits", evidence)
         self.assertIn("256 files", resources)
         self.assertIn("64 MiB", resources)
         self.assertIn("1 MiB", resources)
@@ -446,9 +450,11 @@ class StartSelectionTests(unittest.TestCase):
                        "command": "true", "dependent_files": ["x"]},
         }, "spike")
         self.assertEqual(result["result"], {
-            "type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+            "reason": "spikes-unavailable"})
         self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
                          before)
+
     def test_terminal_run3_spike_is_inert_before_every_side_effect(self):
         bindings = (
             {"kind": "spikes_unavailable"},

@@ -239,7 +239,7 @@
   "spike.identity.postflight": "Postflight identity",
   "spike.image.requested": "Requested local image",
   "spike.image.sealed": "Sealed daemon image identity",
-  "spike.image.realization": "Realized image identity",
+  "spike.image.realization": "Result image ID (equals sealed)",
   "spike.platform": "Native platform",
   "spike.command": "Command vector",
   "spike.user": "Numeric UID:GID",
