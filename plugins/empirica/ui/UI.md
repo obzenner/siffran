@@ -13,7 +13,7 @@ session; the page says so in its header.
 
 | Fact | Owner |
 |---|---|
-| Trust, scope, obligations, next steps, reason text, currency, governance, a run's **standing** and what it **asks** | the plugin's **core** |
+| Trust, scope, obligations, next steps, reason text, currency, governance, a run's immutable **spike backend**, its **standing** and what it **asks** | the plugin's **core** |
 | Store reading, coverage, project identity and labels, attempt families, the facets and their counts, the search, the calendar's cells (counted by civil day in the viewer's IANA time zone, the `tz` the UI sends), which runs carry a flag within a window (by the event's own time) | the **observer read model** |
 | Where a session can be found (host and locator) | the **host**, recorded at StartRun |
 | When a run's writes happened (`started`, `updated`, `ended`, each step's `at`) | the **bridge**, which records each write's time beside the run (ADR-0070); the observer publishes a time only for a write whose own entry exists, else `null`. Labels only: the UI renders times and orders nothing by them |
@@ -47,7 +47,7 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   tier slot k depends on k alone, so the same summary lays out the same on every load and reload, a later one moves
   nothing an earlier one held, and no two islands come closer than `island_gap` (UI2-spec §5); when the largest island
   crosses a tier the same arrangement spreads wider, once. A store of a few small islands is therefore packed close and
-  the store's camera (at most `island_scale_max`, as an island's) shows them centred and large. **Known limitation (5.0.0):** the observer recomputes places and slots from the runs as
+  the store's camera (at most `island_scale_max`, as an island's) shows them centred and large. **Known limitation (6.0.0):** the observer recomputes places and slots from the runs as
   they are and stores none, so a deleted run, or a run whose time is recovered late, may renumber the places (or slots)
   after it, and the marks there move once (contract README, `marks.place`). The look: each island a soft
   glow of its own hue (`island-1`…`island-8`, tokens) inside a dashed shore, its **name** bold in that hue with "N runs ·
@@ -58,7 +58,7 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   its proof in the sheet). A run's zoom is its own scene: the islands and every other mark fade to a background
   (`graph_dim`), the run is drawn large with its standing's word under it, its claims are a node-link graph around it
   (`claimGraph`: rings by depth, each claim its state's shape, labelled where a label fits clear, the `SupportedBy` edges
-  as lines), and its attempts a short chain under it (`attemptChain`, the only relation between runs 5.0.0 records); the
+  as lines), and its attempts a short chain under it (`attemptChain`, the only relation between runs 6.0.0 records); the
   sheet's Claims section draws the same graph small. An island's zoom shows its **card** top left (name, repository, runs,
   and its runs by standing: the observer's `projects[].standings`). A disc zooms; an island's **name** is a link to the
   work view of its project. **The camera** fills the part no bar, key or card covers with `fit_margin_px` to spare
@@ -101,12 +101,13 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   arrow, Page and Home/End keys, resets on a double-click and is a separator saying the width; the width is remembered and
   clamped between `width.sheet-min` and what leaves the main area `width.main-min`, below both the sheet is the whole width,
   and the map refits beside it): one line of where the run is (project, attempt, claims, last
-  change; the repository and the full time on hover), the session to copy, then **Now** or **Outcome** (what is owed, in the order the report asks it,
+  change; the repository and the full time on hover), the session to copy, then its immutable read-only spike capability (`unavailable`, which is not a Needs Human item, or
+  `docker-isolated-v1` / `docker-networked-v1` with copyable qualification and execution identities and an explicit "not live health" note), then **Now** or **Outcome** (what is owed, in the order the report asks it,
   or that the run ended, its scope, what it left unresolved *as recorded when it stopped* and, only if the files changed,
   **Unresolved against the workspace now**); **Audit** (every verdict, newest first as the observer serves them, with its auditor and how
   independent it was; whether the latest still covers the argument is said on it, once); **Claims** as the support graph (the root, each claim's supporters nested
   beneath it, a claim that supports several named again where it recurs), each one line that opens in place to its sources and
-  quotes, the human's answer, each spike's command, result and bound files, review and independence, and the decisions made on
+  quotes, the human's answer, and each closed single-container generic `/2` spike request/result pair. A request disclosure shows only sealed artifact and execution identities, requested and sealed local-image identity, raw-to-canonical native platform, exact argv, the fixed numeric user and work directories, environment names only (no value, fingerprint or length; required content-addressed identities can confirm guessed low-entropy values, so authored values must never contain secrets), captured input declarations, paths, counts, sizes and digests (never contents), the selected profile, and all persisted framework limits including the 120-second workload / 210-second operation bounds. Its result disclosure shows the immutable request and operation identities, producer model attribution, realized-image identity, one natural exit and uppercase verdict, independent stdout/stderr byte counts plus digests, verified cleanup and verified postflight. The UI has no legacy `/1` topology or service/container grid and never shows raw output, host paths, credentials, environment values, staging paths, endpoints, attach/inspect facts or destructive runtime identifiers. The rest of a claim shows review and independence, and the decisions made on
   it; **Dropped claims** with the gate's own reason; **Human decisions**, each attached to what it decided (the claim, a link to
   it; the source; or the plan); **Attempts** side by side; **History** with the files
   that changed since; **Governance and audit**.

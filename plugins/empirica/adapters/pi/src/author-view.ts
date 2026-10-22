@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { PROTOCOL, isTerminalBatch, type Response } from "./contract.ts";
-import { assertResponse } from "./guard.ts";
+import { assertResponse, objectWithKeys, rows, text, unique, validContractResult } from "./guard.ts";
 import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR, type AuthorViewLabel } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
@@ -16,6 +16,7 @@ interface Header {
   readonly status: Trusted;
   readonly governance: Trusted;
   readonly runId: Trusted;
+  readonly spikeBackend: readonly Trusted[];
   readonly proposalRationale: Untrusted | null;
   readonly hostNote: Trusted | null;
 }
@@ -136,41 +137,6 @@ function fallback(result: unknown): string {
   }
 }
 
-function objectWithKeys(value: unknown, keys: readonly string[]): value is Json {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-}
-
-const text = (value: unknown, nonempty = false): value is string =>
-  typeof value === "string" && (!nonempty || value.length > 0);
-const unique = (value: unknown[]): boolean =>
-  new Set(value.map((item) => JSON.stringify(item))).size === value.length;
-const rows = (value: unknown, keys: readonly string[], fields: readonly string[]): boolean =>
-  Array.isArray(value) && unique(value) && value.every((item) =>
-    objectWithKeys(item, keys) && fields.every((field) => text(item[field])));
-
-function validContractResult(value: unknown): boolean {
-  if (!objectWithKeys(value, (value as Json | null)?.target === "index"
-    ? ["target", "digest", "index"] : ["target", "digest", "section_id", "section"])) return false;
-  if (!text(value.digest) || !/^sha256:[0-9a-f]{64}$/.test(value.digest)) return false;
-  if (value.target === "index") {
-    const index = value.index;
-    return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
-      && index.id === "empirica/public" && index.version === "4.0.0"
-      && rows(index.sections, ["id", "title"], ["id", "title"])
-      && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
-        objectWithKeys(reason, ["code", "sections"]) && text(reason.code)
-        && Array.isArray(reason.sections) && reason.sections.every((section) => text(section)))
-      && rows(index.next_actions, ["id", "description"], ["id", "description"]);
-  }
-  if (value.target !== "section" || !text(value.section_id, true)) return false;
-  const section = value.section;
-  return objectWithKeys(section, ["id", "title", "summary", "clauses"])
-    && text(section.id, true) && section.id === value.section_id && text(section.title, true)
-    && text(section.summary) && rows(section.clauses, ["id", "text"], ["id", "text"])
-    && section.clauses.every((clause: Json) => text(clause.id, true) && text(clause.text, true));
-}
-
 /** Whether an active obligation's `missing` is null or the closed, claim-id-targeted object. */
 function validMissing(value: unknown): boolean {
   return value === null || (objectWithKeys(value, ["code", "target_claim_id", "parameters"])
@@ -190,11 +156,9 @@ function validObligations(run: Json): boolean {
 
 /** Validate with the same closed result shapes used by the public response schema. */
 function validResult(result: unknown): boolean {
-  if (objectWithKeys(result, ["type", "contract_result"]) && result.type === "Allow")
-    return validContractResult(result.contract_result);
   try {
     assertResponse({ protocol: PROTOCOL, request_id: "author-view", result } as Response,
-      "author-view");
+      "author-view", objectWithKeys(result, ["type", "contract_result"]) ? "GetContract" : undefined);
     const run = (result as Json | null)?.run;
     return run === undefined || validObligations(run as Json);
   } catch {
@@ -338,6 +302,18 @@ function reason(row: Json, safety: TextSafety): Reason {
   };
 }
 
+/** Render only the closed public StartRun binding; never infer current backend health. */
+function spikeBackend(run: Json): readonly Trusted[] {
+  const backend = run.spike_backend as Json;
+  if (backend.kind === "spikes_unavailable")
+    return [trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_unavailable}`)];
+  return [
+    trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_qualified}`),
+    trusted(`  ${LABELS.spike_backend_record} ${backend.qualification_record_digest}`),
+    trusted(`  ${LABELS.spike_backend_execution} ${backend.execution_binding_digest}`),
+  ];
+}
+
 /** Render the compact governance header summary. */
 function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
@@ -408,7 +384,8 @@ function parse(result: Json): AuthorView {
   const rationale = governanceValue === null ? null : requiredRationale(governanceValue);
   const header: Header = {
     resultType: trusted(resultType), status: trusted(run.status), governance: governance(run),
-    runId: trusted(run.id), proposalRationale: rationale === null ? null : untrusted(rationale, safety),
+    runId: trusted(run.id), spikeBackend: spikeBackend(run),
+    proposalRationale: rationale === null ? null : untrusted(rationale, safety),
     hostNote: hostNote(run.host as Json),
   };
   const terminalNext = (run.next_actions as string[]).map(surface);
@@ -509,6 +486,7 @@ function render(view: AuthorView): string {
   const base = [
     `${view.header.resultType} ${view.header.status} — ${view.header.governance}`,
     `${LABELS.run_id} ${view.header.runId}`,
+    ...view.header.spikeBackend,
     ...(view.header.proposalRationale === null
       ? [] : [`${LABELS.proposal_rationale} ${view.header.proposalRationale}`]),
     ...(view.header.hostNote === null ? [] : [view.header.hostNote]),
@@ -541,6 +519,26 @@ function verificationLabel(verification: Json): string {
 }
 
 /** Render the graph projection without private identity or artifact fields. */
+function redactedEnvironmentPlan(value: unknown): unknown {
+  if (value === null || typeof value !== "object") return value;
+  const source = value as Json;
+  if (source.environment === null || typeof source.environment !== "object") return value;
+  const plan = structuredClone(source);
+  plan.environment = Array.isArray(source.environment)
+    ? [...source.environment].sort()
+    : Object.keys(source.environment).sort();
+  return plan;
+}
+
+function genericSpikeEvidence(item: Json): Json {
+  const safe = structuredClone(item);
+  if (safe.kind === "spike_request") for (const key of ["draft", "plan"])
+    if (Object.hasOwn(safe, key)) safe[key] = redactedEnvironmentPlan(safe[key]);
+  if (safe.kind === "spike" && safe.result_facts && typeof safe.result_facts === "object")
+    delete safe.result_facts.run_id;
+  return safe;
+}
+
 function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
   const labels = LABELS as Record<string, string>;
   const claims = (argument.claims as Json[]).flatMap((item) => {
@@ -557,7 +555,8 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
   });
   const edges = (argument.edges as Json[]).map((item) =>
     `  ${claimId(item.from, safety)} -${item.type}-> ${claimId(item.to, safety)}`);
-  const citations = (argument.artifacts as Json[]).filter((item) => item.citation).flatMap((item) => {
+  const artifacts = argument.artifacts as Json[];
+  const citations = artifacts.filter((item) => item.citation).flatMap((item) => {
     const verification = item.verification as Json | undefined;
     return [
       `  ${untrusted(item.citation, safety)}` +
@@ -565,12 +564,26 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
       ...(verification?.note ? [`    ${LABELS.human_note} ${untrusted(verification.note, safety)}`] : []),
     ];
   });
+  const resultRequests = new Set(artifacts.filter((item) => item.kind === "spike")
+    .map((item) => item.request_artifact_id));
+  const spikes = artifacts.filter((item) => item.kind === "spike_request" || item.kind === "spike")
+    .flatMap((item) => {
+      const request = item.kind === "spike_request";
+      return [
+        `  ${request ? labels.generic_spike_request : labels.generic_spike_result} ` +
+          `${claimId(item.claim_id, safety)} ${item.artifact_id}`,
+        `    ${untrusted(JSON.stringify(genericSpikeEvidence(item)), safety)}`,
+        ...(request && !resultRequests.has(item.artifact_id)
+          ? [`    ${labels.generic_spike_no_result}`] : []),
+      ];
+    });
   return [
     `${LABELS.goal} ${untrusted(argument.goal, safety)}`,
     `${LABELS.root_claim_id} ${claimId(argument.root_claim_id, safety)}`,
     LABELS.claims, ...claims,
     ...(edges.length ? [LABELS.edges, ...edges] : []),
     ...(citations.length ? [LABELS.citations, ...citations] : []),
+    ...(spikes.length ? [labels.generic_spikes, ...spikes] : []),
     `${LABELS.audit_status} ${auditText(argument.audit)}`,
     ...(argument.audit.findings as unknown[]).map(
       (item) => `  ${LABELS.finding} ${untrusted(item, safety)}`),
@@ -615,8 +628,11 @@ function renderValid(row: Json): string {
     const safety = PUBLIC_CONTRACT.untrusted_delimiters as TextSafety;
     return `${LABELS.block}\n${reasonLines((row.reasons as Json[]).map((item) => reason(item, safety))).join("\n")}`;
   }
-  if (row.type === "Fault")
-    return `${LABELS.fault} ${row.code} (${row.fail_direction})${row.message === undefined ? "" : `: ${row.message}`}`;
+  if (row.type === "Fault") {
+    const reason = row.reason === undefined
+      ? "" : ` reason ${row.reason} (GetContract evidence/spike: evidence/spike/limits)`;
+    return `${LABELS.fault} ${row.code} (${row.fail_direction})${reason}${row.message === undefined ? "" : `: ${row.message}`}`;
+  }
   return LABELS.inert;
 }
 

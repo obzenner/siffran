@@ -27,13 +27,13 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from . import citations, confirmation, governance
+from . import citations, confirmation, governance, spike_observer
 from .evaluation import (LATER, ClaimDerivation, EvaluationSnapshot, Requirement, active_evidence,
                          audit_acceptance, audit_attributions, audit_passes, audit_verdicts, claim_blockers,
                          claim_digest, claim_state_cause, confirmation_batch, derive_claims_for_projection,
                          effective_scope_ids, evidence_digest, identity_pair, independence_then, latest_audit_verdict,
                          pending_decisions, report_requirements)
-from .projection import governance_facts, project_runview, spike_result
+from .projection import governance_facts, project_runview
 
 #: ``evidence`` values, strongest first, and the other vocabularies this module owns
 #: (``contracts/empirica-ui-view/v1`` mirrors them; ``scripts/validate_ui_view.py`` holds it).
@@ -58,7 +58,7 @@ CLAIM_STANDING = ("current", "replaced", "gone")
 #: Whether a spike still holds: its files unchanged, changed since (freshness), or replaced by a later spike.
 #: History kinds that record how the run was kept, not what it came to: a page folds them away by default.
 BOOKKEEPING_KINDS = ("observation_basis", "attribution")
-SPIKE_STATES = ("current", "stale", "superseded")
+SPIKE_STATES = ("requested", "current", "stale", "superseded")
 #: The view's name for each budget ceiling ``governance.BUDGETS`` declares (``max_passes`` -> ``passes``).
 BUDGET_NAMES = {ceiling: ceiling.removeprefix("max_") for ceiling in governance.BUDGETS}
 
@@ -205,19 +205,36 @@ def _claim_detail(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating
             "decision": _decision(snapshot, claim, gating, waiting, prompt_error),
             "research": sum(a["kind"] == "research" and a.get("outcome") == "supporting"
                             for a in active_evidence(snapshot, claim)),
-            "proof": [_spike(a, a["artifact_id"] in active, a["artifact_id"] in stale) for a in snapshot.history
-                      if a.get("kind") == "spike" and a.get("claim_id") == claim["id"]
-                      and a.get("claim_digest") == digest]}
+            "proof": _spikes(snapshot, claim, digest, active, stale)}
 
 
-def _spike(art: Mapping[str, Any], active: bool, stale: bool) -> dict[str, Any]:
-    """One executed spike as the plugin's dossier states it (``projection.spike_result``), with whether it still holds: the
-    freshness owner's verdict on the files it bound (``stale``), or that a later spike replaced it. The command's output
-    is not retained, and the fact says so."""
-    fact = spike_result(art, active)
-    return {"command": fact["command"], "outcome": fact["outcome"], "exit_code": fact["exit_code"],
-            "gate": fact["spike_gate"], "files": [{"path": f["path"], "sha256": f["sha256"]} for f in fact["file_bindings"]],
-            "state": "superseded" if not active else "stale" if stale else "current", "output": "not_retained"}
+def _spikes(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], claim_id_digest: str,
+            active: set[str], stale: set[str]) -> list[dict[str, Any]]:
+    requests = [item for item in snapshot.history if item.get("kind") == "spike_request"
+                and item.get("claim_id") == claim["id"] and item.get("claim_digest") == claim_id_digest]
+    results: dict[str, Mapping[str, Any]] = {}
+    for item in snapshot.history:
+        if item.get("kind") == "spike" and item.get("claim_id") == claim["id"] \
+                and item.get("claim_digest") == claim_id_digest:
+            request_id = item["request_artifact_id"]
+            if request_id in results:
+                raise ValueError("generic spike request has multiple results")
+            results[request_id] = item
+    if set(results) - {item["artifact_id"] for item in requests}:
+        raise ValueError("generic spike result has no request")
+    projected = []
+    for request_artifact in requests:
+        result_artifact = results.get(request_artifact["artifact_id"])
+        state = ("requested" if result_artifact is None else "superseded"
+                 if result_artifact["artifact_id"] not in active else "stale"
+                 if result_artifact["artifact_id"] in stale else "current")
+        request, context = spike_observer.request(request_artifact)
+        result = None
+        if result_artifact is not None:
+            result = spike_observer.result(result_artifact, context)
+            result["producer_model"] = identity_pair(result_artifact.get("producer"))
+        projected.append({"request": request, "result": result, "state": state})
+    return projected
 
 
 def governance_view(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -333,7 +350,7 @@ def ask(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
     ``configured``). Read from the items the core presents, first that applies:
 
     * the configuration, when its requirement is the human's (``governance.human_wait``: the agent asked and a host can
-      show it): ``approve_revision`` for any governance ask after the first approval (5.0.0 does not record whether a
+      show it): ``approve_revision`` for any governance ask after the first approval (6.0.0 does not record whether a
       revision raised a ceiling, so a raise is not counted), else ``approve_configuration``;
     * the first human requirement of the report (``report_requirements``): its batch (``confirmation_batch``) asks to
       ``decide_claim`` when it holds a decision, else to ``confirm_source``; the terminal stage asks ``freeze_scope``
@@ -591,6 +608,9 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     changed = view["freshness"]["changes"]
     detail = governance.plain({
         "goal": snapshot.state.goal,
+        # Public immutable StartRun binding only. The observer never consults qualification
+        # authority, current.json, Docker, or local diagnostics.
+        "spike_backend": view["spike_backend"],
         "governance": governance_view(governance_facts(snapshot.state, confirmation.interactions(snapshot))),
         "audit": {"findings": list(audit["findings"])},
         "stop": stop,

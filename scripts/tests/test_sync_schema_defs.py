@@ -118,7 +118,7 @@ class SyncSchemaDefsTests(unittest.TestCase):
             self.assertEqual(self._main(contracts, "--check")[0], 0)
 
 
-CLAIM_ID = {"type": "string", "pattern": r"^[A-Za-z0-9._-]{1,64}(?![\s\S])"}
+CLAIM_ID = {"type": "string", "pattern": r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\s\S])"}
 _CLAIM_NAMES = frozenset({"from", "to", "root"})
 _SCHEMA_KEYWORDS = frozenset({"properties", "$defs"})
 # Every claim-id position, per document. A new claim-bearing field that is not listed here (or

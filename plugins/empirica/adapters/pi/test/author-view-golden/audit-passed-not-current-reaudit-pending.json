@@ -8,7 +8,7 @@
       "basis": "sha256:d1365fba2169d85fd460073fc8f6ca8c5a923b80d1073d2a042cd3079a2fe63f",
       "contract": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "relevant_sections": [
           "audit",
           "children"
@@ -66,7 +66,10 @@
         "independence": null,
         "findings": []
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "spike_backend": {
+        "kind": "spikes_unavailable"
+      }
     },
     "reasons": [
       {
@@ -85,5 +88,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\nAudit: passed, no longer current, re-audit pending\n\nReasons:\n  audit.producers_mixed: Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual. — affected: obligation.audit\n    next: report_convergence intent=stop\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.producers_mixed\n    next: report_convergence intent=stop\n\nChildren:\n  audit: completed"
+  "text": "Block active — no governance\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: passed, no longer current, re-audit pending\n\nReasons:\n  audit.producers_mixed: Covered evidence has mixed producers; re-run the latest spike under the research producer or accept the residual. — affected: obligation.audit\n    next: report_convergence intent=stop\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.producers_mixed\n    next: report_convergence intent=stop\n\nChildren:\n  audit: completed"
 }

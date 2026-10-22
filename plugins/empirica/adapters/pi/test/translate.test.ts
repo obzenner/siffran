@@ -15,6 +15,7 @@ import * as path from "node:path";
 
 import {
   startRunRequest,
+  configuredSpikeProfile,
   splitLeadingFlags,
   parseInvocationFlags,
   gateFromDecision,
@@ -35,7 +36,7 @@ import { type Result } from "../src/contract.ts";
 const SEL = { project: "p", session: "s" };
 const RID = "rid-1";
 const INVOCATION = { host: "pi", interactive: true, signal: "ctx.mode=tui", delegation: false, audit_retrieval: ["local", "workspace"] as ("local" | "web" | "workspace")[], human_surface: "unavailable" as "human" | "unavailable" };
-const RUN = { id: "h", status: "active" as const };
+const RUN = { id: "h", status: "active" as const, spike_backend: { kind: "spikes_unavailable" as const } };
 const SPLIT_CASES = path.resolve(path.dirname(fileURLToPath(import.meta.url)),
   "../../../../../contracts/empirica/v2/invocation-split-cases.json");
 
@@ -56,6 +57,17 @@ test("startRunRequest carries budgets only when supplied", () => {
     assert.deepEqual(req.command.budgets,
       { max_passes: 3, max_spawns: 1, max_audit_spawns: 2 });
   }
+});
+
+test("host profile is exact, optional, and only emitted when supplied", () => {
+  assert.equal(configuredSpikeProfile({}), undefined);
+  for (const spikeProfile of ["docker-isolated-v1", "docker-networked-v1"] as const) {
+    assert.equal(configuredSpikeProfile({ EMPIRICA_SPIKE_PROFILE: spikeProfile }), spikeProfile);
+    const req = startRunRequest(SEL, "g", RID, INVOCATION, { spikeProfile });
+    if (req.command.type === "StartRun") assert.equal(req.command.spike_profile, spikeProfile);
+  }
+  for (const value of ["", "docker-rust-v1", " docker-isolated-v1", "other"])
+    assert.throws(() => configuredSpikeProfile({ EMPIRICA_SPIKE_PROFILE: value }), /EMPIRICA_SPIKE_PROFILE/);
 });
 
 // --- invocation flags --------------------------------------------------------
@@ -119,7 +131,8 @@ const NOTICE_CASES: Array<{
   { label: "convergenceNotice: Block is error with reason", fn: convergenceNotice, result: { type: "Block", run: RUN, reasons: [{ code: "audit.required", message: "audit owed" }] }, type: "error", patterns: [/audit owed/] },
   { label: "convergenceNotice: Inert is info", fn: convergenceNotice, result: { type: "Inert", reason: "no_run" }, type: "info", patterns: [/no active run/] },
   { label: "convergenceNotice: Fault is error", fn: convergenceNotice, result: { type: "Fault", code: "unavailable", fail_direction: "closed" }, type: "error", patterns: [/unavailable/] },
-  { label: "statusNotice: Allow reports id+status", fn: statusNotice, result: { type: "Allow", converged: false, run: { id: "h", status: "active" } }, type: "info", patterns: [/h.*active/] },
+  { label: "statusNotice: Allow reports id+status", fn: statusNotice,
+    result: { type: "Allow", converged: false, run: { ...RUN, id: "h" } }, type: "info", patterns: [/h.*active/] },
   { label: "statusNotice: Inert reports no active run", fn: statusNotice, result: { type: "Inert", reason: "no_run" }, type: "info", patterns: [/no active run/] },
 ];
 
@@ -144,8 +157,10 @@ const START_NOTICE_CASES: Array<{
   type: "info" | "warning" | "error";
   patterns: RegExp[];
 }> = [
-  { label: "Allow active is info: started, with the id", result: { type: "Allow", converged: false, run: { id: "r1", status: "active" } }, type: "info", patterns: [/^\/empirica started: run r1$/] },
-  { label: "Allow converged notes already converged", result: { type: "Allow", converged: true, run: { id: "r2", status: "converged" } }, type: "info", patterns: [/^\/empirica started: run r2 \(already converged\)$/] },
+  { label: "Allow active is info: started, with the id",
+    result: { type: "Allow", converged: false, run: { ...RUN, id: "r1" } }, type: "info", patterns: [/^\/empirica started: run r1$/] },
+  { label: "Allow converged notes already converged",
+    result: { type: "Allow", converged: true, run: { ...RUN, id: "r2", status: "converged" } }, type: "info", patterns: [/^\/empirica started: run r2 \(already converged\)$/] },
   { label: "Fault is error: not started, with the actual code", result: { type: "Fault", code: "unsupported", fail_direction: "closed" }, type: "error", patterns: [/^\/empirica not started: unsupported: /] },
   { label: "Block is warning: not started, with the reason", result: { type: "Block", run: RUN, reasons: [{ code: "x", message: "denied" }] }, type: "warning", patterns: [/^\/empirica not started: denied/] },
   { label: "Inert is warning: not started", result: { type: "Inert", reason: "no_run" }, type: "warning", patterns: [/^\/empirica not started: no run was created$/] },

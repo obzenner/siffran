@@ -5,7 +5,7 @@
 import catalogue from "../../catalogue.json" with { type: "json" };
 import { claimGraph, edgePath, graphBox } from "../../app/geometry.js";
 import { shapePath } from "../../app/universe.js";
-import { TONE, ago, clip, esc, joined, plain, stateOf, t } from "../core/element.js";
+import { TONE, ago, clip, esc, joined, num, plain, stateOf, t } from "../core/element.js";
 import { supportTree } from "../core/tree.js";
 import { chip, claimLink, fact, link, list } from "./parts.js";
 
@@ -24,20 +24,105 @@ function recordHtml(r) {
   </article>`;
 }
 
-/** What one spike was bound to, in full: the gate it ran under and each file's path and SHA-256. A disclosure, so the compact line stays compact. */
-function bindingsHtml(p) {
-  const file = (f) => `<span class="flex flex-col"><code class="break-all font-mono">${esc(f.path)}</code><code class="break-all font-mono text-muted-foreground">${esc(f.sha256)}</code></span>`;
-  return `<details class="text-xs"><summary class="cursor-pointer text-muted-foreground" data-bindings>${t("spike.bindings")}</summary>
-    <div class="flex flex-col gap-xs pt-xs"><span>${t("spike.gate", { gate: t(`spike.outcome.${p.gate}`) })}</span>${p.files.map(file).join("")}</div></details>`;
+/** One copyable content identity: compact in the disclosure label, exact in its body. */
+function identityHtml(label, value) {
+  const short = `${value.slice(0, 15)}…${value.slice(-8)}`;
+  return `<details class="min-w-0 text-xs"><summary class="cursor-pointer break-all text-muted-foreground">${t(label)} <code class="font-mono">${esc(short)}</code></summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
 }
 
-/** The spikes run for a claim, each as the core states it: the command, how it ended, the files it was bound to and whether it still holds. */
+function vectorHtml(label, values) {
+  return fact(t(label), `<ol class="flex min-w-0 flex-col gap-3xs">${values.map((value, index) => `<li class="flex min-w-0 gap-xs"><span class="shrink-0 text-muted-foreground">${index}</span><code class="min-w-0 break-all font-mono">${esc(value)}</code></li>`).join("")}</ol>`);
+}
+
+function profileLabel(profile) {
+  return profile === "docker-isolated-v1" ? t("spike.profile.docker-isolated-v1") : t("spike.profile.docker-networked-v1");
+}
+
+function backendHtml(backend) {
+  return `<div class="flex flex-col gap-3xs" data-spike-authority>
+    <span>${joined(t("spike.backend", { backend: backend.backend }), profileLabel(backend.profile_id))}</span>
+    ${identityHtml("spike_backend.record", backend.qualification_record_digest)}
+    ${identityHtml("spike_backend.execution", backend.execution_binding_digest)}
+  </div>`;
+}
+
+const RESOURCE_KEYS = {
+  cpu_count: "spike.resource.cpu_count", memory_bytes: "spike.resource.memory_bytes",
+  memory_swap_bytes: "spike.resource.memory_swap_bytes", pids: "spike.resource.pids",
+  open_files: "spike.resource.open_files", max_file_size_bytes: "spike.resource.max_file_size_bytes",
+  core_bytes: "spike.resource.core_bytes", workload_timeout_seconds: "spike.resource.workload_timeout_seconds",
+  operation_timeout_seconds: "spike.resource.operation_timeout_seconds", stdout_bytes: "spike.resource.stdout_bytes",
+  stderr_bytes: "spike.resource.stderr_bytes", staging_files: "spike.resource.staging_files",
+  staging_bytes: "spike.resource.staging_bytes", staging_file_bytes: "spike.resource.staging_file_bytes",
+  work_tmpfs_bytes: "spike.resource.work_tmpfs_bytes", tmp_tmpfs_bytes: "spike.resource.tmp_tmpfs_bytes",
+  shm_bytes: "spike.resource.shm_bytes",
+};
+const IDENTITY_KEYS = {
+  draft_digest: "spike.identity.draft_digest", plan_digest: "spike.identity.plan_digest",
+  policy_digest: "spike.identity.policy_digest", snapshot_basis_id: "spike.identity.snapshot_basis_id",
+  snapshot_digest: "spike.identity.snapshot_digest", capture_digest: "spike.identity.capture_digest",
+  operation_digest: "spike.identity.operation_digest", request_artifact_id: "spike.identity.request_artifact_id",
+  qualification_record_digest: "spike.identity.qualification_record_digest",
+  execution_binding_digest: "spike.identity.execution_binding_digest", input_digest: "spike.identity.input_digest",
+  process_digest: "spike.identity.process_digest", topology_digest: "spike.identity.topology_digest",
+  timing_digest: "spike.identity.timing_digest",
+};
+
+function resourcesHtml(resources) {
+  const fields = Object.keys(RESOURCE_KEYS);
+  return `<details class="rounded-m border border-border p-xs" data-spike-limits><summary class="cursor-pointer">${t("spike.resources")}</summary><dl class="ev-facts pt-xs">${fields.map((name) => fact(t(RESOURCE_KEYS[name]), num(resources[name]))).join("")}</dl></details>`;
+}
+
+function requestInputsHtml(request) {
+  const declarations = request.declared_inputs.length ? list(request.declared_inputs.map((path) => `<code class="break-all font-mono">${esc(path)}</code>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
+  const files = request.inputs.length ? list(request.inputs.map((file) => `<span class="flex min-w-0 flex-col"><code class="break-all font-mono">${esc(file.path)}</code><span>${t("spike.bytes", { count: num(file.bytes) })}</span>${identityHtml("spike.file_digest", file.sha256)}</span>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
+  return `<details class="rounded-m border border-border p-xs" data-spike-input><summary class="cursor-pointer">${t("spike.input_summary", { files: num(request.input_count), bytes: num(request.input_bytes) })}</summary><dl class="ev-facts pt-xs">${fact(t("spike.input.declared"), declarations)}${fact(t("spike.input.bindings"), files)}</dl></details>`;
+}
+
+function requestHtml(request) {
+  const environment = request.environment_names.length ? list(request.environment_names.map((name) => `<code class="font-mono">${esc(name)}</code>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
+  const image = request.image;
+  const ids = [["spike.identity.artifact", request.artifact_id], ["spike.identity.harness_request", request.harness_request_id], ...Object.entries(request.identities).map(([key, value]) => [IDENTITY_KEYS[key], value])];
+  return `<section class="flex min-w-0 flex-col gap-xs" data-spike-request aria-label="${t("spike.request")}">
+    <p class="text-xs text-muted-foreground">${joined(t("spike.read_only"), t("spike.claim", { claim: request.claim_id }), request.draft_schema, t("spike.profile", { profile: profileLabel(request.profile_id) }), t("spike.timeouts", { workload: request.limits.workload_timeout_seconds, operation: request.limits.operation_timeout_seconds }))}</p>
+    <dl class="ev-facts">
+      ${fact(t("spike.image.requested"), `<code class="break-all font-mono">${esc(image.requested_reference)}</code>`)}
+      ${identityHtml("spike.image.sealed", image.sealed_id)}
+      ${fact(t("spike.platform"), `<code class="font-mono">${esc(`${image.raw_os}/${image.raw_architecture}`)}</code> → <code class="font-mono">${esc(`${image.os}/${image.architecture}`)}</code>`)}
+      ${vectorHtml("spike.command", request.argv)}
+      ${fact(t("spike.environment"), environment)}
+      ${fact(t("spike.user"), `<code class="font-mono">${num(request.runtime.uid)}:${num(request.runtime.gid)}</code>`)}
+      ${fact(t("spike.workdir"), `<code class="font-mono">${esc(request.runtime.workdir)}</code>`)}
+      ${requestInputsHtml(request)}${resourcesHtml(request.limits)}
+    </dl>
+    <details class="text-xs"><summary class="cursor-pointer text-muted-foreground">${t("spike.identities.request")}</summary><div class="flex flex-col gap-3xs pt-xs">${ids.map(([label, value]) => identityHtml(label, value)).join("")}</div></details>
+  </section>`;
+}
+
+function streamHtml(name, stream) {
+  const label = name === "stdout" ? t("spike.stream.stdout", { bytes: num(stream.bytes_seen) }) : t("spike.stream.stderr", { bytes: num(stream.bytes_seen) });
+  return `<span class="flex min-w-0 flex-col"><span>${label}</span>${identityHtml("spike.stream.digest", stream.sha256)}</span>`;
+}
+
+function resultHtml(result) {
+  if (result === null) return `<p class="text-xs text-muted-foreground" data-spike-no-result>${t("spike.result.none")}</p>`;
+  const ids = [["spike.identity.artifact", result.artifact_id], ["spike.identity.harness_request", result.harness_request_id], ...Object.entries(result.identities).map(([key, value]) => [IDENTITY_KEYS[key], value]), ["spike.identity.harness_result", result.harness_result_digest], ["spike.identity.postflight", result.postflight_identity_digest]];
+  return `<section class="flex min-w-0 flex-col gap-xs" data-spike-result aria-label="${t("spike.result")}">
+    <p class="flex flex-wrap items-center gap-xs"><strong>${esc(result.gate)}</strong><span>${t(`spike.outcome.${result.outcome}`)}</span><span>${t("spike.exit", { code: result.exit_code })}</span><span>${t("spike.exit.natural")}</span><span>${t("spike.cleanup.verified")}</span><span>${t("spike.postflight.verified")}</span></p>
+    <p class="text-xs text-muted-foreground">${result.producer_model ? t("spike.producer", { model: result.producer_model }) : t("spike.producer.unknown")}</p>
+    ${fact(t("spike.image.realization"), `<ev-copy text="${esc(result.realization_image_digest)}" label="spike.image.realization"></ev-copy>`)}
+    <div class="flex flex-col gap-xs">${streamHtml("stdout", result.stdout)}${streamHtml("stderr", result.stderr)}</div>
+    <details class="text-xs"><summary class="cursor-pointer text-muted-foreground">${t("spike.identities.result")}</summary><div class="flex flex-col gap-3xs pt-xs">${ids.map(([label, value]) => identityHtml(label, value)).join("")}</div></details>
+    <p class="text-xs text-muted-foreground">${t("spike.output.not_retained")}</p>
+  </section>`;
+}
+
+/** Generic immutable requests and admitted results; disclosures preserve narrow layouts and read-only semantics. */
 function spikesHtml(proof) {
   if (!proof.length) return "";
-  const one = (p) => `<div class="flex flex-col gap-3xs"><code class="break-all font-mono text-xs">${esc(p.command)}</code>
-    <span class="text-xs text-muted-foreground">${joined(t(`spike.outcome.${p.outcome}`), t("spike.exit", { code: p.exit_code }), t(`spike.${p.state}`))}</span>
-    <span class="text-xs text-muted-foreground">${t("spike.files")} ${p.files.map((f) => `<code class="break-all font-mono">${esc(f.path)}</code>`).join(", ")}</span>${bindingsHtml(p)}</div>`;
-  return fact(t("fact.proof"), `${list(proof.map(one))}<p class="text-xs text-muted-foreground">${t("spike.output.not_retained")}</p>`);
+  const one = (item) => `<article class="flex min-w-0 flex-col gap-s" data-spike-proof>
+    <p class="text-xs text-muted-foreground">${t(`spike.${item.state}`)}</p>${requestHtml(item.request)}${resultHtml(item.result)}</article>`;
+  return fact(t("fact.proof"), list(proof.map(one)));
 }
 
 /** A needs-decision claim's decision: where it stands, where it is asked, and the human's answer. */

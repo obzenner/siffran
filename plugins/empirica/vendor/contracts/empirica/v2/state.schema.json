@@ -8,6 +8,7 @@
   "required": [
     "protocol",
     "state_schema",
+    "spike_backend",
     "goal",
     "invocation",
     "status",
@@ -29,7 +30,54 @@
       "const": "empirica/v2"
     },
     "state_schema": {
-      "const": "empirica.run/2"
+      "const": "empirica.run/3"
+    },
+    "spike_backend": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "backend",
+            "profile_id",
+            "qualification_record_digest",
+            "execution_binding_digest"
+          ],
+          "properties": {
+            "kind": {
+              "const": "qualified"
+            },
+            "backend": {
+              "const": "docker"
+            },
+            "profile_id": {
+              "enum": [
+                "docker-isolated-v1",
+                "docker-networked-v1"
+              ]
+            },
+            "qualification_record_digest": {
+              "$ref": "#/$defs/digest256"
+            },
+            "execution_binding_digest": {
+              "$ref": "#/$defs/digest256"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "spikes_unavailable"
+            }
+          }
+        }
+      ]
     },
     "goal": {
       "type": "string",
@@ -881,7 +929,7 @@
     },
     "claimId": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
     }
   }
 }

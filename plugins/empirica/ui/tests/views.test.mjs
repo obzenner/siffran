@@ -36,15 +36,69 @@ test("what the observer published for a run is on its sheet: the goal, what is o
     if (s.row.goal) assert.ok(t.includes(s.row.goal.slice(0, 40)), key);
   }
 });
-test("an open claim shows everything the sheet holds about it: its sources, its decision, its spikes", () => {
-  let seen = 0;
+test("the run header distinguishes read-only unavailable capability from human obligations and exposes exact generic bindings", () => {
+  const unavailable = text(sheetHtml(ctx(sheets[scenarios.verification])));
+  const qualifiedSheet = sheets[scenarios.converged];
+  const qualified = text(sheetHtml(ctx(qualifiedSheet)));
+  assert.equal(qualifiedSheet.spike_backend.kind, "qualified");
+  assert.match(unavailable, /Spikes unavailable · read-only capability information/);
+  assert.match(unavailable, /Read-only run binding/);
+  assert.doesNotMatch(unavailable, /Needs Human/);
+  assert.match(qualified, /Spikes bound · private-network profile/);
+  assert.match(qualified, /not a live health check/);
+  assert.match(qualified, /sha256:aaaaaaaa…aaaaaaaa/);
+  assert.match(qualified, /sha256:bbbbbbbb…bbbbbbbb/);
+  assert.doesNotMatch(qualified, /unix:\/\/|\.sock|current\.json/);
+});
+test("an open claim shows every safe generic request and result fact without host or raw-output data", () => {
+  let seen = 0, spikes = 0;
   for (const s of Object.values(sheets)) for (const own of s.claims ?? []) {
-    const t = text(sheetHtml(ctx(s, { claim: own.id })));
-    for (const r of own.records) { seen++; assert.ok(t.includes(r.source.slice(0, 40)) && t.includes(r.quote.slice(0, 30)), `${s.key} ${own.id}`); }
-    for (const p of own.proof) assert.ok(t.includes(p.command.slice(0, 30)), `${s.key} ${own.id}`);
-    if (own.decision?.answer) assert.ok(t.includes(own.decision.answer.slice(0, 30)));
+    const html = sheetHtml(ctx(s, { claim: own.id }));
+    const rendered = text(html);
+    for (const r of own.records) { seen++; assert.ok(rendered.includes(r.source.slice(0, 40)) && rendered.includes(r.quote.slice(0, 30)), `${s.key} ${own.id}`); }
+    for (const p of own.proof) {
+      spikes++;
+      assert.ok(rendered.includes(p.request.draft_schema));
+      assert.ok(rendered.includes(p.request.identities.plan_digest));
+      assert.ok(rendered.includes(p.request.profile_id === "docker-networked-v1" ? "private-network profile" : "isolated profile"));
+      assert.match(rendered, /workload 120s · operation 210s/);
+      assert.ok(rendered.includes(p.request.image.requested_reference));
+      assert.ok(rendered.includes(p.request.image.sealed_id));
+      assert.ok(rendered.includes(`${p.request.image.os}/${p.request.image.architecture}`));
+      assert.ok(rendered.includes(new Intl.NumberFormat().format(p.request.runtime.uid))
+        && rendered.includes(new Intl.NumberFormat().format(p.request.runtime.gid)));
+      for (const token of p.request.argv) assert.ok(rendered.includes(token));
+      for (const name of p.request.environment_names) assert.ok(rendered.includes(name));
+      for (const input of p.request.inputs) assert.ok(rendered.includes(input.path) && rendered.includes(input.sha256));
+      if (p.result) {
+        assert.ok(rendered.includes(p.result.gate));
+        assert.ok(rendered.includes(p.result.producer_model));
+        for (const value of Object.values(p.result.identities)) assert.ok(rendered.includes(value));
+        assert.ok(rendered.includes(p.result.stdout.sha256));
+        assert.ok(rendered.includes(p.result.stderr.sha256));
+        assert.match(rendered, /cleanup verified/);
+        assert.match(rendered, /postflight verified/);
+      }
+    }
+    if (own.decision?.answer) assert.ok(rendered.includes(own.decision.answer.slice(0, 30)));
+    assert.doesNotMatch(html, /DOCKER_HOST|docker\.sock|current\.json|container\.cid|staging|BEGIN PRIVATE KEY|observer-secret-value/i);
   }
-  assert.ok(seen > 5);
+  assert.ok(seen > 5 && spikes > 2);
+});
+
+test("natural verdict exits 124 and 125 render as uppercase FAIL without raw streams", () => {
+  const original = Object.values(sheets).find((sheet) => sheet.claims?.some((claim) => claim.proof.length));
+  const own = original.claims.find((claim) => claim.proof.length);
+  for (const code of [124, 125]) {
+    const s = structuredClone(original), claim = s.claims.find((item) => item.id === own.id);
+    const result = claim.proof[0].result;
+    result.outcome = "fail"; result.gate = "FAIL"; result.exit_code = code;
+    result.natural_exit = true;
+    const rendered = text(sheetHtml(ctx(s, { claim: claim.id })));
+    assert.match(rendered, new RegExp(`FAIL.*exit ${code}`));
+    assert.match(rendered, /natural exit/);
+    assert.match(rendered, /Raw stdout and stderr content is not retained or shown/);
+  }
 });
 test("an unread run says it was not read; it is never an empty or a zero run", () => {
   const t = text(sheetHtml(ctx(sheets[scenarios.unreadable])));

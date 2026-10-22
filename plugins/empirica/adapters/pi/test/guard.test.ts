@@ -6,6 +6,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { assertResponse, GuardError } from "../src/guard.ts";
 import type { Response, RunStatus } from "../src/contract.ts";
@@ -16,8 +18,8 @@ function ok(result: Response["result"]): Response {
   return { protocol: "empirica/v2", request_id: RID, result };
 }
 
-function run(status: RunStatus = "active"): { id: string; status: RunStatus } {
-  return { id: "run-1", status };
+function run(status: RunStatus = "active") {
+  return { id: "run-1", status, spike_backend: { kind: "spikes_unavailable" as const } };
 }
 
 function expectThrow(label: string, response: unknown, rid = RID): void {
@@ -51,6 +53,29 @@ expectThrow("Allow run.id missing", ok({ type: "Allow", converged: true, run: { 
 expectThrow("Allow run.id empty", ok({ type: "Allow", converged: true, run: { id: "", status: "active" } } as never));
 expectThrow("Allow run.status missing", ok({ type: "Allow", converged: true, run: { id: "r" } } as never));
 expectThrow("Allow run.status invalid", ok({ type: "Allow", converged: true, run: { id: "r", status: "unknown" } as never }));
+expectThrow("Allow run.spike_backend missing", ok({ type: "Allow", converged: false, run: { id: "r", status: "active" } } as never));
+for (const [label, spike_backend] of [
+  ["unavailable extra field", { kind: "spikes_unavailable", diagnostic: "socket path" }],
+  ["qualified missing digest", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
+    qualification_record_digest: `sha256:${"a".repeat(64)}` }],
+  ["qualified wrong backend", { kind: "qualified", backend: "host", profile_id: "docker-isolated-v1",
+    qualification_record_digest: `sha256:${"a".repeat(64)}`, execution_binding_digest: `sha256:${"b".repeat(64)}` }],
+  ["qualified old profile", { kind: "qualified", backend: "docker", profile_id: "docker-rust-v1",
+    qualification_record_digest: `sha256:${"a".repeat(64)}`, execution_binding_digest: `sha256:${"b".repeat(64)}` }],
+  ["qualified bad digest", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
+    qualification_record_digest: "sha256:no", execution_binding_digest: `sha256:${"b".repeat(64)}` }],
+] as const) expectThrow(`Allow run.spike_backend ${label}`, ok({ type: "Allow", converged: false,
+  run: { id: "r", status: "active", spike_backend } } as never));
+
+test("guard accepts both exact spike backend shapes", () => {
+  const digest = (c: string) => `sha256:${c.repeat(64)}`;
+  assertResponse(ok({ type: "Allow", converged: false, run: run() }), RID);
+  for (const profile_id of ["docker-isolated-v1", "docker-networked-v1"] as const)
+    assertResponse(ok({ type: "Allow", converged: false, run: { ...run(), spike_backend: {
+      kind: "qualified", backend: "docker", profile_id,
+      qualification_record_digest: digest("a"), execution_binding_digest: digest("b"),
+    } } }), RID);
+});
 
 // --- Allow cross invariant mutations (D6-C C3) ------------------------------
 // converged true iff status converged; converged false only non-converged statuses.
@@ -115,4 +140,20 @@ test("guard accepts valid Inert", () => {
 test("guard accepts valid Fault", () => {
   assertResponse(ok({ type: "Fault", code: "unavailable", fail_direction: "closed" }), RID);
   assertResponse(ok({ type: "Fault", code: "corrupt_run", message: "x", fail_direction: "open" }), RID);
+});
+
+test("the guard admits the run-less contract Allow only for GetContract and only exactly", () => {
+  const contract = JSON.parse(readFileSync(join(import.meta.dirname, "author-view-golden",
+    "getcontract-section.json"), "utf8")).result.contract_result;
+  const valid = { ...contract, digest: "sha256:" + "b".repeat(64) };
+  const wrap = (result: unknown) => ({ protocol: "empirica/v2", request_id: RID, result });
+  assert.doesNotThrow(() => assertResponse(wrap({ type: "Allow", contract_result: valid }), RID, "GetContract"));
+  for (const [label, result, command] of [
+    ["another command", { type: "Allow", contract_result: valid }, "GetRun"],
+    ["no command", { type: "Allow", contract_result: valid }, undefined],
+    ["extra converged", { type: "Allow", contract_result: valid, converged: false }, "GetContract"],
+    ["malformed digest", { type: "Allow", contract_result: { ...valid, digest: "x" } }, "GetContract"],
+    ["run Allow", { type: "Allow", converged: false, run: run() }, "GetContract"],
+  ] as const)
+    assert.throws(() => assertResponse(wrap(result), RID, command), GuardError, label);
 });

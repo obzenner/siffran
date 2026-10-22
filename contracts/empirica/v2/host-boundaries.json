@@ -1372,7 +1372,7 @@
       "action": "`report_convergence` with `intent: stop`",
       "expected": "always succeeds; honest stop",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_budget_freeze_terminal.py::test_derivation_and_spawn_limits_block"
+        "plugins/empirica/tests/test_governance.py::test_bootstrap_terminal_run_has_no_preparation_actions"
       ],
       "ledger_rows": []
     },

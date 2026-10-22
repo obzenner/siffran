@@ -20,22 +20,58 @@ from unittest import mock
 from dataclasses import dataclass, field
 from typing import Any
 
+from sandbox_isolation import force_absent_sandbox_home
+
 import governance_setup
 from governance_setup import TEST_INVOCATION, sized_configure_run
+from application import generic_spike
 from application.location import storage_id
 from application.observer import Project, run_key
 from assertions import (ConformanceCase, action_graph, get_argument, get_run, action_investigate, action_research,
-                        action_spike_request, evaluate, observe_action)
+                        evaluate, observe_action)
 from core.canonical import canonical_digest
 from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
-from driver import FakeClock, MemoryTimeline, clone_driver
+from driver import FakeClock, FakeSpikeAuthoritySelector, MemoryTimeline, clone_driver
+force_absent_sandbox_home()
 
 PROFILE = ConformanceCase.DEFAULT_PROFILE
 #: The store's clock: 2026-09-28T09:00Z at the first write, then one minute per write.
 T0 = 1790586000.0
 STEP = 60.0
+
+
+def _generic_spike_action(claim_id: str, paths: list[str]) -> dict:
+    return {"kind": "spike_request", "claim_id": claim_id, "plan": {
+        "schema": "empirica.spike-plan-draft/2",
+        "image": "example/probe:local",
+        "argv": ["/usr/bin/python3", "/inputs/probe.py", "--exact-argv"],
+        "inputs": sorted(paths),
+        "environment": {"MODE": "observer-secret-value"},
+    }}
+
+
+class _GenericFixtureHarness:
+    def __init__(self, exit_code: int):
+        self.exit_code = exit_code
+
+    def run(self, request):
+        facts = generic_spike.GenericOperationFacts(
+            canonical_digest("operation"), request.backend.qualification_record_digest,
+            request.backend.execution_binding_digest, request.plan.image.image_id,
+            request.snapshot.snapshot_digest,
+            canonical_digest("process"), canonical_digest("topology"),
+            canonical_digest("timing"))
+        stdout = generic_spike.GenericStreamFact(0, canonical_digest("stdout:verdict"))
+        stderr = generic_spike.GenericStreamFact(0, canonical_digest("stderr:verdict"))
+        return generic_spike.GenericHarnessResult(
+            request.run_id, request.backend, request.plan_digest, request.policy_digest,
+            request.snapshot.snapshot_digest, facts, stdout, stderr, True, False,
+            self.exit_code,
+            generic_spike.GenericVerdict.PASS if self.exit_code == 0
+            else generic_spike.GenericVerdict.FAIL,
+            True, request.backend.execution_binding_digest)
 
 
 @dataclass
@@ -372,9 +408,11 @@ def _graph(root: str, claims: list[tuple[str, str, str]], edges: list[tuple[str,
 class _Builder:
     def __init__(self, clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> None:
         self.a = _Author()
+        self.spike_authority = FakeSpikeAuthoritySelector()
         timeline = MemoryTimeline() if timeline is None else timeline
         self.store = Store(self.a.bind_driver("observer", "store", "observer fixture store", PROFILE,
-                                              clock=clock or FakeClock(T0, STEP), timeline=timeline),
+                                              clock=clock or FakeClock(T0, STEP), timeline=timeline,
+                                              spike_authority_selector=self.spike_authority),
                            timeline=timeline)
         self.drv = self.store.driver
         self.files: dict[str, bytes] = {}  # what the workspace holds, so citations quote it verbatim
@@ -387,7 +425,8 @@ class _Builder:
     # --- author and host acts ----------------------------------------------
 
     def begin(self, project: str, session: str, goal: str, graph: dict, *, repo: str | None = None,
-              surface: str | None = "human", where: tuple[str, str] | None = None, approve: bool = True, **start) -> str:
+              surface: str | None = "human", where: tuple[str, str] | None = None, approve: bool = True,
+              qualified: bool = False, **start) -> str:
         """Start a run, declare its graph and have its configuration approved. ``repo`` is the path of the repository
         the project is told to live in (its folder name is the project's name); ``surface`` is what the host observes
         it can show a human (an unattended session shows nobody); ``where`` is the (label, locator) its host recorded for
@@ -401,6 +440,7 @@ class _Builder:
                 else "pi" if zlib.crc32(session.encode()) % 3 == 0 else "claude")
         start.setdefault("invocation", {**TEST_INVOCATION, "host": host, "signal": "v2 harness",
                                         **({} if where is None else {"session": {"label": where[0], "locator": where[1]}})})
+        self.spike_authority.qualified_next = qualified
         run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
         if surface is not None:  # none: the host has not looked for a dialog (the run's recorded surface stays ``unobserved``)
             drv.trusted_human_surface(run_id, surface)  # an attended session: evidence waits on its human
@@ -484,11 +524,24 @@ class _Builder:
             run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions})
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
+        """Seed one generic request/result through the real transaction with a fake harness."""
+        del command
         for path, content in files.items():
             self.write(path, content)
-        self.drv.harness_complete(command, exit_code)
-        self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id=claim, command=command, dependent_files=sorted(files))))
+        action = _generic_spike_action(claim, list(files))
+        coordinator = self.drv._service._coordinator
+        before = coordinator.harness
+        coordinator.harness = _GenericFixtureHarness(exit_code)
+        try:
+            result = coordinator.handle({
+                "type": "ObserveAction", "run_id": run_id, "action": action,
+            }, "observer-spike")
+        finally:
+            coordinator.harness = before
+        if result["result"]["type"] == "Block":
+            assert result["result"]["reasons"][0]["code"] == "claim.spike_prerequisite_missing"
+        else:
+            assert result["result"]["type"] == "Allow", result
 
     def freeze(self, run_id: str):
         self.a.require_frozen_scope(self.drv, run_id)
@@ -575,7 +628,8 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
         "C0", [("C0", "ordinary", "A cold start reads the tile index from one cache file."),
                ("C1", "needs-experiment", "The cache file round-trips every tile entry."),
                ("C2", "ordinary", "The loader already isolates index parsing in one function.")],
-        [("C0", "C1"), ("C0", "C2")]))
+        [("C0", "C1"), ("C0", "C2")]), qualified=True,
+        spike_profile="docker-networked-v1")
     b.research(run, "C2", ref="src/loader.py")
     b.research(run, "C1", ref="src/cache.py")
     b.spike(run, "C1", "python -m pytest tests/test_cache.py", {"src/cache.py": b"cache v1\n"})
@@ -615,7 +669,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     # harbor: out of passes.
     run = b.begin("harbor", "s-budget", "Find why the nightly import is slow.", _graph(
         "C0", [("C0", "needs-experiment", "The import spends most of its time in one query.")], []),
-        budgets={"max_spawns": 1, "max_passes": 1})
+        budgets={"max_spawns": 1, "max_passes": 1}, qualified=True)
     b.research(run, "C0", ref="import/query.sql")
     b.spike(run, "C0", "python bench/import.py", {"import/query.sql": b"select 1\n"})
     b.evaluate(run, "report_convergence")
@@ -644,7 +698,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     run = b.begin("lumen", "s-retry", "Choose the colour space for exported previews.", _graph(
         "C0", [("C0", "ordinary", "Previews look the same in every supported viewer."),
                ("C1", "needs-experiment", "Converting to sRGB keeps every swatch within tolerance.")],
-        [("C0", "C1")]))
+        [("C0", "C1")]), qualified=True)
     b.research(run, "C0", ref="docs/viewers.md")
     b.research(run, "C1", ref="src/colour.py")
     b.spike(run, "C1", "python -m pytest tests/test_colour.py", {"src/colour.py": b"srgb\n"})
@@ -810,22 +864,23 @@ def build_hetero_templates() -> Store:
         three = _graph("C0", [("C0", "ordinary", "The guide matches the code."),
                               ("C1", "needs-experiment", "The core tests pass."),
                               ("C2", "needs-experiment", "The util tests pass.")], [("C0", "C1"), ("C0", "C2")])
-        run = b.begin("hetero", "t-a", "Keep the core path fast.", two)
+        run = b.begin("hetero", "t-a", "Keep the core path fast.", two, qualified=True)
         b.research(run, "C1", ref="src/core/a.py")
         b.spike(run, "C1", "pytest tests/core", bind("src/core/a.py", "src/core/b.py", "src/util/x.py"))
-        run = b.begin("hetero", "t-b", "Document the core and util paths.", three)
+        run = b.begin("hetero", "t-b", "Document the core and util paths.", three,
+                      qualified=True)
         b.research(run, "C1", ref="src/core/b.py")
         b.spike(run, "C1", "pytest tests/core", bind("src/core/b.py", "src/core/c.py"))
         b.research(run, "C2", ref="src/util/x.py")
         b.spike(run, "C2", "pytest tests/util", bind("docs/guide.md", "src/util/x.py"))
-        run = b.begin("hetero", "t-c", "Drop the old core helper.", two)
+        run = b.begin("hetero", "t-c", "Drop the old core helper.", two, qualified=True)
         b.research(run, "C1", ref="src/core/a.py")
         b.spike(run, "C1", "pytest tests/t1.py", bind("src/core/a.py", "src/core/c.py", "tests/t1.py"))
         b.evaluate(run, "stop")
         run = b.begin("hetero", "t-d", "Read the util module once.", _graph(
             "C0", [("C0", "ordinary", "The util module is read once.")], []))
         b.research(run, "C0", ref="src/util/y.py")
-        run = b.begin("hetero", "t-e", "Cache the util results.", two)
+        run = b.begin("hetero", "t-e", "Cache the util results.", two, qualified=True)
         b.research(run, "C1", ref="src/util/y.py")
         b.spike(run, "C1", "pytest tests/util", bind("src/util/y.py", "src/core/a.py"))
         b.research(run, "C0", ref="src/core/a.py")
@@ -921,7 +976,7 @@ def _varied(b: "_Builder", n: int, goal: str, thing: str, name: str, repo: str |
         run = b.begin(name, session, goal, _graph(
             "C0", [("C0", "ordinary", f"{subject} does what the goal asks."),
                    ("C1", "needs-experiment", f"The tests for {thing} pass."),
-                   ("C2", "ordinary", f"{subject} has one owner module.")], [("C0", "C1"), ("C0", "C2")]), repo=repo)
+                   ("C2", "ordinary", f"{subject} has one owner module.")], [("C0", "C1"), ("C0", "C2")]), repo=repo, qualified=True)
         b.research(run, "C2", ref=path)
         b.research(run, "C1", ref=path)
         b.spike(run, "C1", f"python -m pytest {check}", {check: f"check {n}\n".encode()})
@@ -938,7 +993,7 @@ def _varied(b: "_Builder", n: int, goal: str, thing: str, name: str, repo: str |
     elif shape == 2:  # an audit caught a problem
         run = b.begin(name, session, goal, _graph(
             "C0", [("C0", "ordinary", f"{subject} handles every input it is given."),
-                   ("C1", "needs-experiment", f"The edge-case test for {thing} passes.")], [("C0", "C1")]), repo=repo)
+                   ("C1", "needs-experiment", f"The edge-case test for {thing} passes.")], [("C0", "C1")]), repo=repo, qualified=True)
         b.research(run, "C0", ref=path)
         b.research(run, "C1", ref=path)
         b.spike(run, "C1", f"python -m pytest {check} -k edge", {check: f"edge {n}\n".encode()})

@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "Prove unknown status is rejected.",
   "invocation": {
     "host": "test",
@@ -51,5 +51,8 @@
       "approval_capability": "unavailable"
     },
     "proposal_digest": "sha256:3eb306f346a326af16feec9ac67cbbff73ddbbc87ade683caf90fbc62918eb0b"
+  },
+  "spike_backend": {
+    "kind": "spikes_unavailable"
   }
 }

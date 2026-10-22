@@ -30,6 +30,10 @@ from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts"))  # the validator is a repository script
+_TESTS = Path(__file__).resolve().parents[1]
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 from adapters import bridge  # noqa: E402
 from adapters.state import fsio, timeline as tl  # noqa: E402
@@ -42,6 +46,7 @@ from assertions import get_argument, get_run  # noqa: E402
 from core.records import Conflict, RunKey  # noqa: E402
 from driver import FakeClock, MemoryTimeline  # noqa: E402
 from observer_store import DriverSource, T0, _Builder, _graph, build_store, observed, contract_problems, view_of  # noqa: E402
+force_absent_sandbox_home()
 
 PLUGIN = Path(__file__).resolve().parents[2]
 TERMINAL = {"converged", "stopped_residual", "stopped_frozen", "stopped_budget"}

@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "Prove refunded on non-launch_rejected state is rejected.",
   "invocation": {
     "host": "test",
@@ -79,6 +79,9 @@
           "reviewed_deferred_scope_digest": null,
           "reviewed_claims": [],
           "findings": []
+        },
+        "spike_backend": {
+          "kind": "spikes_unavailable"
         }
       },
       "audit_role_profile": "empirica:empirica-auditor",
@@ -106,5 +109,8 @@
       "approval_capability": "unavailable"
     },
     "proposal_digest": "sha256:53854310e317b8eaa6fd8179b0746b4e66af220c9cbf28989fcabef97f72c96e"
+  },
+  "spike_backend": {
+    "kind": "spikes_unavailable"
   }
 }

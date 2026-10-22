@@ -192,6 +192,41 @@ async function sheet(A) {
   P.errors.length = 0;
 }
 
+async function genericSpike(A) {
+  const tag = `${A.src.name} ${A.size}`, E = A.E;
+  const id = A.id("converged"), detail = await A.api("/api/run", `&key=${id}`);
+  const claim = detail.claims.find((item) => item.proof.length)?.id;
+  await A.go(`&view=inbox&run=${id}&claim=${claim}`);
+  await E(`[...document.querySelectorAll('[data-claim-row="${claim}"] [data-spike-proof] details')].forEach((item) => item.open = true)`);
+  const text = await A.text(`[data-claim-row="${claim}"]`);
+  const facts = await E(`(() => {
+    const row = document.querySelector('[data-claim-row="${claim}"]');
+    const request = row.querySelector('[data-spike-request]'), result = row.querySelector('[data-spike-result]');
+    return { requests: row.querySelectorAll('[data-spike-request]').length,
+      results: row.querySelectorAll('[data-spike-result]').length,
+      inputs: row.querySelectorAll('[data-spike-input]').length,
+      streams: [...row.querySelectorAll('dt')].filter((node) => /stdout|stderr/i.test(node.textContent)).length,
+      copies: row.querySelectorAll('ev-copy button[aria-label]').length,
+      unnamed: [...row.querySelectorAll('summary, button')].filter((node) => !(node.textContent?.trim() || node.getAttribute('aria-label'))).length,
+      overflow: row.scrollWidth > row.clientWidth + 1,
+      users: [...row.querySelectorAll('dt')].filter((node) => node.textContent.includes('Numeric UID:GID'))
+        .map((node) => ({ value: node.nextElementSibling?.textContent, visible: node.nextElementSibling?.checkVisibility(),
+          ancestors: [...function*(){ let at=node.parentElement; while(at){ if(at.tagName==='DETAILS') yield at.open; at=at.parentElement; } }()] })),
+      requestLabel: request?.getAttribute('aria-label'), resultLabel: result?.getAttribute('aria-label') };
+  })()`);
+  check(`generic spike ${tag}: the sealed request and admitted result are read-only evidence with named disclosures and copy controls`,
+    facts.requests >= 1 && facts.results === 1 && facts.copies >= 8 && facts.unnamed === 0 && facts.requestLabel && facts.resultLabel,
+    facts);
+  const expected = [/generic spike evidence/i, /workload 120s · operation 210s/,
+    /Native platform/, /PASS/, /cleanup verified/, /postflight verified/, /Raw stdout and stderr content is not retained or shown/];
+  check(`generic spike ${tag}: identities, fixed process facts, native platform, exact timeouts, one uppercase verdict and cleanup are visible without raw output`,
+    expected.every((pattern) => pattern.test(text)) && facts.inputs >= 1 && facts.streams === 2 && facts.users.length === 1
+      && facts.users.every((item) => /\d/.test(item.value) && item.ancestors.every(Boolean)) && !facts.overflow,
+    { matches: expected.map((pattern) => [String(pattern), pattern.test(text)]), users: facts.users, text: text.slice(0, 500) });
+  check(`generic spike ${tag}: no host socket, pointer, staging path or destructive runtime identifier is rendered`,
+    !/DOCKER_HOST|docker\.sock|current\.json|container\.cid|\/staging\/|BEGIN PRIVATE KEY|container_id|network_id/i.test(text), text.slice(0, 500));
+}
+
 async function ended(A) {
   const tag = `${A.src.name} ${A.size}`, E = A.E;
   const id = A.id("terminal-consent") ?? A.id("refuted");
@@ -879,7 +914,8 @@ async function universeMotion(A) {
 
 // ---- S · deterministic pictures (make ui-shots): the demo, a fixed clock, no motion, both schemes ----------------------------
 const SHOTS = [["universe", ""], ["island", "&zoom=*"], ["inbox", "&view=inbox"], ["work", "&view=work"], ["run", "&view=inbox&run=*verification"],
-  ["claim", "&view=inbox&run=*verification&claim=*"], ["attempts", "&view=inbox&run=*audit-failed"], ["orbit", "&run=*verification"]];
+  ["claim", "&view=inbox&run=*verification&claim=*"], ["spike", "&view=inbox&run=*converged&claim=*"],
+  ["spike-result", "&view=inbox&run=*converged&claim=*"], ["attempts", "&view=inbox&run=*audit-failed"], ["orbit", "&run=*verification"]];
 async function shots() {
   const out = path.resolve(process.env.OUT || path.join(os.tmpdir(), "empirica-ui-shots"));
   if (out.startsWith(path.resolve(ui, "..", "..", "..") + path.sep)) throw new Error(`OUT=${out}: pictures are written outside the repository`);
@@ -888,12 +924,24 @@ async function shots() {
   const plan = [...SHOTS.map(([n, q]) => [n, q, "light", WIDE]), ["universe", "", "dark", WIDE], ["run", "&view=inbox&run=*verification", "dark", WIDE], ["orbit", "&run=*verification", "dark", WIDE], ["inbox", "&view=inbox", "light", SIZES[1]]];
   for (const [name, query, scheme, size] of plan) {
     await session(SOURCES[0], size, async (A) => {
-      const run = (sc) => A.id(sc), claimOf = async (id) => (await A.api("/api/run", `&key=${id}`)).row.claims[0]?.id;
+      const run = (sc) => A.id(sc), claimOf = async (id) => {
+        const detail = await A.api("/api/run", `&key=${id}`);
+        return detail.claims?.find((item) => item.proof.length)?.id ?? detail.row.claims[0]?.id;
+      };
       let q = query.replace("&zoom=*", `&zoom=${A.summary.projects[0].id}`);
-      const id = run(query.includes("*verification") ? "verification" : "audit-failed");
+      const scenario = query.match(/run=\*([a-z-]+)/)?.[1] ?? "audit-failed";
+      const id = run(scenario);
       q = q.replace(/run=\*[a-z-]+/, `run=${id}`);
       if (q.includes("claim=*")) q = q.replace("claim=*", `claim=${await claimOf(id)}`);
       await A.go(q); await A.P.sleep(900);
+      if (name.startsWith("spike")) {
+        await A.E(`(() => {
+          const target = document.querySelector('${name === "spike-result" ? "[data-spike-result]" : "[data-spike-request]"}');
+          [...document.querySelectorAll('[data-spike-proof] details')].forEach((item) => item.open = target.contains(item));
+          target.scrollIntoView({ block: 'start' });
+        })()`);
+        await A.P.sleep(300);
+      }
       const file = path.join(out, `${name}-${scheme}-${size}.png`);
       await A.P.shot(file);
       const sum = crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex").slice(0, 16);
@@ -930,6 +978,7 @@ const JOURNEYS = {
   liveInbox: () => session(SOURCES[1], WIDE, inbox),
   narrowing: demo(narrowing),
   sheet: demo(sheet),
+  genericSpike: demo(genericSpike),
   ended: demo(ended),
   attempts: demo(attempts),
   audits: demo(audits),

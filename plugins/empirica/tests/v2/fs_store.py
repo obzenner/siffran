@@ -24,18 +24,28 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from unittest import mock
 
+from sandbox_isolation import force_absent_sandbox_home
+
 import governance_setup
 from adapters import bridge
 from adapters.git.artifact_repo import _COMMIT_IDENTITY, GitArtifactRepository
 from adapters.state import identity
 from adapters.state.repository import FilesystemRunRepository
-from application.location import storage_id
+from application import generic_spike
+from application.location import decode_handle, storage_id
+from application.ports import ObservationSnapshot
 from application.protocol import host_profile_id
-from assertions import (action_graph, action_investigate, action_research, action_route, action_spike_request,
+from assertions import (action_graph, action_investigate, action_research, action_route,
                         observe_action, start_run)
+from core import spike_plan
+from core.evaluation import plan_spike_request, plan_spike_result
+from core.freshness import FileObservation, ObservationState, observations_digest
+from core.spike_plan_draft import canonicalize_spike_plan_draft
 from core.records import RunKey
+from driver import FakeLocalImageResolver, FakeSpikeAuthoritySelector
 from governance_setup import approve_current, end_with_consent
-from observer_store import BOUND, DRIFTED, body
+from observer_store import BOUND, DRIFTED, _generic_spike_action, _GenericFixtureHarness, body
+force_absent_sandbox_home()
 
 PROFILE = host_profile_id("claude-code")
 FILES = ("run.json", "timeline.jsonl", "workspace.json")
@@ -92,9 +102,51 @@ TEMPLATES = (
 )
 
 
+def _seed_historical_spike(service, run_id: str, action: dict) -> None:
+    """Persist sealed generic historical spike evidence without public ingress or workload execution."""
+    coordinator = service._coordinator
+    key = decode_handle(run_id)
+    assert key is not None
+    loaded = coordinator._load(key)
+    command = {"type": "ObserveAction", "run_id": run_id, "action": action}
+    snapshot = coordinator._assemble(key, loaded.state, command, require_graph=True)
+    backend = generic_spike.GenericQualifiedBackend(
+        "docker", "docker-isolated-v1", "sha256:" + "a" * 64, "sha256:" + "b" * 64)
+    sealed = generic_spike.prepare_generic_spike(
+        canonicalize_spike_plan_draft(action["plan"]), coordinator.workspace,
+        coordinator.image_resolver, backend)
+    request = plan_spike_request(
+        snapshot, action, generic_spike.sealed_request_facts(sealed, backend))
+    assert request.result_type == "Allow", request
+    state, _, _, _ = coordinator._commit(
+        key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
+    request_body = request.intent.artifacts[0]["body"]
+    harness_run_id = "r-" + request.intent.artifacts[0]["artifact_id"].split(":", 1)[1][:32]
+    harness_request = generic_spike.GenericHarnessRequest(
+        harness_run_id, backend, sealed.plan, sealed.plan.digest,
+        spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
+    result = _GenericFixtureHarness(0).run(harness_request)
+    observations = tuple(FileObservation(
+        binding.path, ObservationState.PRESENT, binding.sha256)
+        for binding in sealed.snapshot.file_bindings)
+    observed = ObservationSnapshot(
+        observations, sealed.snapshot.basis_id, observations_digest(observations))
+    loaded = coordinator._load(key)
+    snapshot = coordinator._assemble(key, state, command, require_graph=True)
+    planned = plan_spike_result(
+        snapshot, request_body,
+        generic_spike.sealed_result_facts(result))
+    assert planned.result_type == "Allow", planned
+    coordinator._commit(
+        key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
+        additional_observations=(("spike_execution", observed),))
+    checked = coordinator._load(key)
+    coordinator._assemble(
+        key, checked.state, {"type": "GetRun", "run_id": run_id}, require_graph=False)
+
+
 def _drive(service, repo: Path, session: str, goal: str, kinds: list[str], steps, stopped: bool) -> None:
-    """One run through the bridge: started, routed, graphed, approved, investigated, its research cited verbatim and
-    its spikes run by the real harness over the files they bind; then stopped (as its human consents) or left active."""
+    """Drive one run; test-only historical spikes preserve bound-file complexity coverage."""
     started = service.dispatch(start_run(goal=goal, request_id=f"start-{session}", project=identity.project_id(repo),
                                          session=session))
     run_id = started["result"]["run"]["id"]
@@ -108,9 +160,7 @@ def _drive(service, repo: Path, session: str, goal: str, kinds: list[str], steps
             claim_id=claim, source_kind="code", result="supports", payload={"source_ref": cited, "citation": line})))
         assert admitted["result"]["type"] == "Allow", admitted
         if bound:
-            ran = service.dispatch(observe_action(run_id=run_id, action=action_spike_request(
-                claim_id=claim, command="cat " + " ".join(bound) + " > /dev/null", dependent_files=sorted(bound))))
-            assert ran["result"]["type"] == "Allow", ran
+            _seed_historical_spike(service, run_id, _generic_spike_action(claim, sorted(bound)))
     if stopped:
         end_with_consent(service._coordinator, run_id)
 
@@ -132,7 +182,12 @@ def _drive_one(base: Path, n: int) -> None:
     os.chdir(repo)
     sequence = (uuid.UUID(int=k) for k in range(1 + 1000 * n, 1 << 16))
     with mock.patch.object(governance_setup, "uuid4", lambda: next(sequence)):
-        _drive(bridge.build_service(PROFILE), repo, *TEMPLATES[n])
+        service = bridge.build_service(PROFILE)
+    selector = FakeSpikeAuthoritySelector()
+    selector.qualified_next = True
+    service._coordinator.spike_authority_selector = selector
+    service._coordinator.image_resolver = FakeLocalImageResolver()
+    _drive(service, repo, *TEMPLATES[n])
 
 
 def _template() -> Path:

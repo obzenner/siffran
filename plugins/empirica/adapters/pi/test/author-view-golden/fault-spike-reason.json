@@ -1,0 +1,9 @@
+{
+  "result": {
+    "type": "Fault",
+    "code": "unavailable",
+    "fail_direction": "closed",
+    "reason": "lifecycle-unavailable"
+  },
+  "text": "Fault unavailable (closed) reason lifecycle-unavailable (GetContract evidence/spike: evidence/spike/limits)"
+}

@@ -31,7 +31,7 @@
         "basis": "sha256:d9a25a79200993f7e0c83b1858f4a69d1a0e04a29fc11116571a8d46ac8b76e2",
         "contract": {
           "id": "empirica/public",
-          "version": "4.0.0",
+          "version": "6.0.0",
           "digest": "<contract-digest>",
           "relevant_sections": [
             "budget"
@@ -194,7 +194,10 @@
             "citation names line 895, not 891"
           ]
         },
-        "confirmation_batch": null
+        "confirmation_batch": null,
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        }
       },
       "reasons": [
         {

@@ -9,7 +9,7 @@
       "basis": "sha256:9e8745d6be67c59d3117de33ccbb253b19887274a1a49440b51a79d7f86e7f3e",
       "contract": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "relevant_sections": [
           "budget",
           "terminal"
@@ -66,8 +66,11 @@
         "independence": null,
         "findings": []
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "spike_backend": {
+        "kind": "spikes_unavailable"
+      }
     }
   },
-  "text": "Allow (converged=false) stopped_budget — no governance\nrun_id: run-fx\nAudit: required\n\nResiduals:\n  evidence.confirmation_required\n    params: route=human\n    next: human: confirmation; report_convergence intent=stop"
+  "text": "Allow (converged=false) stopped_budget — no governance\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nResiduals:\n  evidence.confirmation_required\n    params: route=human\n    next: human: confirmation; report_convergence intent=stop"
 }

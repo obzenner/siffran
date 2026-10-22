@@ -11,8 +11,8 @@ Each suite runs in its own process group, and the runner tracks every launched g
 | Suite | What it runs | Before (serial, s) | After (alone, s) |
 |---|---|---|---|
 | `check-static` | lint, manifests, skills, suite ownership, docs, ADRs, contracts, vendor copies, validator unit tests | 25 | 38 |
-| `check-core` | contracts, state, bridge, governance, audit, v2 activation/audit/blocker modules, Methodologist core | 104 | 33 |
-| `check-evidence` | citations, confirmation, scenarios, A1 boundaries, home isolation, host adapter contracts | (in core) | 37 |
+| `check-core` | contracts, state, production composition, governance, audit, v2 activation/audit/blocker and restored budget/freeze/terminal modules, Methodologist core | 104 | 33 |
+| `check-evidence` | citations, confirmation, generic request/result freshness and races, scenarios, A1 boundaries, home isolation, and the complete public-tools/private-host path | (in core) | 37 |
 | `check-observer` | the observer read model and its server, the filesystem source, its pass costs (git processes, reads, hashes, projections) and background indexer (`test_observer_fs.py`), the drift index's counted pass costs and the oracle that the incremental view equals a from-scratch one (`test_observer_incremental.py`), the generated invariant that it says what the gate and the author view say, its cost counted at n and 2n (`test_observer_complexity.py`), and the stateful machine (`test_observer_stateful.py`: random sequences of public actions through the real service, the observer equal to the core after every step; 12 sequences of up to 6 steps, fixed seed, no database, no shrinking, about 15 s); four processes side by side; needs `make dev-install` (Hypothesis) | (in core) | 33 |
 | `check-claude` | Claude payload, lifecycle translation, Stop settlement | 8 | 9 |
 | `check-codex` | Codex package, hooks, MCP | 2 | 1 |
@@ -22,18 +22,126 @@ Each suite runs in its own process group, and the runner tracks every launched g
 
 Measured with fresh temporary `HOME`, `EMPIRICA_HOME` and `TMPDIR`. "After" static is slower than before because it also holds the skill and suite-ownership guards. The wall time is the slowest suite plus start-up and contention. The simulated-host module (`test_evidence_hosts.py`) is trimmed to adapter contracts: the scripted "successful human journey" tests `test_confirm_releases_the_record_and_the_human_saw_what_they_decided` and `test_a_human_decides_each_item_and_a_needs_decision_claim_in_the_same_batch` are removed. Each is covered elsewhere on the same payload and state: `test_evidence_confirmation` (`confirmed_by_human`, `human_decision`), `test_evidence_scenarios` (confirm releases the record; the needs-decision answer converges), and `test_the_form_is_flat_primitive_and_unlike_the_configuration_form`, which now also pins what the human reads (source, claim, decision order, the reason an observed record has no check). A native session, not these tests, is what shows that a host renders the dialog; that is the job of the qualification skill.
 
-The fast gate retains schema/vendor validation; malformed protocol and state input; private authority and identity checks; core StartRun admission (including required explicit `control_mode` and structural refusal without a run); contract-tagged refusal/recovery dispositions; state and bridge boundaries; focused real-service governance CAS/replay and consent denial; the Claude model-switch subprocess regression; Pi guards, transport failures, and governance UI controls; and Methodologist core/MCP/adapter tests. Governance goldens assert the contract-owned rationale label, hostile-rationale escaping, the human-amendment warning, and original-versus-amended ceiling confirmation. Cross-adapter tests feed identical neutral facts to the Python and TypeScript phase rules: interactive auto presents exactly once, post-approval lower changes auto-accept without a dialog, raises refuse without a dialog, and dismissal/timeout/unavailable UI grant nothing. Pi bundle validation checks package composition only, so it does not execute the adapter suite a second time.
+The fast gate retains schema/vendor validation; malformed protocol and state input; exact run/3 decoding and rejection of every other persisted-state discriminator; private authority and identity checks; core StartRun admission (including required explicit `control_mode` and structural refusal without a run); contract-tagged refusal/recovery dispositions; state and bridge boundaries; focused real-service governance CAS/replay and consent denial; the restored budget/freeze/terminal suite; generic request-before-effects, result-correlation, freshness, supersession, and race coverage; the complete public-tools/private-host convergence path; the Claude model-switch subprocess regression; Pi guards, transport failures, and governance UI controls; and Methodologist core/MCP/adapter tests. Governance goldens assert the contract-owned rationale label, hostile-rationale escaping, the human-amendment warning, and original-versus-amended ceiling confirmation. Cross-adapter tests feed identical neutral facts to the Python and TypeScript phase rules: interactive auto presents exactly once, post-approval lower changes auto-accept without a dialog, raises refuse without a dialog, and dismissal/timeout/unavailable UI grant nothing. Pi bundle validation checks package composition only, so it does not execute the adapter suite a second time.
 
 **Calculated, not enumerated (T1).** The property and stateful tests use Hypothesis, pinned with hashes in `requirements-dev.txt` and installed by `make dev-install` into the gitignored `.venv` (with uv; checks never install, and a missing or stale `.venv` fails with the command to run). `check-observer`, `contract-check` and `empirica-v2-check` run under that interpreter; everything else keeps the system `python3`. The UI's properties use fast-check from the UI's pinned toolchain (`make ui-install`). Every Hypothesis and fast-check run is bounded, under a fixed seed and without an example database: the same examples on every machine. The contract's coverage is generated, not listed: strategies and arbitraries read from the `empirica-ui-view/v1` schemas produce every declared enumeration value, every generated document validates (`scripts/tests/test_ui_view_generators.py`, in `contract-check`), and the UI renders every generated row and sheet, its standing word from `standing` alone (`ui/tests/generated.test.mjs`, in `check-ui`). The observer's agreement with the core is a `RuleBasedStateMachine` over the real service's public actions (`tests/v2/test_observer_stateful.py`), with its named replays and the minimal sequences of what it found that is not the tests' to fix (`KnownDisagreementTests`, expected failures until their owner fixes them).
 
 Runtime-derived Empirica wire-fixture fields are generated with `make contract-fixtures`; shared schema definitions and local `$ref` embeddings are generated with `make contract-schemas`. `contracts/empirica/v2/shared-defs.json` is the never-rewritten source for `invocationProvenance` and `identityObservation`; `public-contract.schema.json` is the source for the prefixed public-contract embedding. `make contract-check` and `make check-static` run both generators in check mode (plus the schema-generator unit regressions), so drift fails without rewriting files; regenerate deliberately after projection or shared-schema changes. The data regions of `doc/design/empirica-host-boundary-registry.md` (each expectation's outcomes, scenario ids and sources, and the acceptance matrix) are written from `host-boundaries.json` by `make registry-doc`; `make contract-check` fails on drift (ADR-0069).
 
+The normative adapter-independent Docker boundary lives in `contracts/empirica-docker-spike/v1/`: a closed machine-readable support contract, schema, mapping table, unsupported scope, and live-only release matrix. `make empirica-docker-support-contract-check` validates it, compares fixed policy/profile/probe/namespace obligations with production constants, requires every refusal code to be an emitted reason and every spike Fault reason to use one hyphenated spelling with a hint, checks the agent-visible public-contract clause `evidence/spike/limits` against its rendering from the code constants (`make empirica-spike-limits` rewrites it), scans normative text for stale Docker-design phrases, and runs its negative controls in `scripts/tests/test_validate_docker_spike_contract.py`. The independently authored Docker fixture is owned only by `scripts/generate_generic_docker_fixtures.py`; its static inspect literals derive from the preserved G11 probe corpus, while cidfile and exact-absence strings (stderr, and the `[]\n` stdout docker/cli flushes) are pinned verbatim from Docker CLI/Moby 20.10–29 source and documentation named in fixture provenance. The generator imports no planner or admission module. `make empirica-docker-fixtures` regenerates it; planner/authority checks run the generator in check mode so drift fails.
+
 ## Targeted integration diagnostics
 
-Run these when changing the named boundary, not on every edit:
+The application, capability-authority, local-image-resolution, pure compiler, semantic-admission,
+immutable staging, bounded-effects, reconstructing-journal, cleanup/recovery, and one-container
+harness and five-probe qualification checkpoints are complete. Qualification and installation are
+separate Make-owned operator operations: the first writes only a private candidate, and the second
+revalidates current implementation, semantic capability, profile, and candidate identity before
+atomically publishing the new `/2` record and pointer. Both require an exact profile and one
+server-native Linux image, remain outside an Empirica run, and never pull, build, load, log
+in, repair, switch context, or accept model-authored runtime input.
+
+Qualification has five mandatory probes: sandbox realization PASS, natural 125 FAIL,
+output overflow unavailable, a qualification-only five-second timeout unavailable, and selected
+profile networking. A failed networked `wget` exits 46 and yields `network-egress-unavailable`. OOM qualification is optional, while runtime OOM and exit 137 always remain
+unavailable. Every probe uses the production compiler, staging, journal, bounded effects, semantic
+admission and exact-ID cleanup path; the networked probe additionally observes sole bridge
+membership while the container is running. Candidate construction proves only recorded IDs absent
+and journal/staging roots empty, never a global Docker inventory comparison.
+
+The legacy environment-readiness helper remains a plugin-process prerequisite, not Docker
+capability authority: it accepts canonical executable CPython >=3.10 on supported Darwin or Linux
+POSIX hosts, process/session/no-follow capabilities, exact compatible jsonschema version/origin and
+Draft 2020-12 APIs, and import-smokes the shipped bridge, protocol and run-state modules at their
+exact plugin-root paths. Its Python-byte diagnostic is not included in the `/2` Docker execution
+binding. Dependency/API/origin imports run under the same canonical Python in a scrubbed process
+group with a 5-second/64-KiB ceiling. Timeout, output overflow, malformed output, or child failure is
+a structured unavailable reason and bounded process-group cleanup leaves no descendant. No upper
+Python cap is asserted.
+
+After discovery, every qualification and runtime operation uses only the resolved canonical CLI target (an ordinary symlink to that regular executable is accepted) and a closed host environment (`LANG=C`, `LC_ALL=C`, exact local Unix `DOCKER_HOST`, and an
+empty profile-owned Docker config directory). A nonempty config refusal identifies the offending private directory without exposing file contents. There is no ambient context, host execution, proxy,
+credential, image-acquisition, or network-profile fallback. Runtime selection is read-only;
+historical resolution re-observes the exact environment, implementation, Docker, endpoint, and
+image identities by digest. A new installed pointer can affect only future runs.
+
+The application accepts only closed single-container `empirica.spike-plan-draft/2` data: one local
+image reference, exact argv, optional repository-relative file/directory inputs, and a bounded
+environment map. The host resolves immutable image/platform facts, expands one captured input union,
+and seals every policy/profile/runtime fact before request CAS. Fixed framework policy owns uid/gid
+65534, `/work`, `/tmp`, `/inputs`, `min(2, NCPU)` CPU, 2 GiB memory, 256 PIDs, ulimits, streams,
+network profile, and the 120-second workload. Natural 137 and every substrate ambiguity admit no
+result. There is no `/1` loader or multi-container author surface.
+
+Production composition loads the passive Docker authority, bounded local-image resolver, and the
+single-container `/2` harness lazily. The harness cannot qualify, install, create, or repair authority during ordinary execution; absent, old, malformed,
+or drifted authority freezes spikes unavailable before mutation. Separate operator-only Make targets own candidate qualification and installation. No old command-string,
+multi-container, qualification-procedure loader, translation, or host fallback is retained.
+
+Timeouts are four distinct limits, not one extensible workload allowance. The container workload hard
+limit is 120 seconds. The Docker backend's 210-second whole-operation limit reserves bounded cleanup
+and postflight phases after effects. Pi grants only an exact schema-shaped public
+`ObserveAction`/`spike_request` a 300-second **outer transport margin**; every near-miss and ordinary
+public operation remains at 30 seconds. Claude MCP's 360-second tool ceiling is likewise an outer
+transport margin. Neither 300 nor 360 seconds can extend the 120-second workload. The authoritative
+`workload_output_limit_bytes` is 1 MiB **per stream**: stdout and stderr are counted and retained
+separately, and either stream exceeding its ceiling is output-limited (it is not a 1 MiB aggregate
+budget). Workload timeout, output limiting, or OOM is unavailable substrate execution, not a failing
+experimental result, and admits no `spike` result evidence.
+
+The generic authority implementation manifest binds every source that selects or resolves authority,
+constructs or invokes public `ObserveAction` transport, classifies or enforces that transport's outer deadline,
+owns the run repository/CAS that seals request state before execution, or owns the Claude MCP ceiling. It also
+binds all seven runtime-loaded vendored v2 JSON documents: public contract and schema, public tool projection,
+request and response schemas, host profiles, and persisted-state schema. Root contract duplicates are not
+runtime inputs and remain outside the authority; `make vendor-check` owns their byte identity with the vendored
+copies. The source set includes the shared bridge, MCP server/public tools, Claude and Codex transports, Pi
+translate/index/stdio/process sources, the located repository plus filesystem repository and FS I/O that own the
+request-sealing run CAS, and `.mcp.json`, in addition to the generic plan, capture, staging, authority,
+effect, journal, harness, and qualification/installer implementation. The two scripts are thin
+argument adapters over that bound module. Pi's `private-transport.ts` and `private_bridge.py` cannot carry
+public `ObserveAction` requests and retain the ordinary 30-second bound. Claude and Codex public entry adapters
+converge on `adapters.bridge.handle`; Pi converges through `adapters/pi/bridge.py` to the same bridge. None owns
+or can select a weaker harness.
+
+Empirica 6's public backend projection is covered by `make empirica-run3-check`: both exact closed
+RunView/GetArgument shapes, no diagnostic extension, exact host-owned profile selection only at `StartRun`, immutable persisted binding, rejection of every non-run/3 state discriminator without mutation,
+and a fresh run/3 generation. The same target binds the agent-visible 120/210/300/360 hierarchy and resource/no-evidence
+wording to the sandbox, Pi transport, and Claude MCP constants. `core/projection.py`, `core/observer.py`,
+`application/observer.py`, and the UI sources are deliberately outside `IMPLEMENTATION_SOURCE_PATHS`: they display the
+already-persisted binding and cannot select, resolve, execute, or admit a harness. The changed runtime-loaded
+`vendor/contracts/empirica/v2/public-contract.json` and response/request/public-tools schemas are inside the manifest,
+so this public-contract cutover still invalidates every earlier installed qualification. UI contract and fixture copies
+are display-only and remain byte-owned by `make contract-fixtures`/`make vendor-contracts`.
+
+Every hermetic test module or shared driver that can reach the production bridge imports
+`tests/sandbox_isolation.py` before that bridge. The helper holds a process-lifetime temporary root
+and forces `EMPIRICA_SANDBOX_HOME` to an absent child, including in bridge subprocesses, so a
+developer's installed qualification authority cannot make direct unittest invocation discover or
+execute Docker. Qualification and sandbox-home semantic tests remain excluded because their own
+fixtures are the authority under test.
+
+The generic runtime journal is a reconstructing `siffran.empirica.generic-docker-operation/2`
+document under exact `generic-runtime-v2`. It binds the current single-container compiler inputs and
+operation digest, admits only monotonic lifecycle states, preserves bounded replay and exact resource
+sets, revalidates exact container/network authority before conservative cleanup, and stages only the
+sealed immutable snapshot. Every transition and exact-ID adoption is atomically replaced and fsynced;
+the journal is removed only after exact Docker absence, no-follow staging absence, and postflight
+authority equality. Crash-boundary tests recover after every isolated lifecycle transition without a
+Docker daemon.
 
 | Target | Boundary | Why it is not in the fast gate |
 |---|---|---|
+| `make empirica-generic-execution-check` | reconstructing generic journals, raw Docker-output admission, exact identity checks, bounded effects and conservative cleanup | fake runner only; no Docker daemon or host fallback |
+| `make empirica-docker-planner-check` | `/2` one-container/optional-bridge compilation, closed semantic static/private-network-membership/terminal admission, and independent Docker Engine/Desktop fixtures | fake documents only; no Docker daemon or host effects |
+| `make empirica-generic-staging-check` | `/2` descriptor-relative, no-follow immutable snapshot materialization, exact revalidation, atomic publication, and bounded cleanup | temporary filesystem only; no Docker daemon |
+| `make empirica-generic-harness-check` | single-container private Docker coordinator, reconstructing journal, exact natural verdict/cleanup/postflight admission, and closed unavailable reasons | fake effects and authority only; no live qualification authority |
+| `make empirica-generic-authority-check` | passive local Docker Engine/Desktop capability observation, semantic record binding, exact profile selection, historical re-observation, and one-call local image resolution | fake passive observations only; no Docker daemon |
+| `make empirica-bridge-composition-check` | production generic store, selector, authority, local-image resolver, and exact `/2` harness composition; unsafe authority degradation and non-spike availability | isolated absent `EMPIRICA_SANDBOX_HOME`; no Docker daemon, publication, or live qualification authority |
+| `make empirica-transaction-check` | single-container two-CAS activation: bounded read-only image resolution, deterministic file/directory capture, immutable request before execution, exact retry correlation, one effect across result-CAS retries, postflight image/input/authority re-observation, and unavailable fail-closed behavior | in-memory repositories/workspace/resolver/harness only; no Docker daemon or live authority |
+| `make empirica-generic-qualification-check` | closed new `/2` candidate/record/pointer validation, exact five-probe sequencing and expected outcomes through fake production effects, under-60 bound, running network membership, scoped cleanup, tamper/legacy rejection, candidate-only output, and separately explicit atomic installation | temporary files and fake Docker observations only; neither qualify nor install target is invoked |
+| `make generic-docker-qualify-candidate PROFILE=… IMAGE=… DOCKER=… OUT=… WORK=…` | operator-only five-probe qualification of one already-local native image and exact profile; writes only a private candidate | live Docker operation, deliberately outside automated checks; never installs |
+| `make generic-docker-install-candidate PROFILE=… CANDIDATE=… SANDBOX_HOME=…` | separately revalidate and atomically publish one exact new `/2` record/pointer | explicit operator mutation, deliberately never invoked by tests or ordinary runtime |
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |
 | `make empirica-core-integration` | full governance coverage, strict v2 state, transactions, retry, persistence, complete behavioral matrix | broad filesystem/schema scenarios; includes `empirica-governance-check` so admission/consent negative controls cannot fall outside the milestone gate |
 | `make empirica-v2-check ARGS="-k test_name"` | a selected behavioral regression (omit ARGS for all v2 cases) | ordinary unittest selection, no custom runner |
@@ -44,9 +152,9 @@ Run these when changing the named boundary, not on every edit:
 | `make empirica-pi-api-typecheck` | each adapter's mirrored Pi API (`pi-types.ts`) is assignable from Pi's own `ExtensionAPI` in 1.0.0 (the floor) and 1.1.0, for both Pi adapters (Empirica and Methodologist) | network (`npm pack` of each Pi version). For packed versions Pi's own external types (for example `TSchema`) resolve to `any`, so the check is weaker there than against a full install |
 | `make observer-smoke` | one timed run at the realistic size: 1,000 runs of a real filesystem store (bridge-driven runs cloned with valid refs across 20 repositories, built with no git identity under verify's scratch HOME) served with the background indexer (`plugins/empirica/tests/v2/test_observer_smoke.py`): an honest progressive cold start; a summary and a 304 within 100 ms; an indexer pass within 100 ms, or 300 ms with one run changed; the summary within 512 KB gzipped; pages of at most 200 rows; search within 300 ms. How a pass grows is counted in `check-observer`, not timed here | about a minute; in `make verify` |
 | `make observer-deep` | the stateful observer = core machine (`test_observer_stateful.py`) under its deeper profile: 40 sequences of up to 10 public actions, fixed seed, no example database, a failure shrunk to its minimal sequence | about 85 s; in `make verify` |
-| `make ui-browser` | the observer UI in headless Chrome against the plugin's own server, each journey once at fixture size (the demo fixtures; a live store the real service built, `plugins/empirica/tests/v2/serve_generated.py`; the empty store): the inbox (what needs me, the strip), narrowing and the numbers that go with it, one run's sheet (proof, audits, dropped claims, attempts, why it stopped), search, the keyboard, history and reload, safe text, motion (off when asked), error recovery, every scheduled read paused in a hidden tab, the narrow layout and the Universe's journeys 1–8 with their click budgets; then the layout invariants in both colour schemes at 1440×900 and 1024×768 (nothing scrolls sideways, no overlay box covers another, no heading, chip or name clipped without its full title, focus inside the window) (`plugins/empirica/ui/tests/browser.journeys.mjs`, described in `plugins/empirica/ui/UI.md`) | needs Chrome; about two and a half minutes |
+| `make ui-browser` | the observer UI in headless Chrome against the plugin's own server, each journey once at fixture size (the demo fixtures; a live store the real service built, `plugins/empirica/tests/v2/serve_generated.py`; the empty store): the inbox (what needs me, the strip), narrowing and the numbers that go with it, one run's sheet (read-only generic spike request/result disclosures with copyable single-container plan/input identities, exact 120/210-second limits, uppercase verdict, cleanup and no host/raw-output data; audits, dropped claims, attempts, why it stopped), search, the keyboard, history and reload, safe text, motion (off when asked), error recovery, every scheduled read paused in a hidden tab, the narrow layout and the Universe's journeys 1–8 with their click budgets; then the layout invariants in both colour schemes at 1440×900 and 1024×768 (nothing scrolls sideways, no overlay box covers another, no heading, chip or name clipped without its full title, focus inside the window) (`plugins/empirica/ui/tests/browser.journeys.mjs`, described in `plugins/empirica/ui/UI.md`) | needs Chrome; about two and a half minutes |
 | `make ui-smoke` | the same file, `MODE=smoke`: one generated store of 1,000 runs: the first render within a second of the summary, the DOM bounds (list ≤ `max_rows` row nodes, ≤ 1,500 nodes on the map), a zoom's frames ≤ 16 ms, and what only many runs have (the calendar's project-days, a list longer than a page, a refused cursor) | needs Chrome; about a minute; in `make verify` |
-| `make ui-shots` | the same file, `MODE=shots`: ten deterministic PNGs of the demo (a frozen clock, reduced motion, light and dark, both sizes) with their sha256, written outside the repository (`OUT=`, default `$TMPDIR/empirica-ui-shots`) for a person to look at; nothing compares pixels | needs Chrome; about 40 s; on demand |
+| `make ui-shots` | the same file, `MODE=shots`: deterministic PNGs of the demo (including a generic spike claim sheet; a frozen clock, reduced motion, light and dark, both sizes) with their sha256, written outside the repository (`OUT=`, default `$TMPDIR/empirica-ui-shots`) for a person to look at; nothing compares pixels | needs Chrome; about 40 s; on demand |
 | `make readme-image` | the same file, `MODE=readme`: README's two PNGs of the Universe (`doc/images/universe-{dark,light}.png`, committed), the generated demo store at 300 runs with `--clean` (no unread run, no unnamed project) as of the same frozen instant, in UTC, reduced motion, 1600x1000 at DPR 1.5; the same inputs give the same bytes; `make docs-check` fails if README names one that is missing, nothing compares pixels | needs Chrome; about 20 s; on demand, when the Universe changes |
 | `make ui-test` | while building: `vitest related --run` on `FILES=app/x.js,…` (relative to the UI's folder or the repository), or on the UI files changed in the worktree: the tests that import them, directly or not, computed from the imports (`plugins/empirica/ui/scripts/imports.mjs`); then it names the browser journeys that also hold one of them (`tests/journeys.json`, the one list kept by hand, since a journey loads the page in Chrome). The guard `tests/imports.test.mjs` (in `check-ui`): every source under `app/` and `elements/` is imported by at least one Vitest test, every `tests/*.journeys.mjs` is declared, and no helper in `tests/` is orphaned | about a second |
 | `make mutate` | mutation testing of the changed lines, the way a change is reviewed (`git diff -U0 HEAD`'s hunks; an untracked file whole; `FILES=a.py,b.js[:10-20]` and `LINES=10-20` override; `RUNNER=` replaces the tests per Python mutant). It prints one line per surviving or uncovered mutant, `file:line  <original> → <mutant>  survived (tests ran: N)` or `… no test covers it`, then the score per tool, and fails if any survived. The UI's `app/` and `elements/`: one Stryker run (`plugins/empirica/ui/stryker.config.json`) with `--mutate file:start-end`, on its Vitest runner: each mutant runs only the tests that cover it (`perTest`) among those that import the file (`vitest.related`); incremental against the local, gitignored `reports/stryker-incremental.json`, so a repeat run with nothing changed reuses every result; sandbox `.stryker-tmp` inside the UI's folder (nothing linked). Python: mutmut 2.5.1 with `--use-patch-file` (a patch of the scope's lines; `whatthepatch` is pinned for it) in an rsync scratch copy (no `.git`, `node_modules` or `.venv`; nothing linked, the worktree's `.venv` interpreter by absolute path), each mutant against the tests that import its module (`scripts/mutate.py`, tested in `suites-check`) | on demand; `app/geometry.js` (797 mutants) about 2 min the first time, seconds after one changed line, about 3 s with nothing changed |
@@ -93,7 +201,10 @@ The adapter classifies every `subagent` call against a reviewed inventory of the
 single and total model-visible characters and, tracked **separately** in UTF-8 bytes, the text-only
 transport envelope size. Claude/Codex MCP results contain no duplicate RunView
 `structuredContent`; Pi's validated JSON remains host-internal `details`. `MAX=<chars>` fails when
-any single result exceeds that ceiling. `make empirica-context-economy-unit-check` (part of
+any single result exceeds that ceiling. Empirica 6's mirrored Python/Pi post-mediation author-view regression uses a
+strict `<1300` ceiling; the largest measured case is the unavailable-backend configure dismissal at 1257 UTF-8 bytes,
+leaving 43 bytes while retaining the exact no-spike/research/graph/honest-stop guidance. `make
+empirica-context-economy-unit-check` (part of
 `check-static`) guards the counter's fixed layout and no-write property.
 
 ## Native logs

@@ -46,12 +46,13 @@ class TextSafety:
 
 @dataclass(frozen=True)
 class Header:
-    """First-line result, run, governance summary, public proposal rationale, and the unreviewed-runtime note."""
+    """First-line result, run, governance, immutable spike binding, public rationale, and host note."""
 
     result_type: Trusted
     status: Trusted
     governance: Trusted
     run_id: Trusted
+    spike_backend: tuple[Trusted, ...]
     proposal_rationale: Untrusted | None
     host_note: Trusted | None = None
 
@@ -266,6 +267,18 @@ def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
     )
 
 
+def _spike_backend(run: dict[str, Any]) -> tuple[Trusted, ...]:
+    """Render only the closed public StartRun binding; never infer current backend health."""
+    backend = run["spike_backend"]
+    if backend["kind"] == "spikes_unavailable":
+        return (Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_unavailable']}"),)
+    return (
+        Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_qualified']}"),
+        Trusted(f"  {_LABELS['spike_backend_record']} {backend['qualification_record_digest']}"),
+        Trusted(f"  {_LABELS['spike_backend_execution']} {backend['execution_binding_digest']}"),
+    )
+
+
 def _governance(run: dict[str, Any]) -> Trusted:
     """Render the compact governance header summary."""
     governance = run["governance"]
@@ -319,7 +332,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     host_note = (Trusted(f"{_LABELS['host_unreviewed']} {unreviewed['package']} {unreviewed['version']} "
                          f"{_LABELS['host_unreviewed_note']}") if unreviewed is not None else None)
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
-                    Trusted(run["id"]),
+                    Trusted(run["id"]), _spike_backend(run),
                     safety.untrusted(rationale) if rationale is not None else None, host_note)
     terminal_next = tuple(render_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
@@ -435,6 +448,7 @@ def _render(view: AuthorView) -> str:
     """Render a parsed view through one ordered, empty-dropping section table."""
     base = (f"{view.header.result_type} {view.header.status} — {view.header.governance}",
             f"{_LABELS['run_id']} {view.header.run_id}",
+            *view.header.spike_backend,
             *((f"{_LABELS['proposal_rationale']} {view.header.proposal_rationale}",)
               if view.header.proposal_rationale is not None else ()),
             *((view.header.host_note,) if view.header.host_note is not None else ()),
@@ -464,6 +478,31 @@ def _verification_label(verification: dict[str, Any]) -> str:
     return _LABELS[_VERIFICATION[verification["status"]]]
 
 
+def _redacted_environment_plan(value: object) -> object:
+    if not isinstance(value, dict):
+        return value
+    environment = value.get("environment")
+    if not isinstance(environment, (dict, list)):
+        return value
+    plan = dict(value)
+    plan["environment"] = sorted(environment if isinstance(environment, dict) else environment)
+    return plan
+
+
+def _generic_spike_evidence(row: dict[str, Any]) -> dict[str, Any]:
+    """Public artifact with runtime-local identity and authored environment values removed."""
+    safe = dict(row)
+    if safe["kind"] == "spike_request":
+        for key in ("draft", "plan"):
+            if key in safe:
+                safe[key] = _redacted_environment_plan(safe[key])
+    if safe["kind"] == "spike":
+        facts = dict(safe["result_facts"])
+        facts.pop("run_id", None)
+        safe["result_facts"] = facts
+    return safe
+
+
 def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, ...]:
     """Render the graph projection without private identity or artifact fields."""
     claims = tuple(
@@ -485,14 +524,27 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         f"  {safety.claim_id(row['from'])} -{row['type']}-> {safety.claim_id(row['to'])}"
         for row in argument["edges"]
     )
+    artifacts = argument["artifacts"]
     citations = tuple(
         line
-        for row in argument["artifacts"] if row.get("citation")
+        for row in artifacts if row.get("citation")
         for line in (
             f"  {safety.untrusted(row['citation'])}"
             + (f" — {_verification_label(row['verification'])}" if row.get("verification") else ""),
             *((f"    {_LABELS['human_note']} {safety.untrusted(row['verification']['note'])}",)
               if row.get("verification", {}).get("note") else ()),
+        )
+    )
+    result_requests = {row["request_artifact_id"] for row in artifacts if row["kind"] == "spike"}
+    spikes = tuple(
+        line
+        for row in artifacts if row["kind"] in {"spike_request", "spike"}
+        for line in (
+            f"  {_LABELS['generic_spike_request' if row['kind'] == 'spike_request' else 'generic_spike_result']} "
+            f"{safety.claim_id(row['claim_id'])} {row['artifact_id']}",
+            f"    {safety.untrusted(json.dumps(_generic_spike_evidence(row), separators=(',', ':'), ensure_ascii=False))}",
+            *((f"    {_LABELS['generic_spike_no_result']}",)
+              if row["kind"] == "spike_request" and row["artifact_id"] not in result_requests else ()),
         )
     )
     audit = argument["audit"]
@@ -502,6 +554,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         _LABELS["claims"], *claims,
         *((_LABELS["edges"], *edges) if edges else ()),
         *((_LABELS["citations"], *citations) if citations else ()),
+        *((_LABELS["generic_spikes"], *spikes) if spikes else ()),
         f"{_LABELS['audit_status']} {audit_text(audit)}",
         *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
     )
@@ -559,8 +612,10 @@ def _render_valid(result: dict[str, Any]) -> str:
         return _LABELS["block"] + "\n" + "\n".join(_reason_lines(
             tuple(_reason(row, safety) for row in result["reasons"])))
     if result["type"] == "Fault":
+        reason = (f" reason {result['reason']} (GetContract evidence/spike: evidence/spike/limits)"
+                  if "reason" in result else "")
         message = f": {result['message']}" if "message" in result else ""
-        return f"{_LABELS['fault']} {result['code']} ({result['fail_direction']}){message}"
+        return f"{_LABELS['fault']} {result['code']} ({result['fail_direction']}){reason}{message}"
     return _LABELS["inert"]
 
 

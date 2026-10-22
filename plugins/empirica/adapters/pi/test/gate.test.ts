@@ -35,6 +35,7 @@ import type { PrivateIngressRequest } from "../src/private-transport.ts";
 const AUTHOR_LABELS = PUBLIC_TOOLS.author_view.labels as Readonly<Record<string, string>>;
 
 const HANDLE = "run-handle-1";
+const UNAVAILABLE_SPIKES = { kind: "spikes_unavailable" } as const;
 
 test("Pi auditor model follows host settings precedence; identity policy owns equivalence", () => {
   const global = { subagents: { agentOverrides: {
@@ -198,7 +199,7 @@ function envelope(result: Result, requestId = "x"): Response {
   return { protocol: PROTOCOL, request_id: requestId, result };
 }
 function run(status = "active") {
-  return { id: HANDLE, status: status as never, governance: { state: "approved",
+  return { id: HANDLE, status: status as never, spike_backend: UNAVAILABLE_SPIKES, governance: { state: "approved",
     proposal: { budgets: {} } } };
 }
 
@@ -229,6 +230,8 @@ interface WireOptions {
   presentation?: "throw" | "fault";
   /** Replaces the fixture owner registrations before ``session_start`` (default: one healthy owner). */
   owners?: ToolInfo[];
+  /** Host-process environment read at session_start for the optional spike profile. */
+  hostEnv?: Readonly<Record<string, string | undefined>>;
   /** Environment the owner resolver sees (default: none set). */
   env?: OwnerEnv;
   /** Replaces the audit-contract resolver (default: a fixture that answers `bedrock/auditor-model`). */
@@ -311,6 +314,7 @@ async function wire(
         type: "Inert", reason: "unsupported_host_event", run: run() } };
     },
     ownerEnv: options.env ?? {},
+    hostEnv: options.hostEnv ?? {},
     hostVersion: options.hostVersion ?? (() => "1.1.0"),
     ...(options.diagnostics ? { diagnostics: options.diagnostics } : {}),
     ...(options.kickoffStartMs ? { kickoffStartMs: options.kickoffStartMs } : {}),
@@ -372,6 +376,25 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.match(w.pi.userMessages[0], /operation="GetRun"/);
   assert.match(w.pi.userMessages[0], /Pi calls the\npackaged auditor/);
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
+});
+
+test("/empirica reads one exact spike profile at session_start and malformed config never dispatches", async () => {
+  for (const profile of ["docker-isolated-v1", "docker-networked-v1"] as const) {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true,
+      (provider, model) => `${String(provider)}/${String(model)}`,
+      { hostEnv: { EMPIRICA_SPIKE_PROFILE: profile } });
+    await w.pi.command("empirica").handler("goal", { ui: new FakeUi(), mode: "tui" });
+    assert.equal(w.requests.length, 1);
+    if (w.requests[0].command.type === "StartRun")
+      assert.equal(w.requests[0].command.spike_profile, profile);
+  }
+  const malformed = await wire(() => { throw new Error("no dispatch expected"); }, true,
+    (provider, model) => `${String(provider)}/${String(model)}`,
+    { hostEnv: { EMPIRICA_SPIKE_PROFILE: "docker-rust-v1" } });
+  const ui = new FakeUi();
+  await malformed.pi.command("empirica").handler("goal", { ui, mode: "tui" });
+  assert.equal(malformed.requests.length, 0);
+  assert.ok(ui.notifications.some((item) => /EMPIRICA_SPIKE_PROFILE/.test(item.message)));
 });
 
 test("/empirica records where the session can be found, from the session manager, and nothing it did not give", async () => {
@@ -907,7 +930,8 @@ const BATCH = (promptError: string | null = null) => ({ key: `sha256:${"d".repea
   records: [{ claim_id: "C1", source_kind: "web", source_ref: "https://example.test/x" }] });
 const EVIDENCE_WAITING = (route = "human", promptError: string | null = route === "human" ? null : "unavailable",
                           code = "evidence.confirmation_required") => ({ type: "Block" as const,
-  run: { id: HANDLE, status: "active" as never, governance: null, confirmation_batch: BATCH(promptError) },
+  run: { id: HANDLE, status: "active" as never, spike_backend: UNAVAILABLE_SPIKES, governance: null,
+    confirmation_batch: BATCH(promptError) },
   reasons: [{ code, message: code === "evidence.confirmation_required" ? "Research waits on a human."
     : code.startsWith("claim.spike") ? `Spike problem: ${code}.` : "Record research for C1.",
     parameters: { route, record_ids: [`sha256:${"a".repeat(64)}`] } }] });
@@ -988,7 +1012,7 @@ test("gate: with route unavailable the requirement stays a denial and nothing is
 
 function waitingRun(overrides: Record<string, unknown> = {}, context: Record<string, unknown> = {},
                     controlMode = "deliberative") {
-  return { id: HANDLE, status: "active" as never, governance: {
+  return { id: HANDLE, status: "active" as never, spike_backend: UNAVAILABLE_SPIKES, governance: {
     state: "pending", control_mode: controlMode, first_approval: false, prompt_error: null, human_wait: true,
     interactions_remaining: { proposal: 3, total: 128 },
     proposal: { budgets: {}, rationale: "sized" },
@@ -2464,4 +2488,31 @@ test("INVARIANT: every path that sees a terminal result ends the run once: tombs
       assert.doesNotMatch(read.content[0].text, /No active Empirica run/, `${sequence.join("+")}: a read after the end works`);
     }
   }
+});
+
+test("empirica_read GetContract passes the real guard and renders the limits clause (index and section)", async () => {
+  const { VENDORED_CONTRACT_DIR } = await import("../src/public-tools.ts");
+  const contract = JSON.parse(readFileSync(join(VENDORED_CONTRACT_DIR, "public-contract.json"), "utf8"));
+  const spike = contract.sections["evidence/spike"];
+  const digest = "sha256:" + "a".repeat(64);
+  const section = { target: "section", digest, section_id: "evidence/spike", section: {
+    id: "evidence/spike", title: spike.title, summary: spike.summary,
+    clauses: spike.clauses.map((c: { id: string; text: string }) => ({ id: c.id, text: c.text })) } };
+  const index = { ...JSON.parse(readFileSync(join(import.meta.dirname, "author-view-golden",
+    "getcontract-index.json"), "utf8")).result.contract_result, digest };
+  const limits = spike.clauses.find((c: { id: string }) => c.id === "evidence/spike/limits").text as string;
+  const w = await wire((req) => {
+    assert.equal(req.command.type, "GetContract");
+    const value = req.command.type === "GetContract" && req.command.target === "index" ? index : section;
+    return envelope({ type: "Allow", contract_result: value } as unknown as Result);
+  });
+  const read = await execTool(w, "empirica_read", {
+    operation: "GetContract", target: "section", section_id: "evidence/spike" });
+  const text = read.content[0].text as string;
+  assert.match(text, /evidence\/spike\/limits/);
+  for (const line of limits.split("\n").slice(0, 6)) assert.ok(text.includes(line.split(" | ")[1]), line);
+  assert.match(text, /reason authority-drift/);
+  const listed = await execTool(w, "empirica_read", { operation: "GetContract", target: "index" });
+  assert.match(listed.content[0].text, /evidence\/spike/);
+  assert.equal(w.requests.length, 2);
 });

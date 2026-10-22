@@ -34,7 +34,7 @@
         "basis": "sha256:1ef53ce6110c18a9168ed46e5bd374b337f1e21e2c61cf0e15dcf4ceca969f30",
         "contract": {
           "id": "empirica/public",
-          "version": "4.0.0",
+          "version": "6.0.0",
           "relevant_sections": [
             "children",
             "audit"
@@ -77,7 +77,10 @@
           "independence": null,
           "findings": []
         },
-        "confirmation_batch": null
+        "confirmation_batch": null,
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        }
       }
     }
   }

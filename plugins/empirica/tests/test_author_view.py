@@ -173,9 +173,35 @@ class NoFallbackTests(unittest.TestCase):
             self.assertIn(f"goal: {wrapped(argument['goal'])}", text, name)
             for claim in argument["claims"]:
                 self.assertIn(f": {wrapped(claim['text'])}", text, name)
-            self.assertNotIn("sha256:", text)
-            self.assertNotIn("artifact_id", text)
+            spikes = [row for row in argument["artifacts"] if row["kind"] in {"spike_request", "spike"}]
+            if spikes:
+                self.assertIn("generic spike evidence (read-only)", text)
+                for row in spikes:
+                    self.assertIn(row["artifact_id"], text)
+                    safe = author_view._generic_spike_evidence(row)
+                    self.assertIn(wrapped(json.dumps(safe, separators=(",", ":"), ensure_ascii=False)), text)
+                    if row["kind"] == "spike":
+                        self.assertNotIn('"run_id":', json.dumps(safe, separators=(",", ":")))
+                self.assertNotRegex(text, r"DOCKER_HOST|docker\.sock|current\.json|container\.cid|staging")
+            else:
+                self.assertNotIn("sha256:", text)
+                self.assertNotIn("artifact_id", text)
             self.assertNotIn("route_stamp", text)
+
+    def test_generic_request_redacts_authored_environment_values(self):
+        row = {
+            "kind": "spike_request",
+            "draft": {"schema": "empirica.spike-plan-draft/2", "image": "example:local",
+                      "argv": ["probe"], "inputs": [],
+                      "environment": {"TOKEN": "secret-value"}},
+            "plan": {"schema": "empirica.spike-plan/2", "image": {}, "argv": ["probe"],
+                     "declared_inputs": [], "environment": {"TOKEN": "secret-value"}},
+        }
+        safe = author_view._generic_spike_evidence(row)
+        self.assertEqual(safe["draft"]["environment"], ["TOKEN"])
+        self.assertEqual(safe["plan"]["environment"], ["TOKEN"])
+        self.assertNotIn("secret-value", json.dumps(safe))
+        self.assertEqual(row["draft"]["environment"]["TOKEN"], "secret-value")
 
     def test_contract_results_are_plain_text(self):
         from application.protocol import contract_result
@@ -240,29 +266,46 @@ class RedirectedObligationTests(unittest.TestCase):
         self.assertEqual(str(author_view._missing(row, safety)), "audit.failed")
 
 
-class NoDigestsOrOpaqueIdsTests(unittest.TestCase):
-    """No ``sha256:`` digests or opaque ids other than ``run_id`` in rendered text."""
+class NoUnownedDigestsOrOpaqueIdsTests(unittest.TestCase):
+    """Only the exact public run handle and qualified spike-binding digests may render."""
 
-    def test_no_sha256_in_rendered_text(self):
+    @staticmethod
+    def _assert_digest_lines(name, result):
+        text = render_author_view(result)
+        lines = [line for line in text.splitlines() if "sha256:" in line]
+        backend = result.get("run", {}).get("spike_backend", {})
+        if backend.get("kind") != "qualified":
+            if lines:
+                raise AssertionError(f"{name}: unexpected digest lines: {lines}")
+            return
+        expected = [
+            f"  {author_view._LABELS['spike_backend_record']} {backend['qualification_record_digest']}",
+            f"  {author_view._LABELS['spike_backend_execution']} {backend['execution_binding_digest']}",
+        ]
+        if lines != expected:
+            raise AssertionError(f"{name}: binding digest lines {lines!r} != {expected!r}")
+
+    def test_only_qualified_backend_digests_render(self):
         for name in RUNVIEW_FIXTURES:
-            text = render_author_view(_load_fixture(name))
-            self.assertNotIn("sha256:", text, f"{name}: sha256 digest leaked into text")
+            self._assert_digest_lines(name, _load_fixture(name))
         for name, result in SYNTHETIC:
-            text = render_author_view(result)
-            self.assertNotIn("sha256:", text, f"{name}: sha256 digest leaked into text")
+            self._assert_digest_lines(name, result)
 
-    def test_no_long_opaque_ids_other_than_run_id(self):
-        """No opaque id string longer than 40 chars except on the ``run_id:`` line."""
+    def test_no_long_opaque_ids_other_than_run_id_or_backend_digests(self):
+        """No opaque id string longer than 40 chars except the three public binding lines."""
         import re
         token = re.compile(r"[A-Za-z0-9_\-]{41,}")
+        allowed = (author_view._LABELS["run_id"],
+                   f"  {author_view._LABELS['spike_backend_record']}",
+                   f"  {author_view._LABELS['spike_backend_execution']}")
         for name in RUNVIEW_FIXTURES:
             text = render_author_view(_load_fixture(name))
             for line in text.splitlines():
-                if line.startswith("run_id:"):
+                if line.startswith(allowed):
                     continue
                 matches = token.findall(line)
                 self.assertEqual(
-                    matches, [], f"{name}: opaque id in non-run_id line: {line!r}")
+                    matches, [], f"{name}: opaque id in non-binding line: {line!r}")
 
 
 class DelimiterTests(unittest.TestCase):
@@ -403,7 +446,7 @@ class ContentCompletenessTests(unittest.TestCase):
             run_id = run.get("id")
             if isinstance(run_id, str) and run_id:
                 self.assertEqual(
-                    text.count(f"run_id: {run_id}"), 1,
+                    text.count(f"{author_view._LABELS['run_id']} {run_id}"), 1,
                     f"{name}: run_id should appear exactly once")
 
     def test_fault_fields_appear(self):

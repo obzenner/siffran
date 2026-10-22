@@ -336,7 +336,7 @@ class OneClaimsBlockerOrder(MediatorFixture):
     """A1-5: terminal states, then what the author can do now, then waiting on a human; the batch is still there."""
 
     def experiment(self, mode="deliberative"):
-        drv, run_id = self.start(kind="needs-experiment", mode=mode)
+        drv, run_id = self.start(kind="needs-experiment", mode=mode, qualified=True)
         self.research(drv, run_id, "web", URL)
         return drv, run_id
 
@@ -380,12 +380,61 @@ class OneClaimsBlockerOrder(MediatorFixture):
         self.assertIn("re-gate", stale.stderr.lower())
 
     def record_passing_spike(self, drv, run_id, ref):
-        from assertions import action_spike_request
+        """Persist sealed generic historical evidence without public ingress or a workload."""
+        from application import generic_spike
+        from application.location import decode_handle
+        from application.ports import ObservationSnapshot
+        from core import spike_plan
+        from core.evaluation import plan_spike_request, plan_spike_result
+        from core.freshness import FileObservation, ObservationState, observations_digest
+        from core.spike_plan_draft import canonicalize_spike_plan_draft
+        from observer_store import _generic_spike_action, _GenericFixtureHarness
+
         path = ref.split(":")[0]
         drv.workspace_write(path, b"v1")
-        drv.harness_complete("python -m pytest", 0)
-        self.dispatch(drv, observe_action(run_id=run_id, action=action_spike_request(
-            claim_id="C0", command="python -m pytest", dependent_files=[path])))
+        action = _generic_spike_action("C0", [path])
+        coordinator = drv._service._coordinator
+        key = decode_handle(run_id)
+        self.assertIsNotNone(key)
+        command = {"type": "ObserveAction", "run_id": run_id, "action": action}
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(key, loaded.state, command, require_graph=True)
+        backend = generic_spike.GenericQualifiedBackend(
+            "docker", "docker-isolated-v1", "sha256:" + "a" * 64,
+            "sha256:" + "b" * 64)
+        sealed = generic_spike.prepare_generic_spike(
+            canonicalize_spike_plan_draft(action["plan"]), drv._workspace,
+            coordinator.image_resolver, backend)
+        request = plan_spike_request(
+            snapshot, action, generic_spike.sealed_request_facts(sealed, backend))
+        self.assertEqual(request.result_type, "Allow")
+        state, _, _, _ = coordinator._commit(
+            key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
+
+        request_body = request.intent.artifacts[0]["body"]
+        harness_run_id = "r-" + request.intent.artifacts[0]["artifact_id"].split(":", 1)[1][:32]
+        harness_request = generic_spike.GenericHarnessRequest(
+            harness_run_id, backend, sealed.plan, sealed.plan.digest,
+            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
+        result = _GenericFixtureHarness(0).run(harness_request)
+        observations = tuple(FileObservation(
+            binding.path, ObservationState.PRESENT, binding.sha256)
+            for binding in sealed.snapshot.file_bindings)
+        observed = ObservationSnapshot(
+            observations, sealed.snapshot.basis_id, observations_digest(observations))
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(key, state, command, require_graph=True)
+        planned = plan_spike_result(
+            snapshot, request_body,
+            generic_spike.sealed_result_facts(result))
+        self.assertEqual(planned.result_type, "Allow")
+        coordinator._commit(
+            key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
+            additional_observations=(("spike_execution", observed),))
+        checked = coordinator._load(key)
+        coordinator._assemble(
+            key, checked.state, {"type": "GetRun", "run_id": run_id},
+            require_graph=False)
 
     def change_file(self, drv, ref):
         drv.workspace_write(ref.split(":")[0], b"v2")

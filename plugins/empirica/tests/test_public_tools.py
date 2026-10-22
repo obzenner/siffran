@@ -16,10 +16,15 @@ import jsonschema
 
 PLUGIN = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PLUGIN))
+if str(PLUGIN / "tests") not in sys.path:
+    sys.path.insert(0, str(PLUGIN / "tests"))
 
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 from governance_setup import SIZED_RATIONALE  # noqa: E402
 from application.protocol import host_profile_id, stored  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
+
+force_absent_sandbox_home()
 
 
 class PublicToolContractTests(unittest.TestCase):
@@ -211,6 +216,28 @@ class PublicToolContractTests(unittest.TestCase):
         result = tools.call("empirica_read", {"run_id": "r", "operation": "GetRun"})
         self.assertTrue(result["isError"])
         self.assertIn("unavailable", result["content"][0]["text"].lower())
+
+    def test_real_bridge_get_contract_renders_the_spike_limits_for_claude_and_codex(self):
+        from unittest import mock
+        from adapters.public_tools import PublicTools
+
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        isolated = mock.patch.dict(os.environ, {"EMPIRICA_HOME": home.name})
+        isolated.start()
+        self.addCleanup(isolated.stop)
+        for profile in (CLAUDE_PROFILE, host_profile_id("codex-cli")):
+            with self.subTest(profile=profile):
+                tools = PublicTools(profile)
+                section = tools.call("empirica_read", {
+                    "operation": "GetContract", "target": "section",
+                    "section_id": "evidence/spike"})
+                self.assertFalse(section.get("isError"), section)
+                text = section["content"][0]["text"]
+                self.assertIn("evidence/spike/limits", text)
+                self.assertIn("reason authority-drift |", text)
+                index = tools.call("empirica_read", {"operation": "GetContract", "target": "index"})
+                self.assertIn("evidence/spike", index["content"][0]["text"])
 
     def test_read_and_report_build_exact_commands(self):
         tools = self._tools()

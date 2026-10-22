@@ -9,6 +9,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
 from adapters.governance import (Approve, Dismiss, HostGovernance, Reject, confirm_form,
                                  decision, expected_approval_kind, review_form)
 from adapters.mcp_server import McpSession
@@ -19,6 +21,7 @@ from test_governance import CONTEXT, GRAPH, AUTHOR
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 

@@ -60,7 +60,7 @@ Confidence and terminal state are derived projections, never graph input.
 1. Make the root the goal-level assurance claim (gating, see above). Put scope you want to defer in non-gating claims below it.
 2. Add one gating claim for each material unknown or invariant.
 3. Attach every claim to the root through `SupportedBy`; detached claims are invalid.
-4. Use `needs-experiment` only when a deterministic command can falsify the claim.
+4. Use `needs-experiment` only when a deterministic generic spike plan can falsify the claim.
 5. Use `needs-decision` only for an irreducible human choice. It is blocked until the human answers
    it at the end of the pass (approve: approved and human-owned; reject: discarded); it needs no research.
    On a host with no human ingress it stays open and the run can only stop as a residual.

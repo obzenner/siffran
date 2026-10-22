@@ -3,6 +3,15 @@ from __future__ import annotations
 
 import unittest
 
+from application import generic_spike
+from application.location import decode_handle
+from application.ports import ObservationSnapshot
+from core import spike_plan
+from core.spike_plan_draft import canonicalize_spike_plan_draft
+from core.evaluation import plan_spike_request, plan_spike_result
+from core.freshness import FileObservation, ObservationState, observations_digest
+from observer_store import _generic_spike_action, _GenericFixtureHarness
+
 from assertions import (
     ConformanceCase,
     action_freeze,
@@ -20,6 +29,52 @@ from assertions import (
 
 
 class BlockerProjectionTests(ConformanceCase):
+    def _seed_historical_spike(self, drv, run_id, claim_id, paths, *, content=b"observed"):
+        """Persist validated historical spike evidence without run/3 ingress or a harness."""
+        for path in paths:
+            drv.workspace_write(path, content)
+        action = _generic_spike_action(claim_id, list(paths))
+        coordinator = drv._service._coordinator
+        key = decode_handle(run_id)
+        self.assertIsNotNone(key)
+        loaded = coordinator._load(key)
+        command = {"type": "ObserveAction", "run_id": run_id, "action": action}
+        snapshot = coordinator._assemble(key, loaded.state, command, require_graph=True)
+        backend = generic_spike.GenericQualifiedBackend(
+            "docker", "docker-isolated-v1", "sha256:" + "a" * 64,
+            "sha256:" + "b" * 64)
+        sealed = generic_spike.prepare_generic_spike(
+            canonicalize_spike_plan_draft(action["plan"]), drv._workspace,
+            coordinator.image_resolver, backend)
+        request = plan_spike_request(
+            snapshot, action, generic_spike.sealed_request_facts(sealed, backend))
+        self.assertEqual(request.result_type, "Allow")
+        state, _, _, _ = coordinator._commit(
+            key, loaded.read.revision, snapshot, loaded.state, request.intent.artifacts)
+        request_body = request.intent.artifacts[0]["body"]
+        harness_run_id = "r-" + request.intent.artifacts[0]["artifact_id"].split(":", 1)[1][:32]
+        harness_request = generic_spike.GenericHarnessRequest(
+            harness_run_id, backend, sealed.plan, sealed.plan.digest,
+            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
+        result = _GenericFixtureHarness(0).run(harness_request)
+        observations = tuple(FileObservation(
+            binding.path, ObservationState.PRESENT, binding.sha256)
+            for binding in sealed.snapshot.file_bindings)
+        observed = ObservationSnapshot(
+            observations, sealed.snapshot.basis_id, observations_digest(observations))
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(key, state, command, require_graph=True)
+        planned = plan_spike_result(
+            snapshot, request_body,
+            generic_spike.sealed_result_facts(result))
+        self.assertEqual(planned.result_type, "Allow")
+        coordinator._commit(
+            key, loaded.read.revision, snapshot, state, planned.intent.artifacts,
+            additional_observations=(("spike_execution", observed),))
+        checked = coordinator._load(key)
+        coordinator._assemble(
+            key, checked.state, {"type": "GetRun", "run_id": run_id}, require_graph=False)
+
     def _audit_row(self, run):
         rows = [row for row in run["obligations"]["active"]
                 if row["id"] == "obligation.audit"]
@@ -72,7 +127,7 @@ class BlockerProjectionTests(ConformanceCase):
                     claim_id = graph["root"]
                     self.require_research_recorded(drv, run_id, claim_id)
                     if kind == "needs-experiment":
-                        self.require_approved_spike(drv, run_id, claim_id, ["src/mod.py"])
+                        self._seed_historical_spike(drv, run_id, claim_id, ["src/mod.py"])
                     if frozen:
                         self.assert_allow(self.dispatch(
                             drv, observe_action(run_id=run_id, action=action_freeze())),
@@ -192,7 +247,8 @@ class BlockerProjectionTests(ConformanceCase):
         run_id = self.start_run(drv)
         graph = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))
         self.require_research_recorded(drv, run_id, graph["root"])
-        self.require_approved_spike(drv, run_id, graph["root"], ["src/stale.py"], content=b"old")
+        self._seed_historical_spike(
+            drv, run_id, graph["root"], ["src/stale.py"], content=b"old")
         drv.workspace_write("src/stale.py", b"new")
         cases.append((drv, run_id, "claim.spike_stale"))
 
@@ -283,7 +339,8 @@ class BlockerProjectionTests(ConformanceCase):
 
     def test_INVARIANT_the_progress_basis_is_moved_by_every_recorded_observation_and_by_no_read(self):
         """G17b item 2: `run.basis` (core.evaluation.progress_basis) is the one thing hosts compare to know the run moved.
-        Every admitted observation kind changes it; any number of reads (GetRun, GetArgument, EvaluateRun) does not."""
+        Every currently admitted non-spike observation kind changes it; any number of reads (GetRun, GetArgument,
+        EvaluateRun) does not. Run/3 spikes are separately proved unavailable before side effects in test_run3_binding."""
         drv = self.bind_driver("progress-basis", "moves", "the basis moves only with recorded work")
         run_id = self.start_run(drv, budgets={"max_passes": 20})
 
@@ -302,10 +359,9 @@ class BlockerProjectionTests(ConformanceCase):
         reads_leave_it()
         steps = []
         steps.append(("route", lambda: self.require_route_admitted(drv, run_id)))
-        steps.append(("graph", lambda: self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="needs-experiment"))))
-        root = canonical_graph(n_claims=1, kind="needs-experiment")["root"]
+        steps.append(("graph", lambda: self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1, kind="ordinary"))))
+        root = canonical_graph(n_claims=1, kind="ordinary")["root"]
         steps.append(("research", lambda: self.require_research_recorded(drv, run_id, root)))
-        steps.append(("spike", lambda: self.require_approved_spike(drv, run_id, root, ["src/mod.py"])))
         steps.append(("freeze", lambda: self.dispatch(drv, observe_action(run_id=run_id, action=action_freeze()))))
         for name, step in steps:
             step()

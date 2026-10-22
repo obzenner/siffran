@@ -116,7 +116,7 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
       rationale: dialog.rationale,
     }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };
-  const run = { id: "run", status: "active", governance: g };
+  const run = { id: "run", status: "active", spike_backend: { kind: "spikes_unavailable" }, governance: g };
   const decisions: Array<Record<string, unknown>> = [];
   const settings: HarnessSettings = { onPresent() {}, onRefresh() {}, onCustom() {} };
   let refreshes = 0, customCalls = 0;
@@ -327,7 +327,8 @@ test("timeout follows the shared Python/TypeScript case table with exact results
 });
 
 const configureFallback = { protocol: "empirica/v2", request_id: "cfg", result: { type: "Allow", converged: false,
-  run: { id: "cfg-run", status: "active", goal: "g", governance: null } } } as const;
+  run: { id: "cfg-run", status: "active", goal: "g",
+    spike_backend: { kind: "spikes_unavailable" }, governance: null } } } as const;
 
 test("initial ingress throw fails closed with fallback RunView", async () => {
   const throwing: PrivateIngress = async () => { throw new Error("injected"); };

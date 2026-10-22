@@ -382,7 +382,8 @@ test("the launch-unsupported reason is read from the contract projection", () =>
 });
 
 test("a refusal block carries the reason, and the run only when one exists", () => {
-  const run = { id: "r", status: "active" as never };
+  const run = { id: "r", status: "active" as never,
+    spike_backend: { kind: "spikes_unavailable" as const } };
   assert.deepEqual(ownerRefusalBlock("missing-tool").reasons.map((r) => r.code), ["host.subagents_missing"]);
   assert.equal("run" in ownerRefusalBlock("missing-tool"), false);
   assert.equal(ownerRefusalBlock("missing-tool", run).run, run);

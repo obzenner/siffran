@@ -30,6 +30,8 @@ const PATTERNS = {
   "^[0-9a-f]{12}$": () => fc.string({ unit: fc.constantFrom(..."0123456789abcdef"), minLength: 12, maxLength: 12 }),
   "^[0-9]{4}-[0-9]{2}-[0-9]{2}$": () => fc.date({ min: new Date(0), max: new Date(4102444800000), noInvalidDate: true }).map((d) => d.toISOString().slice(0, 10)),
   "^sha256:[0-9a-f]{64}$": () => fc.string({ unit: fc.constantFrom(..."0123456789abcdef"), minLength: 64, maxLength: 64 }).map((h) => `sha256:${h}`),
+  "^[a-z0-9][a-z0-9._/-]*@sha256:[0-9a-f]{64}$": () => fc.string({ unit: fc.constantFrom(..."0123456789abcdef"), minLength: 64, maxLength: 64 }).map((h) => `example/probe@sha256:${h}`),
+  "^[A-Za-z_][A-Za-z0-9_]{0,127}$": () => fc.string({ unit: fc.constantFrom(..."ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"), minLength: 1, maxLength: 12 }),
 };
 
 /** The arbitraries of one set of schemas. `full`: every optional property present, every array non-empty and a null

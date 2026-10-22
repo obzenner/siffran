@@ -22,6 +22,7 @@ Exit 0 = all pass; 1 = at least one failed.
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import subprocess
@@ -29,6 +30,8 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 import jsonschema
 
@@ -56,7 +59,12 @@ _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _PROFILE_IDS = [p["profile_id"] for p in _HOST_PROFILES["profiles"]]
 _CANONICAL_PROFILE = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if p["host_id"] == "claude-code")
 
+from sandbox_isolation import (  # noqa: E402
+    ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
+
 from adapters import bridge  # noqa: E402
+from governance_setup import invocation_for  # noqa: E402
+force_absent_sandbox_home()
 
 
 def _valid_request(command: dict, request_id: str = "r") -> dict:
@@ -211,6 +219,167 @@ class BridgeV2Tests(unittest.TestCase):
         service = bridge.build_service(_CANONICAL_PROFILE)
         self.assertTrue(callable(getattr(service, "dispatch", None)))
         self.assertTrue(callable(getattr(service, "_dispatch_validated", None)))
+
+    def test_bridge_test_modules_are_isolated_from_developer_sandbox_authority(self):
+        bridge_tests = (
+            _PLUGIN_ROOT / "tests/test_bridge_v2.py",
+            _PLUGIN_ROOT / "tests/test_host_runtime.py",
+            _PLUGIN_ROOT / "tests/test_governance_hosts.py",
+            _PLUGIN_ROOT / "tests/test_context_economy.py",
+            _PLUGIN_ROOT / "tests/test_observer.py",
+            _PLUGIN_ROOT / "tests/test_public_tools.py",
+            _PLUGIN_ROOT / "tests/v2/driver.py",
+            _PLUGIN_ROOT / "tests/v2/fs_store.py",
+            _PLUGIN_ROOT / "tests/v2/observer_store.py",
+            _PLUGIN_ROOT / "tests/v2/test_timeline.py",
+            _PLUGIN_ROOT / "adapters/claude/tests/test_claude_adapter.py",
+            _PLUGIN_ROOT / "adapters/claude/tests/test_activation_lifecycle.py",
+            _PLUGIN_ROOT / "adapters/claude/tests/test_claude_adapter_conformance.py",
+            _PLUGIN_ROOT / "adapters/codex/tests/test_codex_adapter.py",
+            _PLUGIN_ROOT / "adapters/codex/tests/test_codex_adapter_conformance.py",
+        )
+        for path in bridge_tests:
+            source = path.read_text(encoding="utf-8")
+            self.assertIn("from sandbox_isolation import", source, path)
+            self.assertIn("force_absent_sandbox_home()", source, path)
+
+        test_roots = (
+            _PLUGIN_ROOT / "tests",
+            _PLUGIN_ROOT / "adapters/claude/tests",
+            _PLUGIN_ROOT / "adapters/codex/tests",
+        )
+        for root in test_roots:
+            for path in root.rglob("*.py"):
+                tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+                aliases = {
+                    alias.asname or alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom) and node.module == "adapters"
+                    for alias in node.names if alias.name == "bridge"
+                }
+                reaches_bridge = any(
+                    isinstance(node, ast.Call)
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr in {"build_service", "handle"}
+                    and isinstance(node.func.value, ast.Name)
+                    and node.func.value.id in aliases
+                    for node in ast.walk(tree)
+                ) or any(
+                    # PublicTools without dispatch= defaults to bridge.handle
+                    # (adapters/public_tools.py); a **kwargs call counts too.
+                    isinstance(node, ast.Call)
+                    and (getattr(node.func, "id", None) == "PublicTools"
+                         or getattr(node.func, "attr", None) == "PublicTools")
+                    and not any(kw.arg == "dispatch" for kw in node.keywords)
+                    for node in ast.walk(tree)
+                )
+                if reaches_bridge:
+                    self.assertIn(path, bridge_tests, path)
+                    source = path.read_text(encoding="utf-8")
+                    self.assertIn("from sandbox_isolation import", source, path)
+                    self.assertIn("force_absent_sandbox_home()", source, path)
+        self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
+        self.assertFalse(ABSENT_SANDBOX_HOME.exists())
+
+    def test_build_service_composes_exact_v2_authority_image_resolver_and_harness(self):
+        execution_store = object()
+        store = type("Store", (), {"execution_store": execution_store})()
+        selector, resolver, image_resolver, docker_harness, service = (
+            object(), object(), object(), object(), object())
+        with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
+              patch.object(
+                  bridge, "GenericBackendSelector", return_value=selector) as selector_type,
+              patch.object(
+                  bridge, "GenericAuthorityResolver", return_value=resolver) as resolver_type,
+              patch.object(
+                  bridge, "DockerLocalImageResolver", return_value=image_resolver) as image_type,
+              patch.object(
+                  bridge, "GenericDockerHarness", return_value=docker_harness) as harness_type,
+              patch.object(bridge._v2, "compose", return_value=service) as compose):
+            self.assertIs(bridge.build_service(_CANONICAL_PROFILE), service)
+        store_type.assert_called_once_with()
+        selector_type.assert_called_once_with(store)
+        resolver_type.assert_called_once_with(store)
+        image_type.assert_called_once_with(resolver)
+        harness_type.assert_called_once_with(execution_store, resolver)
+        self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
+        self.assertIs(compose.call_args.kwargs["image_resolver"], image_resolver)
+        self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
+
+    def test_sandbox_constructor_failure_degrades_only_spikes(self):
+        names = ("GenericQualificationStore", "GenericBackendSelector",
+                 "GenericAuthorityResolver", "DockerLocalImageResolver", "GenericDockerHarness")
+        for failing in names:
+            store_value = type("Store", (), {"execution_store": object()})()
+            with self.subTest(failing=failing), \
+                    patch.object(bridge, "GenericQualificationStore",
+                                 return_value=store_value) as store, \
+                    patch.object(bridge, "GenericBackendSelector",
+                                 return_value=object()) as selector, \
+                    patch.object(bridge, "GenericAuthorityResolver",
+                                 return_value=object()) as resolver, \
+                    patch.object(bridge, "DockerLocalImageResolver",
+                                 return_value=object()) as image_resolver, \
+                    patch.object(bridge, "GenericDockerHarness",
+                                 return_value=object()) as docker_harness:
+                {"GenericQualificationStore": store, "GenericBackendSelector": selector,
+                 "GenericAuthorityResolver": resolver,
+                 "DockerLocalImageResolver": image_resolver,
+                 "GenericDockerHarness": docker_harness}[failing].side_effect = PermissionError(
+                     "unsafe")
+                service = bridge.build_service(_CANONICAL_PROFILE)
+            from application.ports import NullSpikeAuthoritySelector
+            self.assertIsNone(service._harness)
+            self.assertIsInstance(
+                service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
+            self.assertEqual(response["result"]["type"], "Allow", response)
+
+    def test_bridge_construction_performs_no_docker_discovery(self):
+        store = SimpleNamespace(execution_store=object())
+        selector = SimpleNamespace(select=Mock(
+            side_effect=AssertionError("selection is StartRun-only")))
+        with patch.object(bridge, "GenericQualificationStore", return_value=store), \
+                patch.object(bridge, "GenericBackendSelector", return_value=selector), \
+                patch.object(bridge, "GenericAuthorityResolver", return_value=object()), \
+                patch.object(bridge, "DockerLocalImageResolver", return_value=object()), \
+                patch.object(bridge, "GenericDockerHarness", return_value=object()):
+            service = bridge.build_service(_CANONICAL_PROFILE)
+        self.assertTrue(callable(service.dispatch))
+        selector.select.assert_not_called()
+
+    def test_start_run_with_absent_authority_binds_unavailable_without_docker_reads(self):
+        self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
+        self.assertFalse(ABSENT_SANDBOX_HOME.exists())
+        with tempfile.TemporaryDirectory() as home:
+            saved = os.environ.get("EMPIRICA_HOME")
+            os.environ["EMPIRICA_HOME"] = str(Path(home).resolve())
+            try:
+                service = bridge.build_service(_CANONICAL_PROFILE)
+                response = service.dispatch(_valid_request({
+                    "type": "StartRun",
+                    "control_mode": "deliberative",
+                    "selector": {"project": "composition", "session": "absent"},
+                    "goal": "reason without Docker",
+                    "invocation": invocation_for(_CANONICAL_PROFILE),
+                }, "start-absent"))
+            finally:
+                if saved is None:
+                    os.environ.pop("EMPIRICA_HOME", None)
+                else:
+                    os.environ["EMPIRICA_HOME"] = saved
+        self.assertIn(response["result"]["type"], {"Allow", "Block"}, response)
+        self.assertEqual(
+            service._coordinator.last_state.spike_backend, {"kind": "spikes_unavailable"})
+
+    def test_unsafe_authority_does_not_block_nonspike_read(self):
+        saved = os.environ["EMPIRICA_SANDBOX_HOME"]
+        os.environ["EMPIRICA_SANDBOX_HOME"] = "relative/unsafe"
+        try:
+            response = bridge.handle(_get_run(request_id="unsafe-read"), _CANONICAL_PROFILE)
+        finally:
+            os.environ["EMPIRICA_SANDBOX_HOME"] = saved
+        _assert_inert_no_run(response)
 
     # --- no state/git repo reached (no-location, no-write) ----------------------
 

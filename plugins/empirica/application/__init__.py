@@ -13,6 +13,12 @@ Public API::
     from application import compose, dispatch_request
 """
 from .protocol import dispatch_request
-from .v2 import compose
+
+
+def compose(*args, **kwargs):
+    """Load stateful host composition only when a caller actually requests it."""
+    from .v2 import compose as _compose
+    return _compose(*args, **kwargs)
+
 
 __all__ = ["compose", "dispatch_request"]

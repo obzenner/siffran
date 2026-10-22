@@ -11,7 +11,6 @@ from typing import Any
 import jsonschema
 
 from application import protocol as _protocol
-from adapters import bridge as _bridge
 from core.confirmation import is_terminal
 
 READ_TOOL = "empirica_read"
@@ -218,10 +217,13 @@ def _load_artifact() -> dict:
 class PublicTools:
     """Profile-bound public tools over the canonical Empirica bridge."""
 
-    def __init__(self, profile_id: str, *, dispatch: Dispatch = _bridge.handle, govern=None,
+    def __init__(self, profile_id: str, *, dispatch: Dispatch | None = None, govern=None,
                  confirm=None):
         if profile_id not in _PROFILES:
             raise ValueError(f"unknown exact Empirica profile: {profile_id!r}")
+        if dispatch is None:
+            from adapters import bridge
+            dispatch = bridge.handle
         self._profile_id = profile_id
         self._dispatch = dispatch
         self._govern = govern

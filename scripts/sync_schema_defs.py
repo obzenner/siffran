@@ -29,8 +29,8 @@ _GRAPH_DEFS = ("graphClaimItem", "graphEdgeItem", "graphPayload")
 # Every target carries the claim-identifier definition; each claim-id position refers to it.
 _UNIVERSAL_SHARED_DEFS = ("claimId",)
 _EXTRA_SHARED_DEFS = {
-    "request.schema.json": _GRAPH_DEFS,
-    "response.schema.json": (*_GRAPH_DEFS, "governancePresentation"),
+    "request.schema.json": (*_GRAPH_DEFS, "spikePlanDraft"),
+    "response.schema.json": (*_GRAPH_DEFS, "governancePresentation", "spikePlanDraft"),
 }
 _MANAGED_KEY = "x-generated-public-contract-defs"
 _PUBLIC_PREFIX = "publicContract__"
@@ -122,6 +122,107 @@ def _drop_managed_public_defs(response: dict) -> None:
         defs.pop(name, None)
 
 
+def _replace_spike_draft(value: object, draft: dict[str, Any]) -> object:
+    """Replace every embedded public draft schema with the shared unreleased /2 shape."""
+    if isinstance(value, list):
+        return [_replace_spike_draft(item, draft) for item in value]
+    if not isinstance(value, dict):
+        return value
+    schema = value.get("properties", {}).get("schema")
+    if isinstance(schema, dict) and schema.get("const") == "empirica.spike-plan-draft/2":
+        return copy.deepcopy(draft)
+    return {key: _replace_spike_draft(item, draft) for key, item in value.items()}
+
+
+def _replace_projected_spike_draft(value: object, draft: dict[str, Any]) -> object:
+    if isinstance(value, list):
+        return [_replace_projected_spike_draft(item, draft) for item in value]
+    if not isinstance(value, dict):
+        return value
+    properties = value.get("properties")
+    if (isinstance(properties, dict)
+            and properties.get("kind", {}).get("const") == "spike_request"
+            and "artifact_id" in properties and "draft" in properties):
+        result = copy.deepcopy(value)
+        result["properties"]["draft"] = copy.deepcopy(draft)
+        result["properties"]["inputs"] = {
+            "type": "array", "maxItems": 256,
+            "items": {
+                "type": "object", "additionalProperties": False,
+                "required": ["path", "sha256", "bytes"],
+                "properties": {
+                    "path": {"type": "string", "minLength": 1, "maxLength": 1024,
+                             "pattern": "^(?!/)(?!.*\\\\)(?!.*//).+$"},
+                    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+                    "bytes": {"type": "integer", "minimum": 0, "maximum": 67108864},
+                },
+            },
+        }
+        return {key: _replace_projected_spike_draft(item, draft)
+                for key, item in result.items()}
+    return {key: _replace_projected_spike_draft(item, draft) for key, item in value.items()}
+
+
+def _single_result_facts_schema() -> dict[str, Any]:
+    digest = {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+    stream = {"type": "object", "additionalProperties": False,
+              "required": ["bytes_seen", "sha256"],
+              "properties": {"bytes_seen": {"type": "integer", "minimum": 0},
+                             "sha256": copy.deepcopy(digest)}}
+    operation_names = ("operation_digest", "qualification_record_digest",
+                       "execution_binding_digest", "image_digest", "input_digest",
+                       "process_digest", "topology_digest", "timing_digest")
+    backend = {
+        "type": "object", "additionalProperties": False,
+        "required": ["kind", "backend", "profile_id", "qualification_record_digest",
+                     "execution_binding_digest"],
+        "properties": {
+            "kind": {"const": "qualified"}, "backend": {"const": "docker"},
+            "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+            "qualification_record_digest": copy.deepcopy(digest),
+            "execution_binding_digest": copy.deepcopy(digest),
+        },
+    }
+    fields = ("run_id", "backend", "plan_digest", "policy_digest", "snapshot_digest",
+              "operation_facts", "stdout", "stderr", "natural_exit",
+              "forced_termination", "exit_code", "verdict", "cleanup_proven",
+              "postflight_identity_digest", "harness_result_digest")
+    return {
+        "type": "object", "additionalProperties": False, "required": list(fields),
+        "properties": {
+            "run_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$"},
+            "backend": backend,
+            "plan_digest": copy.deepcopy(digest), "policy_digest": copy.deepcopy(digest),
+            "snapshot_digest": copy.deepcopy(digest),
+            "operation_facts": {
+                "type": "object", "additionalProperties": False,
+                "required": list(operation_names),
+                "properties": {name: copy.deepcopy(digest) for name in operation_names},
+            },
+            "stdout": copy.deepcopy(stream), "stderr": copy.deepcopy(stream),
+            "natural_exit": {"const": True}, "forced_termination": {"const": False},
+            "exit_code": {"type": "integer", "minimum": 0, "maximum": 255,
+                          "not": {"const": 137}},
+            "verdict": {"enum": ["PASS", "FAIL"]},
+            "cleanup_proven": {"const": True},
+            "postflight_identity_digest": copy.deepcopy(digest),
+            "harness_result_digest": copy.deepcopy(digest),
+        },
+    }
+
+
+def _replace_result_facts(value: object) -> object:
+    if isinstance(value, list):
+        return [_replace_result_facts(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    properties = value.get("properties")
+    if (isinstance(properties, dict) and "verdict_container_id" in properties
+            and "containers" in properties and "harness_result_digest" in properties):
+        return _single_result_facts_schema()
+    return {key: _replace_result_facts(item) for key, item in value.items()}
+
+
 def generated_documents() -> dict[str, dict]:
     docs = {name: _load(name) for name in TARGETS}
     shared = copy.deepcopy(_load("shared-defs.json")["$defs"])
@@ -129,6 +230,10 @@ def generated_documents() -> dict[str, dict]:
         if required not in shared:
             raise SchemaGenerationError(f"missing shared definition #/$defs/{required}")
     for name, document in tuple(docs.items()):
+        document = _replace_spike_draft(document, shared["spikePlanDraft"])
+        document = _replace_projected_spike_draft(
+            document, shared["projectedSpikePlanDraft"])
+        document = _replace_result_facts(document)
         # The embedded copies of the shared definitions are generated output: refresh the previous
         # ones in place (they may predate a shared-definition change) instead of comparing against
         # them, so the document keeps its definition order.
@@ -147,6 +252,11 @@ def generated_documents() -> dict[str, dict]:
         docs[name] = document
 
     public_contract = _load("public-contract.json")
+    public_contract = _replace_spike_draft(public_contract, shared["spikePlanDraft"])
+    public_contract = _replace_projected_spike_draft(
+        public_contract, shared["projectedSpikePlanDraft"])
+    public_contract = _replace_result_facts(public_contract)
+    docs["public-contract.json"] = public_contract
     _drop_managed_public_defs(docs["response.schema.json"])
     refusal_codes = [code for code, row in public_contract["reasons"].items()
                      if row.get("disposition") == "start_refused"]

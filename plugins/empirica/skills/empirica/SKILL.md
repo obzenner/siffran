@@ -63,6 +63,13 @@ A runnable convergence workflow requires all of these capabilities:
 6. request the guarded convergence decision;
 7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
+The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does
+not disable graph refinement, research, honest residual stopping, reads, or audit of claims that need
+no experiment. Do not submit an unchanged spike request in that state and never fabricate or replace
+spike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or
+`docker-networked-v1` value means this run is bound to the two published digests; it is not a
+claim that Docker is currently healthy.
+
 If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
 investigation and report the exact unsupported capability. Do not imitate the missing operation
 in prose or write runtime artifacts by hand.
@@ -145,11 +152,41 @@ Apply the folds in order:
    human. What still needs a confirmation, who asks, when, and how often is owned by
    [references/evidence.md](references/evidence.md) ("What still needs confirming"); a `needs-decision`
    claim is human-owned and needs no research. A summary of what a source says is not a citation.
-2. **Spike second only for `needs-experiment`.** After supporting research,
-   request a deterministic command and its non-empty dependent-file set through
-   the service. The service captures immutable bytes, runs the harness once, and
-   derives the gate solely from the process exit code.
-3. **Re-gate stale spikes.** If a bound file changes, request the spike again.
+2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView's
+   immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:
+   continue non-spike research or refine the graph, or stop with an honest residual. If it is
+   `qualified`, construct exactly `{"kind":"spike_request","claim_id":...,"plan":...}` with a
+   closed `empirica.spike-plan-draft/2` containing exactly `schema`, `image`, `argv`, `inputs`,
+   and `environment`. Name one already-local Docker image by familiar name/tag, repository digest,
+   full image ID, or unambiguous ID prefix; Empirica never inventories, pulls, builds, or installs it.
+   Supply one exact nonempty executable/argument vector, zero or more repository-relative files or
+   directories, and at most 128 environment overrides. `HOME` and `TMPDIR` are framework-owned.
+   Never put credentials or secrets in environment values: values persist in the immutable request,
+   and content-addressed plan identity can confirm guessed low-entropy values even though public
+   views expose names only. Never add authority, profile, resources, timeout, user, workdir, network,
+   topology, service, alias, host path, Docker option, image acquisition, or derived capture facts.
+
+   The service captures only the declared immutable files and runs the harness
+   at most once within that application call; a result-CAS retry never reruns it, but a crash after
+   execution or a separate call may execute the same sealed request again, so the probe must be safe
+   under duplicate execution. `qualified` means bound, not currently healthy.
+
+   Any tool works as argv (`cargo build`, `npm run build`, `pytest -k load`, `go test ./...`) inside
+   one host-fixed container: uid/gid 65534, `/work` = `HOME`, read-only `/inputs`, 1 MiB per stream,
+   and the host-selected network profile. The 120-second workload runs inside the 210-second
+   operation; Pi's 300-second and Claude MCP's 360-second limits are outer transport margins. The
+   one complete list of what you choose, what the host fixes, what is never available, and every
+   refusal `reason` with its hint is public-contract clause `evidence/spike/limits` (`GetContract`
+   section `evidence/spike`).
+
+   Only the verdict container's inspected natural exit produces uppercase `PASS`/`FAIL`: zero is
+   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Any other outcome is a
+   spike Fault `unavailable` and admits **no spike result evidence**. The Fault carries one closed
+   `reason` whenever the cause is attributable: act on its hint. A Fault without a reason is an
+   internal host failure: retry once, then ask the operator. Never treat it as FAIL, use a host
+   fallback, or claim evidence that was not admitted. Operator requalification can affect only a future run.
+3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the
+   bounded spike again; otherwise follow the unavailable guidance above.
 4. **Derive the result:**
    - supporting research satisfies Fold 1;
    - refuting research refutes the claim;

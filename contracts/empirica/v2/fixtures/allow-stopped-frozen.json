@@ -21,7 +21,7 @@
         "basis": "sha256:1bbd2a5ff842966a9956dfb695a91fa5968317baaeda6f386c56a1e7e874437a",
         "contract": {
           "id": "empirica/public",
-          "version": "4.0.0",
+          "version": "6.0.0",
           "relevant_sections": [
             "freeze",
             "terminal"
@@ -83,7 +83,10 @@
           "independence": null,
           "findings": []
         },
-        "confirmation_batch": null
+        "confirmation_batch": null,
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        }
       }
     }
   }

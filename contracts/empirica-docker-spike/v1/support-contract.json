@@ -1,0 +1,158 @@
+{
+  "schema": "siffran.empirica.docker-spike-support/1",
+  "contract_id": "empirica-docker-spike-support-v1",
+  "status": "internal-current-only",
+  "host_support": {
+    "profiles": ["docker-isolated-v1", "docker-networked-v1"],
+    "server_os": "linux",
+    "canonical_architectures": ["amd64", "arm64"],
+    "required_security": ["cgroupns", "seccomp-default-or-builtin"],
+    "required_resource_flags": ["MemoryLimit", "SwapLimit", "CpuCfsQuota", "PidsLimit"],
+    "endpoint": "local-unix-socket",
+    "diagnostics_only": ["client-version", "server-version", "cgroup-version", "cgroup-driver", "host-python-architecture", "NCPU", "MemTotal", "optional-security-options"]
+  },
+  "image_resolution": {
+    "acquisition": "already-local-only",
+    "identity": "daemon-image-id",
+    "platform": "canonical-native-server-platform",
+    "declared_volumes": "forbidden",
+    "refusals": ["image-not-local", "image-reference-ambiguous", "image-malformed", "image-platform-mismatch", "image-declares-volumes", "image-tool-missing", "image-uid65534-unusable"]
+  },
+  "sandbox_policy": {
+    "uid": 65534,
+    "gid": 65534,
+    "workdir": "/work",
+    "inputs": "/inputs",
+    "tmpdir": "/tmp",
+    "cpu_max": 2,
+    "memory_bytes": 2147483648,
+    "memory_swap_bytes": 2147483648,
+    "pids": 256,
+    "nofile": 1024,
+    "fsize_bytes": 67108864,
+    "core_bytes": 0,
+    "workload_seconds": 120,
+    "operation_seconds": 210,
+    "stream_bytes": 1048576,
+    "capture_files": 256,
+    "capture_bytes": 67108864,
+    "capture_file_bytes": 67108864,
+    "work_tmpfs_bytes": 536870912,
+    "tmp_tmpfs_bytes": 67108864,
+    "shm_bytes": 67108864
+  },
+  "lifecycle": {
+    "states": ["intent", "staged", "network-intent", "network-created", "container-intent", "container-created", "static-verified", "attaching", "terminal-observed", "cleanup", "removed"],
+    "isolated_network": "none",
+    "networked_prestart": "exact-owned-private-bridge-with-no-live-endpoints",
+    "running_membership": "qualification-only-sole-verdict-endpoint",
+    "fast_exit_fallback": "prestart-owned-empty-bridge-plus-exact-container-network-configuration",
+    "pass": "natural-exit-0",
+    "fail": "natural-exit-nonzero-except-137",
+    "unavailable": ["timeout", "stream-overflow", "oom", "exit-137", "failed-start", "forced-termination", "malformed-observation", "cleanup-ambiguity", "authority-drift"]
+  },
+  "destructive_authority": {
+    "source": "durably-recorded-64-hex-full-id-only",
+    "cidfile": "docker-created-owner-only-empty-or-missing-is-never-absence",
+    "absence": "exact-recorded-id-error-form",
+    "ambiguity": "retain-journal-and-staging",
+    "operator_recovery": "inspect-private-operation-id-before-explicit-removal"
+  },
+  "qualification": {
+    "probes": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"],
+    "deadline_seconds": 60,
+    "candidate": "private-mode-0600-only",
+    "installation": "separate-explicit-revalidation-and-atomic-publication",
+    "image_tools": ["/bin/sh", "cat", "chmod", "command", "head", "id", "printf", "sleep", "test", "touch", "wget", "uid65534-readable-executable"]
+  },
+  "observer": {
+    "schema": "empirica-ui-view/v1",
+    "environment": "names-only",
+    "streams": "independent-counts-and-digests-no-content",
+    "private_exclusions": ["environment-values", "raw-stream-content", "host-paths", "credentials", "docker-endpoint", "cidfile", "journal", "container-id", "network-id"],
+    "provenance": "request-result-and-producer-identities"
+  },
+  "unsupported": ["runtime-schema-v1", "multi-container-topology", "host-network", "published-ports", "privileged", "host-mounts", "devices-and-gpus", "image-declared-volumes", "cross-architecture-or-emulation", "selinux-enforcing-hosts", "podman", "kubernetes", "docker-in-docker", "image-pull-build-load-login", "registry-credentials", "remote-docker-endpoint", "windows-containers", "wsl2-and-native-windows-hosts", "automatic-qualification-or-installation"],
+  "adapter_mapping": [
+    {
+      "id": "default-namespaces",
+      "obligation": "Private PID and UTS namespaces use Docker defaults; IPC and cgroup namespaces are explicit private.",
+      "cli_input": "container create --ipc private --cgroupns private; no --pid or --uts",
+      "daemon_observation": "HostConfig.IpcMode and PidMode are empty or private, UTSMode is empty, CgroupnsMode is empty or private",
+      "allowed_forms": ["PidMode empty", "PidMode private", "IpcMode empty", "IpcMode private", "UTSMode empty", "CgroupnsMode empty", "CgroupnsMode private"],
+      "refusal_reason": "lifecycle-unavailable",
+      "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#static_container_inspect"
+    },
+    {
+      "id": "cidfile-authority",
+      "obligation": "Docker creates a fresh owner-only cidfile; the host never precreates it. An empty, missing, or malformed cidfile is never absence: the journal is retained and the next recovery's exact-name, label-verified candidate set decides (zero proves absence, one is adopted and removed by full ID, more fail closed).",
+      "cli_input": "container create --cidfile <reserved-absent-path> under umask 077; container ls --all --no-trunc --filter name=^/?<name>$",
+      "daemon_observation": "optional regular owner file mode 0600 containing one 64-hex container ID; otherwise exact-name candidates verified by Id, Name and every ownership label",
+      "allowed_forms": ["absent before create", "owner-only file after successful create", "missing, empty, or malformed after any other create (deferred to recovery)"],
+      "refusal_reason": "cleanup-unavailable",
+      "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#docker_cli_create_contract"
+    },
+    {
+      "id": "private-bridge",
+      "obligation": "Networked execution uses one exact owned non-internal bridge with no prestart endpoints.",
+      "cli_input": "network create --driver bridge; container create --network <full-id>",
+      "daemon_observation": "prestart network inspect has exact ID/labels/bridge/internal=false/Containers empty; terminal container names the exact network",
+      "allowed_forms": ["NetworkMode full ID", "NetworkMode framework name", "prestart Containers empty"],
+      "refusal_reason": "lifecycle-unavailable",
+      "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#network_endpoint_forms"
+    },
+    {
+      "id": "running-membership",
+      "obligation": "Qualification proves the sole verdict endpoint while the network probe is running.",
+      "cli_input": "container start --attach concurrently with bounded inspect",
+      "daemon_observation": "network Containers has exactly the recorded container full ID before attach completion",
+      "allowed_forms": ["sole endpoint while running", "fast production exit uses prestart safe fallback"],
+      "refusal_reason": "probe-failed",
+      "evidence": "G11 probe corpus running-only bridge-membership observation"
+    },
+    {
+      "id": "resource-limits",
+      "obligation": "Memory, equal memory-swap, CPU and PID limits must be enforceable.",
+      "cli_input": "--memory 2147483648b --memory-swap 2147483648b --cpus min(2,NCPU) --pids-limit 256",
+      "daemon_observation": "SwapLimit/MemoryLimit/CpuCfsQuota/PidsLimit true and exact HostConfig realized values",
+      "allowed_forms": ["all four capability flags true", "MemorySwap equals Memory"],
+      "refusal_reason": "resource-limits-unavailable",
+      "evidence": "Docker info SwapLimit and pinned static inspect fixture"
+    },
+    {
+      "id": "natural-verdict",
+      "obligation": "Only one natural workload exit becomes evidence.",
+      "cli_input": "container start --attach <full-id>",
+      "daemon_observation": "terminal State exited, not running, no OOM/error, attach and inspect exit agree",
+      "allowed_forms": ["exit 0 PASS", "exit 1-136 FAIL", "exit 138-255 FAIL"],
+      "refusal_reason": "lifecycle-unavailable",
+      "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#terminal_forms"
+    },
+    {
+      "id": "exact-cleanup",
+      "obligation": "Cleanup is proved by exact recorded full-ID absence, not remove success.",
+      "cli_input": "container/network rm <recorded-full-id>; inspect <same-full-id>",
+      "daemon_observation": "nonzero exit; stdout empty or the docker/cli empty JSON list []; anchored No such resource: ID or resource ID not found",
+      "allowed_forms": ["No such container: exact-ID", "container exact-ID not found", "No such network: exact-ID", "network exact-ID not found"],
+      "refusal_reason": "cleanup-unavailable",
+      "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#absence_stderr"
+    },
+    {
+      "id": "observer-privacy",
+      "obligation": "Public proof exposes provenance and names-only environment information.",
+      "cli_input": "none; historical artifact projection only",
+      "daemon_observation": "no live Docker read",
+      "allowed_forms": ["environment names", "stream counts and digests", "producer identity"],
+      "refusal_reason": "malformed-historical-proof-omitted",
+      "evidence": "contracts/empirica-ui-view/v1/run.schema.json"
+    }
+  ],
+  "release_matrix": [
+    {"tier": 1, "host": "docker-desktop-macos", "architecture": "arm64", "store": "containerd", "status": "live-qualification-required"},
+    {"tier": 1, "host": "docker-desktop-macos", "architecture": "arm64", "store": "classic", "status": "live-qualification-required"},
+    {"tier": 1, "host": "linux-rootful", "architecture": "amd64", "store": "either", "status": "live-qualification-required"},
+    {"tier": 1, "host": "linux-rootless", "architecture": "amd64", "store": "either", "status": "live-qualification-required"},
+    {"tier": 2, "host": "docker-desktop-macos", "architecture": "amd64", "store": "either", "status": "live-qualification-required"},
+    {"tier": 2, "host": "linux-rootful", "architecture": "arm64", "store": "either", "status": "live-qualification-required"}
+  ]
+}

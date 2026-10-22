@@ -49,6 +49,10 @@
       "roots": ["adapters/observer"],
       "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "adapters.bridge", "hooks"]
     },
+    "adapters.sandbox": {
+      "roots": ["adapters/sandbox"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "adapters.observer", "adapters.bridge", "hooks"]
+    },
     "adapters.bridge": {
       "roots": ["adapters/bridge.py", "adapters/__init__.py"],
       "forbidden_imports": ["hooks"]
@@ -150,7 +154,7 @@
   "required_contract_references": {
     "public_contract": "contracts/empirica/v2/public-contract.json",
     "id": "empirica/public",
-    "version": "4.0.0",
+    "version": "6.0.0",
     "protocol": "empirica/v2"
   },
   "required_profile_references": {

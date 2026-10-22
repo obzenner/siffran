@@ -118,6 +118,25 @@ test("argument author text round-trips every graph field", () => {
   }
 });
 
+test("generic spike request and result evidence is explicit, read-only, fenced, and contains no host substrate data", () => {
+  const fixture = JSON.parse(readFileSync(path.resolve(import.meta.dirname,
+    "../../../../../contracts/empirica/v2/fixtures/getargument-spike-approved.json"), "utf8"));
+  const result = structuredClone(fixture.expected.result);
+  const request = result.argument.artifacts.find((item: Json) => item.kind === "spike_request");
+  request.draft.environment = ["TOKEN"];
+  const rendered = renderAuthorView(result, { strict: true });
+  assert.match(rendered, /generic spike evidence \(read-only\)/);
+  assert.match(rendered, /immutable request G0 sha256:/);
+  assert.match(rendered, /admitted result G0 sha256:/);
+  assert.match(rendered, /empirica\.spike-plan-draft\/2/);
+  assert.match(rendered, /docker-isolated-v1/);
+  assert.match(rendered, /"verdict":"PASS"/);
+  assert.match(rendered, /<<<EMPIRICA_UNTRUSTED_DATA>>>/);
+  assert.match(rendered, /"environment":\["TOKEN"\]/);
+  assert.doesNotMatch(rendered, /author-view-secret-value|value_digest/);
+  assert.doesNotMatch(rendered, /DOCKER_HOST|docker\.sock|current\.json|container\.cid|staging|BEGIN PRIVATE KEY/);
+});
+
 test("a value that is not a claim id is never rendered raw", () => {
   const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "getargument-active.json"), "utf8"));
   for (const hostile of ["", "a b", "claim:C0", "C0\nNext:", "C0\n", "x".repeat(65), "caf\u00e9",

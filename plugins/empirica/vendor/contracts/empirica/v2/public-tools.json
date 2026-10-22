@@ -208,7 +208,16 @@
       "decision_approve": "approved by a human",
       "decision_reject": "rejected by a human",
       "human_answer": "human answer:",
-      "pending_audit": "for the audit to retrieve"
+      "pending_audit": "for the audit to retrieve",
+      "spike_backend": "spikes",
+      "spike_backend_unavailable": "unavailable; no spike requests (research, graph, honest stop still allowed)",
+      "spike_backend_qualified": "qualified generic Docker profile binding (not a live-health claim)",
+      "spike_backend_record": "qualification record:",
+      "spike_backend_execution": "execution binding:",
+      "generic_spikes": "generic spike evidence (read-only)",
+      "generic_spike_request": "immutable request",
+      "generic_spike_result": "admitted result",
+      "generic_spike_no_result": "no result evidence admitted"
     }
   },
   "host_profiles": {
@@ -425,7 +434,7 @@
                     "properties": {
                       "root": {
                         "type": "string",
-                        "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                       },
                       "claims": {
                         "type": "array",
@@ -443,7 +452,7 @@
                           "properties": {
                             "id": {
                               "type": "string",
-                              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                             },
                             "text": {
                               "type": "string",
@@ -480,11 +489,11 @@
                           "properties": {
                             "from": {
                               "type": "string",
-                              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                             },
                             "to": {
                               "type": "string",
-                              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                             },
                             "type": {
                               "const": "SupportedBy",
@@ -546,7 +555,7 @@
                   },
                   "claim_id": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                   },
                   "source_kind": {
                     "enum": [
@@ -594,13 +603,13 @@
                 }
               },
               {
+                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
                   "kind",
                   "claim_id",
-                  "command",
-                  "dependent_files"
+                  "plan"
                 ],
                 "properties": {
                   "kind": {
@@ -609,21 +618,87 @@
                   },
                   "claim_id": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                   },
-                  "command": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "dependent_files": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[^/].*$"
-                    }
+                  "plan": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schema",
+                      "image",
+                      "argv",
+                      "inputs",
+                      "environment"
+                    ],
+                    "properties": {
+                      "schema": {
+                        "const": "empirica.spike-plan-draft/2",
+                        "description": "Exact minimal single-container author draft schema.",
+                        "type": "string"
+                      },
+                      "image": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "pattern": "^(?!.*\\s).+$",
+                        "description": "Already-local Docker name/tag, repository digest, full image ID, or unambiguous ID prefix; locality and ambiguity are host-resolved."
+                      },
+                      "argv": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 256,
+                        "prefixItems": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          }
+                        ],
+                        "items": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "description": "Exact executable and argument vector; no shell is injected."
+                      },
+                      "inputs": {
+                        "type": "array",
+                        "maxItems": 256,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^(?!/)(?!.*\\\\)(?!.*//).+$"
+                        },
+                        "description": "Repository-relative file or directory declarations forming a bounded canonical closure: a set, accepted in any order and normalized to sorted canonical order; overlapping or duplicate-root entries (one declaration inside another, or two spellings of one root such as src and src/) are refused with invalid_request. Host expansion excludes symlinks and .git and seals one canonical captured-file union."
+                      },
+                      "environment": {
+                        "type": "object",
+                        "maxProperties": 128,
+                        "propertyNames": {
+                          "allOf": [
+                            {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                            },
+                            {
+                              "not": {
+                                "enum": [
+                                  "HOME",
+                                  "TMPDIR"
+                                ],
+                                "type": "string"
+                              }
+                            }
+                          ]
+                        },
+                        "additionalProperties": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "description": "Bounded authored overrides; HOME and TMPDIR are framework-owned and values must never contain secrets."
+                      }
+                    },
+                    "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
                   }
                 }
               },
@@ -836,7 +911,7 @@
                     "properties": {
                       "root": {
                         "type": "string",
-                        "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                       },
                       "claims": {
                         "type": "array",
@@ -854,7 +929,7 @@
                           "properties": {
                             "id": {
                               "type": "string",
-                              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                             },
                             "text": {
                               "type": "string",
@@ -891,11 +966,11 @@
                           "properties": {
                             "from": {
                               "type": "string",
-                              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                             },
                             "to": {
                               "type": "string",
-                              "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                              "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                             },
                             "type": {
                               "const": "SupportedBy",
@@ -957,7 +1032,7 @@
                   },
                   "claim_id": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                   },
                   "source_kind": {
                     "enum": [
@@ -1005,13 +1080,13 @@
                 }
               },
               {
+                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
                   "kind",
                   "claim_id",
-                  "command",
-                  "dependent_files"
+                  "plan"
                 ],
                 "properties": {
                   "kind": {
@@ -1020,21 +1095,87 @@
                   },
                   "claim_id": {
                     "type": "string",
-                    "pattern": "^[A-Za-z0-9._-]{1,64}(?![\\s\\S])"
+                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
                   },
-                  "command": {
-                    "type": "string",
-                    "minLength": 1
-                  },
-                  "dependent_files": {
-                    "type": "array",
-                    "minItems": 1,
-                    "uniqueItems": true,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "pattern": "^[^/].*$"
-                    }
+                  "plan": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "schema",
+                      "image",
+                      "argv",
+                      "inputs",
+                      "environment"
+                    ],
+                    "properties": {
+                      "schema": {
+                        "const": "empirica.spike-plan-draft/2",
+                        "description": "Exact minimal single-container author draft schema.",
+                        "type": "string"
+                      },
+                      "image": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 255,
+                        "pattern": "^(?!.*\\s).+$",
+                        "description": "Already-local Docker name/tag, repository digest, full image ID, or unambiguous ID prefix; locality and ambiguity are host-resolved."
+                      },
+                      "argv": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 256,
+                        "prefixItems": [
+                          {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 4096
+                          }
+                        ],
+                        "items": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "description": "Exact executable and argument vector; no shell is injected."
+                      },
+                      "inputs": {
+                        "type": "array",
+                        "maxItems": 256,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 1024,
+                          "pattern": "^(?!/)(?!.*\\\\)(?!.*//).+$"
+                        },
+                        "description": "Repository-relative file or directory declarations forming a bounded canonical closure: a set, accepted in any order and normalized to sorted canonical order; overlapping or duplicate-root entries (one declaration inside another, or two spellings of one root such as src and src/) are refused with invalid_request. Host expansion excludes symlinks and .git and seals one canonical captured-file union."
+                      },
+                      "environment": {
+                        "type": "object",
+                        "maxProperties": 128,
+                        "propertyNames": {
+                          "allOf": [
+                            {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                            },
+                            {
+                              "not": {
+                                "enum": [
+                                  "HOME",
+                                  "TMPDIR"
+                                ],
+                                "type": "string"
+                              }
+                            }
+                          ]
+                        },
+                        "additionalProperties": {
+                          "type": "string",
+                          "maxLength": 4096
+                        },
+                        "description": "Bounded authored overrides; HOME and TMPDIR are framework-owned and values must never contain secrets."
+                      }
+                    },
+                    "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
                   }
                 }
               },

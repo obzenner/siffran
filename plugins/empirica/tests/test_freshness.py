@@ -24,12 +24,11 @@ sys.path.insert(0, str(PLUGIN))
 
 from core import freshness as fr  # noqa: E402
 from core.freshness import (  # noqa: E402
-    ActiveSpikeHead, DigestContractError, ExecutionContractError, ExecutionFacts, FileBinding,
-    FileObservation, FreshnessChange, FreshnessEvaluation, FreshnessContractError, Gate,
+    ActiveSpikeHead, DigestContractError, FileBinding, FileObservation,
+    FreshnessChange, FreshnessEvaluation, FreshnessContractError,
     ObservationContractError, ObservationState, PathContractError, StaleHead,
-    canonical_digest, command_digest, evaluate_freshness, execution_facts, gate_from_exit_code,
-    required_paths, validate_digest256, validate_observations,
-    validate_relative_posix_path,
+    canonical_digest, evaluate_freshness, required_paths, validate_digest256,
+    validate_observations, validate_relative_posix_path,
 )
 
 PRESENT = ObservationState.PRESENT
@@ -47,15 +46,6 @@ def _d(label):
 
 def _digest_bytes(b):
     return "sha256:" + hashlib.sha256(b).hexdigest()
-
-
-class _HarnessResult:
-    """A duck-typed harness result for the pure ``execution_facts`` (core must not import ports)."""
-
-    def __init__(self, exit_code, result_digest, snapshot_digest):
-        self.exit_code = exit_code
-        self.result_digest = result_digest
-        self.snapshot_digest = snapshot_digest
 
 
 def _head(artifact_char="h", bindings=()):
@@ -167,12 +157,6 @@ class CanonicalDigest(unittest.TestCase):
     def test_non_string_keys_rejected(self):
         with self.assertRaises(DigestContractError):
             canonical_digest({1: "a"})
-
-    def test_command_digest_exact_bytes_no_trim(self):
-        self.assertEqual(command_digest("pytest"),
-                         "sha256:" + hashlib.sha256(b"pytest").hexdigest())
-        self.assertNotEqual(command_digest("pytest"), command_digest(" pytest"))
-        self.assertNotEqual(command_digest("pytest"), command_digest("pytest\n"))
 
     def test_validate_digest256_lowercase_only(self):
         self.assertEqual(validate_digest256("sha256:" + "0" * 64), "sha256:" + "0" * 64)
@@ -330,7 +314,6 @@ class CoreFactsImmutability(unittest.TestCase):
             _head(bindings=(FileBinding("a", _d("x")),)),
             StaleHead(_d("h"), (FreshnessChange("a", MISSING),)),
             FreshnessEvaluation(()),
-            ExecutionFacts((FileBinding("a", _d("x")),), 0, Gate.PASS, _d("r")),
         ]
         for obj in samples:
             first_field = next(iter(obj.__dataclass_fields__))
@@ -360,7 +343,7 @@ class CoreFactsImmutability(unittest.TestCase):
         for accepted in ("A", "a.b-C_9", "x" * 64):
             with self.subTest(accepted=accepted):
                 self.assertEqual(ActiveSpikeHead(_d("h"), accepted, "r", binding).claim_id, accepted)
-        for rejected in ("", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
+        for rejected in ("", ".leading", "-leading", "_leading", "x" * 65, "a b", "claim:C0", "caf\u00e9", "a\nb", "C0\n",
                          "<<<EMPIRICA_UNTRUSTED_DATA>>>", None, 7):
             with self.subTest(rejected=rejected), self.assertRaises(FreshnessContractError):
                 ActiveSpikeHead(_d("h"), rejected, "r", binding)
@@ -370,76 +353,6 @@ class CoreFactsImmutability(unittest.TestCase):
                              / "shared-defs.json").read_text(encoding="utf-8"))
         self.assertEqual(shared["$defs"]["claimId"],
                          {"type": "string", "pattern": fr.CLAIM_ID_PATTERN})
-
-
-# --- proof 13: exit code is sole gate authority --------------------------------
-
-class GateAuthority(unittest.TestCase):
-    def test_zero_pass_nonzero_fail(self):
-        self.assertEqual(gate_from_exit_code(0), Gate.PASS)
-        for code in (1, -1, 2, 127, 255):
-            self.assertEqual(gate_from_exit_code(code), Gate.FAIL)
-
-    def test_bool_rejected(self):
-        with self.assertRaises(ExecutionContractError):
-            gate_from_exit_code(True)
-        with self.assertRaises(ExecutionContractError):
-            gate_from_exit_code(False)
-
-    def test_non_int_rejected(self):
-        for code in ("0", 0.0, None):
-            with self.assertRaises(ExecutionContractError):
-                gate_from_exit_code(code)
-
-    def test_execution_facts_derives_gate_from_exit_code_only(self):
-        bindings = (FileBinding("a", _d("x")),)
-        result = _HarnessResult(0, _d("r"), _d("s"))
-        facts = execution_facts(bindings, result)
-        self.assertEqual(facts.exit_code, 0)
-        self.assertEqual(facts.gate, Gate.PASS)
-        self.assertEqual(facts.result_digest, _d("r"))
-        self.assertEqual(facts.file_bindings, bindings)
-
-    def test_execution_facts_nonzero_fails(self):
-        bindings = (FileBinding("a", _d("x")),)
-        facts = execution_facts(bindings, _HarnessResult(3, _d("r"), _d("s")))
-        self.assertEqual(facts.gate, Gate.FAIL)
-        self.assertEqual(facts.exit_code, 3)
-
-    def test_execution_facts_contain_no_identity(self):
-        bindings = (FileBinding("a", _d("x")),)
-        facts = execution_facts(bindings, _HarnessResult(0, _d("r"), _d("s")))
-        for attr in ("command", "request_id", "claim_id", "artifact_id",
-                     "snapshot_digest", "statement_digest"):
-            self.assertFalse(hasattr(facts, attr), f"ExecutionFacts must not carry {attr}")
-
-    def test_execution_facts_rejects_bad_result(self):
-        bindings = (FileBinding("a", _d("x")),)
-        with self.assertRaises(ExecutionContractError):
-            execution_facts(bindings, "not-a-result")
-        with self.assertRaises(ExecutionContractError):
-            execution_facts(bindings, _HarnessResult(True, _d("r"), _d("s")))
-        with self.assertRaises(ExecutionContractError):
-            execution_facts(bindings, _HarnessResult(0, "bad", _d("s")))
-
-    def test_execution_facts_rejects_empty_bindings(self):
-        with self.assertRaises(ExecutionContractError):
-            execution_facts((), _HarnessResult(0, _d("r"), _d("s")))
-
-    def test_constructor_gate_must_match_exit_code(self):
-        with self.assertRaises(ExecutionContractError):
-            ExecutionFacts((FileBinding("a", _d("x")),), 0, Gate.FAIL, _d("r"))
-        with self.assertRaises(ExecutionContractError):
-            ExecutionFacts((FileBinding("a", _d("x")),), 1, Gate.PASS, _d("r"))
-
-    def test_constructor_duplicate_binding_paths_rejected(self):
-        with self.assertRaises(ExecutionContractError):
-            ExecutionFacts((FileBinding("a", _d("x")), FileBinding("a", _d("y"))),
-                           0, Gate.PASS, _d("r"))
-
-    def test_constructor_bad_result_digest_rejected(self):
-        with self.assertRaises(DigestContractError):
-            ExecutionFacts((FileBinding("a", _d("x")),), 0, Gate.PASS, "bad")
 
 
 # --- proof 14: AST/import proof core freshness has no I/O imports/calls --------

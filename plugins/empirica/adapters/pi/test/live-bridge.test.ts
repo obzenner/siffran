@@ -331,3 +331,19 @@ test(
     assert.equal(parsed.result.fail_direction, "closed");
   },
 );
+
+test("the real bridge's GetContract answers pass the stdio guard and render the limits clause",
+  { skip: !pythonAvailable }, async () => {
+    const { getContractRequest } = await import("../src/translate.ts");
+    const { renderAuthorView } = await import("../src/author-view.ts");
+    const section = await bridge(getContractRequest("section", "contract-section", "evidence/spike"));
+    assert.equal(section.result.type, "Allow");
+    const text = renderAuthorView(section.result);
+    assert.match(text, /evidence\/spike\/limits/);
+    assert.match(text, /reason authority-drift \|/);
+    const index = await bridge(getContractRequest("index", "contract-index"));
+    assert.match(renderAuthorView(index.result), /evidence\/spike/);
+    // A clause id is not a section: the core answers unsupported, which still guards.
+    const clause = await bridge(getContractRequest("section", "contract-clause", "evidence/spike/limits"));
+    assert.deepEqual(clause.result, { type: "Fault", code: "unsupported", fail_direction: "closed" });
+  });

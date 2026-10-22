@@ -54,7 +54,8 @@ if str(_PLUGIN_ROOT) not in sys.path:
 from application import host_runtime  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
-from adapters.execution import FilesystemWorkspace, SubprocessSpikeHarness  # noqa: E402
+from application.ports import NullSpikeAuthoritySelector  # noqa: E402
+from adapters.execution import FilesystemWorkspace  # noqa: E402
 from adapters.git.artifact_repo import GitArtifactRepository, toplevel  # noqa: E402
 from adapters.identity import POLICY_VERSION, observe  # noqa: E402
 from adapters.state.located import LocatedRunRepository  # noqa: E402
@@ -92,6 +93,26 @@ def _fault(code: str, request_id: str) -> dict:
         "request_id": request_id,
         "result": {"type": "Fault", "code": code, "fail_direction": "closed"},
     }
+
+
+def GenericQualificationStore(*args, **kwargs):
+    from adapters.sandbox.generic_authority import GenericQualificationStore as implementation
+    return implementation(*args, **kwargs)
+
+
+def GenericBackendSelector(*args, **kwargs):
+    from adapters.sandbox.generic_authority import GenericBackendSelector as implementation
+    return implementation(*args, **kwargs)
+
+
+def GenericAuthorityResolver(*args, **kwargs):
+    from adapters.sandbox.generic_authority import GenericAuthorityResolver as implementation
+    return implementation(*args, **kwargs)
+
+
+def DockerLocalImageResolver(*args, **kwargs):
+    from adapters.sandbox.generic_authority import DockerLocalImageResolver as implementation
+    return implementation(*args, **kwargs)
 
 
 class _LazyGitArtifactRepository:
@@ -157,6 +178,11 @@ class _RecordingRuns:
         return revision
 
 
+def GenericDockerHarness(*args, **kwargs):
+    from adapters.sandbox.generic_harness import GenericDockerHarness as implementation
+    return implementation(*args, **kwargs)
+
+
 def build_service(profile_id: str, *, clock=time.time):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
@@ -172,10 +198,23 @@ def build_service(profile_id: str, *, clock=time.time):
     repo_dir = Path(os.environ.get("EMPIRICA_REPO_DIR", Path.cwd()))
     runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd(), clock=clock)
     artifacts = _LazyGitArtifactRepository(repo_dir)
+    try:
+        qualification_store = GenericQualificationStore()
+        spike_authority = GenericBackendSelector(qualification_store)
+        authority_resolver = GenericAuthorityResolver(qualification_store)
+        image_resolver = DockerLocalImageResolver(authority_resolver)
+        spike_harness = GenericDockerHarness(
+            qualification_store.execution_store, authority_resolver)
+    except Exception:  # unsafe/absent generic composition freezes spikes unavailable at StartRun
+        spike_authority = NullSpikeAuthoritySelector()
+        spike_harness = None
+        image_resolver = None
     return _v2.compose(
-        workspace=FilesystemWorkspace(Path.cwd()), harness=SubprocessSpikeHarness(),
+        workspace=FilesystemWorkspace(Path.cwd()), harness=spike_harness,
         runs=runs, artifacts=artifacts,
         host=None, profile_id=profile_id, limits={}, clock=None,
+        spike_authority_selector=spike_authority,
+        image_resolver=image_resolver,
     )
 
 

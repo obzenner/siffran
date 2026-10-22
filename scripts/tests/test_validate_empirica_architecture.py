@@ -835,6 +835,15 @@ class ArchitectureValidatorTests(unittest.TestCase):
         self.assertIn(va.RULE_FORBIDDEN_SYMBOL, self._ids(diags))
         self.assertTrue(any("evidence" in d.message for d in diags), diags)
 
+    def test_71_sandbox_imports_host_adapter_is_forbidden(self):
+        # adapters.sandbox is a declared layer: a sandbox module importing a host adapter is refused
+        cfg = base_config()
+        self._write("adapters/sandbox/__init__.py", "")
+        self._write("adapters/sandbox/x.py", "from adapters.pi import bridge\n")
+        diags = va.check_python_dependencies(cfg, self.pkg, self._py_files(cfg))
+        self.assertIn(va.RULE_DEP_PY, self._ids(diags))
+        self.assertTrue(any("adapters.sandbox" in d.message and "adapters.pi" in d.message for d in diags), diags)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

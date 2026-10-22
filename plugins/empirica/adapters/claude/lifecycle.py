@@ -291,7 +291,11 @@ def run_start_main() -> int:
         if invocation.unknown_flags:
             _emit_start_block("unknown flags: " + " ".join(invocation.unknown_flags))
             return 0
-        response = dispatch_start_run(payload)
+        try:
+            response = dispatch_start_run(payload)
+        except ValueError as exc:
+            _emit_start_block(str(exc))
+            return 0
         result = response.result
         run = result.run
         refusal = result.first_reason.message if result.first_reason is not None else None

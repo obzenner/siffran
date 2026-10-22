@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "invocation": {
     "host": "test",
     "interactive": true,
@@ -50,5 +50,8 @@
       "approval_capability": "unavailable"
     },
     "proposal_digest": "sha256:d764258b8562be747439eb952a4c21b1b0dcd82e8458928c13bdcf1bd1a7913c"
+  },
+  "spike_backend": {
+    "kind": "spikes_unavailable"
   }
 }

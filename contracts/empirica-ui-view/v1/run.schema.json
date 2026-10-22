@@ -10,6 +10,7 @@
     "key",
     "version",
     "goal",
+    "spike_backend",
     "governance",
     "audit",
     "stop",
@@ -45,6 +46,17 @@
         "string",
         "null"
       ]
+    },
+    "spike_backend": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/spikeBackend"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The run's immutable StartRun binding, copied from the public RunView; qualified is not a live-health claim. Null only when the run state could not be read."
     },
     "governance": {
       "oneOf": [
@@ -573,78 +585,9 @@
               },
               "proof": {
                 "type": "array",
-                "description": "Every spike executed for this claim as its wording stands, in the order they ran, each as the plugin's dossier states it (empty: none ran). Output of the command is not retained.",
+                "description": "Every immutable generic spike request for this claim, paired with its result when one was admitted. Raw output and host/runtime secrets are never published.",
                 "items": {
-                  "type": "object",
-                  "additionalProperties": false,
-                  "required": [
-                    "command",
-                    "outcome",
-                    "exit_code",
-                    "gate",
-                    "files",
-                    "state",
-                    "output"
-                  ],
-                  "properties": {
-                    "command": {
-                      "type": "string",
-                      "minLength": 1
-                    },
-                    "outcome": {
-                      "enum": [
-                        "pass",
-                        "fail"
-                      ],
-                      "description": "How the spike ended (registry artifact_outcomes)."
-                    },
-                    "exit_code": {
-                      "type": "integer"
-                    },
-                    "gate": {
-                      "enum": [
-                        "pass",
-                        "fail"
-                      ],
-                      "description": "The spike gate the execution produced (registry spike_gates)."
-                    },
-                    "files": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": [
-                          "path",
-                          "sha256"
-                        ],
-                        "properties": {
-                          "path": {
-                            "type": "string",
-                            "minLength": 1
-                          },
-                          "sha256": {
-                            "type": "string",
-                            "minLength": 1
-                          }
-                        }
-                      },
-                      "description": "The files, with their digests, the execution was bound to."
-                    },
-                    "state": {
-                      "enum": [
-                        "current",
-                        "stale",
-                        "superseded"
-                      ],
-                      "description": "current: its files are unchanged; stale: a bound file changed since (the freshness owner's verdict); superseded: a later spike replaced it."
-                    },
-                    "output": {
-                      "enum": [
-                        "not_retained"
-                      ],
-                      "description": "The command's output is not kept by the plugin."
-                    }
-                  }
+                  "$ref": "#/$defs/genericSpikeProof"
                 }
               }
             }
@@ -1064,6 +1007,181 @@
           "description": "The human's note to the author, when the receipt has one."
         }
       }
+    },
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "genericSpikeProof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request", "result", "state"],
+      "properties": {
+        "request": {"$ref": "#/$defs/genericSpikeRequest"},
+        "result": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/genericSpikeResult"}]},
+        "state": {
+          "enum": ["requested", "current", "stale", "superseded"],
+          "description": "requested has no admitted result; current still holds; stale has changed input; superseded was replaced."
+        }
+      }
+    },
+    "genericSpikeInput": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"$ref": "#/$defs/digest"},
+        "bytes": {"type": "integer", "minimum": 0, "maximum": 67108864}
+      }
+    },
+    "genericSpikeImage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requested_reference", "sealed_id", "raw_os", "os", "raw_architecture", "architecture"],
+      "properties": {
+        "requested_reference": {"type": "string", "minLength": 1},
+        "sealed_id": {"$ref": "#/$defs/digest"},
+        "raw_os": {"type": "string", "minLength": 1},
+        "os": {"type": "string", "minLength": 1},
+        "raw_architecture": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1}
+      }
+    },
+    "genericSpikeRuntime": {
+      "type": "object", "additionalProperties": false,
+      "required": ["uid", "gid", "workdir", "inputs_mount", "tmpdir"],
+      "properties": {
+        "uid": {"const": 65534}, "gid": {"const": 65534},
+        "workdir": {"const": "/work"}, "inputs_mount": {"const": "/inputs"},
+        "tmpdir": {"const": "/tmp"}
+      }
+    },
+    "genericSpikeLimits": {
+      "type": "object", "additionalProperties": false,
+      "required": ["cpu_count", "memory_bytes", "memory_swap_bytes", "pids", "open_files", "max_file_size_bytes", "core_bytes", "workload_timeout_seconds", "stdout_bytes", "stderr_bytes", "staging_files", "staging_bytes", "staging_file_bytes", "work_tmpfs_bytes", "tmp_tmpfs_bytes", "shm_bytes", "operation_timeout_seconds"],
+      "properties": {
+        "cpu_count": {"type": "integer", "minimum": 1},
+        "memory_bytes": {"type": "integer", "minimum": 1}, "memory_swap_bytes": {"type": "integer", "minimum": 1},
+        "pids": {"type": "integer", "minimum": 1}, "open_files": {"type": "integer", "minimum": 1},
+        "max_file_size_bytes": {"type": "integer", "minimum": 1}, "core_bytes": {"type": "integer", "minimum": 0},
+        "workload_timeout_seconds": {"type": "integer", "minimum": 1},
+        "stdout_bytes": {"type": "integer", "minimum": 0}, "stderr_bytes": {"type": "integer", "minimum": 0},
+        "staging_files": {"type": "integer", "minimum": 0}, "staging_bytes": {"type": "integer", "minimum": 0},
+        "staging_file_bytes": {"type": "integer", "minimum": 0},
+        "work_tmpfs_bytes": {"type": "integer", "minimum": 1}, "tmp_tmpfs_bytes": {"type": "integer", "minimum": 1},
+        "shm_bytes": {"type": "integer", "minimum": 1},
+        "operation_timeout_seconds": {"type": "integer", "minimum": 1}
+      }
+    },
+    "genericSpikeRequestIdentities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["draft_digest", "plan_digest", "policy_digest", "snapshot_basis_id", "snapshot_digest", "capture_digest", "qualification_record_digest", "execution_binding_digest"],
+      "properties": {
+        "draft_digest": {"$ref": "#/$defs/digest"}, "plan_digest": {"$ref": "#/$defs/digest"},
+        "policy_digest": {"$ref": "#/$defs/digest"}, "snapshot_basis_id": {"$ref": "#/$defs/digest"},
+        "snapshot_digest": {"$ref": "#/$defs/digest"}, "capture_digest": {"$ref": "#/$defs/digest"},
+        "qualification_record_digest": {"$ref": "#/$defs/digest"},
+        "execution_binding_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "genericSpikeRequest": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_id", "harness_request_id", "claim_id", "draft_schema", "image", "argv", "declared_inputs", "inputs", "input_count", "input_bytes", "environment_names", "profile_id", "runtime", "limits", "identities"],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/digest"}, "harness_request_id": {"$ref": "#/$defs/digest"},
+        "claim_id": {"type": "string", "minLength": 1}, "draft_schema": {"const": "empirica.spike-plan-draft/2"},
+        "image": {"$ref": "#/$defs/genericSpikeImage"},
+        "argv": {"type": "array", "minItems": 1, "maxItems": 256, "items": {"type": "string"}},
+        "declared_inputs": {"type": "array", "maxItems": 256, "items": {"type": "string", "minLength": 1}},
+        "inputs": {"type": "array", "maxItems": 256, "items": {"$ref": "#/$defs/genericSpikeInput"}},
+        "input_count": {"type": "integer", "minimum": 0, "maximum": 256},
+        "input_bytes": {"type": "integer", "minimum": 0, "maximum": 67108864},
+        "environment_names": {"type": "array", "maxItems": 128, "items": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"}},
+        "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+        "runtime": {"$ref": "#/$defs/genericSpikeRuntime"},
+        "limits": {"$ref": "#/$defs/genericSpikeLimits"},
+        "identities": {"$ref": "#/$defs/genericSpikeRequestIdentities"}
+      }
+    },
+    "genericSpikeResultIdentities": {
+      "type": "object", "additionalProperties": false,
+      "required": ["operation_digest", "request_artifact_id", "plan_digest", "policy_digest", "snapshot_digest", "qualification_record_digest", "execution_binding_digest", "input_digest", "process_digest", "topology_digest", "timing_digest"],
+      "properties": {
+        "operation_digest": {"$ref": "#/$defs/digest"}, "request_artifact_id": {"$ref": "#/$defs/digest"},
+        "plan_digest": {"$ref": "#/$defs/digest"}, "policy_digest": {"$ref": "#/$defs/digest"},
+        "snapshot_digest": {"$ref": "#/$defs/digest"}, "qualification_record_digest": {"$ref": "#/$defs/digest"},
+        "execution_binding_digest": {"$ref": "#/$defs/digest"}, "input_digest": {"$ref": "#/$defs/digest"},
+        "process_digest": {"$ref": "#/$defs/digest"}, "topology_digest": {"$ref": "#/$defs/digest"},
+        "timing_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "genericSpikeResult": {
+      "type": "object", "additionalProperties": false,
+      "required": ["artifact_id", "request_artifact_id", "harness_request_id", "outcome", "gate", "exit_code", "producer_model", "profile_id", "realization_image_digest", "stdout", "stderr", "natural_exit", "cleanup_proven", "postflight_proven", "postflight_identity_digest", "harness_result_digest", "identities"],
+      "properties": {
+        "artifact_id": {"$ref": "#/$defs/digest"}, "request_artifact_id": {"$ref": "#/$defs/digest"},
+        "harness_request_id": {"$ref": "#/$defs/digest"}, "outcome": {"enum": ["pass", "fail"]},
+        "gate": {"enum": ["PASS", "FAIL"]}, "exit_code": {"type": "integer", "minimum": 0, "maximum": 255},
+        "producer_model": {"type": ["string", "null"]},
+        "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+        "realization_image_digest": {"$ref": "#/$defs/digest"},
+        "stdout": {"$ref": "#/$defs/genericSpikeStream"}, "stderr": {"$ref": "#/$defs/genericSpikeStream"},
+        "natural_exit": {"const": true}, "cleanup_proven": {"const": true}, "postflight_proven": {"const": true},
+        "postflight_identity_digest": {"$ref": "#/$defs/digest"}, "harness_result_digest": {"$ref": "#/$defs/digest"},
+        "identities": {"$ref": "#/$defs/genericSpikeResultIdentities"}
+      }
+    },
+    "genericSpikeStream": {
+      "type": "object", "additionalProperties": false, "required": ["bytes_seen", "sha256"],
+      "properties": {"bytes_seen": {"type": "integer", "minimum": 0}, "sha256": {"$ref": "#/$defs/digest"}}
+    },
+    "spikeBackend": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "spikes_unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind",
+            "backend",
+            "profile_id",
+            "qualification_record_digest",
+            "execution_binding_digest"
+          ],
+          "properties": {
+            "kind": {
+              "const": "qualified"
+            },
+            "backend": {
+              "const": "docker"
+            },
+            "profile_id": {
+              "enum": [
+                "docker-isolated-v1",
+                "docker-networked-v1"
+              ]
+            },
+            "qualification_record_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "execution_binding_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        }
+      ]
     },
     "budget": {
       "type": "object",
