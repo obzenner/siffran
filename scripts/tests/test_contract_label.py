@@ -25,7 +25,7 @@ class ContractLabelTests(unittest.TestCase):
         self.assertEqual(json.loads(text(CONTRACTS / "public-contract.json"))["version"], LABEL)
         self.assertEqual(v.REGISTRY_VERSION, LABEL)
         self.assertEqual(json.loads(text(PLUGIN / "architecture.json"))["required_contract_references"]["version"], LABEL)
-        self.assertIn(f'index.version === "{LABEL}"', text(PLUGIN / "adapters" / "pi" / "src" / "author-view.ts"))
+        self.assertIn(f'index.version === "{LABEL}"', text(PLUGIN / "adapters" / "pi" / "src" / "guard.ts"))
         for schema in ("public-contract.schema.json", "response.schema.json"):
             consts = re.findall(r'"const": "(\d+\.\d+\.\d+)"', text(CONTRACTS / schema))
             self.assertIn(LABEL, consts, schema)

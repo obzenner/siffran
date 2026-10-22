@@ -133,7 +133,8 @@ Follow the complete packaged-auditor invocation and rejection rules in
 
 With a non-null run handle, `report_convergence` permits only a centrally guarded `Allow`.
 `Block`, `Inert`, every `Fault`, malformed responses, and transport failures deny. The central
-guard enforces `converged=true` iff `run.status=converged`.
+guard enforces `converged=true` iff `run.status=converged`. The one run-less `Allow` it admits is
+exactly `{type, contract_result}`, and only for `GetContract` (`empirica_read`).
 
 Two Blocks are the exception and settle nonterminally: the sole human-approval wait (ADR-0063) and
 the sole `budget.exhausted` blocker of an active run (the current exhaustion rule). Pi permits the call, prints

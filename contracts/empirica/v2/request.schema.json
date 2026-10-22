@@ -1755,7 +1755,7 @@
             "maxLength": 1024,
             "pattern": "^(?!/)(?!.*\\\\)(?!.*//).+$"
           },
-          "description": "Repository-relative file or directory declarations; host expansion excludes symlinks and .git and seals one canonical captured-file union."
+          "description": "Repository-relative file or directory declarations forming a bounded canonical closure: a set, accepted in any order and normalized to sorted canonical order; overlapping or duplicate-root entries (one declaration inside another, or two spellings of one root such as src and src/) are refused with invalid_request. Host expansion excludes symlinks and .git and seals one canonical captured-file union."
         },
         "environment": {
           "type": "object",

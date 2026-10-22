@@ -2489,3 +2489,30 @@ test("INVARIANT: every path that sees a terminal result ends the run once: tombs
     }
   }
 });
+
+test("empirica_read GetContract passes the real guard and renders the limits clause (index and section)", async () => {
+  const { VENDORED_CONTRACT_DIR } = await import("../src/public-tools.ts");
+  const contract = JSON.parse(readFileSync(join(VENDORED_CONTRACT_DIR, "public-contract.json"), "utf8"));
+  const spike = contract.sections["evidence/spike"];
+  const digest = "sha256:" + "a".repeat(64);
+  const section = { target: "section", digest, section_id: "evidence/spike", section: {
+    id: "evidence/spike", title: spike.title, summary: spike.summary,
+    clauses: spike.clauses.map((c: { id: string; text: string }) => ({ id: c.id, text: c.text })) } };
+  const index = { ...JSON.parse(readFileSync(join(import.meta.dirname, "author-view-golden",
+    "getcontract-index.json"), "utf8")).result.contract_result, digest };
+  const limits = spike.clauses.find((c: { id: string }) => c.id === "evidence/spike/limits").text as string;
+  const w = await wire((req) => {
+    assert.equal(req.command.type, "GetContract");
+    const value = req.command.type === "GetContract" && req.command.target === "index" ? index : section;
+    return envelope({ type: "Allow", contract_result: value } as unknown as Result);
+  });
+  const read = await execTool(w, "empirica_read", {
+    operation: "GetContract", target: "section", section_id: "evidence/spike" });
+  const text = read.content[0].text as string;
+  assert.match(text, /evidence\/spike\/limits/);
+  for (const line of limits.split("\n").slice(0, 6)) assert.ok(text.includes(line.split(" | ")[1]), line);
+  assert.match(text, /reason authority-drift/);
+  const listed = await execTool(w, "empirica_read", { operation: "GetContract", target: "index" });
+  assert.match(listed.content[0].text, /evidence\/spike/);
+  assert.equal(w.requests.length, 2);
+});

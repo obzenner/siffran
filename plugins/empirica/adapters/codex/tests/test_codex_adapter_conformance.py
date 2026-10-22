@@ -13,11 +13,16 @@ from unittest.mock import patch
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+_TESTS = PLUGIN_ROOT / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 from adapters.codex.lifecycle import _start, _stop  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.governance import HostGovernance  # noqa: E402
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CODEX_PROFILE = host_profile_id("codex-cli")
 
 

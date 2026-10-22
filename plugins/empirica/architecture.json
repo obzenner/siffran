@@ -49,6 +49,10 @@
       "roots": ["adapters/observer"],
       "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "adapters.bridge", "hooks"]
     },
+    "adapters.sandbox": {
+      "roots": ["adapters/sandbox"],
+      "forbidden_imports": ["adapters.claude", "adapters.codex", "adapters.pi", "adapters.observer", "adapters.bridge", "hooks"]
+    },
     "adapters.bridge": {
       "roots": ["adapters/bridge.py", "adapters/__init__.py"],
       "forbidden_imports": ["hooks"]

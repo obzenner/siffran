@@ -121,7 +121,9 @@ Submit exactly `{"kind":"spike_request","claim_id":...,"plan":...}`. The `plan` 
    or unambiguous ID prefix. The host resolves locality and immutable native-platform identity; no
    image inventory, pull, build, or install is available to the author.
 3. `argv`: one nonempty exact executable/argument vector. A shell is used only when explicitly named.
-4. `inputs`: zero or more canonical non-overlapping repository-relative file/directory declarations.
+4. `inputs`: zero or more non-overlapping repository-relative file/directory declarations, in any
+   order (the host normalizes them to sorted canonical order; overlapping or duplicate-root entries
+   are refused with `invalid_request`).
    The host expands them once into a sorted bounded captured-file union, excluding symlinks and `.git`.
 5. `environment`: at most 128 bounded name/value overrides. `HOME` and `TMPDIR` are framework-owned.
    Values persist verbatim and must never contain credentials or secrets; content-addressed plan

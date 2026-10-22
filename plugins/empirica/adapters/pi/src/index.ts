@@ -518,7 +518,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // throws — the hard gate catches and fails closed.
     const dispatch = async (request: Request): Promise<Response> => {
       const response = await Promise.resolve(deps.dispatch(request));
-      assertResponse(response, request.request_id);
+      assertResponse(response, request.request_id, request.command.type);
       return response;
     };
     const trusted = async <Op extends PrivateOperation>(request: PrivateIngressRequest<Op>): Promise<PrivateResponses[Op]> =>

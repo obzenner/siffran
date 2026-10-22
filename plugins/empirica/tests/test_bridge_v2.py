@@ -227,13 +227,16 @@ class BridgeV2Tests(unittest.TestCase):
             _PLUGIN_ROOT / "tests/test_governance_hosts.py",
             _PLUGIN_ROOT / "tests/test_context_economy.py",
             _PLUGIN_ROOT / "tests/test_observer.py",
+            _PLUGIN_ROOT / "tests/test_public_tools.py",
             _PLUGIN_ROOT / "tests/v2/driver.py",
             _PLUGIN_ROOT / "tests/v2/fs_store.py",
             _PLUGIN_ROOT / "tests/v2/observer_store.py",
             _PLUGIN_ROOT / "tests/v2/test_timeline.py",
             _PLUGIN_ROOT / "adapters/claude/tests/test_claude_adapter.py",
             _PLUGIN_ROOT / "adapters/claude/tests/test_activation_lifecycle.py",
+            _PLUGIN_ROOT / "adapters/claude/tests/test_claude_adapter_conformance.py",
             _PLUGIN_ROOT / "adapters/codex/tests/test_codex_adapter.py",
+            _PLUGIN_ROOT / "adapters/codex/tests/test_codex_adapter_conformance.py",
         )
         for path in bridge_tests:
             source = path.read_text(encoding="utf-8")
@@ -260,6 +263,14 @@ class BridgeV2Tests(unittest.TestCase):
                     and node.func.attr in {"build_service", "handle"}
                     and isinstance(node.func.value, ast.Name)
                     and node.func.value.id in aliases
+                    for node in ast.walk(tree)
+                ) or any(
+                    # PublicTools without dispatch= defaults to bridge.handle
+                    # (adapters/public_tools.py); a **kwargs call counts too.
+                    isinstance(node, ast.Call)
+                    and (getattr(node.func, "id", None) == "PublicTools"
+                         or getattr(node.func, "attr", None) == "PublicTools")
+                    and not any(kw.arg == "dispatch" for kw in node.keywords)
                     for node in ast.walk(tree)
                 )
                 if reaches_bridge:

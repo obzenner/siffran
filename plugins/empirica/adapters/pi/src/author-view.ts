@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import * as path from "node:path";
 
 import { PROTOCOL, isTerminalBatch, type Response } from "./contract.ts";
-import { assertResponse } from "./guard.ts";
+import { assertResponse, objectWithKeys, rows, text, unique, validContractResult } from "./guard.ts";
 import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR, type AuthorViewLabel } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
@@ -137,41 +137,6 @@ function fallback(result: unknown): string {
   }
 }
 
-function objectWithKeys(value: unknown, keys: readonly string[]): value is Json {
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
-}
-
-const text = (value: unknown, nonempty = false): value is string =>
-  typeof value === "string" && (!nonempty || value.length > 0);
-const unique = (value: unknown[]): boolean =>
-  new Set(value.map((item) => JSON.stringify(item))).size === value.length;
-const rows = (value: unknown, keys: readonly string[], fields: readonly string[]): boolean =>
-  Array.isArray(value) && unique(value) && value.every((item) =>
-    objectWithKeys(item, keys) && fields.every((field) => text(item[field])));
-
-function validContractResult(value: unknown): boolean {
-  if (!objectWithKeys(value, (value as Json | null)?.target === "index"
-    ? ["target", "digest", "index"] : ["target", "digest", "section_id", "section"])) return false;
-  if (!text(value.digest) || !/^sha256:[0-9a-f]{64}$/.test(value.digest)) return false;
-  if (value.target === "index") {
-    const index = value.index;
-    return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
-      && index.id === "empirica/public" && index.version === "6.0.0"
-      && rows(index.sections, ["id", "title"], ["id", "title"])
-      && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
-        objectWithKeys(reason, ["code", "sections"]) && text(reason.code)
-        && Array.isArray(reason.sections) && reason.sections.every((section) => text(section)))
-      && rows(index.next_actions, ["id", "description"], ["id", "description"]);
-  }
-  if (value.target !== "section" || !text(value.section_id, true)) return false;
-  const section = value.section;
-  return objectWithKeys(section, ["id", "title", "summary", "clauses"])
-    && text(section.id, true) && section.id === value.section_id && text(section.title, true)
-    && text(section.summary) && rows(section.clauses, ["id", "text"], ["id", "text"])
-    && section.clauses.every((clause: Json) => text(clause.id, true) && text(clause.text, true));
-}
-
 /** Whether an active obligation's `missing` is null or the closed, claim-id-targeted object. */
 function validMissing(value: unknown): boolean {
   return value === null || (objectWithKeys(value, ["code", "target_claim_id", "parameters"])
@@ -191,11 +156,9 @@ function validObligations(run: Json): boolean {
 
 /** Validate with the same closed result shapes used by the public response schema. */
 function validResult(result: unknown): boolean {
-  if (objectWithKeys(result, ["type", "contract_result"]) && result.type === "Allow")
-    return validContractResult(result.contract_result);
   try {
     assertResponse({ protocol: PROTOCOL, request_id: "author-view", result } as Response,
-      "author-view");
+      "author-view", objectWithKeys(result, ["type", "contract_result"]) ? "GetContract" : undefined);
     const run = (result as Json | null)?.run;
     return run === undefined || validObligations(run as Json);
   } catch {

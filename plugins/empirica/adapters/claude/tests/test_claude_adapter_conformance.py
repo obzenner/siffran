@@ -16,6 +16,10 @@ from unittest.mock import patch
 PLUGIN = Path(__file__).resolve().parents[3]
 if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
+_TESTS = PLUGIN / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 from adapters.claude import lifecycle  # noqa: E402
 from adapters.claude.run_start import dispatch_start_run  # noqa: E402
@@ -23,6 +27,7 @@ from adapters.confirmation import HostConfirmation  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.governance import HostGovernance  # noqa: E402
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 

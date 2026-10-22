@@ -6,6 +6,8 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { assertResponse, GuardError } from "../src/guard.ts";
 import type { Response, RunStatus } from "../src/contract.ts";
@@ -138,4 +140,20 @@ test("guard accepts valid Inert", () => {
 test("guard accepts valid Fault", () => {
   assertResponse(ok({ type: "Fault", code: "unavailable", fail_direction: "closed" }), RID);
   assertResponse(ok({ type: "Fault", code: "corrupt_run", message: "x", fail_direction: "open" }), RID);
+});
+
+test("the guard admits the run-less contract Allow only for GetContract and only exactly", () => {
+  const contract = JSON.parse(readFileSync(join(import.meta.dirname, "author-view-golden",
+    "getcontract-section.json"), "utf8")).result.contract_result;
+  const valid = { ...contract, digest: "sha256:" + "b".repeat(64) };
+  const wrap = (result: unknown) => ({ protocol: "empirica/v2", request_id: RID, result });
+  assert.doesNotThrow(() => assertResponse(wrap({ type: "Allow", contract_result: valid }), RID, "GetContract"));
+  for (const [label, result, command] of [
+    ["another command", { type: "Allow", contract_result: valid }, "GetRun"],
+    ["no command", { type: "Allow", contract_result: valid }, undefined],
+    ["extra converged", { type: "Allow", contract_result: valid, converged: false }, "GetContract"],
+    ["malformed digest", { type: "Allow", contract_result: { ...valid, digest: "x" } }, "GetContract"],
+    ["run Allow", { type: "Allow", converged: false, run: run() }, "GetContract"],
+  ] as const)
+    assert.throws(() => assertResponse(wrap(result), RID, command), GuardError, label);
 });

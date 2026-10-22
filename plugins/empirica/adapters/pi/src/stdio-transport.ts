@@ -137,7 +137,7 @@ export function bridgeProcessConfig(config: StdioBridgeConfig, request: unknown)
   };
 }
 
-function guardResponse(raw: string, expectedRequestId: string): Response {
+function guardResponse(raw: string, expectedRequestId: string, command: string): Response {
   const trimmed = raw.trim();
   if (trimmed.length === 0) {
     throw new GuardError("empirica bridge returned no output");
@@ -152,7 +152,7 @@ function guardResponse(raw: string, expectedRequestId: string): Response {
   // The central guard validates protocol, request_id correlation, result
   // discriminator, and minimum safe branch fields. A malformed/partial/
   // unknown/mismatched response throws here — the caller's gate fails closed.
-  assertResponse(parsed, expectedRequestId);
+  assertResponse(parsed, expectedRequestId, command);
   return parsed as Response;
 }
 
@@ -170,6 +170,6 @@ export function createStdioBridgeDispatch(config: StdioBridgeConfig): Dispatch {
   return async (request: Request): Promise<Response> => {
     const raw = await runJsonProcess(
       bridgeProcessConfig(config, request), JSON.stringify(request));
-    return guardResponse(raw, request.request_id);
+    return guardResponse(raw, request.request_id, request.command.type);
   };
 }

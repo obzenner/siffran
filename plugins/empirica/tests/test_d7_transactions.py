@@ -1325,12 +1325,20 @@ class D7TransactionTests(unittest.TestCase):
                 return result
 
         harness = RealHarness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+        coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, _ = \
             self._qualified_spike_ready(harness, session="real-harness-result-admission")
-        response = coordinator.handle(
-            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        # The live E2E-B1 shape: inputs in author order, not canonical order, through the
+        # schema-validating protocol gateway the bridge uses.
+        workspace.write("sample.conf", b"k=v\n")
+        action = spike_action("src/x.py", "sample.conf")
+        from application import protocol as gateway
+        response = gateway.dispatch_request(
+            {"protocol": "empirica/v2", "request_id": "spike",
+             "command": {"type": "ObserveAction", "run_id": run_id, "action": action}},
+            lambda envelope: coordinator.handle(envelope["command"], envelope["request_id"]))
         self.assertEqual(response["result"]["type"], "Allow", response)
         self.assertIs(type(harness.result), generic_spike.GenericHarnessResult)
+        self.assertIs(harness.result.verdict, generic_spike.GenericVerdict.PASS)
         history = traverse_history(
             decode_state(runs.data[key].value), artifacts_repo.values[key].values())
         self.assertEqual([item["kind"] for item in history].count("spike"), 1)
@@ -1338,6 +1346,53 @@ class D7TransactionTests(unittest.TestCase):
         result_artifact = next(item for item in history if item["kind"] == "spike")
         self.assertEqual(result_artifact["result_facts"]["operation_facts"]["image_digest"],
                          request_artifact["plan"]["image"]["id"])
+        canonical = canonicalize_spike_plan_draft(action["plan"])
+        self.assertEqual(request_artifact["draft"]["inputs"], ["sample.conf", "src/x.py"])
+        self.assertEqual(request_artifact["draft"], canonical.to_data())
+        self.assertEqual(request_artifact["draft_digest"], canonical.digest)
+
+    def test_any_valid_input_order_binds_one_canonical_draft(self):
+        import itertools
+        digests = set()
+        for order in itertools.permutations(("src/x.py", "sample.conf", "lib/a.py")):
+            with self.subTest(order=order):
+                harness = Harness()
+                coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, _ = \
+                    self._qualified_spike_ready(harness, session="order-" + "-".join(order))
+                workspace.write("sample.conf", b"k=v\n")
+                workspace.write("lib/a.py", b"a")
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id,
+                     "action": spike_action(*order)}, "spike")
+                self.assertEqual(response["result"]["type"], "Allow", response)
+                self.assertEqual(harness.calls, 1)
+                history = traverse_history(
+                    decode_state(runs.data[key].value), artifacts_repo.values[key].values())
+                request = next(item for item in history if item["kind"] == "spike_request")
+                result = next(item for item in history if item["kind"] == "spike")
+                self.assertEqual(request["draft"]["inputs"], ["lib/a.py", "sample.conf", "src/x.py"])
+                self.assertEqual(result["result_facts"]["verdict"], "PASS")
+                digests.add(request["draft_digest"])
+        self.assertEqual(len(digests), 1)
+
+    def test_overlapping_or_duplicate_root_inputs_are_invalid_before_any_docker_read(self):
+        # A genuinely malformed draft is the author's invalid request: no corrupt-run Block, no
+        # reasonless host Fault, no image resolution, no harness call, no artifact.
+        for inputs in (("src", "src/x.py"), ("src", "src/")):
+            with self.subTest(inputs=inputs):
+                harness, resolver = Harness(), ImageResolver()
+                coordinator, runs, artifacts_repo, _, _, _, run_id, key, _ = \
+                    self._qualified_spike_ready(
+                        harness, session="malformed-" + "-".join(inputs), resolver=resolver)
+                before = self._artifact_kinds(artifacts_repo, key)
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id,
+                     "action": spike_action(*inputs)}, "spike")
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": "invalid_request", "fail_direction": "closed"})
+                self.assertEqual(resolver.calls, [])
+                self.assertEqual(harness.calls, 0)
+                self.assertEqual(self._artifact_kinds(artifacts_repo, key), before)
 
     def test_qualified_spike_seals_request_before_exact_run_bound_execution(self):
         for exit_code in (0, 17):

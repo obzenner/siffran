@@ -671,7 +671,14 @@ class Coordinator:
                     persisted["qualification_record_digest"],
                     persisted["execution_binding_digest"])
                 if draft is None:
-                    draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
+                    try:
+                        draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
+                    except spike_plan_draft.SpikePlanDraftError:
+                        # An author mistake, never a corrupt run or a host failure.
+                        return self._fault(request_id, "invalid_request")
+                    # Any valid spelling (such as unsorted inputs) is accepted; the canonical
+                    # draft is the one planned, digested, and persisted.
+                    action = {**action, "plan": draft.to_data()}
                 snapshot = self._assemble(key, state, command, require_graph=True)
             except HistoryCorrupt:
                 if not self._revision_unchanged(key, read.revision):

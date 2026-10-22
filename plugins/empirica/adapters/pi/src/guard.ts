@@ -23,6 +23,43 @@ import {
   type RunStatus,
 } from "./contract.ts";
 
+type Json = Record<string, any>;
+
+export function objectWithKeys(value: unknown, keys: readonly string[]): value is Json {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    && Object.keys(value).sort().join("\0") === [...keys].sort().join("\0");
+}
+
+export const text = (value: unknown, nonempty = false): value is string =>
+  typeof value === "string" && (!nonempty || value.length > 0);
+export const unique = (value: unknown[]): boolean =>
+  new Set(value.map((item) => JSON.stringify(item))).size === value.length;
+export const rows = (value: unknown, keys: readonly string[], fields: readonly string[]): boolean =>
+  Array.isArray(value) && unique(value) && value.every((item) =>
+    objectWithKeys(item, keys) && fields.every((field) => text(item[field])));
+
+export function validContractResult(value: unknown): boolean {
+  if (!objectWithKeys(value, (value as Json | null)?.target === "index"
+    ? ["target", "digest", "index"] : ["target", "digest", "section_id", "section"])) return false;
+  if (!text(value.digest) || !/^sha256:[0-9a-f]{64}$/.test(value.digest)) return false;
+  if (value.target === "index") {
+    const index = value.index;
+    return objectWithKeys(index, ["id", "version", "sections", "reasons", "next_actions"])
+      && index.id === "empirica/public" && index.version === "6.0.0"
+      && rows(index.sections, ["id", "title"], ["id", "title"])
+      && Array.isArray(index.reasons) && unique(index.reasons) && index.reasons.every((reason) =>
+        objectWithKeys(reason, ["code", "sections"]) && text(reason.code)
+        && Array.isArray(reason.sections) && reason.sections.every((section) => text(section)))
+      && rows(index.next_actions, ["id", "description"], ["id", "description"]);
+  }
+  if (value.target !== "section" || !text(value.section_id, true)) return false;
+  const section = value.section;
+  return objectWithKeys(section, ["id", "title", "summary", "clauses"])
+    && text(section.id, true) && section.id === value.section_id && text(section.title, true)
+    && text(section.summary) && rows(section.clauses, ["id", "text"], ["id", "text"])
+    && section.clauses.every((clause: Json) => text(clause.id, true) && text(clause.text, true));
+}
+
 const START_REFUSAL_REASON_CODES = new Set<string>(PUBLIC_TOOLS.start_refusal_codes);
 const RUN_STATUSES: ReadonlySet<RunStatus> = new Set([
   "active",
@@ -128,6 +165,7 @@ function assertAllowCrossInvariant(converged: boolean, run: unknown): void {
  *   - protocol is exactly `empirica/v2`
  *   - request_id equals the request's request_id
  *   - result.type is one of Allow | Block | Inert | Fault
+ *   - Allow for GetContract: exactly {type, contract_result} with a closed contract_result
  *   - Allow: converged is boolean; run has id (nonempty string) + status (canonical);
  *     converged true iff status is `converged`; converged false only for
  *     active/stopped_residual/stopped_frozen/stopped_budget (cross invariant)
@@ -141,6 +179,7 @@ function assertAllowCrossInvariant(converged: boolean, run: unknown): void {
 export function assertResponse(
   response: unknown,
   expectedRequestId: string,
+  command?: string,
 ): asserts response is Response {
   if (!isObject(response))
     throw new GuardError("empirica response is not an object");
@@ -159,6 +198,13 @@ export function assertResponse(
 
   switch (result.type) {
     case "Allow": {
+      // GetContract alone answers with the one run-less Allow: exactly a closed contract_result.
+      if (command === "GetContract") {
+        if (!objectWithKeys(result, ["type", "contract_result"])
+            || !validContractResult(result.contract_result))
+          throw new GuardError("GetContract Allow must be exactly one valid contract_result");
+        break;
+      }
       if (typeof result.converged !== "boolean")
         throw new GuardError("Allow.converged must be a boolean");
       const converged = result.converged;
