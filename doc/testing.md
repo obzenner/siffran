@@ -89,29 +89,77 @@ separately, and either stream exceeding its ceiling is output-limited (it is not
 budget). Workload timeout, output limiting, or OOM is unavailable substrate execution, not a failing
 experimental result, and admits no `spike` result evidence.
 
-The generic authority implementation manifest binds every source that selects or resolves authority,
-constructs or invokes public `ObserveAction` transport, classifies or enforces that transport's outer deadline,
-owns the run repository/CAS that seals request state before execution, or owns the Claude MCP ceiling. It also
-binds all seven runtime-loaded vendored v2 JSON documents: public contract and schema, public tool projection,
-request and response schemas, host profiles, and persisted-state schema. Root contract duplicates are not
-runtime inputs and remain outside the authority; `make vendor-check` owns their byte identity with the vendored
-copies. The source set includes the shared bridge, MCP server/public tools, Claude and Codex transports, Pi
-translate/index/stdio/process sources, the located repository plus filesystem repository and FS I/O that own the
-request-sealing run CAS, and `.mcp.json`, in addition to the generic plan, capture, staging, authority,
-effect, journal, harness, and qualification/installer implementation. The two scripts are thin
-argument adapters over that bound module. Pi's `private-transport.ts` and `private_bridge.py` cannot carry
-public `ObserveAction` requests and retain the ordinary 30-second bound. Claude and Codex public entry adapters
+The generic authority implementation manifest is `IMPLEMENTATION_SOURCE_PATHS` in
+`plugins/empirica/adapters/sandbox/common.py`; changing any file in it changes the implementation digest, which
+invalidates every installed qualification. It binds every source on the public `ObserveAction` transport path,
+including the Pi response guard, and everything the sandbox loads, and it is exactly the closure of the roots
+declared beside it in `IMPLEMENTATION_ROOTS`:
+
+<!-- implementation-roots -->
+- the host entry points: `.mcp.json` (it owns the Claude MCP ceiling), `adapters/mcp_server.py`, the shared bridge
+  `adapters/bridge.py`, the Claude and Codex transports `adapters/claude/transport.py` and
+  `adapters/codex/transport.py`, the Pi stdio target `adapters/pi/bridge.py`, and the Pi
+  extension `adapters/pi/src/index.ts`;
+- `adapters/sandbox/generic_qualification.py`, the module the qualify and install scripts are thin argument adapters
+  over;
+- the vendored contract directory `vendor/contracts/empirica/v2`: every JSON document in it, since runtime code reads
+  them by constructed path.
+<!-- /implementation-roots -->
+
+The closure adds every module a member imports, transitively. In Python, that is every `import` and
+`from … import`, at any depth (inside functions too), together with each enclosing package's `__init__.py`. In
+TypeScript, it is every relative `import` or `export … from` specifier, `import type` included, and every relative
+dynamic `import()` or `require()` with a literal specifier. The standard library, the declared third-party distributions
+(`jsonschema`, `referencing`), `node:` builtins and bare npm specifiers are outside the plugin tree and are not
+bound. Because `index.ts` imports the whole Pi extension and the Claude and Codex transports run their packages'
+`__init__`, an edit to a Pi UI module or to a Claude or Codex hook translator also invalidates installed
+qualification. No file is excluded by name; a file is outside the manifest only because no root reaches it. That
+covers:
+
+- `adapters/pi/private_bridge.py`, which `private-transport.ts` spawns: it dispatches only the private ingress
+  operations and refuses any other, so it cannot carry a public `ObserveAction`, and every module it imports is
+  already bound;
+- the observer process (`adapters/observer/`, `application/observer*.py`, `core/observer.py`,
+  `core/spike_observer.py`) and the web UI (`plugins/empirica/ui/`), which display the already-persisted binding;
+- the hook entry points `hooks/*.py` and the Claude driver `adapters/claude/lifecycle.py`, lifecycle gates that no
+  root imports. The Codex
+  driver `adapters/codex/lifecycle.py` is inside only because `adapters/codex/__init__.py`, which
+  `codex/transport.py` runs, imports it, so an edit to the Codex driver invalidates installed qualification and the
+  same edit to the Claude driver does not;
+- the two qualify/install scripts, thin argument adapters over `generic_qualification.py`;
+- the Pi compatibility inventories `adapters/pi/compat/*.json`, which describe the separately installed pi-subagents
+  audit runtime.
+
+`make empirica-manifest-check` (`scripts/check_implementation_manifest.py`, in `check-static`) is a drift guard
+against ordinary omissions by trusted repository authors, not a sandbox against an adversarial author, who could
+edit the list itself. It derives the closure and fails when the list differs from it in either direction, when an
+imported module resolves to no file and is not outside the plugin tree (a name imported from a package must be bound
+by its `__init__.py`), when the roots list above and `IMPLEMENTATION_ROOTS` differ in either direction, or when an
+import takes a conventional form it cannot follow: Python dynamic loading, refused outright (any import or use of
+`importlib`, `__import__` or `runpy`); a star import; `createRequire`; a `require` outside a literal call; or a
+non-literal `import()`/`require()`, comments before the parenthesis included. Three lines of `runtime-owner.ts` are exempt, each
+by its exact text, which must occur exactly once in the file: they import `createRequire`, resolve a specifier inside
+the installed pi-subagents package with it, and load that package; the last is a general loader, whose callers are
+trusted to pass only that resolved path. A load built at runtime is not seen, so the file it reaches is bound only if
+it is a root: `getattr`/`__builtins__`/`sys.modules` lookups, `pkgutil`/`pydoc` resolvers, `exec`, `new Function`,
+`process.getBuiltinModule`, `new Worker(new URL(…))`, constructed paths, a `require` hidden after a `//` or `/*`
+inside a string or template literal (the `require` scan removes comments without knowing strings, and a `/*` hides
+text up to the next `*/`, across lines; the `import`/`import()` patterns scan the raw text), and spawned processes (of those,
+`adapters/pi/bridge.py`, spawned by `stdio-transport.ts`, is a root, while `private_bridge.py`, spawned by
+`private-transport.ts`, and `adapters/observer/cli.py`, spawned by `observer-ui.ts`, are not). Bound code also reads data
+files from the plugin tree that are not authority inputs and are not bound: the auditor agent
+`agents/empirica-auditor.md`, the `plugin.json` versions, and `skills/empirica/SKILL.md`. Root contract duplicates
+are not runtime inputs: `make vendor-check` owns their byte identity with the vendored copies.
+
+Pi's private ingress (`private-transport.ts`, `private_bridge.py`) carries no public `ObserveAction` request and
+keeps the ordinary 30-second bound. Claude and Codex public entry adapters
 converge on `adapters.bridge.handle`; Pi converges through `adapters/pi/bridge.py` to the same bridge. None owns
 or can select a weaker harness.
 
 Empirica 6's public backend projection is covered by `make empirica-run3-check`: both exact closed
 RunView/GetArgument shapes, no diagnostic extension, exact host-owned profile selection only at `StartRun`, immutable persisted binding, rejection of every non-run/3 state discriminator without mutation,
 and a fresh run/3 generation. The same target binds the agent-visible 120/210/300/360 hierarchy and resource/no-evidence
-wording to the sandbox, Pi transport, and Claude MCP constants. `core/projection.py`, `core/observer.py`,
-`application/observer.py`, and the UI sources are deliberately outside `IMPLEMENTATION_SOURCE_PATHS`: they display the
-already-persisted binding and cannot select, resolve, execute, or admit a harness. The changed runtime-loaded
-`vendor/contracts/empirica/v2/public-contract.json` and response/request/public-tools schemas are inside the manifest,
-so this public-contract cutover still invalidates every earlier installed qualification. UI contract and fixture copies
+wording to the sandbox, Pi transport, and Claude MCP constants. UI contract and fixture copies
 are display-only and remain byte-owned by `make contract-fixtures`/`make vendor-contracts`.
 
 Every hermetic test module or shared driver that can reach the production bridge imports

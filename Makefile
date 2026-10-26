@@ -135,7 +135,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
@@ -331,7 +331,7 @@ adr-check: ## Check ADR link health and numbering (adrs doctor)
 		printf '$(DIM)adrs not installed — skipping$(RESET)\n'; \
 	fi
 
-.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits
+.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits empirica-manifest-check
 contract-fixtures: ## Regenerate the Empirica wire-fixture fields (contracts/empirica/v2/fixtures, from the real service), and the observer fixtures from build_store's FIXTURE_SCENARIOS through the real service and observer, into contracts/empirica-ui-view/v1/fixtures and its byte copy plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures (the built-in demo)
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
@@ -348,6 +348,10 @@ contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, 
 empirica-docker-support-contract-check: dev-python ## Validate the current-only normative Docker spike support contract, its emitted refusal codes, and the public evidence/spike/limits clause against the code constants
 	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py
 	@$(DEV_PYTHON) -m unittest -q scripts/tests/test_validate_docker_spike_contract.py
+
+empirica-manifest-check: ## Check that the implementation manifest (IMPLEMENTATION_SOURCE_PATHS) equals the import closure of its declared roots (doc/testing.md), and test the check against seeded trees
+	@$(PYTHON) -m unittest -q scripts/tests/test_check_implementation_manifest.py
+	@$(PYTHON) $(SCRIPTS)/check_implementation_manifest.py
 
 empirica-spike-limits: dev-python ## Rewrite the public-contract evidence/spike/limits clause from the code constants (then make vendor-contracts)
 	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py --write-limits

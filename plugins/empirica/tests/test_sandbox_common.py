@@ -167,24 +167,15 @@ class EnvironmentTests(unittest.TestCase):
         with self.assertRaises(environment.EnvironmentPreflightError):
             environment.validate_environment_identity({})
 
-    def test_implementation_manifest_is_closed_sorted_and_generic_only(self):
+    def test_implementation_manifest_is_closed_sorted_and_binds_every_listed_source(self):
+        # Membership is owned by the closure rule (doc/testing.md), checked by `make empirica-manifest-check`.
         paths = common.IMPLEMENTATION_SOURCE_PATHS
         self.assertEqual(paths, tuple(sorted(set(paths))))
-        for forbidden in (
-            "adapters/sandbox/docker.py", "adapters/sandbox/record.py",
-            "adapters/sandbox/selection.py", "adapters/sandbox/execution.py",
-        ):
-            self.assertNotIn(forbidden, paths)
-        required = {
-            "adapters/author_view.py", "adapters/invocation.py", "application/host_runtime.py",
-            "core/canonical.py", "core/spike_observer.py", "core/observer.py",
-        }
-        self.assertTrue(required.issubset(paths))
         manifest = common.implementation_manifest()
         self.assertEqual([row["path"] for row in manifest["files"]], list(paths))
         from core.canonical import canonical_digest
         original = manifest["implementation_digest"]
-        for path in required:
+        for path in paths:
             changed = [dict(row) for row in manifest["files"]]
             next(row for row in changed if row["path"] == path)["sha256"] = "sha256:" + "f" * 64
             self.assertNotEqual(canonical_digest({"files": changed}), original)
