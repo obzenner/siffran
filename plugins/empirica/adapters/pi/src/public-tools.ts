@@ -103,8 +103,69 @@ export const VENDORED_CONTRACT_DIR = path.resolve(
   "vendor", "contracts", "empirica", "v2",
 );
 
-const PUBLIC_TOOLS_PATH = path.join(VENDORED_CONTRACT_DIR, "public-tools.json");
+/** Read one vendored contract document; the one loader every adapter module shares. */
+export function readVendored(name: string): any {
+  return JSON.parse(readFileSync(path.join(VENDORED_CONTRACT_DIR, name), "utf8"));
+}
 
-export const PUBLIC_TOOLS = JSON.parse(
-  readFileSync(PUBLIC_TOOLS_PATH, "utf8"),
-) as PublicToolsProjection;
+export const PUBLIC_TOOLS = readVendored("public-tools.json") as PublicToolsProjection;
+
+type Schema = Record<string, any>;
+
+/** The vendored response and request schema definitions every derived contract value is read from. */
+export const RESPONSE_DEFS = readVendored("response.schema.json").$defs as Schema;
+export const REQUEST_DEFS = readVendored("request.schema.json").$defs as Schema;
+
+/** The closed string values an `enum`/`const` schema admits; any other shape refuses to load. */
+export function schemaValues<T extends string = string>(schema: Schema | undefined): ReadonlySet<T> {
+  const values: unknown[] = Array.isArray(schema?.enum) ? schema.enum
+    : schema !== undefined && "const" in schema ? [schema.const] : [];
+  if (values.length === 0 || !values.every((value) => typeof value === "string"))
+    throw new Error(`contract schema is not a closed string value set: ${JSON.stringify(schema)}`);
+  return new Set(values as T[]);
+}
+
+/** The one value a `const` schema admits; any other shape refuses to load. */
+export function schemaConst(schema: Schema | undefined): string {
+  if (typeof schema?.const !== "string")
+    throw new Error(`contract schema is not a string const: ${JSON.stringify(schema)}`);
+  return schema.const;
+}
+
+/** The one boolean a `const` schema admits; any other shape refuses to load. */
+export function schemaBoolean(schema: Schema | undefined): boolean {
+  if (typeof schema?.const !== "boolean")
+    throw new Error(`contract schema is not a boolean const: ${JSON.stringify(schema)}`);
+  return schema.const;
+}
+
+const PATTERN_KEYS = new Set(["type", "pattern", "description"]);
+
+/**
+ * The anchored pattern a string schema admits; any other admission keyword (`format`, `enum`, ...),
+ * an unanchored pattern, or a top-level alternation (`|`, which `^...$` would not anchor) refuses to load.
+ */
+export function schemaPattern(schema: Schema | undefined): RegExp {
+  const pattern = schema?.pattern;
+  if (schema?.type !== "string" || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key))
+      || typeof pattern !== "string" || !pattern.startsWith("^") || !pattern.endsWith("$")
+      || pattern.endsWith("\\$") || pattern.includes("|"))
+    throw new Error(`contract schema is not a closed anchored string pattern: ${JSON.stringify(schema)}`);
+  return new RegExp(pattern);
+}
+
+/** The branches of a nonempty `oneOf` schema; any other shape refuses to load. */
+export function schemaBranches(schema: Schema | undefined): readonly Schema[] {
+  if (!Array.isArray(schema?.oneOf) || schema.oneOf.length === 0)
+    throw new Error(`contract schema is not a closed oneOf: ${JSON.stringify(schema)}`);
+  return schema.oneOf;
+}
+
+/** The exact keys of a closed object schema (no extra properties, every property required). */
+export function closedKeys(schema: Schema | undefined): readonly string[] {
+  const keys = Object.keys(schema?.properties ?? {}).sort();
+  if (schema?.type !== "object" || schema.additionalProperties !== false || keys.length === 0
+      || !Array.isArray(schema.required) || [...schema.required].sort().join("\0") !== keys.join("\0"))
+    throw new Error(`contract schema is not a closed object: ${JSON.stringify(schema)}`);
+  return keys;
+}

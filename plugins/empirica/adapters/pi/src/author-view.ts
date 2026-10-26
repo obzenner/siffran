@@ -1,10 +1,7 @@
 // Schema-guarded, byte-identical TypeScript port of adapters/author_view.py.
-import { readFileSync } from "node:fs";
-import * as path from "node:path";
-
 import { PROTOCOL, isTerminalBatch, type Response } from "./contract.ts";
 import { assertResponse, objectWithKeys, rows, text, unique, validContractResult } from "./guard.ts";
-import { PUBLIC_TOOLS, VENDORED_CONTRACT_DIR, type AuthorViewLabel } from "./public-tools.ts";
+import { PUBLIC_TOOLS, RESPONSE_DEFS, readVendored, type AuthorViewLabel } from "./public-tools.ts";
 
 type Trusted = string & { readonly __trusted: unique symbol };
 type Untrusted = string & { readonly __untrusted: unique symbol };
@@ -63,11 +60,7 @@ interface AuthorView {
   readonly waiting: readonly string[];
 }
 
-const PUBLIC_CONTRACT = JSON.parse(readFileSync(
-  path.join(VENDORED_CONTRACT_DIR, "public-contract.json"), "utf8")) as Json;
-const RESPONSE_DEFS = (JSON.parse(readFileSync(
-  path.join(VENDORED_CONTRACT_DIR, "response.schema.json"), "utf8",
-)) as Json).$defs as Json;
+const PUBLIC_CONTRACT = readVendored("public-contract.json") as Json;
 const LABELS = PUBLIC_TOOLS.author_view.labels;
 const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);
 const CLAIM_ID_DEF = "claimId";

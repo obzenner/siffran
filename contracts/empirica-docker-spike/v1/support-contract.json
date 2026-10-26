@@ -132,7 +132,7 @@
       "id": "exact-cleanup",
       "obligation": "Cleanup is proved by exact recorded full-ID absence, not remove success.",
       "cli_input": "container/network rm <recorded-full-id>; inspect <same-full-id>",
-      "daemon_observation": "nonzero exit; stdout empty or the docker/cli empty JSON list []; anchored No such resource: ID or resource ID not found",
+      "daemon_observation": "nonzero exit; stdout empty, [], or []\\n (docker/cli flushes []\\n); anchored No such resource: ID or resource ID not found",
       "allowed_forms": ["No such container: exact-ID", "container exact-ID not found", "No such network: exact-ID", "network exact-ID not found"],
       "refusal_reason": "cleanup-unavailable",
       "evidence": "plugins/empirica/tests/fixtures/docker/generic-linux-v27.json#absence_stderr"

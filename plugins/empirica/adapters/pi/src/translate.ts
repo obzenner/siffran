@@ -18,6 +18,7 @@ import {
   type RunSelector,
   type SpikeProfile,
 } from "./contract.ts";
+import { REQUEST_DEFS, schemaValues } from "./public-tools.ts";
 import type { SubagentInventory } from "./subagent-inventory.ts";
 
 // The convergence gate's intent and the tool/command name it guards. A run may
@@ -52,7 +53,8 @@ export function parseInvocationFlags(args: string): ParsedInvocationFlags {
 // --- Pi invocation -> Request -----------------------------------------------
 
 export const SPIKE_PROFILE_ENV = "EMPIRICA_SPIKE_PROFILE";
-const SPIKE_PROFILES = new Set<SpikeProfile>(["docker-isolated-v1", "docker-networked-v1"]);
+/** The host-selectable profiles: exactly the vendored request schema's StartRun `spike_profile` enum. */
+export const SPIKE_PROFILES = schemaValues<SpikeProfile>(REQUEST_DEFS.startRun?.properties?.spike_profile);
 
 /** Read one exact host-process profile at session start; configured malformed values refuse. */
 export function configuredSpikeProfile(
@@ -61,7 +63,7 @@ export function configuredSpikeProfile(
   if (!Object.hasOwn(environ, SPIKE_PROFILE_ENV)) return undefined;
   const value = environ[SPIKE_PROFILE_ENV];
   if (!SPIKE_PROFILES.has(value as SpikeProfile))
-    throw new Error(`${SPIKE_PROFILE_ENV} must be docker-isolated-v1 or docker-networked-v1`);
+    throw new Error(`${SPIKE_PROFILE_ENV} must be ${[...SPIKE_PROFILES].join(" or ")}`);
   return value as SpikeProfile;
 }
 

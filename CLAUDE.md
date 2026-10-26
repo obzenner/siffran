@@ -94,9 +94,9 @@ All methodologies must be rooted in computer science, mathematics, or establishe
 ## Validation
 
 ```
-make check          # fast static + core + Claude + Codex + Pi contributor gate
-make check-ci       # fast gate without Pi; PI_CHECKS=1 opts Pi in
-make check-<suite>  # static | core | claude | codex | pi — the one you are working in
+make check          # the eight fast suites in parallel: static, core, evidence, observer, claude, codex, pi, ui
+make check-ci       # the fast gate without Pi and UI; PI_CHECKS=1 opts them in
+make check-<suite>  # static | core | evidence | observer | claude | codex | pi | ui — the one you are working in
 make test           # all fast deterministic tests, including Pi
 make native-qualification  # operator procedure entrypoint; launches nothing
 make validate       # manifests only

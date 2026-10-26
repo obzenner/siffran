@@ -6,16 +6,29 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { assertResponse, GuardError } from "../src/guard.ts";
-import type { Response, RunStatus } from "../src/contract.ts";
+import {
+  allowRunStatuses, assertResponse, DIGEST, FAIL_DIRECTIONS, FAULT_CODES, GuardError, INERT_REASONS, RUN_STATUSES,
+  SPIKE_BACKEND_KINDS, SPIKE_PROFILE_IDS, spikeBackendChecks,
+} from "../src/guard.ts";
+import {
+  PROTOCOL, type FailDirection, type FaultCode, type InertReason, type Response, type RunStatus, type SpikeBackend,
+  type SpikeProfile,
+} from "../src/contract.ts";
 
 const RID = "rid-1";
+// The raw vendored schemas and the repository fixtures, read independently of the code under test.
+const PLUGIN = join(import.meta.dirname, "..", "..", "..");
+const VENDORED = join(PLUGIN, "vendor", "contracts", "empirica", "v2");
+const readJson = (file: string) => JSON.parse(readFileSync(file, "utf8"));
+const RESPONSE = readJson(join(VENDORED, "response.schema.json"));
+const DEFS = RESPONSE.$defs;
+const FIXTURES = join(PLUGIN, "..", "..", "contracts", "empirica", "v2", "fixtures");
 
 function ok(result: Response["result"]): Response {
-  return { protocol: "empirica/v2", request_id: RID, result };
+  return { protocol: PROTOCOL, request_id: RID, result };
 }
 
 function run(status: RunStatus = "active") {
@@ -38,9 +51,9 @@ expectThrow("not an object (string)", "hello");
 expectThrow("wrong protocol", { ...ok({ type: "Inert", reason: "no_run" }), protocol: "empirica/v3" });
 expectThrow("missing protocol", { request_id: RID, result: { type: "Inert", reason: "no_run" } });
 expectThrow("request_id mismatch", ok({ type: "Inert", reason: "no_run" }), "other-rid");
-expectThrow("missing request_id", { protocol: "empirica/v2", result: { type: "Inert", reason: "no_run" } });
-expectThrow("result not an object", { protocol: "empirica/v2", request_id: RID, result: null });
-expectThrow("missing result", { protocol: "empirica/v2", request_id: RID });
+expectThrow("missing request_id", { protocol: PROTOCOL, result: { type: "Inert", reason: "no_run" } });
+expectThrow("result not an object", { protocol: PROTOCOL, request_id: RID, result: null });
+expectThrow("missing result", { protocol: PROTOCOL, request_id: RID });
 expectThrow("unknown result.type", ok({ type: "Wat" } as never));
 
 // --- Allow mutations ---------------------------------------------------------
@@ -64,6 +77,14 @@ for (const [label, spike_backend] of [
     qualification_record_digest: `sha256:${"a".repeat(64)}`, execution_binding_digest: `sha256:${"b".repeat(64)}` }],
   ["qualified bad digest", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
     qualification_record_digest: "sha256:no", execution_binding_digest: `sha256:${"b".repeat(64)}` }],
+  ["qualified extra field", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
+    qualification_record_digest: `sha256:${"a".repeat(64)}`, execution_binding_digest: `sha256:${"b".repeat(64)}`,
+    healthy: true }],
+  ["qualified numeric digest", { kind: "qualified", backend: "docker", profile_id: "docker-isolated-v1",
+    qualification_record_digest: 7, execution_binding_digest: `sha256:${"b".repeat(64)}` }],
+  ["unknown kind", { kind: "docker" }],
+  ["missing kind", {}],
+  ["array", ["spikes_unavailable"]],
 ] as const) expectThrow(`Allow run.spike_backend ${label}`, ok({ type: "Allow", converged: false,
   run: { id: "r", status: "active", spike_backend } } as never));
 
@@ -146,7 +167,7 @@ test("the guard admits the run-less contract Allow only for GetContract and only
   const contract = JSON.parse(readFileSync(join(import.meta.dirname, "author-view-golden",
     "getcontract-section.json"), "utf8")).result.contract_result;
   const valid = { ...contract, digest: "sha256:" + "b".repeat(64) };
-  const wrap = (result: unknown) => ({ protocol: "empirica/v2", request_id: RID, result });
+  const wrap = (result: unknown) => ({ protocol: PROTOCOL, request_id: RID, result });
   assert.doesNotThrow(() => assertResponse(wrap({ type: "Allow", contract_result: valid }), RID, "GetContract"));
   for (const [label, result, command] of [
     ["another command", { type: "Allow", contract_result: valid }, "GetRun"],
@@ -156,4 +177,84 @@ test("the guard admits the run-less contract Allow only for GetContract and only
     ["run Allow", { type: "Allow", converged: false, run: run() }, "GetContract"],
   ] as const)
     assert.throws(() => assertResponse(wrap(result), RID, command), GuardError, label);
+});
+
+// --- every contract value the guard checks is the vendored schema's ----------
+// Each exhaustive record fails tsc on a missing or extra type member, so the type alias, the guard's
+// derived runtime set and the raw vendored schema enum cannot drift apart.
+
+const RUN_STATUS_MEMBERS: Record<RunStatus, true> = {
+  active: true, converged: true, stopped_residual: true, stopped_frozen: true, stopped_budget: true,
+};
+const INERT_REASON_MEMBERS: Record<InertReason, true> = { no_run: true, unsupported_host_event: true };
+const FAULT_CODE_MEMBERS: Record<FaultCode, true> = {
+  invalid_request: true, unsupported: true, conflict: true, corrupt_run: true, corrupt_artifacts: true,
+  unavailable: true,
+};
+const FAIL_DIRECTION_MEMBERS: Record<FailDirection, true> = { open: true, closed: true };
+const SPIKE_PROFILE_MEMBERS: Record<SpikeProfile, true> = { "docker-isolated-v1": true, "docker-networked-v1": true };
+const qualifiedBackend = DEFS.spikeBackend.oneOf.find(
+  (branch: { properties: { kind: { const: string } } }) => branch.properties.kind.const === "qualified");
+
+for (const [label, derived, members, schemaEnum] of [
+  ["run status", RUN_STATUSES, RUN_STATUS_MEMBERS, DEFS.runView.properties.status.enum],
+  ["inert reason", INERT_REASONS, INERT_REASON_MEMBERS, DEFS.inert.properties.reason.enum],
+  ["fault code", FAULT_CODES, FAULT_CODE_MEMBERS, DEFS.fault.properties.code.enum],
+  ["fail direction", FAIL_DIRECTIONS, FAIL_DIRECTION_MEMBERS, DEFS.fault.properties.fail_direction.enum],
+  ["spike profile", SPIKE_PROFILE_IDS, SPIKE_PROFILE_MEMBERS, qualifiedBackend.properties.profile_id.enum],
+] as const) test(`the guard's ${label} set is exactly the type's members and the vendored schema enum`, () => {
+  assert.deepEqual([...derived].sort(), Object.keys(members).sort());
+  assert.deepEqual([...derived].sort(), [...schemaEnum].sort());
+});
+
+test("the spike-backend kind type, the guard's derived kinds and the vendored oneOf kinds are one set", () => {
+  const members: Record<SpikeBackend["kind"], true> = { spikes_unavailable: true, qualified: true };
+  const schemaKinds = DEFS.spikeBackend.oneOf.map((branch: { properties: { kind: { const: string } } }) =>
+    branch.properties.kind.const).sort();
+  assert.deepEqual([...SPIKE_BACKEND_KINDS].sort(), Object.keys(members).sort());
+  assert.deepEqual([...SPIKE_BACKEND_KINDS].sort(), schemaKinds);
+});
+
+test("the spike-backend derivation refuses at load a schema without unique kinds or a oneOf", () => {
+  assert.equal(spikeBackendChecks(DEFS.spikeBackend).size, DEFS.spikeBackend.oneOf.length);
+  const [first] = DEFS.spikeBackend.oneOf;
+  assert.throws(() => spikeBackendChecks({ oneOf: [first, first] }), /kind consts are not unique/);
+  assert.throws(() => spikeBackendChecks({ anyOf: DEFS.spikeBackend.oneOf }), /not a closed oneOf/);
+});
+
+test("the Allow cross-invariant derivation refuses at load a non-boolean or duplicate converged const", () => {
+  const statuses = allowRunStatuses(DEFS);
+  assert.deepEqual([...statuses.keys()].sort(), [false, true]);
+  const withConverged = (name: string, converged: unknown) => ({ ...DEFS, [name]: { ...DEFS[name],
+    properties: { ...DEFS[name].properties, converged } } });
+  assert.throws(() => allowRunStatuses(withConverged("allowConverged", { const: "true" })), /not a boolean const/);
+  assert.throws(() => allowRunStatuses(withConverged("allowConverged", { const: false })), /converged consts are not distinct/);
+});
+
+test("the guard's one digest pattern and the protocol are the vendored schema's", () => {
+  assert.equal(DIGEST.source, DEFS.digest256.pattern);
+  assert.equal(DIGEST.flags, "");
+  assert.equal(PROTOCOL, RESPONSE.properties.protocol.const);
+});
+
+test("the guard accepts every repository response fixture", () => {
+  const files = readdirSync(FIXTURES).filter((name) => name.endsWith(".json")).sort();
+  const responses = files.map((name) => readJson(join(FIXTURES, name))).filter((fixture) => "expected" in fixture);
+  assert.ok(responses.length >= 28, `expected the response fixtures, found ${responses.length}`);
+  for (const { request, expected } of responses)
+    assert.doesNotThrow(() => assertResponse(expected, expected.request_id, request.command.type), request.request_id);
+});
+
+test("the guard refuses a contract index of another contract identity", () => {
+  const golden = readJson(join(import.meta.dirname, "author-view-golden", "getcontract-index.json")).result.contract_result;
+  const index = { ...golden, digest: "sha256:" + "b".repeat(64) };
+  const wrap = (contract_result: unknown) => ({ protocol: PROTOCOL, request_id: RID,
+    result: { type: "Allow", contract_result } });
+  assert.doesNotThrow(() => assertResponse(wrap(index), RID, "GetContract"));
+  for (const [label, changed] of [
+    ["version", { ...index.index, version: "5.0.0" }],
+    ["id", { ...index.index, id: "empirica/private" }],
+    ["extra key", { ...index.index, extra: [] }],
+  ] as const)
+    assert.throws(() => assertResponse(wrap({ ...index, index: changed }), RID, "GetContract"), GuardError, label);
 });

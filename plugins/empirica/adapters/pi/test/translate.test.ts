@@ -16,6 +16,7 @@ import * as path from "node:path";
 import {
   startRunRequest,
   configuredSpikeProfile,
+  SPIKE_PROFILES,
   splitLeadingFlags,
   parseInvocationFlags,
   gateFromDecision,
@@ -31,7 +32,7 @@ import {
 import { compareVersions } from "../src/host-profile.ts";
 import { loadInventory, type ReviewedInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
 import { reviewedVersions } from "./compat-versions.ts";
-import { type Result } from "../src/contract.ts";
+import { type Result, type SpikeProfile } from "../src/contract.ts";
 
 const SEL = { project: "p", session: "s" };
 const RID = "rid-1";
@@ -68,6 +69,18 @@ test("host profile is exact, optional, and only emitted when supplied", () => {
   }
   for (const value of ["", "docker-rust-v1", " docker-isolated-v1", "other"])
     assert.throws(() => configuredSpikeProfile({ EMPIRICA_SPIKE_PROFILE: value }), /EMPIRICA_SPIKE_PROFILE/);
+});
+
+test("the selectable host profiles are exactly the vendored StartRun spike_profile enum", () => {
+  const request = JSON.parse(readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)),
+    "../../../vendor/contracts/empirica/v2/request.schema.json"), "utf8"));
+  const members: Record<SpikeProfile, true> = { "docker-isolated-v1": true, "docker-networked-v1": true };
+  // Schema order: the set and the refusal message follow the enum as written, not a sorted copy.
+  const enumValues: string[] = request.$defs.startRun.properties.spike_profile.enum;
+  assert.deepEqual([...SPIKE_PROFILES], enumValues);
+  assert.deepEqual(Object.keys(members).sort(), [...enumValues].sort());
+  assert.throws(() => configuredSpikeProfile({ EMPIRICA_SPIKE_PROFILE: "x" }),
+    { message: `EMPIRICA_SPIKE_PROFILE must be ${enumValues.join(" or ")}` });
 });
 
 // --- invocation flags --------------------------------------------------------
