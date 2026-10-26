@@ -711,6 +711,24 @@ class D6StrictRunStateTests(unittest.TestCase):
         run2["spike_backend"] = {"kind": "spikes_unavailable"}
         self.assertEqual(mod.classify_and_decode(run2).kind, "current_corrupt")
 
+    def test_a_schema_valid_state_the_decoder_refuses_is_current_corrupt(self):
+        """The schema's ``$`` also matches before a final newline; the decoder's ``fullmatch`` does not."""
+        mod = _import_run_state()
+        from application.protocol import schema_validator
+        for field in ("qualification_record_digest", "execution_binding_digest"):
+            with self.subTest(field=field):
+                raw = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+                raw["spike_backend"] = {
+                    "kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
+                    "qualification_record_digest": "sha256:" + "a" * 64,
+                    "execution_binding_digest": "sha256:" + "b" * 64}
+                self.assertEqual(mod.classify_and_decode(raw).kind, "valid")
+                raw["spike_backend"][field] += "\n"
+                schema_validator("state").validate(raw)
+                classified = mod.classify_and_decode(raw)
+                self.assertEqual(classified.kind, "current_corrupt")
+                self.assertIsNone(classified.state)
+
     def test_strict_state_roundtrip_no_defaults(self):
         """Valid committed fixture roundtrips through classify_and_decode → encode with no
         field defaults added."""

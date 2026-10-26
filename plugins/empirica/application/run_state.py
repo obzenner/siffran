@@ -164,4 +164,8 @@ def classify_and_decode(raw: Any) -> Classification:
         return Classification("current_corrupt")
     if not _procedural_ok(raw):
         return Classification("current_corrupt")
-    return Classification("valid", decode_state(raw))
+    try:
+        state = decode_state(raw)
+    except (KeyError, TypeError, ValueError):  # the schema is looser than the decoder (e.g. `$` before "\n")
+        return Classification("current_corrupt")
+    return Classification("valid", state)
