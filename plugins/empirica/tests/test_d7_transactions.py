@@ -1674,6 +1674,55 @@ class D7TransactionTests(unittest.TestCase):
                 self.assertEqual(harness.calls, 1)
                 self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
 
+    def test_a_binding_changed_between_request_and_result_is_run_corrupt(self):
+        harness = Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+            self._qualified_spike_ready(harness, session="binding-changed")
+        mutated = []
+
+        def change_binding():
+            state = decode_state(runs.data[key].value)
+            backend = {**state.spike_backend, "execution_binding_digest": canonical_digest("another binding")}
+            runs.seq += 1
+            runs.data[key] = Present(encode_state(replace(state, spike_backend=backend)),
+                                     Revision(str(runs.seq)))
+            mutated.append(runs.data[key])
+
+        harness.before_result = change_binding
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        self.assertEqual(response["result"]["type"], "Block", response)
+        self.assertEqual([reason["code"] for reason in response["result"]["reasons"]], ["run.corrupt"])
+        self.assertEqual(harness.calls, 1)
+        self.assertEqual(runs.data[key], mutated[0])
+        self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
+
+    def test_a_canonicalized_draft_never_reaches_the_plan_spike_request_handler(self):
+        import itertools
+        from application import transaction
+        calls, raised = [], []
+
+        def recording(*args, **kwargs):
+            calls.append(args[1]["plan"]["inputs"])
+            try:
+                return plan(*args, **kwargs)
+            except Exception as exc:
+                raised.append(exc)
+                raise
+
+        plan = transaction.plan_spike_request
+        for order in itertools.permutations(("src/x.py", "sample.conf", "lib/a.py")):
+            with self.subTest(order=order), mock.patch.object(transaction, "plan_spike_request", recording):
+                coordinator, _, _, workspace, _, _, run_id, _, _ = \
+                    self._qualified_spike_ready(session="handler-" + "-".join(order))
+                workspace.write("sample.conf", b"k=v\n")
+                workspace.write("lib/a.py", b"a")
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": spike_action(*order)}, "spike")
+                self.assertEqual(response["result"]["type"], "Allow", response)
+                self.assertEqual(raised, [])
+                self.assertEqual(calls[-1], ["lib/a.py", "sample.conf", "src/x.py"])
+
     def test_concurrent_duplicate_calls_may_execute_twice_but_each_admits_once(self):
         first_harness, second_harness = Harness(), Harness()
         coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, action = \

@@ -708,7 +708,7 @@ class Coordinator:
             try:
                 decision = plan_spike_request(
                     snapshot, action, sealed_request_facts(sealed, backend))
-            except Exception:
+            except Exception:  # internal only: the draft is canonicalized above, so an author error is invalid_request
                 return self._fault(request_id, "unavailable")
             if decision.result_type != "Allow":
                 if not self._revision_unchanged(key, read.revision):
@@ -794,7 +794,7 @@ class Coordinator:
             if state.status != "active":
                 return self._inert(request_id)
             if dict(state.spike_backend) != committed_binding:
-                return self._fault(request_id, "unavailable")
+                return self._safe_block(key, request_id, "run.corrupt")  # the binding is immutable persisted state
             try:
                 snapshot = self._assemble(key, state, command, require_graph=True)
             except HistoryCorrupt:
