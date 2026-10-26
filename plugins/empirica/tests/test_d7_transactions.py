@@ -1248,8 +1248,10 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual(latest["observation_basis_digest"],
                          decode_state(runs.data[key].value).observation_basis_digest)
 
-    def _qualified_spike_ready(self, harness=None, *, session="qualified", resolver=None):
-        runs, artifacts_repo, workspace = Runs(), Artifacts(), Workspace()
+    def _qualified_spike_ready(self, harness=None, *, session="qualified", resolver=None,
+                               workspace=None, graph=None):
+        runs, artifacts_repo = Runs(), Artifacts()
+        workspace = Workspace() if workspace is None else workspace
         harness = harness if harness is not None else Harness()
         selector = QualifiedSelector()
         coordinator = ProductionCoordinator(
@@ -1261,7 +1263,7 @@ class D7TransactionTests(unittest.TestCase):
              "selector": {"project": "p", "session": session}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         activate_investigation(coordinator, run_id)
-        graph = {"root": "C0", "claims": [
+        graph = graph or {"root": "C0", "claims": [
             {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
             "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
@@ -1673,6 +1675,113 @@ class D7TransactionTests(unittest.TestCase):
                 self.assertEqual(response["result"]["type"], expected, response)
                 self.assertEqual(harness.calls, 1)
                 self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
+
+    def test_an_empty_capture_commits_request_and_result_with_one_execution(self):
+        from adapters.author_view import render_author_view
+        from adapters.execution import FilesystemWorkspace
+
+        class RealWorkspace(FilesystemWorkspace):
+            def write(self, path, content):
+                target = self.root / path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(content)
+
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        real = RealWorkspace(Path(temporary.name))
+        for path, content in CITED_SOURCES.items():
+            real.write(path, content)
+        (real.root / "emptydir").mkdir()
+        (real.root / "emptydir" / "link").symlink_to("../src/x.py")  # capture skips it: zero files
+        for label, workspace, inputs in (("no-declaration", None, []),
+                                         ("symlink-only-directory", real, ["emptydir"])):
+            with self.subTest(label):
+                harness = Harness()
+                coordinator, _, artifacts_repo, _, _, _, run_id, key, action = \
+                    self._qualified_spike_ready(harness, session="empty-" + label, workspace=workspace)
+                action["plan"]["inputs"] = inputs
+                response = coordinator.handle(
+                    {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+                self.assertEqual(response["result"]["type"], "Allow", response)
+                self.assertEqual(harness.calls, 1)
+                kinds = self._artifact_kinds(artifacts_repo, key)
+                self.assertEqual((kinds.count("spike_request"), kinds.count("spike")), (1, 1))
+                argument = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "argument")
+                self.assertEqual(argument["result"]["type"], "Allow", argument)
+                spike = next(item for item in argument["result"]["argument"]["artifacts"]
+                             if item["kind"] == "spike")
+                self.assertEqual((spike["file_bindings"], spike["spike_gate"]), ([], "PASS"))
+                self.assertEqual(coordinator.handle(
+                    {"type": "GetRun", "run_id": run_id}, "run")["result"]["type"], "Allow")
+                self.assertIn('"file_bindings":[]', render_author_view(argument["result"], strict=True))
+
+    def test_shared_path_drift_after_reobservation_admits_no_result(self):
+        workspace = Workspace()
+
+        class DriftOnAuthorityRecheck(ImageResolver):
+            armed = 0
+
+            def resolve(self, reference, backend):
+                if self.armed:
+                    self.armed += 1
+                    if self.armed == 3:  # reobserve_authority: after the input reobservation, before the commit
+                        workspace.write("src/x.py", b"drifted")
+                return super().resolve(reference, backend)
+
+        resolver, harness = DriftOnAuthorityRecheck(), Harness()
+        graph = {"root": "R", "claims": [
+            {"id": "R", "text": "r", "gating": True, "kind": "ordinary"},
+            {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"},
+            {"id": "C1", "text": "u", "gating": True, "kind": "needs-experiment"}],
+            "edges": [{"from": "R", "to": "C0", "type": "SupportedBy"},
+                      {"from": "R", "to": "C1", "type": "SupportedBy"}]}
+        coordinator, _, artifacts_repo, _, _, _, run_id, key, action = self._qualified_spike_ready(
+            harness, session="shared-drift", resolver=resolver, workspace=workspace, graph=graph)
+        research = coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {
+            "kind": "research", "claim_id": "C1", "source_kind": "code", "result": "supports",
+            "payload": {"source_ref": "test_d7_transactions.py",
+                        "citation": "Observation basis fixture."}}}, "research-c1")
+        self.assertEqual(research["result"]["type"], "Allow", research)
+        bound = coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                                    "action": spike_action("src/x.py", claim_id="C1")}, "spike-c1")
+        self.assertEqual(bound["result"]["type"], "Allow", bound)
+        resolver.armed = 1
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike-c0")
+        self.assertEqual((response["result"]["type"], response["result"]["code"]),
+                         ("Fault", "unavailable"), response)
+        self.assertEqual((resolver.armed, harness.calls), (3, 2))
+        kinds = self._artifact_kinds(artifacts_repo, key)
+        self.assertEqual((kinds.count("spike_request"), kinds.count("spike")), (2, 1))
+        argument = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "argument")
+        self.assertEqual([(item["claim_id"], [row["path"] for row in item["file_bindings"]])
+                          for item in argument["result"]["argument"]["artifacts"] if item["kind"] == "spike"],
+                         [("C1", ["src/x.py"])])
+
+    def test_a_missing_post_plan_observation_admits_no_result(self):
+        from application import transaction
+        from core.freshness import observations_digest
+        real, injected = transaction.Coordinator._post_plan, []
+
+        def without_rows(self, snapshot, state, domain, post_plan_observation=None):
+            if post_plan_observation is not None:  # the result commit: drop its sealed observations
+                injected.append(post_plan_observation.observations)
+                post_plan_observation = ObservationSnapshot(
+                    (), post_plan_observation.basis_id, observations_digest(()))
+            return real(self, snapshot, state, domain, post_plan_observation)
+
+        harness = Harness()
+        coordinator, _, artifacts_repo, _, _, _, run_id, key, action = \
+            self._qualified_spike_ready(harness, session="missing-coverage")
+        with mock.patch.object(transaction.Coordinator, "_post_plan", without_rows):
+            response = coordinator.handle(
+                {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
+        self.assertEqual((response["result"]["type"], response["result"]["code"]),
+                         ("Fault", "unavailable"), response)
+        self.assertEqual([[item.path for item in rows] for rows in injected], [["src/x.py"]])
+        self.assertEqual(harness.calls, 1)
+        kinds = self._artifact_kinds(artifacts_repo, key)
+        self.assertEqual((kinds.count("spike_request"), kinds.count("spike")), (1, 0))
 
     def test_a_binding_changed_between_request_and_result_is_run_corrupt(self):
         harness = Harness()

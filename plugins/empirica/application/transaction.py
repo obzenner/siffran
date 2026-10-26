@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from typing import Any
 
 from core.context_selector import select_sections
-from core.freshness import FileObservation, ObservationState, observations_digest
+from core.freshness import FileObservation, ObservationState, observations_digest, required_paths
 from core import governance
 from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSnapshot, audit_exclusions,
                              active_spike_heads as captured_heads, audit_binding,
@@ -845,6 +845,8 @@ class Coordinator:
         after_heads = captured_heads(history, graph)
         if before_heads == after_heads:
             return replace(snapshot, state=state, history=history, graph=graph)
+        # Exactly the files the heads after this commit bind: a superseded head's own paths drop out.
+        required = required_paths(after_heads)
         if post_plan_observation is None:
             observation = build_observation_snapshot(after_heads, self.workspace)
         else:
@@ -854,11 +856,12 @@ class Coordinator:
                 if prior is not None and prior != item:
                     raise ObservationUnavailable("post-plan observation changed during execution")
                 by_path[item.path] = item
-            rows = tuple(by_path[path] for path in sorted(by_path))
+            if any(path not in by_path for path in required):
+                raise ObservationUnavailable("post-plan observation coverage differs")
+            rows = tuple(by_path[path] for path in required)
             basis_id = digest([(item.path, item.state.value, item.sha256) for item in rows])
             observation = ObservationSnapshot(rows, basis_id, observations_digest(rows))
-        if tuple(item.path for item in observation.observations) != tuple(sorted({
-                binding.path for head in after_heads for binding in head.file_bindings})):
+        if tuple(item.path for item in observation.observations) != required:
             raise ObservationUnavailable("post-plan observation coverage differs")
         return replace(
             snapshot, state=state, history=history, graph=graph,

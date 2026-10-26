@@ -160,7 +160,8 @@ be to narrow or redesign, continue research, or arrange operator requalification
 A Fault without a reason is an internal host failure: retry once, then ask the operator. Never
 infer FAIL or use a host fallback.
 
-A passing result satisfies Fold 2 only while every bound file remains current. Re-submit the same
+A passing result satisfies Fold 2 only while every bound file remains current; a spike that captures
+no file binds none, so no workspace-file change can stale it. Re-submit the same
 closed plan through `spike_request` only when a changed binding requires re-gating and this run
 remains qualified; there is no separate re-gate action.
 

@@ -529,6 +529,88 @@ class EvidenceFreshnessTests(ConformanceCase):
         self.assertEqual(observed_paths, (_BOUND,),
                          "the new observation-history entry must be exactly the active bound path")
 
+    # S-EMPTY-INPUTS — a spike that captures no file binds none; a re-spike binds only its new inputs
+    def test_a_spike_without_inputs_binds_no_file_and_keeps_its_natural_outcome(self):
+        for exit_code, gate, state in ((0, "PASS", "approved"), (1, "FAIL", "discarded")):
+            with self.subTest(exit_code=exit_code):
+                drv = self.bind_driver(
+                    "S-EMPTY-INPUTS", "empty-inputs",
+                    "A spike that declares no inputs executes once, commits its request and "
+                    "result with no file binding and keeps its natural outcome; no workspace-file "
+                    "edit stales it")
+                run_id = self.start_run(drv, goal=self.GOAL)
+                root_id = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))["root"]
+                self.require_research_recorded(drv, run_id, root_id)
+                drv.workspace_write(_BOUND, b"v1")
+                request, result = self.require_approved_spike(
+                    drv, run_id, root_id, [], exit_code=exit_code)
+                self.assertEqual((request["inputs"], result["file_bindings"]), ([], []))
+                self.assertEqual(result["spike_gate"], gate)
+                drv.workspace_write(_BOUND, b"v2")
+                run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+                self.assertEqual(run["freshness"]["changes"], [])
+                self.assertEqual(self.get_argument_claim(drv, run_id, root_id)["state"], state)
+
+    def test_a_respike_binds_only_its_new_inputs(self):
+        a, b = _BOUND_C0, _BOUND_C1
+        for name, first, second in (("nonempty_to_empty", [a], []), ("empty_to_nonempty", [], [a]),
+                                    ("strict_subset", [a, b], [a]), ("disjoint", [a], [b])):
+            with self.subTest(variant=name):
+                drv = self.bind_driver(
+                    "S-EMPTY-INPUTS", name,
+                    "A passing re-spike of one claim supersedes its head: only the new inputs "
+                    "bind it, an obsolete path no longer stales it and a current one does")
+                run_id = self.start_run(drv, goal=self.GOAL)
+                root_id = self.require_graph_admitted(drv, run_id, canonical_graph(n_claims=1))["root"]
+                self.require_research_recorded(drv, run_id, root_id)
+                self.require_approved_spike(drv, run_id, root_id, first)
+                _, result = self.require_approved_spike(drv, run_id, root_id, second)
+                self.assertEqual([row["path"] for row in result["file_bindings"]], sorted(second))
+                active = self.find_one_argument_artifact(
+                    self.get_argument_artifacts(drv, run_id), kind="spike", claim_id=root_id, active=True)
+                self.assertEqual(active["artifact_id"], result["artifact_id"])
+                for obsolete in sorted(set(first) - set(second)):
+                    drv.workspace_write(obsolete, b"v2")
+                run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+                self.assertEqual(run["freshness"]["changes"], [])
+                self.assertEqual(self.get_argument_claim(drv, run_id, root_id)["state"], "approved")
+                for current in second:
+                    drv.workspace_write(current, b"v2")
+                    self.assert_block_reason(
+                        self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence")),
+                        "claim.spike_stale", parameters={"changes": [{"path": current, "state": "present"}]})
+
+    def test_a_superseded_shared_path_still_binds_the_other_claim(self):
+        drv = self.bind_driver(
+            "S-EMPTY-INPUTS", "shared-path",
+            "Two sibling experiments bind one file; when one re-spikes without it, the other keeps "
+            "its binding and observation and is the only one that file stales")
+        shared = _BOUND
+        graph = {"root": "R", "claims": [
+            {"id": "R", "text": "Two experiments support the root.", "gating": True, "kind": "ordinary"},
+            {"id": "C0", "text": "The first experiment passes.", "gating": True, "kind": "needs-experiment"},
+            {"id": "C1", "text": "The second experiment passes.", "gating": True, "kind": "needs-experiment"}],
+            "edges": [{"from": "R", "to": "C0", "type": "SupportedBy"},
+                      {"from": "R", "to": "C1", "type": "SupportedBy"}]}
+        run_id = self.start_run(drv, goal=self.GOAL)
+        self.require_graph_admitted(drv, run_id, graph)
+        for claim_id in ("C0", "C1"):
+            self.require_research_recorded(drv, run_id, claim_id)
+            self.require_approved_spike(drv, run_id, claim_id, [shared])
+        self.require_approved_spike(drv, run_id, "C0", [])
+        before = drv.workspace_observe_history()
+        self.dispatch(drv, get_run(run_id=run_id))
+        self.assertEqual(drv.workspace_observe_history()[len(before)][0], (shared,),
+                         "C1's binding still requires observing the shared path")
+        c1 = self.find_one_argument_artifact(
+            self.get_argument_artifacts(drv, run_id), kind="spike", claim_id="C1", active=True)
+        self.assertEqual([row["path"] for row in c1["file_bindings"]], [shared])
+        drv.workspace_write(shared, b"v2")
+        run = self.dispatch(drv, get_run(run_id=run_id))["result"]["run"]
+        self.assertEqual(run["freshness"]["changes"], [{"path": shared, "state": "present"}])
+        self.assertEqual(self.get_argument_claim(drv, run_id, "C0")["state"], "approved")
+        self.assertNotEqual(self.get_argument_claim(drv, run_id, "C1")["state"], "approved")
+
 
 if __name__ == "__main__":
     unittest.main()

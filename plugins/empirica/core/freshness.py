@@ -102,8 +102,8 @@ class ActiveSpikeHead:
             raise FreshnessContractError("claim_id must match " + CLAIM_ID_PATTERN)
         if not isinstance(self.harness_request_id, str) or not self.harness_request_id:
             raise FreshnessContractError("harness_request_id must be a nonempty string")
-        if not isinstance(self.file_bindings, tuple) or not self.file_bindings:
-            raise FreshnessContractError("file_bindings must be a nonempty tuple")
+        if not isinstance(self.file_bindings, tuple):
+            raise FreshnessContractError("file_bindings must be a tuple")
         paths = []
         for b in self.file_bindings:
             if not isinstance(b, FileBinding):

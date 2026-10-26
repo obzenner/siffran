@@ -356,6 +356,16 @@ def _spike_failed():
     return b, run
 
 
+def _spike_without_inputs(exit_code=0):
+    """A spike that captures no file binds none: the observer reads it as the gate and the author view do."""
+    def build():
+        b, run = _begin(f"spike-no-inputs-{exit_code}", [("C0", "needs-experiment", "The probe passes")], qualified=True)
+        b.research(run, "C0", ref="probe.md")
+        b.spike(run, "C0", "probe", {}, exit_code=exit_code)
+        return b, run
+    return build
+
+
 def _decision_rejected():
     b, run = _begin("decision-no", [("C0", "ordinary", "Root"), ("C1", "needs-decision", "Ship the cache")], [("C0", "C1")])
     digest = next(c["wording_digest"] for c in b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"]
@@ -443,6 +453,8 @@ VARIANTS = {
     "refuted": (_refuted, set()),
     "refuted_and_supported": (_refuted_and_supported, set()),
     "spike_failed": (_spike_failed, set()),
+    "spike_without_inputs": (_spike_without_inputs(), set()),
+    "spike_without_inputs_failed": (_spike_without_inputs(1), set()),
     "decision_rejected": (_decision_rejected, set()),
     "regraph_removed": (_regraph_removed, set()),
     "human_after_changed_pass": (_human_after_changed_pass, set()),

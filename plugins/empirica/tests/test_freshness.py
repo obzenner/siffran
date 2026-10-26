@@ -325,9 +325,21 @@ class CoreFactsImmutability(unittest.TestCase):
             ActiveSpikeHead(_d("h"), "c", "r",
                             (FileBinding("a", _d("x")), FileBinding("a", _d("y"))))
 
-    def test_binding_nonempty_required(self):
-        with self.assertRaises(FreshnessContractError):
-            ActiveSpikeHead(_d("h"), "c", "r", ())
+    def test_a_head_may_bind_no_files_and_no_file_can_stale_it(self):
+        # A spike that captured no file has no workspace-file freshness dependency (S-EMPTY-INPUTS).
+        empty = ActiveSpikeHead(_d("e"), "c", "r", ())
+        bound = ActiveSpikeHead(_d("b"), "c", "r", (FileBinding("a", _d("x")),))
+        self.assertEqual(required_paths((empty,)), ())
+        self.assertEqual(required_paths((empty, bound)), ("a",))
+        self.assertEqual(evaluate_freshness((empty,), ()), FreshnessEvaluation(()))
+        changed = evaluate_freshness((empty, bound), (FileObservation("a", PRESENT, _d("y")),))
+        self.assertEqual([head.artifact_id for head in changed.stale_heads], [_d("b")])
+
+    def test_bindings_must_be_a_tuple_of_file_bindings(self):
+        for bindings in ([], [FileBinding("a", _d("x"))], None, ("a",),
+                         (FileBinding("a", _d("x")), ("b", _d("y")))):
+            with self.subTest(bindings=bindings), self.assertRaises(FreshnessContractError):
+                ActiveSpikeHead(_d("h"), "c", "r", bindings)
 
     def test_head_ids_nonempty_opaque(self):
         with self.assertRaises(FreshnessContractError):
