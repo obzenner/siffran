@@ -170,7 +170,7 @@ def check_support_contract() -> None:
     jsonschema.Draft202012Validator(schema).validate(contract)
 
     profiles = contract["host_support"]["profiles"]
-    require(profiles == ["docker-isolated-v1", "docker-networked-v1"], "profiles differ")
+    require(profiles == sorted(spike_plan.NETWORK_PROFILES), "profiles differ")
     require(contract["qualification"]["probes"] == list(generic_qualification.PROBE_ORDER),
             "qualification probes differ")
     require(generic_qualification.TOTAL_QUALIFICATION_SECONDS

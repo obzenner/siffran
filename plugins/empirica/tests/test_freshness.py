@@ -354,6 +354,26 @@ class CoreFactsImmutability(unittest.TestCase):
         self.assertEqual(shared["$defs"]["claimId"],
                          {"type": "string", "pattern": fr.CLAIM_ID_PATTERN})
 
+    def test_core_digest_pattern_is_every_vendored_schema_digest256(self):
+        vendored = PLUGIN / "vendor" / "contracts" / "empirica" / "v2"
+        for name in ("state", "request", "response"):
+            with self.subTest(schema=name):
+                schema = json.loads((vendored / f"{name}.schema.json").read_text(encoding="utf-8"))
+                self.assertEqual(schema["$defs"]["digest256"],
+                                 {"type": "string", "pattern": fr.DIGEST256_PATTERN})
+
+    def test_is_digest256_accepts_only_the_exact_lowercase_form_of_a_plain_string(self):
+        class Text(str):
+            pass
+
+        self.assertTrue(fr.is_digest256("sha256:" + "0123456789abcdef" * 4))
+        for rejected in ("sha256:" + "A" * 64, "sha256:" + "0" * 63, "sha256:" + "0" * 65,
+                         "0" * 64, "sha512:" + "0" * 64, "sha256:" + "0" * 64 + "\n",
+                         " sha256:" + "0" * 64, Text("sha256:" + "0" * 64), None, 7,
+                         b"sha256:" + b"0" * 64):
+            with self.subTest(rejected=rejected):
+                self.assertFalse(fr.is_digest256(rejected))
+
 
 # --- proof 14: AST/import proof core freshness has no I/O imports/calls --------
 

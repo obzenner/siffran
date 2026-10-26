@@ -1532,5 +1532,37 @@ class LocationsTests(unittest.TestCase):
         self.assertIsNone(locations.repo("p"), "a symlinked record is refused")
 
 
+class HistoricalSpikeLiteralTests(unittest.TestCase):
+    """``core.spike_observer`` owns frozen literals by design; today they equal the current owners."""
+
+    def test_historical_profiles_and_digest_form_equal_the_current_owners(self):
+        from core import freshness, spike_observer, spike_plan
+        self.assertEqual(spike_observer._PROFILES, spike_plan.NETWORK_PROFILES)
+        self.assertEqual(spike_observer._DIGEST.pattern, freshness.DIGEST256_PATTERN)
+
+    def test_historical_backend_admits_exactly_the_current_qualified_bindings(self):
+        from core import spike_observer, spike_plan
+        digest = "sha256:" + "0" * 64
+
+        def qualified(**changes):
+            row = {"kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
+                   "qualification_record_digest": digest, "execution_binding_digest": digest}
+            return {**row, **changes}
+
+        cases = [qualified(profile_id=profile) for profile in sorted(spike_plan.NETWORK_PROFILES)] + [
+            {"kind": "spikes_unavailable"}, qualified(extra=True), qualified(backend="host"),
+            qualified(profile_id="docker-rust-v1"), qualified(execution_binding_digest=digest.upper()),
+            qualified(qualification_record_digest=digest + "\n"),
+        ]
+        for binding in cases:
+            with self.subTest(binding=binding):
+                try:
+                    spike_observer.backend(binding)
+                    admitted = True
+                except ValueError:
+                    admitted = False
+                self.assertEqual(admitted, spike_plan.spike_backend_kind(binding) == "qualified")
+
+
 if __name__ == "__main__":
     unittest.main()

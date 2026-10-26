@@ -194,7 +194,7 @@ def _validate_candidate_record(value: object) -> dict[str, Any]:
         raise GenericQualificationFailure(
             QualificationReason.INSTALL_VALIDATION_FAILED, "qualification record schema or shape is unknown")
     row = json.loads(json.dumps(value))
-    if row["profile_id"] not in planner.NETWORK_PROFILE_IDS:
+    if not isinstance(row["profile_id"], str) or row["profile_id"] not in spike_plan.NETWORK_PROFILES:
         raise GenericQualificationFailure(
             QualificationReason.INSTALL_VALIDATION_FAILED, "qualification profile is unknown")
     runtime = authority.validate_runtime(row["runtime"])
@@ -211,7 +211,7 @@ def _validate_candidate_record(value: object) -> dict[str, Any]:
         raise GenericQualificationFailure(
             QualificationReason.INSTALL_VALIDATION_FAILED, "qualification must contain five probes")
     row["probes"] = [validate_probe(probe, index) for index, probe in enumerate(row["probes"])]
-    expected_running = row["profile_id"] == "docker-networked-v1"
+    expected_running = row["profile_id"] == spike_plan.NETWORKED_PROFILE
     if row["probes"][-1]["running_network_membership"] is not expected_running \
             or any(probe["running_network_membership"] for probe in row["probes"][:-1]):
         raise GenericQualificationFailure(
@@ -463,7 +463,7 @@ class ProductionProbeKernel:
             script = "head -c 1048577 /dev/zero"
         elif name == "timeout":
             script = "sleep 30"
-        elif profile == "docker-isolated-v1":
+        elif profile == spike_plan.ISOLATED_PROFILE:
             script = ("if wget -q -T 3 -O /dev/null http://example.com/; "
                       "then exit 44; else exit 0; fi")
         else:
@@ -661,7 +661,7 @@ def qualify_to_candidate(
     kernel_factory: Callable[..., QualificationProbeKernel] = ProductionProbeKernel,
     clock: Callable[[], float] = time.monotonic,
 ) -> dict[str, Any]:
-    if profile_id not in planner.NETWORK_PROFILE_IDS:
+    if not isinstance(profile_id, str) or profile_id not in spike_plan.NETWORK_PROFILES:
         raise GenericQualificationFailure(
             QualificationReason.INVALID_INPUT, "qualification profile is unknown")
     began = clock()

@@ -14,11 +14,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from core import spike_plan
+from core.freshness import is_digest256
 from . import planner
 
 MAX_CONTROL_BYTES = 256 * 1024
 _FULL_ID = re.compile(r"^[0-9a-f]{64}$")
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ENV = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 
@@ -249,7 +249,7 @@ def full_id(value: object, path: str = "Docker full ID") -> str:
 
 
 def digest(value: object, path: str = "Docker digest") -> str:
-    if type(value) is not str or _DIGEST.fullmatch(value) is None:
+    if not is_digest256(value):
         raise DockerObservationError(path + " must be lowercase sha256")
     return value
 
@@ -446,7 +446,7 @@ def admit_static_container(
             or mount.get("Mode", "") not in ("", "ro")):
         raise DockerObservationError("container input bind differs")
     mode = host.get("NetworkMode")
-    if operation.backend.profile_id == "docker-isolated-v1":
+    if operation.backend.profile_id == spike_plan.ISOLATED_PROFILE:
         if mode != "none" or network_full_id is not None:
             raise DockerObservationError("isolated network mode differs")
         normalized_mode = "none"
@@ -515,7 +515,7 @@ def admit_terminal_container(
     if full_id(row.get("Id"), "terminal container Id") != full_id(container_full_id):
         raise DockerObservationError("terminal container Id differs")
     terminal = decode_terminal_container(row)
-    if operation.backend.profile_id == "docker-isolated-v1":
+    if operation.backend.profile_id == spike_plan.ISOLATED_PROFILE:
         if network_full_id is not None or any(name != "none" for name, _, _ in terminal.networks):
             raise DockerObservationError("terminal isolated network membership differs")
     else:
@@ -565,7 +565,7 @@ def admit_network_membership(
     container_full_id: str,
 ) -> NetworkMembershipObservation:
     """Qualification only: the exact owned bridge has exactly the verdict container attached."""
-    if operation.backend.profile_id != "docker-networked-v1":
+    if operation.backend.profile_id != spike_plan.NETWORKED_PROFILE:
         raise DockerObservationError("operation has no private network membership invariant")
     observed = admit_owned_network(operation, document, network_full_id=network_full_id,
                                    container_full_id=container_full_id)

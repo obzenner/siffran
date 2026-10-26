@@ -13,12 +13,11 @@ from application.generic_spike import GenericQualifiedBackend
 from core.canonical import canonical_digest
 from core.spike_plan import (
     BACKEND_OPERATION_TIMEOUT_SECONDS, FIXED_GID, FIXED_INPUTS, FIXED_TMPDIR, FIXED_UID,
-    FIXED_WORKDIR, FRAMEWORK_SPIKE_POLICY, SealedSpikeRequest, SpikePlanError,
+    FIXED_WORKDIR, FRAMEWORK_SPIKE_POLICY, NETWORKED_PROFILE, SealedSpikeRequest, SpikePlanError,
     WORKLOAD_TIMEOUT_SECONDS,
 )
 
 OPERATION_SCHEMA = "empirica.docker-operation-plan/2"
-NETWORK_PROFILE_IDS = ("docker-isolated-v1", "docker-networked-v1")
 IMAGE_INSPECT_FORMAT = (
     '{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}},'
     '"Volumes":{{json (index .Config "Volumes")}}}'
@@ -255,7 +254,7 @@ def compile_docker_operation(
     network = None
     network_mode = "none"
     commands: list[DockerCommand] = []
-    if backend.profile_id == "docker-networked-v1":
+    if backend.profile_id == NETWORKED_PROFILE:
         network_name = _resource_name(operation_id, "network")
         network_token = _full_id_token(operation_id, "network")
         network_labels = _labels(request, backend, run_id, operation_id, "network")

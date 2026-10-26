@@ -14,7 +14,10 @@ class PathContractError(FreshnessContractError): ...
 DigestContractError = CanonicalJSONError
 class ObservationContractError(FreshnessContractError): ...
 
-_DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
+# The one digest form; the literal is the vendored schemas' $defs/digest256 pattern (a test pins the
+# equality). Always applied with ``fullmatch``, so a trailing newline never matches.
+DIGEST256_PATTERN = r"^sha256:[0-9a-f]{64}$"
+_DIGEST_RE = re.compile(DIGEST256_PATTERN)
 # The one claim-identifier pattern; the literal mirrors shared-defs.json#/$defs/claimId (a test
 # pins the equality). The final lookahead means absolute end under both Python ``re.search`` and
 # ECMA-262 (``$`` would also match before a trailing newline in Python).
@@ -39,6 +42,11 @@ def validate_relative_posix_path(value) -> str:
         if segment in ("", ".", ".."):
             raise PathContractError("path has an empty/dot/dotdot segment")
     return value
+
+
+def is_digest256(value) -> bool:
+    """Whether ``value`` is a plain ``str`` in the exact lowercase ``sha256:<64 hex>`` form."""
+    return type(value) is str and _DIGEST_RE.fullmatch(value) is not None
 
 
 def validate_digest256(value) -> str:

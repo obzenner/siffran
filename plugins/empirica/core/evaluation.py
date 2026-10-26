@@ -9,7 +9,8 @@ from types import MappingProxyType
 from typing import Any
 
 from .canonical import canonical_digest
-from .freshness import ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, valid_claim_id
+from .freshness import (ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, is_digest256,
+                        valid_claim_id)
 from .run import OperationalState
 from . import citations, confirmation, governance, spike_plan, spike_plan_draft
 
@@ -804,15 +805,9 @@ def validate_sealed_spike_request(
     if type(sealed_facts) is not dict or set(sealed_facts) != required:
         raise ValueError("generic sealed request facts are not closed")
     backend = sealed_facts["backend"]
-    if (type(backend) is not dict
-            or set(backend) != {"kind", "backend", "profile_id",
-                                "qualification_record_digest", "execution_binding_digest"}
-            or backend.get("kind") != "qualified" or backend.get("backend") != "docker"
-            or backend.get("profile_id") not in spike_plan.NETWORK_PROFILES
-            or not _digest256(backend.get("qualification_record_digest"))
-            or not _digest256(backend.get("execution_binding_digest"))
-            or not _digest256(sealed_facts.get("snapshot_basis_id"))
-            or not _digest256(sealed_facts.get("snapshot_digest"))):
+    if (type(backend) is not dict or spike_plan.spike_backend_kind(backend) != "qualified"
+            or not is_digest256(sealed_facts.get("snapshot_basis_id"))
+            or not is_digest256(sealed_facts.get("snapshot_digest"))):
         raise ValueError("generic sealed request authority or snapshot facts are malformed")
     try:
         plan = spike_plan.sealed_plan_from_data(sealed_facts["plan"])
@@ -884,11 +879,6 @@ def plan_spike_request(
     return _decision(snapshot, state, artifacts=(sealed,))
 
 
-def _digest256(value: object) -> bool:
-    return (type(value) is str and len(value) == 71 and value.startswith("sha256:")
-            and all(character in "0123456789abcdef" for character in value[7:]))
-
-
 def _validated_generic_result_facts(
     request_body: Mapping[str, Any], result_facts: Mapping[str, Any],
     request_artifact_id: str,
@@ -914,13 +904,8 @@ def _validated_generic_result_facts(
     except (KeyError, spike_plan.SpikePlanError) as exc:
         raise ValueError("generic request identities are malformed") from exc
     backend = request_body.get("backend")
-    if (type(backend) is not dict
-            or set(backend) != {"kind", "backend", "profile_id",
-                                "qualification_record_digest", "execution_binding_digest"}
-            or backend.get("kind") != "qualified" or backend.get("backend") != "docker"
-            or backend.get("profile_id") != plan.network_profile
-            or not _digest256(backend.get("qualification_record_digest"))
-            or not _digest256(backend.get("execution_binding_digest"))):
+    if (type(backend) is not dict or spike_plan.spike_backend_kind(backend) != "qualified"
+            or backend["profile_id"] != plan.network_profile):
         raise ValueError("generic request authority is malformed")
     expected_run_id = "r-" + request_artifact_id.split(":", 1)[1][:32]
     if (result_facts["run_id"] != expected_run_id
@@ -932,7 +917,7 @@ def _validated_generic_result_facts(
     supplied_digest = result_facts["harness_result_digest"]
     digest_body = dict(result_facts)
     del digest_body["harness_result_digest"]
-    if not _digest256(supplied_digest) or digest(digest_body) != supplied_digest:
+    if not is_digest256(supplied_digest) or digest(digest_body) != supplied_digest:
         raise ValueError("generic harness result digest is invalid")
     if (result_facts["cleanup_proven"] is not True
             or result_facts["postflight_identity_digest"]
@@ -944,7 +929,7 @@ def _validated_generic_result_facts(
     }
     operation = result_facts["operation_facts"]
     if (type(operation) is not dict or set(operation) != operation_fields
-            or any(not _digest256(value) for value in operation.values())
+            or any(not is_digest256(value) for value in operation.values())
             or operation["qualification_record_digest"]
             != backend["qualification_record_digest"]
             or operation["execution_binding_digest"] != backend["execution_binding_digest"]
@@ -958,7 +943,7 @@ def _validated_generic_result_facts(
                 or type(stream["bytes_seen"]) is not int
                 or isinstance(stream["bytes_seen"], bool)
                 or not 0 <= stream["bytes_seen"] <= ceiling
-                or not _digest256(stream["sha256"])):
+                or not is_digest256(stream["sha256"])):
             raise ValueError("generic stream facts exceed the sealed policy")
     exit_code = result_facts["exit_code"]
     verdict = result_facts["verdict"]

@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 
 from application import protocol as _proto
+from core.spike_plan import NETWORK_PROFILES
 
 
 #: Reviewed mapping from a Claude auditor tool to the retrieval kinds it is observed to cover. ``Read``,
@@ -15,7 +16,6 @@ from application import protocol as _proto
 _CLAUDE_TOOL_RETRIEVAL = {"Read": ("local", "workspace")}
 _CLAUDE_AUDITOR = Path(__file__).resolve().parents[1] / "agents" / "empirica-auditor.md"
 SPIKE_PROFILE_ENV = "EMPIRICA_SPIKE_PROFILE"
-SPIKE_PROFILES = frozenset({"docker-isolated-v1", "docker-networked-v1"})
 
 
 def configured_spike_profile(environ: Mapping[str, str]) -> str | None:
@@ -23,9 +23,9 @@ def configured_spike_profile(environ: Mapping[str, str]) -> str | None:
     if SPIKE_PROFILE_ENV not in environ:
         return None
     value = environ[SPIKE_PROFILE_ENV]
-    if value not in SPIKE_PROFILES:
+    if value not in NETWORK_PROFILES:
         raise ValueError(
-            f"{SPIKE_PROFILE_ENV} must be docker-isolated-v1 or docker-networked-v1")
+            f"{SPIKE_PROFILE_ENV} must be {' or '.join(sorted(NETWORK_PROFILES))}")
     return value
 
 

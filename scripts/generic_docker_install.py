@@ -15,7 +15,7 @@ from adapters.sandbox import generic_qualification as qualification  # noqa: E40
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", required=True, choices=sorted(qualification.planner.NETWORK_PROFILE_IDS))
+    parser.add_argument("--profile", required=True, choices=sorted(qualification.spike_plan.NETWORK_PROFILES))
     parser.add_argument("--candidate", required=True, type=Path)
     parser.add_argument("--sandbox-home", required=True, type=Path)
     args = parser.parse_args()

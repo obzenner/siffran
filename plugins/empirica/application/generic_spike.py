@@ -41,10 +41,8 @@ class GenericQualifiedBackend:
     execution_binding_digest: str
 
     def __post_init__(self) -> None:
-        if self.backend != "docker" or self.profile_id not in spike_plan.NETWORK_PROFILES:
+        if spike_plan.spike_backend_kind(self.to_data()) != "qualified":
             raise ValueError("generic backend profile is not closed")
-        validate_digest256(self.qualification_record_digest)
-        validate_digest256(self.execution_binding_digest)
 
     def to_data(self) -> dict[str, str]:
         return {

@@ -11,7 +11,7 @@ from enum import Enum
 from typing import Any, Mapping
 
 from .canonical import canonical_digest
-from .freshness import validate_digest256, validate_relative_posix_path
+from .freshness import is_digest256, validate_digest256, validate_relative_posix_path
 
 PLAN_SCHEMA = "empirica.spike-plan/2"
 POLICY_SCHEMA = "empirica.spike-plan-policy/2"
@@ -40,10 +40,15 @@ MEMORY_BYTES = 2 * 1024 * 1024 * 1024
 PIDS = 256
 OPEN_FILES = 1024
 STREAM_BYTES = 1024 * 1024
-NETWORK_PROFILES = frozenset({"docker-isolated-v1", "docker-networked-v1"})
+# The one code owner of the profile ids; a test pins it to every vendored schema profile enum.
+ISOLATED_PROFILE = "docker-isolated-v1"
+NETWORKED_PROFILE = "docker-networked-v1"
+NETWORK_PROFILES = frozenset({ISOLATED_PROFILE, NETWORKED_PROFILE})
+QUALIFIED_BACKEND_FIELDS = frozenset({
+    "kind", "backend", "profile_id", "qualification_record_digest", "execution_binding_digest",
+})
 
 _ARCHITECTURE_ALIASES = {"aarch64": "arm64", "x86_64": "amd64"}
-_IMAGE_ID = re.compile(r"^sha256:[0-9a-f]{64}$")
 _IMAGE_PREFIX = re.compile(r"^(?:sha256:)?[0-9a-f]{12,64}$")
 _REPO_DIGEST = re.compile(r"^(.+)@sha256:[0-9a-f]{64}$")
 _TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
@@ -56,6 +61,21 @@ _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 class SpikePlanError(ValueError):
     """A pure author or host-sealed plan fact is malformed."""
+
+
+def spike_backend_kind(value: object) -> str | None:
+    """The kind of an exact closed spike backend binding (``spikeBackend``), else ``None``."""
+    if not isinstance(value, Mapping):
+        return None
+    if set(value) == {"kind"} and value["kind"] == "spikes_unavailable":
+        return "spikes_unavailable"
+    if (set(value) == QUALIFIED_BACKEND_FIELDS and value["kind"] == "qualified"
+            and value["backend"] == "docker"
+            and type(value["profile_id"]) is str and value["profile_id"] in NETWORK_PROFILES
+            and is_digest256(value["qualification_record_digest"])
+            and is_digest256(value["execution_binding_digest"])):
+        return "qualified"
+    return None
 
 
 class NaturalVerdict(Enum):
@@ -103,7 +123,7 @@ def validate_local_image_reference(value: object) -> str:
     """Validate syntax only; locality and prefix ambiguity are host-owned effects."""
     text = _bounded_text(
         value, "image reference", nonempty=True, maximum=MAX_IMAGE_REFERENCE_BYTES)
-    if _IMAGE_ID.fullmatch(text) or _IMAGE_PREFIX.fullmatch(text):
+    if is_digest256(text) or _IMAGE_PREFIX.fullmatch(text):
         return text
     digest = _REPO_DIGEST.fullmatch(text)
     if digest is not None:

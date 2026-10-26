@@ -2,11 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import re
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from . import governance
+from . import governance, spike_plan
 
 
 def delegated_auto(command: Mapping[str, Any]) -> bool:
@@ -90,19 +89,9 @@ class OperationalState:
         binding = self.spike_backend
         if not isinstance(binding, Mapping):
             raise ValueError("run/3 requires a spike backend binding")
-        qualified = {
-            "kind", "backend", "profile_id", "qualification_record_digest",
-            "execution_binding_digest",
-        }
-        if binding.get("kind") == "qualified":
-            if (set(binding) != qualified or binding.get("backend") != "docker"
-                    or binding.get("profile_id") not in {
-                        "docker-isolated-v1", "docker-networked-v1"}
-                    or any(not isinstance(binding.get(key), str)
-                           or re.fullmatch(r"sha256:[0-9a-f]{64}", binding[key]) is None
-                           for key in ("qualification_record_digest", "execution_binding_digest"))):
+        if spike_plan.spike_backend_kind(binding) is None:
+            if binding.get("kind") == "qualified":
                 raise ValueError("run/3 qualified spike backend is malformed")
-        elif set(binding) != {"kind"} or binding.get("kind") != "spikes_unavailable":
             raise ValueError("run/3 unavailable spike backend is malformed")
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))

@@ -2,15 +2,14 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 from core.canonical import canonical_json
 from core.evaluation import (EvaluationSnapshot, active_spike_heads, digest,
                              frozen_scope_invalid, graph_refusal)
 from core import citations
-from core.freshness import (FileObservation, FreshnessContractError, ObservationState, observations_digest,
-                            required_paths)
+from core.freshness import (FileObservation, FreshnessContractError, ObservationState, is_digest256,
+                            observations_digest, required_paths)
 from .ports import ObservationSnapshot
 from core.records import Artifact
 from core.run import OperationalState
@@ -23,8 +22,6 @@ from .history_records import (
 )
 from .observation import build_observation_snapshot
 from .run_state import encode_state
-
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class HistoryCorrupt(ValueError):
@@ -55,10 +52,6 @@ def _decode(value: Artifact) -> dict[str, Any]:
     return {"artifact_id": value.artifact_id, **body}
 
 
-def _valid_digest(value: Any) -> bool:
-    return type(value) is str and _DIGEST.fullmatch(value) is not None
-
-
 def _wrong_version(value: Any, expected: int) -> bool:
     return type(value) is not int or value != expected
 
@@ -71,14 +64,14 @@ def _manifest(value: Artifact) -> dict[str, Any]:
         raise HistoryCorrupt("malformed reachable manifest")
     parent = item["parent"]
     ids = item["artifact_ids"]
-    if (parent is not None and not _valid_digest(parent)) or not isinstance(ids, list):
+    if (parent is not None and not is_digest256(parent)) or not isinstance(ids, list):
         raise HistoryCorrupt("malformed manifest references")
-    if any(not _valid_digest(aid) for aid in ids) or len(ids) != len(set(ids)):
+    if any(not is_digest256(aid) for aid in ids) or len(ids) != len(set(ids)):
         raise HistoryCorrupt("malformed or duplicate manifest artifact IDs")
     if (type(item["observation_basis_id"]) is not str or not item["observation_basis_id"]
-            or not _valid_digest(item["observation_digest"])
-            or not _valid_digest(item["next_state_digest"])
-            or not _valid_digest(item["observation_basis_digest"])):
+            or not is_digest256(item["observation_digest"])
+            or not is_digest256(item["next_state_digest"])
+            or not is_digest256(item["observation_basis_digest"])):
         raise HistoryCorrupt("malformed manifest witnesses")
     return item
 
@@ -94,7 +87,7 @@ def _observation_basis(value: Artifact) -> dict[str, Any]:
     if (not isinstance(policy, dict) or set(policy) != POLICY_INPUT_KEYS
             or not all(type(policy[key]) is str and policy[key]
                        for key in ("contract_id", "contract_version", "profile_id"))
-            or not _valid_digest(policy["contract_digest"])
+            or not is_digest256(policy["contract_digest"])
             or item["clock_inputs"] != []):
         raise HistoryCorrupt("malformed observation basis")
     for source in item["sources"]:
@@ -102,7 +95,7 @@ def _observation_basis(value: Artifact) -> dict[str, Any]:
                 or set(source) != OBSERVATION_SOURCE_KEYS
                 or not isinstance(source["name"], str) or not source["name"]
                 or not isinstance(source["basis_id"], str) or not source["basis_id"]
-                or not _valid_digest(source["digest"])
+                or not is_digest256(source["digest"])
                 or not isinstance(source["observations"], list)):
             raise HistoryCorrupt("malformed observation basis source")
         observations = []
@@ -127,7 +120,7 @@ def index_artifacts(stored: Any) -> dict[str, Artifact]:
     by_id: dict[str, Artifact] = {}
     try:
         for value in values:
-            if not isinstance(value, Artifact) or not _valid_digest(value.artifact_id):
+            if not isinstance(value, Artifact) or not is_digest256(value.artifact_id):
                 continue
             prior = by_id.get(value.artifact_id)
             if prior is not None and prior != value:
@@ -140,7 +133,7 @@ def index_artifacts(stored: Any) -> dict[str, Artifact]:
 
 def manifest_chain(head: Any, by_id: dict[str, Artifact]) -> list[dict[str, Any]]:
     """The committed manifests from genesis to ``head``, following ``parent`` links; each must be present and well formed."""
-    if not _valid_digest(head):
+    if not is_digest256(head):
         raise HistoryCorrupt("missing committed manifest head")
     chain: list[dict[str, Any]] = []
     seen: set[str] = set()

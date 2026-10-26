@@ -18,16 +18,15 @@ from typing import Any, Callable, Mapping, Protocol
 
 from application import generic_spike as application
 from core import spike_plan
+from core.freshness import is_digest256
 
 from . import common, generic_admission, planner, process
 
 RECORD_SCHEMA = "siffran.empirica.docker-spike-qualification-record/2"
 POINTER_SCHEMA = "siffran.empirica.docker-spike-qualification-pointer/2"
 NAMESPACE = "docker-spike-qualification-v2"
-PROFILES = planner.NETWORK_PROFILE_IDS
 MAX_RECORD_BYTES = 2 * 1024 * 1024
 MAX_POINTER_BYTES = 64 * 1024
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _CONTEXT = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 
 RUNTIME_REQUIRED = frozenset({
@@ -78,13 +77,13 @@ class ResolvedGenericAuthority:
 
 
 def _digest(value: object, where: str) -> str:
-    if type(value) is not str or _DIGEST.fullmatch(value) is None:
+    if not is_digest256(value):
         raise GenericQualificationError(where + " must be lowercase sha256")
     return value
 
 
 def _profile(value: object) -> str:
-    if type(value) is not str or value not in PROFILES:
+    if type(value) is not str or value not in spike_plan.NETWORK_PROFILES:
         raise GenericQualificationError("generic Docker profile is unknown")
     return value
 
@@ -259,7 +258,7 @@ class GenericBackendSelector:
         self.store = store
 
     def select(self, requested_profile: str | None = None):
-        profile = "docker-isolated-v1" if requested_profile is None else requested_profile
+        profile = spike_plan.ISOLATED_PROFILE if requested_profile is None else requested_profile
         try:
             self.store.check_runtime(profile)
             record = self.store.load_current(profile)
