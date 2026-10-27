@@ -137,7 +137,9 @@ zooms in, `−` steps out. Typing in a field is never a command (`app/keys.js`).
   not over (a run still asking breathes), and only when the person accepts motion.
 - `states.json` gives each contract value a tone, an icon and a copy prefix. **The value lists are generated**:
   `enums.json` comes from the contract's schemas (`make ui-enums`); `tests/contract.test.mjs` regenerates it and fails
-  on drift, and holds every vocabulary in `states.json` equal to its list.
+  on drift, and holds every vocabulary in `states.json` equal to its list. The spike backend's profiles, closed forms and
+  digest pattern, which `app/client.js` checks a sheet against, are projected there too; a backend shape the projection
+  does not check fails generation rather than being dropped.
 - Every user-visible string is in the copy catalogue (`t()`); `scripts/audit.mjs` fails on literal text, unused or
   missing keys, undeclared dynamic families and placeholders not supplied; it also keeps tokens, raw values and
   navigation honest.

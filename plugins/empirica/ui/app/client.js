@@ -5,14 +5,22 @@
 // One request per run's sheet is ever in flight. A page asked with a cursor from another published view is `stale`
 // (the server's 409): the caller starts the walk again. No DOM. Tested in tests/client.test.mjs.
 
+import enums from "../enums.json" with { type: "json" };
+
 const CONTRACT = "empirica-ui-view/v1";
 const isObject = (x) => x !== null && typeof x === "object" && !Array.isArray(x);
-const digest = (x) => typeof x === "string" && /^sha256:[0-9a-f]{64}$/.test(x);
-const validSpikeBackend = (x) => x === null || (isObject(x) && (x.kind === "spikes_unavailable"
-  ? Object.keys(x).length === 1
-  : x.kind === "qualified" && x.backend === "docker"
-    && ["docker-isolated-v1", "docker-networked-v1"].includes(x.profile_id)
-    && digest(x.qualification_record_digest) && digest(x.execution_binding_digest) && Object.keys(x).length === 5));
+const PATTERNS = Object.fromEntries(Object.entries(enums.patterns).map(([name, p]) => [name, new RegExp(p)]));
+/** Whether `v` fits one field of a generated form (scripts/enums.mjs FORMS): its const, a value of its list, or a string
+ * of its pattern. A form of any other shape fits nothing, so a form this check does not know refuses, never admits. */
+const fits = (form, v) => ("const" in form ? v === form.const
+  : "list" in form ? Array.isArray(enums[form.list]) && enums[form.list].includes(v)
+    : "pattern" in form ? typeof v === "string" && PATTERNS[form.pattern]?.test(v) === true : false);
+/** Whether `x` is exactly one generated form of `forms`: null where the contract allows it, else the form its `kind`
+ * names, with exactly that form's keys (the generator checked that every one is required and no other is allowed). */
+const exactly = (forms, x) => (x === null ? forms.nullable === true : isObject(x) && Object.hasOwn(forms.kinds, x.kind)
+  && Object.keys(x).length === Object.keys(forms.kinds[x.kind]).length
+  && Object.entries(forms.kinds[x.kind]).every(([field, form]) => Object.hasOwn(x, field) && fits(form, x[field])));
+const validSpikeBackend = (x) => exactly(enums.spike_backend, x);
 
 /** Whether `v` has a summary's required shape. The schema (summary.schema.json) is checked in the build; this is the cheap check at the boundary. */
 export const validSummary = (v) => isObject(v) && v.contract === CONTRACT && typeof v.token === "string" && isObject(v.coverage)

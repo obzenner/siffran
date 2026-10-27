@@ -36,15 +36,33 @@ export const PATHS = {
   why: [["run", "dropped", "[]", "why"]],
   answer: [["run", "decisions", "[]", "answer"]],
   effect: [["run", "decisions", "[]", "effect"]],
+  // the profiles a spike backend may be bound to: the backend's own list, which validates it (app/client.js); the
+  // profiles a claim's request and result name must agree with it (tests/contract.test.mjs)
+  profile: [["run", "spike_backend", "profile_id"]],
 };
 
 /** Lists that are the names of an object's properties rather than an enum. */
 export const KEYS = { budgets: ["run", "governance", "ceilings"], flag: [...ROW, "flags"] };
 
+/** Patterns, by name: each is the one `pattern` every listed place declares (two that differ fail generation). */
+export const PATTERNS = {
+  digest: [["run", "spike_backend", "qualification_record_digest"], ["run", "spike_backend", "execution_binding_digest"]],
+};
+
+/** Closed values the client checks exactly, as forms: the nullable alternatives of a `oneOf`, one per `kind` const, each
+ * its properties in schema order and each property as `{const}`, `{list}` (a PATHS list generated at that very place)
+ * or `{pattern}` (a PATTERNS name declared at that very place). The projection holds only where its assumptions do,
+ * and checks them: every alternative is a closed object (`additionalProperties: false`) whose properties are all
+ * required, so the exact keys are the whole check, and a property carries one of those three shapes and nothing more.
+ * Any other shape fails generation instead of being dropped: this is a projection of these forms, not a schema
+ * interpreter. */
+export const FORMS = { spike_backend: ["run", "spike_backend"] };
+const ALTERNATIVE = new Set(["type", "additionalProperties", "required", "properties", "title", "description"]);
+
 /** The schema node at a path of property names, looking through `$ref` and a nullable `oneOf`. */
 function nodeAt(schema, steps) {
   const deref = (n) => (n?.$ref ? deref(schema.$defs[n.$ref.replace("#/$defs/", "")]) : n);
-  const some = (n, has) => (has(n) ? n : n.oneOf?.map(deref).find(has));
+  const some = (n, has) => (has(n) ? n : n.oneOf?.map(deref).map((o) => some(o, has)).find(Boolean));
   let node = schema;
   for (const p of steps) {
     node = deref(node);
@@ -71,6 +89,42 @@ export function generate(dir) {
     const object = node?.properties ? node : node?.oneOf?.find((o) => o.properties);
     if (!object) throw new Error(`no properties at ${p.join(".")}`);
     out[name] = Object.keys(object.properties);
+  }
+  const at = (which, p) => [which, ...p].join(".");
+  const placed = (table, place) => Object.keys(table).filter((n) => table[n].some(([w, ...p]) => at(w, p) === place));
+  out.patterns = {};
+  for (const [name, places] of Object.entries(PATTERNS)) {
+    const found = [...new Set(places.map(([which, ...p]) => nodeAt(schemas[which], p)?.pattern))];
+    if (found.length !== 1 || typeof found[0] !== "string") throw new Error(`pattern ${name}: the places declare ${found.length} patterns`);
+    out.patterns[name] = found[0];
+  }
+  for (const [name, [which, ...p]] of Object.entries(FORMS)) {
+    const schema = schemas[which];
+    const deref = (n) => (n?.$ref ? deref(schema.$defs[n.$ref.replace("#/$defs/", "")]) : n);
+    const flat = (n) => (n.oneOf ? n.oneOf.map(deref).flatMap(flat) : [n]);
+    const alternatives = flat(nodeAt(schema, p));
+    const form = { nullable: alternatives.some((a) => a.type === "null"), kinds: {} };
+    for (const alt of alternatives.filter((a) => a.type !== "null")) {
+      const where = `${name}: an alternative`;
+      const extra = Object.keys(alt).filter((k) => !ALTERNATIVE.has(k));
+      if (alt.type !== "object" || alt.additionalProperties !== false || extra.length) throw new Error(`${where} is not a closed object (${extra})`);
+      const fields = Object.keys(alt.properties ?? {});
+      if (fields.length !== (alt.required ?? []).length || fields.some((f) => !alt.required.includes(f))) throw new Error(`${where} has an optional property`);
+      const kind = alt.properties.kind?.const;
+      if (typeof kind !== "string" || kind in form.kinds) throw new Error(`${where} has no kind const of its own`);
+      const own = {};
+      for (const field of fields) {
+        const prop = alt.properties[field], keys = Object.keys(prop).filter((k) => k !== "description").sort().join(",");
+        const place = at(which, [...p, field]);
+        if (keys === "const") own[field] = { const: prop.const };
+        else if (keys === "enum" && placed(PATHS, place).length === 1) own[field] = { list: placed(PATHS, place)[0] };
+        else if (keys === "pattern,type" && prop.type === "string" && placed(PATTERNS, place).length === 1) own[field] = { pattern: placed(PATTERNS, place)[0] };
+        else throw new Error(`${name}.${kind}.${field}: a shape this projection does not check (${keys})`);
+        if (own[field].list && JSON.stringify(out[own[field].list]) !== JSON.stringify(prop.enum.filter((v) => v !== null))) throw new Error(`${name}.${kind}.${field}: not its list`);
+      }
+      form.kinds[kind] = own;
+    }
+    out[name] = form;
   }
   return out;
 }

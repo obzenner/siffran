@@ -184,6 +184,10 @@
     "run_continued",
     "none"
   ],
+  "profile": [
+    "docker-isolated-v1",
+    "docker-networked-v1"
+  ],
   "budgets": [
     "passes",
     "spawns",
@@ -194,5 +198,35 @@
     "refuted",
     "decided",
     "changed_since_audit"
-  ]
+  ],
+  "patterns": {
+    "digest": "^sha256:[0-9a-f]{64}$"
+  },
+  "spike_backend": {
+    "nullable": true,
+    "kinds": {
+      "spikes_unavailable": {
+        "kind": {
+          "const": "spikes_unavailable"
+        }
+      },
+      "qualified": {
+        "kind": {
+          "const": "qualified"
+        },
+        "backend": {
+          "const": "docker"
+        },
+        "profile_id": {
+          "list": "profile"
+        },
+        "qualification_record_digest": {
+          "pattern": "digest"
+        },
+        "execution_binding_digest": {
+          "pattern": "digest"
+        }
+      }
+    }
+  }
 }

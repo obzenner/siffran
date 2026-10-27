@@ -332,3 +332,21 @@ test("the sheet's claims start with the run's graph, drawn small from geometry's
     assert.ok(html.indexOf(svg) < html.indexOf("data-claim-row"), "above the list");
   }
 });
+const enums = JSON.parse((await import("node:fs")).readFileSync(new URL("../enums.json", import.meta.url), "utf8"));
+test("every spike profile the contract lists is worded by its own copy, on the run's binding and on a claim's request", () => {
+  const bound = sheets[scenarios.converged];
+  const [requested, claim] = Object.values(sheets).flatMap((s) => (s.claims ?? []).filter((c) => c.proof.length).map((c) => [s, c.id]))[0];
+  const aside = (html) => text(html.match(/<aside[^>]*data-spike-backend[^]*?<\/aside>/)[0]);
+  assert.ok(enums.profile.length >= 2 && bound.spike_backend.kind === "qualified");
+  for (const id of enums.profile) {
+    const label = copy[`spike.profile.${id}`], others = enums.profile.filter((o) => o !== id).map((o) => copy[`spike.profile.${o}`]);
+    assert.ok(label, `${id} has no copy`);
+    const s = structuredClone(bound); s.spike_backend.profile_id = id;
+    const header = aside(sheetHtml(ctx(s)));
+    assert.ok(header.includes(label) && others.every((o) => !header.includes(o)), `binding: ${id}`);
+    const r = structuredClone(requested);
+    for (const c of r.claims) for (const p of c.proof) p.request.profile_id = id;
+    const own = text(sheetHtml(ctx(r, { claim })));
+    assert.ok(own.includes(copy["spike.profile"].replace("{profile}", label)), `request: ${id}`);
+  }
+});

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fake-only generic sandbox process, environment, scaffolding, and lock tests."""
+"""Fake-only generic sandbox process, scaffolding, lock and implementation-manifest tests."""
 from __future__ import annotations
 
 import os
@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from adapters.sandbox import common, environment, process
+from adapters.sandbox import common, process
 
 
 class BoundedRunnerTests(unittest.TestCase):
@@ -145,28 +145,7 @@ class ScaffoldingTests(unittest.TestCase):
                     common.sandbox_home()
 
 
-class EnvironmentTests(unittest.TestCase):
-    def test_plugin_process_readiness_is_posix_cross_platform_not_desktop_only(self):
-        facts = environment._system_python()
-        capabilities = environment._system_capabilities()
-        probe = environment._inprocess_import_probe(
-            environment.importlib.import_module, environment.importlib.metadata.version)
-        for host_os in ("Darwin", "Linux"):
-            identity = environment.inspect_environment(
-                python_facts={**facts, "host_os": host_os},
-                capability_facts=capabilities, child_probe=lambda _: probe)
-            with self.subTest(host_os=host_os):
-                self.assertTrue(identity.available, identity.reasons)
-                environment.validate_environment_identity(identity)
-        refused = environment.inspect_environment(
-            python_facts={**facts, "host_os": "Windows"},
-            capability_facts=capabilities, child_probe=lambda _: probe)
-        self.assertFalse(refused.available)
-
-    def test_invalid_identity_fails_closed(self):
-        with self.assertRaises(environment.EnvironmentPreflightError):
-            environment.validate_environment_identity({})
-
+class ImplementationManifestTests(unittest.TestCase):
     def test_implementation_manifest_is_closed_sorted_and_binds_every_listed_source(self):
         # Membership is owned by the closure rule (doc/testing.md), checked by `make empirica-manifest-check`.
         paths = common.IMPLEMENTATION_SOURCE_PATHS

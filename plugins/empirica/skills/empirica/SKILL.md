@@ -20,6 +20,12 @@ translate host events and expose capabilities. Never edit operational state unde
 
 Treat training-weight knowledge as hypothesis: discharge load-bearing claims against evidence or surface them as unverified.
 
+**Experiments go through Empirica only.** During an active run, every experimental workload is an
+`empirica_observe` `spike_request`; never run one through the ambient host shell, `docker run`, or `docker exec`,
+including after an unavailable or refused result. An operator's separate approval to acquire an image does not
+authorize running a workload, and read-only inspection is neither a substitute for one nor an experimental result.
+The binding rules are the public contract's `evidence/spike/isolation` and `evidence/spike/outcomes` clauses (the limits list is `evidence/spike/limits`).
+
 Identify the exact active host surface from the tools and lifecycle already present in context.
 **Do not read any file, including a skill reference, before the `investigate` witness is admitted
 (route → graph → approved configuration).** Use this inline bootstrap matrix:

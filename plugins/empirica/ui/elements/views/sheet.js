@@ -25,7 +25,7 @@ function spikeBackendHtml(backend) {
     const short = `${value.slice(0, 15)}…${value.slice(-8)}`;
     return `<details class="text-xs"><summary class="cursor-pointer">${t(label)} <code class="font-mono">${esc(short)}</code></summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
   };
-  const profile = backend.profile_id === "docker-isolated-v1" ? t("spike.profile.docker-isolated-v1") : t("spike.profile.docker-networked-v1");
+  const profile = t(`spike.profile.${backend.profile_id}`);
   return `<aside class="flex min-w-0 flex-col gap-3xs rounded-m border border-border p-xs text-xs" role="note" data-spike-backend><span>${joined(t("spike_backend.qualified"), profile, t("spike_backend.read_only"), t("spike_backend.not_health"))}</span>${identity(backend.qualification_record_digest, "spike_backend.record")}${identity(backend.execution_binding_digest, "spike_backend.execution")}</aside>`;
 }
 

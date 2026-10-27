@@ -34,8 +34,9 @@ function vectorHtml(label, values) {
   return fact(t(label), `<ol class="flex min-w-0 flex-col gap-3xs">${values.map((value, index) => `<li class="flex min-w-0 gap-xs"><span class="shrink-0 text-muted-foreground">${index}</span><code class="min-w-0 break-all font-mono">${esc(value)}</code></li>`).join("")}</ol>`);
 }
 
+/** A profile's words: its own copy key, one per value of the contract's list (enums.json; scripts/audit.mjs checks each). */
 function profileLabel(profile) {
-  return profile === "docker-isolated-v1" ? t("spike.profile.docker-isolated-v1") : t("spike.profile.docker-networked-v1");
+  return t(`spike.profile.${profile}`);
 }
 
 function backendHtml(backend) {

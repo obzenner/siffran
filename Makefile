@@ -135,7 +135,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check lifecycle-gates-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
@@ -156,6 +156,10 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_activation_route_graph test_async_children test_audit test_blocker_projection test_budget_freeze_terminal
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_audit_retrieval
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
+		test_d7_transactions.D7TransactionTests.test_real_generic_docker_harness_result_is_admitted_by_plan_spike_result \
+		test_d7_transactions.D7TransactionTests.test_any_valid_input_order_binds_one_canonical_draft \
+		test_d7_transactions.D7TransactionTests.test_overlapping_or_duplicate_root_inputs_are_invalid_before_any_docker_read
 	@$(PYTHON) $(METHODOLOGIST_CORE_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q \
 		test_governance.StartAdmissionTests \
@@ -293,12 +297,14 @@ empirica-host-integration: empirica-activation-lifecycle-check empirica-governan
 test: check ## Alias for the complete fast contributor gate, including validator unit tests
 
 .PHONY: lint
-lint: ## Lint Python hooks, tests, and scripts (ruff, if installed)
+lint: ## Lint Python hooks, tests, and scripts (ruff; fails when ruff is missing unless EMPIRICA_ALLOW_SKIP=1)
 	@printf '$(BOLD)==> lint$(RESET)\n'
 	@if command -v ruff >/dev/null 2>&1; then \
 		ruff check $(PLUGINS_DIR) lib $(SCRIPTS); \
+	elif [ "$${EMPIRICA_ALLOW_SKIP:-}" = 1 ]; then \
+		printf '$(DIM)note: ruff not installed — lint explicitly skipped (EMPIRICA_ALLOW_SKIP=1)$(RESET)\n'; \
 	else \
-		printf '$(DIM)ruff not installed — skipping (pip install ruff)$(RESET)\n'; \
+		printf 'error: ruff not installed (install it, or set EMPIRICA_ALLOW_SKIP=1 to skip lint explicitly)\n' >&2; exit 1; \
 	fi
 
 .PHONY: fmt
@@ -323,12 +329,14 @@ validate: ## Validate marketplace + plugin manifests (JSON, semver, cross-refere
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_licence.py
 
 .PHONY: adr-check
-adr-check: ## Check ADR link health and numbering (adrs doctor)
+adr-check: ## Check ADR link health and numbering (adrs doctor; fails when adrs is missing unless EMPIRICA_ALLOW_SKIP=1)
 	@printf '$(BOLD)==> ADRs$(RESET)\n'
 	@if command -v adrs >/dev/null 2>&1; then \
 		adrs --ng doctor; \
+	elif [ "$${EMPIRICA_ALLOW_SKIP:-}" = 1 ]; then \
+		printf '$(DIM)note: adrs not installed — ADR check explicitly skipped (EMPIRICA_ALLOW_SKIP=1)$(RESET)\n'; \
 	else \
-		printf '$(DIM)adrs not installed — skipping$(RESET)\n'; \
+		printf 'error: adrs not installed (install it, or set EMPIRICA_ALLOW_SKIP=1 to skip the ADR check explicitly)\n' >&2; exit 1; \
 	fi
 
 .PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits empirica-manifest-check
@@ -551,11 +559,16 @@ pi-canary-unit-check: ## Test that the dogfood settings and canary recipes never
 	@printf '$(BOLD)==> Pi dogfood runtime boundary$(RESET)\n'
 	@$(PYTHON) $(PI_CANARY_TESTS)
 
+.PHONY: lifecycle-gates-unit-check
+lifecycle-gates-unit-check: ## Test through make that lint and adr-check fail without their tool unless EMPIRICA_ALLOW_SKIP=1, and that release-check claims only automated checks (fake tools, no installs)
+	@printf '$(BOLD)==> lifecycle gates$(RESET)\n'
+	@$(PYTHON) $(SCRIPTS)/tests/test_lifecycle_gates.py
+
 ## --- Qualify
 
 .PHONY: empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-fixtures empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check generic-docker-qualify-candidate generic-docker-install-candidate empirica-generic-harness-check empirica-generic-execution-check
 
-empirica-sandbox-check: ## Test generic workspace capture, subprocess, environment, scaffolding, lock, and implementation-identity primitives without Docker
+empirica-sandbox-check: ## Test generic workspace capture, subprocess, scaffolding, lock, and implementation-identity primitives without Docker
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_SANDBOX_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_WORKSPACE_ADAPTER_TESTS)
 
@@ -582,7 +595,7 @@ empirica-generic-authority-check: ## Test passive Docker capability authority, r
 empirica-generic-qualification-check: ## Test five-probe candidate qualification and explicit installation without Docker or publication
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_GENERIC_QUALIFICATION_TESTS)
 
-generic-docker-qualify-candidate: ## QUALIFY ONLY: write a private candidate with PROFILE= IMAGE= DOCKER= OUT= WORK=; never installs authority
+generic-docker-qualify-candidate: ## QUALIFY ONLY: write a private candidate with PROFILE= IMAGE= DOCKER= OUT= WORK=; OUT= must not exist and its parent must already be your own mode-0700 directory (checked when the candidate is written, after the probes); never installs authority
 	@test -n "$(PROFILE)" -a -n "$(IMAGE)" -a -n "$(DOCKER)" -a -n "$(OUT)" -a -n "$(WORK)" || { echo 'PROFILE, IMAGE, DOCKER, OUT, and WORK are required' >&2; exit 2; }
 	@$(PYTHON) $(SCRIPTS)/generic_docker_qualify.py --profile "$(PROFILE)" --image "$(IMAGE)" --docker "$(DOCKER)" --output "$(OUT)" --work-root "$(WORK)"
 
@@ -742,10 +755,12 @@ verify: ## The one hermetic gate: the installs (node_modules, dev-install, ui-in
 
 .PHONY: release-check
 release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices
-	@printf '\n$(BOLD)Ready to release.$(RESET) Remaining steps are yours:\n'
-	@printf '  1. confirm the version bump is in plugin.json (make status)\n'
-	@printf '  2. commit and push\n'
-	@printf '  3. open or update the PR\n'
+	@printf '\n$(BOLD)Automated release checks passed.$(RESET) They are not release evidence on their own; the rest is yours:\n'
+	@printf '  1. native qualification in each supported host (make native-qualification prints the operator procedure)\n'
+	@printf '  2. Docker qualification and install of each profile at this implementation digest (generic-docker-qualify-candidate, then generic-docker-install-candidate)\n'
+	@printf '  3. the live cells of contracts/empirica-docker-spike/v1/support-contract.json, observed by the operator\n'
+	@printf '  4. confirm the version bump is in plugin.json (make status)\n'
+	@printf '  5. commit and push, then open or update the PR\n'
 
 ## --- Maintain
 
