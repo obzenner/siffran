@@ -14,6 +14,7 @@ import http.client
 import io
 import json
 import os
+import socket
 import subprocess
 import sys
 import tempfile
@@ -78,6 +79,13 @@ class ServerTests(unittest.TestCase):
 
     def test_it_listens_on_loopback_only(self):
         self.assertEqual(self.served.server.server_address[0], "127.0.0.1")
+
+    def test_the_listen_backlog_holds_a_browser_s_burst_of_connections(self):
+        """A page load opens one connection per module, JSON and font file (about 28 at once; the handler speaks
+        HTTP/1.0). socketserver's default backlog of 5 makes macOS reset the ones beyond it, so a module never loads and
+        the app never starts. The backlog is the system's maximum, on the served server."""
+        self.assertGreaterEqual(self.served.server.request_queue_size, socket.SOMAXCONN)
+        self.assertTrue(self.served.server.daemon_threads)
 
     def test_a_request_for_another_host_is_refused(self):
         port = self.served.port
