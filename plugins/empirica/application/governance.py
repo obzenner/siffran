@@ -60,6 +60,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 if reason:
                     return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
                 decision = payload
+                superseded_budgets = None  # the amend branch's priors; null for every other outcome
                 if "submission" in payload:
                     resolved, reason = policy.resolve_submission(
                         governed, payload["submission"], _proto.governance_decisions())
@@ -87,6 +88,12 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                                                       presentation=True)
                     if reason := policy.revision_error(governed, state.goal, proposed):
                         return c._block_from_snapshot(snapshot, rid, reason, presentation=True)
+                    # ADR-0072: the priors the confirm form shows as "(was …)" must be read from the
+                    # persisted state — the proposal the human actually amended — BEFORE the revise
+                    # below replaces it; afterwards they can be derived from nowhere.
+                    superseded_budgets = policy.plain(
+                        {key: state.governance["proposal"]["budgets"][key]
+                         for key in policy.CEILINGS})
                     governed = policy.revise(state.goal, governed, proposal=proposed)
                 if outcome == "reject":
                     governed.update(state="rejected")
@@ -97,9 +104,11 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                         "presentation_fingerprint": fingerprint if outcome == "present" else None,
                         "outcome": outcome, "plan_revision": payload["plan_revision"],
                         "proposal_digest": payload["proposal_digest"],
-                        "approval_kind": payload["approval_kind"]})
+                        "approval_kind": payload["approval_kind"],
+                        "superseded_budgets": superseded_budgets})
                 else:
-                    prior.update(fingerprint=fingerprint, outcome=outcome)
+                    prior.update(fingerprint=fingerprint, outcome=outcome,
+                                 superseded_budgets=superseded_budgets)
             next_state = replace(next_state, governance=governed)
             committed, _, _, planned = c._commit(key, read.revision, snapshot, next_state, domain)
         except ValueError as exc:

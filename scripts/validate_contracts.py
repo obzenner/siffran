@@ -1716,6 +1716,24 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
     if proto_const != contract.get("protocol"):
         errors.append(f"{where}: state.protocol const {proto_const!r} != registry "
                       f"protocol {contract.get('protocol')!r}")
+    # receipts[].superseded_budgets (ADR-0072, run/4): every governance receipt requires the
+    # member, and its object form is a closed shape naming exactly the ceilings of governance.CEILINGS
+    # — a mechanical mirror, like the status enums, so the state schema cannot drift from the core's
+    # one ceiling vocabulary.
+    from core.governance import CEILINGS
+    receipts = props.get("governance", {}).get("properties", {}).get("receipts", {})
+    item = receipts.get("items", {})
+    if "superseded_budgets" not in item.get("required", []):
+        errors.append(f"{where}: governance.receipts must require 'superseded_budgets' "
+                      "on every receipt")
+    superseded = item.get("properties", {}).get("superseded_budgets", {})
+    object_form = next((alt for alt in superseded.get("oneOf", [])
+                        if alt.get("type") == "object"), None)
+    if (object_form is None or object_form.get("additionalProperties") is not False
+            or set(object_form.get("properties", {})) != set(CEILINGS)
+            or set(object_form.get("required", [])) != set(CEILINGS)):
+        errors.append(f"{where}: governance.receipts superseded_budgets must be a closed object "
+                      f"naming exactly the three ceilings ({', '.join(CEILINGS)}) required together")
     # purpose shape parity: state childRecord.purpose must exact-match the D2
     # request actionChildReserve.purpose AND the response childSummary.purpose
     # (both are nonempty opaque strings). Extract the actual request/response purpose
@@ -1944,7 +1962,7 @@ def _minimal_valid_state() -> dict:
     """A minimal valid state wrapper for child-matrix validation."""
     return {
         "protocol": "empirica/v2",
-        "state_schema": "empirica.run/3",
+        "state_schema": "empirica.run/4",
         "spike_backend": {"kind": "spikes_unavailable"},
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
@@ -4797,6 +4815,32 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "$ref": "#/$defs/digest256"}
         expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
                "terminal-fingerprint", "state: terminal-fingerprint coverage drift")
+        # receipts priors drift: a receipt that stops requiring the supersided member (review-1's
+        # mirror bite: the amend branch would have nothing to bind the confirm form's priors to)
+        bad_ss = copy.deepcopy(state_schema)
+        receipts_required = (bad_ss["properties"]["governance"]["properties"]
+                             ["receipts"]["items"]["required"])
+        receipts_required.remove("superseded_budgets")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "must require 'superseded_budgets'", "state: receipts drop the priors requirement")
+        # receipts priors drift: the object form names the wrong ceiling set
+        bad_ss = copy.deepcopy(state_schema)
+        superseded_object = next(
+            alt for alt in (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                            ["items"]["properties"]["superseded_budgets"]["oneOf"])
+            if alt.get("type") == "object")
+        superseded_object["properties"]["max_widgits"] = superseded_object["properties"].pop("max_passes")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "exactly the three ceilings", "state: receipts ceiling-key drift")
+        # receipts priors drift: the object form stops closing its keys
+        bad_ss = copy.deepcopy(state_schema)
+        superseded_object = next(
+            alt for alt in (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                            ["items"]["properties"]["superseded_budgets"]["oneOf"])
+            if alt.get("type") == "object")
+        superseded_object["additionalProperties"] = True
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "closed object", "state: receipts priors stop being closed")
     bad_state = {"budgets": {"max_passes": 1, "passes_used": 5,
                             "max_spawns": 0, "spawns_used": 0}}
     expect(lambda e: check_state_invariants(bad_state, e, "neg"),

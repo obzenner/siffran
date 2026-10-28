@@ -30,7 +30,7 @@
       "const": "empirica/v2"
     },
     "state_schema": {
-      "const": "empirica.run/3"
+      "const": "empirica.run/4"
     },
     "spike_backend": {
       "oneOf": [
@@ -406,7 +406,8 @@
               "outcome",
               "plan_revision",
               "proposal_digest",
-              "approval_kind"
+              "approval_kind",
+              "superseded_budgets"
             ],
             "properties": {
               "id": {
@@ -449,6 +450,37 @@
                   "auto"
                 ],
                 "description": "Immutable per-receipt approval kind; host_ui requires a prior exact presentation, auto has none."
+              },
+              "superseded_budgets": {
+                "description": "The ceilings of the proposal this amendment superseded, recorded at the amend commit: the revise erases them from the run's state, so the confirm form's (was ...) priors cannot be derived later (ADR-0072). Null for every other outcome; an amend receipt always names the revision before the one it brought about.",
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "max_passes",
+                      "max_spawns",
+                      "max_audit_spawns"
+                    ],
+                    "properties": {
+                      "max_passes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max_spawns": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max_audit_spawns": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                ]
               }
             }
           }

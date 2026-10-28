@@ -55,7 +55,7 @@ human decided on without trusting the adapter that showed them.
 * Immutable bytes are checkable: two readers must get one answer, and the answer must have an exact digest.
 * No backwards compatibility is owed inside a run: a state-schema version bump already classifies old run
   files as corrupt, as `empirica.run/2` does today
-  (`plugins/empirica/tests/test_run3_binding.py:291-299`, `current_corrupt`).
+  (`plugins/empirica/tests/test_run4_binding.py:300-307`, `current_corrupt`).
 
 ## Considered Options
 
@@ -70,7 +70,7 @@ human decided on without trusting the adapter that showed them.
 * A recorded "what the dialog stood beside" block inside the digested document — reviews left, the human-surface
   observation, a separate budgets-used map (rejected, review-1 finding 1: the core re-renders the document and
   refuses a mismatch at every decision, but `present` itself appends a receipt that the interaction counters
-  count (`application/governance.py:96-101`, `core/governance.py:173-176`), and `trusted_human_surface` rewrites
+  count (`application/governance.py:103-110`, `core/governance.py:173-176`), and `trusted_human_surface` rewrites
   `human_surface` between calls (`application/transaction.py:417-419`), so a digest over those values changes under
   the human's own answer and the recompute would refuse every decision. The document records only the decided
   content plus facts fixed for the run's lifetime).
@@ -130,9 +130,9 @@ form whenever no prior dialog exists (`adapters/governance.py:233-234`). The doc
 `governance_state` as information, covering `pending`, `revision_pending` and `rejected`.
 
 The confirm document's `(was …)` priors are not derivable any other way — the state's proposal has already
-been replaced at the amend commit (`application/governance.py:81-90`) — so run/4 records them
+been replaced at the amend commit (`application/governance.py:82-97`) — so run/4 records them
 **on the receipt the amendment finalises**: `receipts[].superseded_budgets`, written by the sole receipt
-writer (`application/governance.py:94-102`) from `state.governance["proposal"]["budgets"]` — read from the
+writer (`application/governance.py:103-110`) from `state.governance["proposal"]["budgets"]` — read from the
 state, not the already-revised `governed` — and `null` for every other outcome. The invariant checks:
 non-null if and only if `outcome == "amend"`, and its keys are exactly the ceilings
 (`core/governance.py:46`).
@@ -237,15 +237,15 @@ reason move to the document; the form carries the path and the digest of the one
 
 The state schema becomes `empirica.run/4` (`contracts/empirica/v2/state.schema.json:32-33`; the const drives
 classification, `plugins/empirica/application/protocol.py:45`,
-`plugins/empirica/application/run_state.py:70,159`). There is **no backwards compatibility**: run files
+`plugins/empirica/application/run_state.py:71,160`). There is **no backwards compatibility**: run files
 written as `empirica.run/3` classify as corrupt, exactly as `empirica.run/2` does today
-(`plugins/empirica/tests/test_run3_binding.py:291-299`). The public wire keeps its axis `empirica/v2`; the
+(`plugins/empirica/tests/test_run4_binding.py:300-307`). The public wire keeps its axis `empirica/v2`; the
 requests gain `document_digest` — on the governance decision payload, the evidence presentation payload and
 the evidence confirmation payload (today required: `run_id`, `receipt_id` and `proposal_digest`/`key`/
 `decisions` respectively, `contracts/empirica/v2/request.schema.json:1278,1571,1662`) — and it becomes
 required for every `host_ui` receipt and every human evidence record, absent for `auto` (the same discipline
 `presentation_fingerprint` already has: `None` if and only if `auto`,
-`plugins/empirica/core/governance.py:343-347`). Because the payloads change, the public-tool schemas and the
+`plugins/empirica/core/governance.py:353-356`). Because the payloads change, the public-tool schemas and the
 vendor copies follow (`make empirica-public-tools-sync`, `make vendor-contracts`).
 
 ## Consequences

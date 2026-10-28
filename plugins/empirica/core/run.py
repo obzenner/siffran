@@ -88,11 +88,11 @@ class OperationalState:
     def __post_init__(self) -> None:
         binding = self.spike_backend
         if not isinstance(binding, Mapping):
-            raise ValueError("run/3 requires a spike backend binding")
+            raise ValueError("run/4 requires a spike backend binding")
         if spike_plan.spike_backend_kind(binding) is None:
             if binding.get("kind") == "qualified":
-                raise ValueError("run/3 qualified spike backend is malformed")
-            raise ValueError("run/3 unavailable spike backend is malformed")
+                raise ValueError("run/4 qualified spike backend is malformed")
+            raise ValueError("run/4 unavailable spike backend is malformed")
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))

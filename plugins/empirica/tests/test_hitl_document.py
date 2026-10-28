@@ -89,6 +89,7 @@ def _decide(governed: dict, payload: dict, budgets: dict) -> tuple[dict, dict]:
         decision = dict(payload)
     observing = SimpleNamespace(budgets=dict(budgets), governance=governed)
     outcome = decision["outcome"]
+    superseded_budgets = None  # the amend branch's priors (ADR-0072 run/4); null otherwise
     if outcome == "approve":
         error = core_governance.configuration_error(observing, governed["proposal"])
         assert error is None, error
@@ -102,6 +103,7 @@ def _decide(governed: dict, payload: dict, budgets: dict) -> tuple[dict, dict]:
         assert error is None, error
         error = core_governance.revision_error(governed, GOAL, proposed)
         assert error is None, error
+        superseded_budgets = core_governance.plain(dict(governed["proposal"]["budgets"]))
         governed = core_governance.revise(GOAL, governed, proposal=proposed)
     elif outcome == "reject":
         governed = {**governed, "state": "rejected"}
@@ -112,7 +114,8 @@ def _decide(governed: dict, payload: dict, budgets: dict) -> tuple[dict, dict]:
               "presentation_fingerprint": governor(payload) if outcome == "present" else None,
               "outcome": outcome, "plan_revision": payload["plan_revision"],
               "proposal_digest": payload["proposal_digest"],
-              "approval_kind": payload["approval_kind"]}
+              "approval_kind": payload["approval_kind"],
+              "superseded_budgets": superseded_budgets}
     return {**governed, "receipts": [*governed["receipts"], receipt]}, budgets
 
 
@@ -181,7 +184,7 @@ def rejected_governance() -> dict:
 
 def _config_snapshot(governance: dict) -> EvaluationSnapshot:
     state = OperationalState(
-        protocol="empirica/v2", state_schema="empirica.run/3",
+        protocol="empirica/v2", state_schema="empirica.run/4",
         spike_backend={"kind": "spikes_unavailable"}, goal=GOAL, invocation=INVOCATION,
         status="active", budgets=_used_budgets(governance["proposal"]["budgets"]),
         governance=governance, selected_graph_artifact_id=None, frozen_claim_ids=None,
@@ -261,7 +264,7 @@ def evidence_snapshot() -> EvaluationSnapshot:
         "spike_unavailable": "A fact of definition; no deterministic check can establish it.",
     })
     state = OperationalState(
-        protocol="empirica/v2", state_schema="empirica.run/3",
+        protocol="empirica/v2", state_schema="empirica.run/4",
         spike_backend={"kind": "spikes_unavailable"}, goal=GOAL, invocation=INVOCATION,
         status="active",
         budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,

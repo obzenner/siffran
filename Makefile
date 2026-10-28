@@ -44,7 +44,7 @@ EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
 EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
 CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
 PI_CANARY_TESTS := $(SCRIPTS)/tests/test_pi_canary.py
-EMPIRICA_RUN3_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run3_binding.py
+EMPIRICA_RUN4_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run4_binding.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -139,7 +139,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check lifecycle-gates-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run3-check dev-python ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run4-check dev-python ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -259,12 +259,12 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
-.PHONY: empirica-transaction-check empirica-git-check empirica-run3-check empirica-bridge-composition-check
+.PHONY: empirica-transaction-check empirica-git-check empirica-run4-check empirica-bridge-composition-check
 empirica-bridge-composition-check: ## Check shared production Docker composition and fail-closed authority degradation without Docker
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 
-empirica-run3-check: ## Check exact run/3 binding, v6 closed public backend projection, and non-run/3 rejection
-	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run3_binding test_d6_strict_v2
+empirica-run4-check: ## Check exact run/4 binding, v6 closed public backend projection, and non-run/4 rejection
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run4_binding test_d6_strict_v2
 
 empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bootstrap process counts
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)

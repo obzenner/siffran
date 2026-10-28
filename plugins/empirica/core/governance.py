@@ -339,6 +339,17 @@ def invariant(doc: Mapping) -> bool:
     for receipt in receipts:
         if receipt["approval_kind"] not in APPROVAL_KINDS:
             return False
+        # The amendment's superseded ceilings ride their receipt (ADR-0072, run/4): an amend
+        # receipt must name them — after the revise they can be derived nowhere else — and no
+        # other outcome may carry them. An amend receipt always names a strictly earlier revision
+        # than the one its amendment brought about.
+        if receipt["outcome"] == "amend":
+            superseded = receipt.get("superseded_budgets")
+            if (not isinstance(superseded, Mapping) or set(superseded) != set(CEILINGS)
+                    or receipt["plan_revision"] >= value["plan_revision"]):
+                return False
+        elif receipt.get("superseded_budgets") is not None:
+            return False
         # The presentation fingerprint is bound to the immutable receipt kind.
         if ((receipt["presentation_fingerprint"] is None)
                 != (receipt["approval_kind"] == "auto")):

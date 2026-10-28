@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/3",
+  "state_schema": "empirica.run/4",
   "goal": "governed task",
   "invocation": {
     "host": "test",
@@ -34,6 +34,7 @@
         "fingerprint": "sha256:2d96bb8ab63d28c49fe20a9d6b5ec770bcbe782e5d2c0f4302053222a9820bf5",
         "presentation_fingerprint": "sha256:8a0cdcbc03c6dc84d017366c46c1620a50fad15c173efb6b654b3aee38e1e9b5",
         "outcome": "approve",
+        "superseded_budgets": null,
         "plan_revision": 1,
         "proposal_digest": "sha256:5246d5773a2c3c031aac783c8aae5bb72475511259779279493c6e859d7000ea",
         "approval_kind": "host_ui"

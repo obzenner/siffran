@@ -68,7 +68,7 @@ def _state_document(state: OperationalState) -> dict[str, Any]:
 
 def encode_state(state: OperationalState) -> dict[str, Any]:
     if state.state_schema != _STATE_SCHEMA_ID:
-        raise ValueError("only exact current run/3 state may be encoded")
+        raise ValueError("only exact current run/4 state may be encoded")
     return _state_document(state)
 
 
@@ -154,7 +154,7 @@ def _procedural_ok(doc: dict) -> bool:
 
 
 def classify_and_decode(raw: Any) -> Classification:
-    """Decode exact current run/3 state; every other identity is corrupt."""
+    """Decode exact current run/4 state; every other identity is corrupt."""
     if (not isinstance(raw, dict) or raw.get("protocol") != _PROTOCOL
             or raw.get("state_schema") != _STATE_SCHEMA_ID):
         return Classification("current_corrupt")

@@ -118,6 +118,7 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
         "presentation_fingerprint": "sha256:" + "b" * 64,
         "outcome": "approve", "plan_revision": 1,
         "proposal_digest": approved_digest, "approval_kind": "host_ui",
+        "superseded_budgets": None,
     }
     value.update(approved_digest=approved_digest, approval_kind="host_ui",
                  first_approval=True, receipts=[approval])
@@ -139,6 +140,7 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
                                          "sha256:" + "d" * 64),
             "outcome": "reject", "plan_revision": 2,
             "proposal_digest": value["proposal_digest"], "approval_kind": kind,
+            "superseded_budgets": None,
         })
     return value
 

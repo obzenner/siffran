@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict run/3 backend binding and major-version run/2 rejection regressions."""
+"""Strict run/4 backend binding and legacy run/3, major-version run/2 rejection regressions."""
 from __future__ import annotations
 
 import copy
@@ -240,7 +240,7 @@ class PublicSpikeBackendTests(unittest.TestCase):
         self.assertIn("SPIKE_BRIDGE_TIMEOUT_MS = 300_000", pi_transport)
 
 
-class Run3SchemaTests(unittest.TestCase):
+class Run4SchemaTests(unittest.TestCase):
     def setUp(self):
         self.schema = protocol.state_schema()
         self.fixture = json.loads((
@@ -282,7 +282,7 @@ class Run3SchemaTests(unittest.TestCase):
                 self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
                 self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
 
-    def test_roundtrip_is_deeply_immutable_and_encoder_is_run3_only(self):
+    def test_roundtrip_is_deeply_immutable_and_encoder_is_run4_only(self):
         classified = run_state.classify_and_decode(self.fixture)
         self.assertEqual(classified.kind, "valid")
         with self.assertRaises(TypeError):
@@ -297,6 +297,14 @@ class Run3SchemaTests(unittest.TestCase):
             run_state.encode_state(replace(classified.state, state_schema="empirica.run/2"))
         run2["spike_backend"] = {"kind": "spikes_unavailable"}
         self.assertEqual(run_state.classify_and_decode(run2).kind, "current_corrupt")
+        # ADR-0072: run/3 became legacy the moment run/4 shipped — it classifies corrupt exactly
+        # as run/2 does, with no backwards compatibility and no repair.
+        run3 = copy.deepcopy(self.fixture)
+        run3["state_schema"] = "empirica.run/3"
+        self.assertEqual(run_state.classify_and_decode(run3).kind, "current_corrupt")
+        self.assertIsNone(run_state.classify_and_decode(run3).state)
+        with self.assertRaises(ValueError):
+            run_state.encode_state(replace(classified.state, state_schema="empirica.run/3"))
 
         class StringImpostor:
             def __str__(self):
@@ -419,12 +427,12 @@ class StartSelectionTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             coordinator.handle(start_command(), "start")
 
-    def test_explicit_start_after_latest_run2_creates_fresh_run3_without_mutating_old(self):
+    def test_explicit_start_after_latest_run2_creates_fresh_run4_without_mutating_old(self):
         selector = CountingSelector()
         coordinator, (_workspace, _harness, runs, artifacts) = self.coordinator(selector)
         historical_state, historical_artifacts = chain(initial())
         old_key = RunKey(storage_id("p"), storage_id("s"), 1)
-        old_document = legacy_document(historical_state)
+        old_document = legacy_document(historical_state, "empirica.run/2")
         runs.create(old_key, old_document)
         for item in historical_artifacts:
             artifacts.append(old_key, item)
@@ -437,9 +445,9 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual(selector.calls, 1)
         self.assertEqual(runs.data[old_key], before_read)
         self.assertEqual(artifacts.values[old_key], before_artifacts)
-        self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/3")
+        self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/4")
 
-    def test_unavailable_run3_spike_is_guarded_before_workspace_artifact_and_harness(self):
+    def test_unavailable_run4_spike_is_guarded_before_workspace_artifact_and_harness(self):
         coordinator, (workspace, harness, runs, artifacts) = self.coordinator(
             CountingSelector(SpikesUnavailable()))
         started = coordinator.handle(start_command(), "start")
@@ -455,7 +463,7 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
                          before)
 
-    def test_terminal_run3_spike_is_inert_before_every_side_effect(self):
+    def test_terminal_run4_spike_is_inert_before_every_side_effect(self):
         bindings = (
             {"kind": "spikes_unavailable"},
             _persisted(_qualified(DIGEST_A, DIGEST_B)),
@@ -484,58 +492,62 @@ class StartSelectionTests(unittest.TestCase):
                      artifacts.append_calls), before)
 
 
-def legacy_document(state):
-    current = replace(state, state_schema="empirica.run/3",
-                      spike_backend={"kind": "spikes_unavailable"})
+def legacy_document(state, discriminator):
+    """A persisted document of a previous state family: the current state, encoded, re-labelled
+    with the legacy discriminator, so only its identity differs (the major run/2 shape predates
+    the spike backend binding, so it does not carry one)."""
+    current = replace(state, spike_backend={"kind": "spikes_unavailable"})
     document = run_state.encode_state(current)
-    document["state_schema"] = "empirica.run/2"
-    document.pop("spike_backend")
+    document["state_schema"] = discriminator
+    if discriminator == "empirica.run/2":
+        document.pop("spike_backend")
     return document
 
 
-class Run2RejectionTests(unittest.TestCase):
+class LegacyRejectionTests(unittest.TestCase):
     def test_old_handle_is_corrupt_and_cannot_mutate_state_or_artifacts(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            runs = FilesystemRunRepository(Path(temporary))
-            artifacts = Artifacts()
-            state, values = chain(initial())
-            key = RunKey(storage_id("p"), storage_id("s"), 1)
-            runs.create(key, legacy_document(state))
-            for item in values:
-                artifacts.append(key, item)
-            workspace, harness = Workspace(), Harness()
-            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
-            run_id = encode_handle(key)
-            path = runs._doc_path(key)
-            before_bytes = path.read_bytes()
-            before_read = runs.read(key)
-            before_artifacts = copy.deepcopy(artifacts.values[key])
-            for command in (
-                {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
-                {"type": "GetRun", "run_id": run_id},
-                {"type": "RestoreRun", "run_id": run_id},
-                {"type": "GetArgument", "run_id": run_id},
-                {"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
-                {"type": "ObserveAction", "run_id": run_id,
-                 "action": {"kind": "route", "reason": "must not write"}},
-                {"type": "ObserveAction", "run_id": run_id,
-                 "action": {"kind": "spike_request", "claim_id": "C0",
-                            "command": "true", "dependent_files": ["x"]}},
-            ):
-                with self.subTest(command=command["type"]):
-                    result = service._dispatch_validated(
-                        {"request_id": command["type"], "command": command})
-                    self.assertEqual(result["result"]["type"], "Block")
-                    self.assertEqual(result["result"]["reasons"][0]["code"], "run.corrupt")
-            self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
-            trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
-            self.assertEqual(trusted["result"]["type"], "Inert")
-            after_read = runs.read(key)
-            self.assertEqual(path.read_bytes(), before_bytes)
-            self.assertEqual(after_read.revision, before_read.revision)
-            self.assertEqual(artifacts.values[key], before_artifacts)
-            self.assertEqual(workspace.calls, [])
-            self.assertEqual(harness.calls, 0)
+        for discriminator in ("empirica.run/3", "empirica.run/2"):
+            with self.subTest(state_schema=discriminator), tempfile.TemporaryDirectory() as temporary:
+                runs = FilesystemRunRepository(Path(temporary))
+                artifacts = Artifacts()
+                state, values = chain(initial())
+                key = RunKey(storage_id("p"), storage_id("s"), 1)
+                runs.create(key, legacy_document(state, discriminator))
+                for item in values:
+                    artifacts.append(key, item)
+                workspace, harness = Workspace(), Harness()
+                service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+                run_id = encode_handle(key)
+                path = runs._doc_path(key)
+                before_bytes = path.read_bytes()
+                before_read = runs.read(key)
+                before_artifacts = copy.deepcopy(artifacts.values[key])
+                for command in (
+                    {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
+                    {"type": "GetRun", "run_id": run_id},
+                    {"type": "RestoreRun", "run_id": run_id},
+                    {"type": "GetArgument", "run_id": run_id},
+                    {"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
+                    {"type": "ObserveAction", "run_id": run_id,
+                     "action": {"kind": "route", "reason": "must not write"}},
+                    {"type": "ObserveAction", "run_id": run_id,
+                     "action": {"kind": "spike_request", "claim_id": "C0",
+                                "command": "true", "dependent_files": ["x"]}},
+                ):
+                    with self.subTest(command=command["type"]):
+                        result = service._dispatch_validated(
+                            {"request_id": command["type"], "command": command})
+                        self.assertEqual(result["result"]["type"], "Block")
+                        self.assertEqual(result["result"]["reasons"][0]["code"], "run.corrupt")
+                self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
+                trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
+                self.assertEqual(trusted["result"]["type"], "Inert")
+                after_read = runs.read(key)
+                self.assertEqual(path.read_bytes(), before_bytes)
+                self.assertEqual(after_read.revision, before_read.revision)
+                self.assertEqual(artifacts.values[key], before_artifacts)
+                self.assertEqual(workspace.calls, [])
+                self.assertEqual(harness.calls, 0)
 
 
 if __name__ == "__main__":

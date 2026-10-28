@@ -352,9 +352,48 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
                    "proposal_digest": gov["proposal_digest"]}
         gov["receipts"] = [{**receipt, "approval_kind": "host_ui"}]
         self.assertFalse(governance.invariant(_invariant_doc(gov)))
-        # a correct auto receipt at the exact approved revision and digest passes
-        gov["receipts"] = [{**receipt, "approval_kind": "auto"}]
+        # A correct auto receipt at the exact approved revision and digest passes.
+        gov["receipts"] = [{**receipt, "approval_kind": "auto", "superseded_budgets": None}]
         self.assertTrue(governance.invariant(_invariant_doc(gov)))
+
+    # --- the amendment's superseded ceilings ride the receipt (ADR-0072, run/4) ---
+    def test_amend_receipt_superseded_ceilings_invariant(self):
+        gov = _sized(_capable(_placeholder()), SIZED_BUDGETS, SIZED_RATIONALE)
+        submission = {"action": "approve", "configuration": {"budgets": {"max_passes": 6,
+                        "max_spawns": 1, "max_audit_spawns": 2}}}
+        resolved, reason = governance.resolve_submission(gov, submission, _APPROVE_ACTIONS)
+        self.assertIsNone(reason)
+        self.assertEqual(resolved["outcome"], "amend")
+        amended = governance.revise("goal", gov, proposal=resolved["configuration"])
+        self.assertEqual(amended["plan_revision"], gov["plan_revision"] + 1)  # the amend's heirs
+        fields = {"id": "amend-1", "fingerprint": "sha256:" + "a" * 64,
+                  "presentation_fingerprint": "sha256:" + "b" * 64,  # a human's presentation reservation
+                  "proposal_digest": gov["proposal_digest"], "approval_kind": "host_ui"}
+        superseded = {"max_passes": SIZED_BUDGETS["max_passes"],
+                      "max_spawns": SIZED_BUDGETS["max_spawns"],
+                      "max_audit_spawns": SIZED_BUDGETS["max_audit_spawns"]}
+        good = {**fields, "outcome": "amend", "plan_revision": gov["plan_revision"],
+                "superseded_budgets": superseded}
+        amended["receipts"] = [good]
+        self.assertTrue(governance.invariant(_invariant_doc(amended)))
+        cases = [
+            ("an amend receipt without its priors",
+             {k: v for k, v in good.items() if k != "superseded_budgets"}),
+            ("an amend receipt with null priors",
+             {**good, "superseded_budgets": None}),
+            ("an amend receipt naming the wrong ceilings",
+             {**good, "superseded_budgets": {"max_passes": 6, "max_spawns": 1,
+                                              "max_audit_spawns": 2, "extra": 1}}),
+            ("an amend receipt at the amended revision itself",
+             {**good, "plan_revision": amended["plan_revision"]}),
+            ("a non-amend receipt carrying priors",
+             {**good, "outcome": "approve",
+              "superseded_budgets": superseded, "plan_revision": amended["plan_revision"]}),
+        ]
+        for label, receipt in cases:
+            with self.subTest(case=label):
+                forged = {**amended, "receipts": [receipt]}
+                self.assertFalse(governance.invariant(_invariant_doc(forged)), "must fail: " + label)
 
     # --- a zero-audit proposal is a valid sized proposal ---
     def test_zero_audit_proposal_is_sized(self):
@@ -428,6 +467,75 @@ class GovernanceServiceTests(unittest.TestCase):
             budgets=SIZED_BUDGETS, rationale=SIZED_RATIONALE))["type"], "Allow")
         result = self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
         self.assertEqual(result["result"]["type"], "Allow", result)
+
+    # --- the amendment's superseded ceilings ride the receipt (ADR-0072, PR 06) ---
+
+    def _receipts(self):
+        self.view()  # reassemble, so the coordinator's latest snapshot holds the last write
+        return self.service._coordinator.last_snapshot.state.governance["receipts"]
+
+    def test_pre_approval_amend_records_the_superseded_ceilings(self):
+        """The confirm_amendment form's ``(was …)`` priors cannot be derived from state after the
+        amendment commits — run/4 records them on the receipt, read from the proposal the human
+        amended (before ``revise`` replaced it)."""
+        self.prepare()
+        amended = {"max_passes": SIZED_BUDGETS["max_passes"] - 1, "max_spawns": 1,
+                   "max_audit_spawns": 2}
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(self.admit(self.decision("pre-approval-amend", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["outcome"], "amend")
+        self.assertEqual(receipts[-1]["superseded_budgets"], superseded)
+
+    def test_post_approval_amend_records_the_superseded_ceilings(self):
+        self.prepare()
+        self.assertEqual(self.admit(self.decision("first-approve"))["type"], "Allow")
+        revised = {k: v for k, v in SIZED_BUDGETS.items()}
+        revised["max_passes"] = SIZED_BUDGETS["max_passes"] - 2
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets=revised, rationale="a later authored revision"))["type"], "Allow")
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(superseded["max_passes"], revised["max_passes"])
+        amended = {k: v for k, v in revised.items()}
+        amended["max_passes"] = revised["max_passes"] - 1
+        self.assertEqual(self.admit(self.decision("post-approval-amend", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["outcome"], "amend")
+        self.assertEqual(receipts[-1]["superseded_budgets"], superseded)
+
+    def test_every_non_amend_outcome_records_null_priors(self):
+        """Only an amendment supersedes ceilings: present, dismiss and reject write null priors,
+        and so does the first approval (asserted over the whole receipt log each step)."""
+        self.prepare()
+        for label in ("present", "dismiss", "reject"):
+            self.assertIn(self.admit(self.decision(f"null-{label}", outcome=label))["type"],
+                          {"Allow", "Inert"})
+            for receipt in self._receipts():
+                self.assertIsNone(receipt["superseded_budgets"])
+        # a fresh run for the approvals: an approve receipt carries null priors too
+        self.setUp()
+        self.prepare()
+        self.assertIn(self.admit(self.decision("null-approve"))["type"], {"Allow", "Inert"})
+        for receipt in self._receipts():
+            self.assertIsNone(receipt["superseded_budgets"])
+
+    def test_amend_priors_are_the_amended_proposal_not_the_effective_ceilings(self):
+        """``state.budgets`` holds seed or approved ceilings — never what the dialog showed —
+        so the receipt's priors must be the amended proposal's own ceilings, read from the state
+        before ``revise`` replaced them, even when those ceilings differ from the effective ones."""
+        self.prepare()
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"],
+                         SIZED_BUDGETS["max_passes"])
+        # a pre-approval proposal may raise above the seed ceilings in deliberative mode:
+        amended = {"max_passes": SIZED_BUDGETS["max_passes"] + 1, "max_spawns": 1,
+                   "max_audit_spawns": 2}
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(self.admit(self.decision("amend-above", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        receipt = self._receipts()[-1]
+        self.assertEqual(receipt["superseded_budgets"], superseded)
 
     def test_escaped_rationale_bound_survives_private_response_validation(self):
         self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
