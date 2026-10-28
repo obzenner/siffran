@@ -51,3 +51,23 @@ test("the patterns do fire (a negative control)", () => {
   const total = FORBIDDEN[11][0];
   assert.ok(total.test("Object.values(a.by.standing).reduce((s, n) => s + n, 0)") && total.test("Object.values(summary.facets.standing).reduce(add)") && !total.test("num(a.total)"));
 });
+
+// Values the contract owns and enums.json carries (scripts/enums.mjs): no source spells them, so a profile the contract
+// adds is validated and worded from the generated file, never mislabelled by a branch that knew only the old ones. Read
+// from the schema, not listed here.
+const { declared, schemas } = await import("./schema-arbitrary.mjs");
+const PROFILE_IDS = [...new Set(Object.entries(declared()).filter(([at]) => at.endsWith("/properties/profile_id")).flatMap(([, v]) => v))];
+const DIGEST_PATTERNS = [...new Set([schemas.run.$defs.digest.pattern, ...schemas.run.$defs.spikeBackend.oneOf
+  .flatMap((alt) => Object.values(alt.properties)).map((p) => p.pattern).filter(Boolean)])];
+const spells = (src) => [...PROFILE_IDS, ...DIGEST_PATTERNS].filter((value) => src.includes(value));
+
+test("no source under app/ or elements/ spells a spike profile id or the contract's digest pattern", () => {
+  for (const [file, src] of code) assert.deepEqual(spells(src), [], `${file}: a contract value enums.json carries`);
+});
+
+test("the contract values are read from the schema and do fire (a negative control)", () => {
+  assert.ok(PROFILE_IDS.length >= 2 && DIGEST_PATTERNS.length === 1, "the schema still declares the profiles and one digest pattern");
+  assert.deepEqual(spells(`x === ${JSON.stringify(PROFILE_IDS[0])}`), [PROFILE_IDS[0]]);
+  assert.deepEqual(spells(`/${DIGEST_PATTERNS[0]}/.test(v)`), DIGEST_PATTERNS);
+  assert.deepEqual(spells("t(`spike.profile.${id}`)"), []);
+});

@@ -30,17 +30,21 @@ for _path in (_HERE / "v2", _HERE, _PLUGIN, _ROOT / "scripts"):
     if str(_path) not in sys.path:
         sys.path.insert(0, str(_path))
 
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
 import validate_ui_view  # noqa: E402
 from application import observer as observer_module  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application.observer import Observer  # noqa: E402
+from core import observer as core_observer  # noqa: E402
 from core.records import RunKey  # noqa: E402
 from assertions import (action_graph, action_investigate, action_research, action_route,  # noqa: E402
                         get_argument, get_run, observe_action, start_run)
 from governance_setup import sized_configure_run  # noqa: E402
-from observer_store import (DriverSource, _Builder, _graph, build_store, observed, contract_problems,  # noqa: E402
+from observer_store import (DriverSource, _Builder, _generic_spike_action, _graph, build_store, observed, contract_problems,  # noqa: E402
                             view_of)
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
 _STORE = build_store()
@@ -622,7 +626,8 @@ class HistoricalFactsTests(unittest.TestCase):
     def _stopped_with_spike():
         b = _Builder()
         run = b.begin("probe", "drift", "Stop with a passing experiment", _graph(
-            "C0", [("C0", "ordinary", "Goal"), ("C1", "needs-experiment", "Experiment")], [("C0", "C1")]))
+            "C0", [("C0", "ordinary", "Goal"), ("C1", "needs-experiment", "Experiment")], [("C0", "C1")]),
+            qualified=True)
         b.research(run, "C0")
         b.research(run, "C1")
         b.spike(run, "C1", "python check.py", {"check.py": b"old\n"})
@@ -678,7 +683,7 @@ class HistoricalFactsTests(unittest.TestCase):
     def test_a_frozen_stop_lists_the_required_claims_it_left_unresolved_with_what_it_deferred(self):
         b = _Builder()
         run = b.begin("probe", "frozen", "Frozen stop", _graph(
-            "C0", [("C0", "needs-experiment", "Spike-backed")], []))
+            "C0", [("C0", "needs-experiment", "Spike-backed")], []), qualified=True)
         b.research(run, "C0")
         b.spike(run, "C0", "python check.py", {"check.py": b"old\n"})
         b.freeze(run)
@@ -700,10 +705,11 @@ class SpikeProofTests(unittest.TestCase):
     @staticmethod
     def _built():
         b = _Builder()
-        run = b.begin("probe", "spiked", "Spiked claim", _graph("C0", [("C0", "needs-experiment", "Experiment")], []))
+        run = b.begin("probe", "spiked", "Spiked claim", _graph(
+            "C0", [("C0", "needs-experiment", "Experiment")], []), qualified=True)
         b.research(run, "C0")
         b.spike(run, "C0", "python check.py", {"check.py": b"old\n"})
-        b.spike(run, "C0", "python check.py --strict", {"check.py": b"old\n"}, exit_code=1)
+        b.spike(run, "C0", "python check.py --strict", {"check.py": b"new\n"}, exit_code=1)
         return b, run
 
     @staticmethod
@@ -712,21 +718,155 @@ class SpikeProofTests(unittest.TestCase):
         (detail,) = details.values()
         return detail["claims"][0]["proof"]
 
-    def test_each_retained_spike_carries_its_command_result_files_and_standing(self):
+    def test_each_retained_spike_carries_closed_request_result_and_standing(self):
         b, run = self._built()
-        dossier = [a for a in b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["artifacts"]
-                   if a["kind"] == "spike"]
+        dossier = b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["artifacts"]
+        request_ids = [a["artifact_id"] for a in dossier if a["kind"] == "spike_request"]
+        result_ids = [a["artifact_id"] for a in dossier if a["kind"] == "spike"]
         proof = self._proof(b)
-        self.assertEqual([(p["command"], p["outcome"], p["exit_code"], p["gate"]) for p in proof],
-                         [(a["command"], a["outcome"], a["exit_code"], a["spike_gate"]) for a in dossier])
-        self.assertEqual([p["files"] for p in proof], [a["file_bindings"] for a in dossier])
+        self.assertEqual([p["request"]["artifact_id"] for p in proof], request_ids)
+        self.assertEqual([p["result"]["artifact_id"] for p in proof], result_ids)
         self.assertEqual([p["state"] for p in proof], ["superseded", "current"])
-        self.assertEqual({p["output"] for p in proof}, {"not_retained"})
+        self.assertEqual([p["result"]["gate"] for p in proof], ["PASS", "FAIL"])
+        self.assertEqual([p["result"]["outcome"] for p in proof], ["pass", "fail"])
+        self.assertEqual([p["result"]["exit_code"] for p in proof], [0, 1])
+        for item in proof:
+            request, result = item["request"], item["result"]
+            self.assertEqual(request["draft_schema"], "empirica.spike-plan-draft/2")
+            self.assertEqual(request["profile_id"], "docker-isolated-v1")
+            self.assertEqual(request["environment_names"], ["MODE"])
+            self.assertEqual(request["runtime"], {"uid": 65534, "gid": 65534,
+                                                   "workdir": "/work", "inputs_mount": "/inputs",
+                                                   "tmpdir": "/tmp"})
+            self.assertEqual(request["limits"]["workload_timeout_seconds"], 120)
+            self.assertEqual(request["limits"]["operation_timeout_seconds"], 210)
+            self.assertEqual(request["image"]["requested_reference"], "example/probe:local")
+            self.assertEqual(request["argv"], ["/usr/bin/python3", "/inputs/probe.py", "--exact-argv"])
+            self.assertEqual(request["input_count"], len(request["inputs"]))
+            self.assertNotIn("observer-secret-value", json.dumps(request))
+            self.assertEqual(result["profile_id"], request["profile_id"])
+            self.assertTrue(result["cleanup_proven"] and result["postflight_proven"])
+            self.assertNotEqual(result["stdout"]["sha256"], result["stderr"]["sha256"])
+            self.assertNotIn("output", item)
+            flattened = repr(item)
+            for forbidden in ("DOCKER_HOST", "docker.sock", "current.json", "container.cid", "/staging/"):
+                self.assertNotIn(forbidden, flattened)
 
-    def test_a_spike_whose_files_changed_is_stale_and_keeps_its_command(self):
+    def test_historical_request_projection_uses_persisted_policy_not_any_current_limit(self):
         b, _ = self._built()
-        b.write("check.py", b"new\n")
+        from core import spike_plan
+        with mock.patch.object(spike_plan, "FRAMEWORK_SPIKE_POLICY", object()), \
+                mock.patch.object(spike_plan, "WORKLOAD_TIMEOUT_SECONDS", 1), \
+                mock.patch.object(spike_plan, "BACKEND_OPERATION_TIMEOUT_SECONDS", 999):
+            proof = self._proof(b)
+        self.assertEqual(len(proof), 2)
+        self.assertTrue(all(item["request"]["limits"]["workload_timeout_seconds"] == 120
+                            and item["request"]["limits"]["operation_timeout_seconds"] == 210
+                            for item in proof))
+
+    def test_a_spike_whose_inputs_changed_is_stale_and_keeps_the_sealed_request(self):
+        b, _ = self._built()
+        b.write("check.py", b"newer\n")
         self.assertEqual([p["state"] for p in self._proof(b)], ["superseded", "stale"])
+
+    def test_natural_124_and_125_are_exact_fail_verdicts_not_unavailable_substrate(self):
+        for code in (124, 125):
+            with self.subTest(code=code):
+                b = _Builder()
+                run = b.begin("probe", f"exit-{code}", "Natural verdict exit", _graph(
+                    "C0", [("C0", "needs-experiment", "Experiment")], []), qualified=True)
+                b.research(run, "C0")
+                b.spike(run, "C0", "ignored", {"check.py": b"old\n"}, exit_code=code)
+                (item,) = self._proof(b)
+                result = item["result"]
+                self.assertEqual((result["outcome"], result["gate"],
+                                  result["exit_code"]),
+                                 ("fail", "FAIL", code))
+                self.assertTrue(result["natural_exit"])
+
+    def test_request_without_an_admitted_result_is_explicitly_requested_not_failed(self):
+        class UnavailableHarness:
+            def run(self, request):
+                raise RuntimeError("substrate ambiguity")
+
+        b = _Builder()
+        run = b.begin("probe", "requested", "Sealed request", _graph(
+            "C0", [("C0", "needs-experiment", "Experiment")], []), qualified=True)
+        b.research(run, "C0")
+        b.write("check.py", b"old\n")
+        coordinator = b.drv._service._coordinator
+        original = coordinator.harness
+        coordinator.harness = UnavailableHarness()
+        try:
+            response = coordinator.handle({"type": "ObserveAction", "run_id": run,
+                                           "action": _generic_spike_action("C0", ["check.py"])}, "request-only")
+        finally:
+            coordinator.harness = original
+        self.assertEqual(response["result"], {"type": "Fault", "code": "unavailable", "fail_direction": "closed"})
+        (item,) = self._proof(b)
+        self.assertEqual(item["state"], "requested")
+        self.assertIsNone(item["result"])
+        self.assertEqual(item["request"]["declared_inputs"], ["check.py"])
+
+    def test_old_or_multi_container_request_shape_is_rejected_not_translated(self):
+        old = {"draft": {"schema": "empirica.spike-plan-draft/1",
+                          "containers": [], "inputs": [], "networks": [], "startup_order": []}}
+        with self.assertRaises((KeyError, ValueError, TypeError)):
+            core_observer.spike_observer.request(old)
+
+    def test_platform_aliases_and_empty_inputs_environment_are_projected_without_inference(self):
+        from core import governance
+        from core.canonical import canonical_digest
+        b, _ = self._built()
+        raw = governance.plain(next(item for item in b.drv._service._coordinator.last_snapshot.history
+                                    if item.get("kind") == "spike_request"))
+        raw["draft"]["inputs"] = []
+        raw["draft"]["environment"] = {}
+        raw["draft_digest"] = canonical_digest(raw["draft"])
+        raw["plan"]["draft_digest"] = raw["draft_digest"]
+        raw["plan"]["inputs"] = []
+        raw["plan"]["captured_files"] = []
+        raw["plan"]["capture_digest"] = canonical_digest([])
+        raw["plan"]["environment"] = {}
+        raw["plan"]["image"].update(raw_architecture="x86_64", architecture="amd64")
+        raw["plan_digest"] = canonical_digest(raw["plan"])
+        request, _ = core_observer.spike_observer.request(raw)
+        self.assertEqual((request["image"]["raw_architecture"], request["image"]["architecture"]),
+                         ("x86_64", "amd64"))
+        self.assertEqual((request["declared_inputs"], request["inputs"], request["input_count"],
+                          request["input_bytes"]), ([], [], 0, 0))
+        self.assertEqual(request["environment_names"], [])
+
+    def test_tampered_persisted_policy_plan_and_unknown_fields_fail_closed(self):
+        from core import governance
+        b, _ = self._built()
+        original = governance.plain(next(item for item in b.drv._service._coordinator.last_snapshot.history
+                                         if item.get("kind") == "spike_request"))
+        mutations = (
+            lambda row: row["policy"].__setitem__("stdout_bytes", 7),
+            lambda row: row["plan"].__setitem__("uid", 0),
+            lambda row: row["plan"].__setitem__("unknown", True),
+        )
+        for mutate in mutations:
+            row = json.loads(json.dumps(original))
+            mutate(row)
+            with self.assertRaises(ValueError):
+                core_observer.spike_observer.request(row)
+
+    def test_recursive_observer_projection_contains_no_environment_secret_or_private_authority(self):
+        forbidden = ("observer-secret-value", "DOCKER_HOST", "docker.sock", "container.cid",
+                     "journal.json", "container_id", "network_id", "BEGIN PRIVATE KEY")
+        _, details = observed(Observer(DriverSource(_STORE)))
+        rendered = json.dumps(details, sort_keys=True)
+        for value in forbidden:
+            self.assertNotIn(value, rendered)
+
+    def test_closed_detail_projection_rejects_malformed_nested_data(self):
+        # The pure detail boundaries must reject unknown or missing fields before any unsafe partial display.
+        with self.assertRaises((KeyError, ValueError, TypeError)):
+            core_observer.spike_observer.request({"draft": {}})
+        with self.assertRaises((KeyError, ValueError, TypeError)):
+            core_observer.spike_observer.result({"result_facts": {"stdout": "raw"}}, {})
 
     def test_a_claim_without_a_spike_has_an_empty_proof(self):
         view, details = observed(Observer(DriverSource(_STORE)))
@@ -1390,6 +1530,38 @@ class LocationsTests(unittest.TestCase):
         record.unlink()
         os.symlink(self.repo / "elsewhere.json", record)
         self.assertIsNone(locations.repo("p"), "a symlinked record is refused")
+
+
+class HistoricalSpikeLiteralTests(unittest.TestCase):
+    """``core.spike_observer`` owns frozen literals by design; today they equal the current owners."""
+
+    def test_historical_profiles_and_digest_form_equal_the_current_owners(self):
+        from core import freshness, spike_observer, spike_plan
+        self.assertEqual(spike_observer._PROFILES, spike_plan.NETWORK_PROFILES)
+        self.assertEqual(spike_observer._DIGEST.pattern, freshness.DIGEST256_PATTERN)
+
+    def test_historical_backend_admits_exactly_the_current_qualified_bindings(self):
+        from core import spike_observer, spike_plan
+        digest = "sha256:" + "0" * 64
+
+        def qualified(**changes):
+            row = {"kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
+                   "qualification_record_digest": digest, "execution_binding_digest": digest}
+            return {**row, **changes}
+
+        cases = [qualified(profile_id=profile) for profile in sorted(spike_plan.NETWORK_PROFILES)] + [
+            {"kind": "spikes_unavailable"}, qualified(extra=True), qualified(backend="host"),
+            qualified(profile_id="docker-rust-v1"), qualified(execution_binding_digest=digest.upper()),
+            qualified(qualification_record_digest=digest + "\n"),
+        ]
+        for binding in cases:
+            with self.subTest(binding=binding):
+                try:
+                    spike_observer.backend(binding)
+                    admitted = True
+                except ValueError:
+                    admitted = False
+                self.assertEqual(admitted, spike_plan.spike_backend_kind(binding) == "qualified")
 
 
 if __name__ == "__main__":

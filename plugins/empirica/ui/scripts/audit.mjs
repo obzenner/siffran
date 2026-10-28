@@ -37,6 +37,7 @@ function families(states, cat, enums) {
     "where.*": of("where", enums.where),
     "spike.outcome.*": of("spike.outcome", enums.spike_outcome),
     "spike.*": of("spike", enums.spike),
+    "spike.profile.*": of("spike.profile", enums.profile),
     "mode.*": of("mode", enums.mode),
     "approval.*": of("approval", enums.approval),
     "budget.*": of("budget", enums.budgets),

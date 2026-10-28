@@ -83,6 +83,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         self.claims = ["C0", *sorted(extra)]
         self.reworded: set = set()
         self.run = self.b.begin("probe", "s-machine", "Generated run.", _graph_of(self.claims), surface=surface,
+                                qualified=True,
                                 # an auto run is approved by its host's policy, never by a waiting human
                                 approve=approve or start == "auto-delegated", **copy.deepcopy(kw))
 
@@ -116,7 +117,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
     def cite_the_web(self, claim):
         self.b.cite(self.run, claim, "web", "https://example.invalid/spec", "External support")
 
-    @precondition(lambda self: self._approved())
+    @precondition(lambda self: self._approved() and "C1" in self.claims)
     @rule(path=st.sampled_from(FILES), passes=st.booleans())
     def spike(self, path, passes):
         self.b.spike(self.run, "C1", f"probe {path}", {path: b"v1\n"}, exit_code=0 if passes else 1)

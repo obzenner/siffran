@@ -9,9 +9,10 @@ from types import MappingProxyType
 from typing import Any
 
 from .canonical import canonical_digest
-from .freshness import ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, valid_claim_id
+from .freshness import (ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, is_digest256,
+                        valid_claim_id)
 from .run import OperationalState
-from . import citations, confirmation, governance
+from . import citations, confirmation, governance, spike_plan, spike_plan_draft
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
                 "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
@@ -783,53 +784,235 @@ def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
     return None
 
 
-def plan_spike_request(snapshot: EvaluationSnapshot, action: Mapping[str, Any]) -> Decision:
-    """Purely admit and seal a spike request against current graph/research."""
+def validate_sealed_spike_request(
+    action: object,
+    sealed_facts: object,
+) -> tuple[spike_plan_draft.SpikePlanDraft, spike_plan.SealedSpikePlan]:
+    """Validate the exact /2 author and host-only request shapes without effects."""
+    if type(action) is not dict or set(action) != {"kind", "claim_id", "plan"} \
+            or action.get("kind") != "spike_request":
+        raise ValueError("generic spike action is not closed")
+    try:
+        draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
+    except spike_plan_draft.SpikePlanDraftError as exc:
+        raise ValueError("generic spike draft is malformed") from exc
+    if draft.to_data() != action["plan"]:
+        raise ValueError("generic spike draft is not canonical")
+    required = {
+        "draft_digest", "plan", "plan_digest", "policy", "policy_digest",
+        "operation_timeout_seconds", "snapshot_basis_id", "snapshot_digest", "backend",
+    }
+    if type(sealed_facts) is not dict or set(sealed_facts) != required:
+        raise ValueError("generic sealed request facts are not closed")
+    backend = sealed_facts["backend"]
+    if (type(backend) is not dict or spike_plan.spike_backend_kind(backend) != "qualified"
+            or not is_digest256(sealed_facts.get("snapshot_basis_id"))
+            or not is_digest256(sealed_facts.get("snapshot_digest"))):
+        raise ValueError("generic sealed request authority or snapshot facts are malformed")
+    try:
+        plan = spike_plan.sealed_plan_from_data(sealed_facts["plan"])
+        request = spike_plan.sealed_request_from_data({
+            "schema": spike_plan.REQUEST_SCHEMA,
+            "plan": sealed_facts["plan"],
+            "plan_digest": sealed_facts["plan_digest"],
+            "policy": sealed_facts["policy"],
+            "policy_digest": sealed_facts["policy_digest"],
+            "operation_timeout_seconds": sealed_facts["operation_timeout_seconds"],
+        })
+    except spike_plan.SpikePlanError as exc:
+        raise ValueError("generic sealed request facts are malformed") from exc
+    if (sealed_facts["draft_digest"] != draft.digest
+            or plan.draft_digest != draft.digest
+            or request.plan != plan
+            or plan.network_profile != backend["profile_id"]):
+        raise ValueError("generic sealed request differs from author draft")
+    return draft, plan
+
+
+def preflight_spike_request(
+    snapshot: EvaluationSnapshot, action: Mapping[str, Any],
+) -> Decision | None:
+    """Apply governance/research gates before any host-side resolving or capture."""
     state = snapshot.state
     blocked = _investigation_block(snapshot)
     if blocked is not None:
         return blocked
     if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
-    claim = next((c for c in snapshot.graph["claims"] if c["id"] == action["claim_id"]), None)
+    claim_id = action.get("claim_id") if type(action) is dict else None
+    claim = next((c for c in snapshot.graph["claims"] if c["id"] == claim_id), None)
     if claim is None:
         return _decision(snapshot, state, "Block", reason="graph.invalid")
-    research = [a for a in active_evidence(snapshot, claim) if a["kind"] == "research" and a["outcome"] == "supporting"]
+    research = [a for a in active_evidence(snapshot, claim)
+                if a["kind"] == "research" and a["outcome"] == "supporting"]
     if not research:
-        return _decision(snapshot, state, "Block", reason="claim.spike_prerequisite_missing", affected="claim:" + claim["id"])
-    sealed = artifact("spike_request", {
+        return _decision(snapshot, state, "Block", reason="claim.spike_prerequisite_missing",
+                         affected="claim:" + claim["id"])
+    return None
+
+
+def plan_spike_request(
+    snapshot: EvaluationSnapshot,
+    action: Mapping[str, Any],
+    sealed_facts: Mapping[str, Any],
+) -> Decision:
+    """Purely admit a server-captured generic spike request against current graph/research."""
+    preflight = preflight_spike_request(snapshot, action)
+    if preflight is not None:
+        return preflight
+    state = snapshot.state
+    claim = next(c for c in snapshot.graph["claims"] if c["id"] == action["claim_id"])
+    research = [a for a in active_evidence(snapshot, claim)
+                if a["kind"] == "research" and a["outcome"] == "supporting"]
+    draft, _ = validate_sealed_spike_request(action, sealed_facts)
+    base = {
         "claim_id": claim["id"], "claim_digest": claim_digest(claim),
-        "statement_digest": digest(action), "harness_request_id": digest(action),
-        "command": action["command"], "command_digest": digest(action["command"]),
-        "dependent_files": sorted(action["dependent_files"]),
+        "statement_digest": sealed_facts["draft_digest"],
+        "draft": action["plan"],
+        **sealed_facts,
         "prerequisite_research_ids": [a["artifact_id"] for a in research],
         "producer": _producer(state),
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,
-    })
+    }
+    base["harness_request_id"] = digest(base)
+    sealed = artifact("spike_request", base)
     return _decision(snapshot, state, artifacts=(sealed,))
 
 
-def plan_spike_result(snapshot: EvaluationSnapshot, request_body: Mapping[str, Any], facts: Any) -> Decision:
-    """Purely admit immutable harness facts and plan one spike result artifact."""
+def _validated_generic_result_facts(
+    request_body: Mapping[str, Any], result_facts: Mapping[str, Any],
+    request_artifact_id: str,
+) -> tuple[int, str]:
+    fields = {
+        "run_id", "backend", "plan_digest", "policy_digest", "snapshot_digest",
+        "operation_facts", "stdout", "stderr", "natural_exit", "forced_termination",
+        "exit_code", "verdict", "cleanup_proven", "postflight_identity_digest",
+        "harness_result_digest",
+    }
+    if type(result_facts) is not dict or set(result_facts) != fields:
+        raise ValueError("generic result facts are not closed")
+    try:
+        plan = spike_plan.sealed_plan_from_data(request_body["plan"])
+        spike_plan.sealed_request_from_data({
+            "schema": spike_plan.REQUEST_SCHEMA,
+            "plan": request_body["plan"],
+            "plan_digest": request_body["plan_digest"],
+            "policy": request_body["policy"],
+            "policy_digest": request_body["policy_digest"],
+            "operation_timeout_seconds": request_body["operation_timeout_seconds"],
+        })
+    except (KeyError, spike_plan.SpikePlanError) as exc:
+        raise ValueError("generic request identities are malformed") from exc
+    backend = request_body.get("backend")
+    if (type(backend) is not dict or spike_plan.spike_backend_kind(backend) != "qualified"
+            or backend["profile_id"] != plan.network_profile):
+        raise ValueError("generic request authority is malformed")
+    expected_run_id = "r-" + request_artifact_id.split(":", 1)[1][:32]
+    if (result_facts["run_id"] != expected_run_id
+            or result_facts["plan_digest"] != plan.digest
+            or result_facts["policy_digest"] != spike_plan.FRAMEWORK_SPIKE_POLICY.digest
+            or result_facts["snapshot_digest"] != request_body.get("snapshot_digest")
+            or result_facts["backend"] != backend):
+        raise ValueError("generic result identities differ from the request")
+    supplied_digest = result_facts["harness_result_digest"]
+    digest_body = dict(result_facts)
+    del digest_body["harness_result_digest"]
+    if not is_digest256(supplied_digest) or digest(digest_body) != supplied_digest:
+        raise ValueError("generic harness result digest is invalid")
+    if (result_facts["cleanup_proven"] is not True
+            or result_facts["postflight_identity_digest"]
+            != backend["execution_binding_digest"]):
+        raise ValueError("generic cleanup or postflight identity is invalid")
+    operation_fields = {
+        "operation_digest", "qualification_record_digest", "execution_binding_digest",
+        "image_digest", "input_digest", "process_digest", "topology_digest", "timing_digest",
+    }
+    operation = result_facts["operation_facts"]
+    if (type(operation) is not dict or set(operation) != operation_fields
+            or any(not is_digest256(value) for value in operation.values())
+            or operation["qualification_record_digest"]
+            != backend["qualification_record_digest"]
+            or operation["execution_binding_digest"] != backend["execution_binding_digest"]
+            or operation["image_digest"] != plan.image.image_id
+            or operation["input_digest"] != request_body.get("snapshot_digest")):
+        raise ValueError("generic operation facts differ from the request")
+    for name in ("stdout", "stderr"):
+        stream = result_facts[name]
+        ceiling = getattr(spike_plan.FRAMEWORK_SPIKE_POLICY, name + "_bytes")
+        if (type(stream) is not dict or set(stream) != {"bytes_seen", "sha256"}
+                or type(stream["bytes_seen"]) is not int
+                or isinstance(stream["bytes_seen"], bool)
+                or not 0 <= stream["bytes_seen"] <= ceiling
+                or not is_digest256(stream["sha256"])):
+            raise ValueError("generic stream facts exceed the sealed policy")
+    exit_code = result_facts["exit_code"]
+    verdict = result_facts["verdict"]
+    if (result_facts["natural_exit"] is not True
+            or result_facts["forced_termination"] is not False
+            or type(exit_code) is not int or isinstance(exit_code, bool)
+            or not 0 <= exit_code <= 255 or exit_code == 137
+            or verdict != ("PASS" if exit_code == 0 else "FAIL")):
+        raise ValueError("generic natural verdict facts are malformed")
+    return exit_code, verdict
+
+
+def plan_spike_result(
+    snapshot: EvaluationSnapshot,
+    request_body: Mapping[str, Any],
+    result_facts: Mapping[str, Any],
+) -> Decision:
+    """Purely admit immutable generic harness facts for an exact committed request."""
     state = snapshot.state
     blocked = _investigation_block(snapshot)
     if blocked is not None:
         return blocked
     if snapshot.graph is None or frozen_scope_invalid(state, snapshot.graph):
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
+    request_artifact_id = digest(request_body)
+    sealed_request = next((item for item in snapshot.history
+                           if item.get("kind") == "spike_request"
+                           and item.get("artifact_id") == request_artifact_id), None)
+    if sealed_request is None:
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
+    requests = [item for item in snapshot.history
+                if item.get("kind") == "spike_request"
+                and item.get("claim_id") == request_body["claim_id"]]
+    if not requests or requests[-1].get("artifact_id") != request_artifact_id:
+        return _decision(snapshot, state, "Block", reason="graph.invalid")
+    if (state.route_stamp != request_body["route_stamp"]
+            or state.investigation_stamp != request_body["investigation_stamp"]):
         return _decision(snapshot, state, "Block", reason="graph.invalid")
     claim = next((c for c in snapshot.graph["claims"] if c["id"] == request_body["claim_id"]), None)
     if claim is None or claim_digest(claim) != request_body["claim_digest"]:
         return _decision(snapshot, state, "Block", reason="graph.invalid")
+    research = [item for item in active_evidence(snapshot, claim)
+                if item["kind"] == "research" and item["outcome"] == "supporting"]
+    if tuple(item["artifact_id"] for item in research) != tuple(
+            request_body["prerequisite_research_ids"]):
+        return _decision(snapshot, state, "Block", reason="claim.spike_prerequisite_missing",
+                         affected="claim:" + claim["id"])
+    verdict_exit, verdict = _validated_generic_result_facts(
+        request_body, result_facts, request_artifact_id)
+    plan = spike_plan.sealed_plan_from_data(request_body["plan"])
+    file_bindings = [{"path": item.path, "sha256": item.sha256}
+                     for item in plan.captured_files]
     prior = [a for a in snapshot.history if a.get("kind") == "spike" and a.get("claim_id") == claim["id"] and a.get("claim_digest") == request_body["claim_digest"]]
     result = artifact("spike", {
         "claim_id": claim["id"], "claim_digest": request_body["claim_digest"],
-        "statement_digest": facts.result_digest,
+        "statement_digest": result_facts["harness_result_digest"],
         "harness_request_id": request_body["harness_request_id"],
-        "command": request_body["command"], "command_digest": request_body["command_digest"],
+        "request_artifact_id": request_artifact_id,
+        "draft_digest": request_body["draft_digest"],
+        "plan_digest": request_body["plan_digest"],
+        "policy_digest": request_body["policy_digest"],
+        "snapshot_digest": request_body["snapshot_digest"],
+        "backend": request_body["backend"],
         "prerequisite_research_ids": request_body["prerequisite_research_ids"],
-        "file_bindings": [{"path": b.path, "sha256": b.sha256} for b in facts.file_bindings],
-        "exit_code": facts.exit_code, "spike_gate": facts.gate.value,
-        "outcome": "pass" if facts.exit_code == 0 else "fail",
+        "file_bindings": file_bindings,
+        "exit_code": verdict_exit,
+        "spike_gate": verdict,
+        "outcome": "pass" if verdict_exit == 0 else "fail",
+        "result_facts": result_facts,
         "supersedes": prior[-1]["artifact_id"] if prior else None,
         "producer": request_body["producer"],
         "route_stamp": state.route_stamp, "investigation_stamp": state.investigation_stamp,

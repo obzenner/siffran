@@ -79,7 +79,8 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
     config = detail["governance"]["oneOf"][1]["properties"]
     governance = state_schema["properties"]["governance"]["properties"]
     waits = record["wait"]["oneOf"][1]["properties"]
-    proof = detail["claims"]["oneOf"][1]["items"]["properties"]["proof"]["items"]["properties"]
+    proof = run_schema["$defs"]["genericSpikeProof"]["properties"]
+    proof_result = run_schema["$defs"]["genericSpikeResult"]["properties"]
     ask = {v for v in confirmation.ASK_WHERE.values()}
     pairs = [
         ("view run.state", _enum(run, "state"), set(reg["statuses"]), "registry statuses"),
@@ -113,8 +114,8 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
          "core.confirmation decisions"),
         ("decision where", _enum(decision, "where"), ask, "core.confirmation.ASK_WHERE"),
         ("run proof.state", _enum(proof, "state"), set(SPIKE_STATES), "core.observer.SPIKE_STATES"),
-        ("run proof.gate", _enum(proof, "gate"), set(reg["spike_gates"]), "registry spike_gates"),
-        ("run proof.outcome", _enum(proof, "outcome"), {"pass", "fail"}, "registry artifact_outcomes (a spike's)"),
+        ("run proof.gate", _enum(proof_result, "gate"), set(reg["spike_gates"]), "registry spike_gates"),
+        ("run proof.outcome", _enum(proof_result, "outcome"), {"pass", "fail"}, "registry artifact_outcomes (a spike's)"),
         ("run steps.kind", _enum(step, "kind"), set(HISTORY_KINDS), "history_records.HISTORY_KINDS"),
         ("run steps.subject", _enum(step, "subject"), set(STEP_SUBJECTS), "core.observer.STEP_SUBJECTS"),
         ("run steps.standing", _enum(step, "standing"), set(CLAIM_STANDING), "core.observer.CLAIM_STANDING"),

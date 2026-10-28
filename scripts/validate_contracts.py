@@ -65,7 +65,7 @@ AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_
 REVIEWED_HOST_PROFILES_DIGEST = "sha256:d4915422e2b04b6d6d44f4ff480d7134d69b81a94dfec0c6f4d52878868bfc14"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
-REGISTRY_VERSION = "4.0.0"
+REGISTRY_VERSION = "6.0.0"
 PROTOCOL = "empirica/v2"
 # Structural D1 constants that have no canonical-JSON vocabulary of their own: edge
 # types and research source kinds. Artifact kind/outcome/spike-gate vocabularies ARE
@@ -221,14 +221,15 @@ def check_referential(contract: dict, errors: list[str], where: str) -> None:
             errors.append(f"{where}: reasons.{rid} must list at least one next action")
         if not (reason.get("sections") or []):
             errors.append(f"{where}: reasons.{rid} must list at least one section")
-    # D2C artifact vocabulary self-consistency: spike_gates is a subset of
-    # artifact_outcomes so the per-kind derivation (research = outcomes minus gates,
-    # spike = gates) is well-defined, and the spike outcome equals the gate vocabulary.
+    # Artifact outcomes remain lowercase dossier states; generic harness verdict gates
+    # are the distinct closed uppercase vocabulary. Their lowercase forms must be the
+    # spike artifact outcomes.
     artifact_outcomes = _as_set(contract.get("artifact_outcomes", []), where, errors,
                                 "artifact_outcomes")
     spike_gates = _as_set(contract.get("spike_gates", []), where, errors, "spike_gates")
-    if spike_gates and artifact_outcomes and not spike_gates.issubset(artifact_outcomes):
-        errors.append(f"{where}: spike_gates {sorted(spike_gates)} must be a subset of "
+    lowered_gates = {gate.lower() for gate in spike_gates}
+    if spike_gates and artifact_outcomes and not lowered_gates.issubset(artifact_outcomes):
+        errors.append(f"{where}: lowercase spike_gates {sorted(lowered_gates)} must be a subset of "
                       f"artifact_outcomes {sorted(artifact_outcomes)}")
     if not _as_set(contract.get("artifact_kinds", []), where, errors, "artifact_kinds"):
         errors.append(f"{where}: artifact_kinds must be a nonempty array")
@@ -1075,6 +1076,77 @@ def _check_prereqs(art: dict, p: str, cdigest: Any,
                           f"research artifact for claim digest {cdigest!r}")
 
 
+def _validation_spike_request(
+    *, sequence: int, artifact_id: str, claim_digest: str,
+    prerequisites: list[str], paths: list[str], backend: dict,
+) -> dict:
+    ordered = sorted(paths)
+    return {
+        "sequence": sequence, "artifact_id": artifact_id, "claim_id": "G0",
+        "claim_digest": claim_digest, "kind": "spike_request",
+        "statement_digest": "sha256:" + "e" * 64,
+        "harness_request_id": artifact_id,
+        "draft": {
+            "schema": "empirica.spike-plan-draft/2",
+            "image": "example/probe@sha256:" + "1" * 64,
+            "argv": ["/usr/bin/python3", "/inputs/probe.py"],
+            "inputs": ordered,
+            "environment": [],
+        },
+        "draft_digest": "sha256:" + "d" * 64,
+        "plan_digest": "sha256:" + "e" * 64,
+        "policy_digest": "sha256:" + "f" * 64,
+        "operation_timeout_seconds": 210,
+        "snapshot_basis_id": "sha256:" + "b" * 64,
+        "snapshot_digest": "sha256:" + "c" * 64,
+        "inputs": [{"path": path, "sha256": "sha256:" + "9" * 64,
+                    "bytes": 0} for path in ordered],
+        "backend": dict(backend), "producer_model": None,
+        "prerequisite_research_ids": list(prerequisites),
+    }
+
+
+def _validation_spike_result(
+    *, sequence: int, artifact_id: str, request: dict, claim_digest: str,
+    exit_code: int, active: bool, supersedes: str | None,
+) -> dict:
+    verdict = "PASS" if exit_code == 0 else "FAIL"
+    paths = [item["path"] for item in request["inputs"]]
+    backend = dict(request["backend"])
+    return {
+        "sequence": sequence, "artifact_id": artifact_id, "claim_id": "G0",
+        "claim_digest": claim_digest, "kind": "spike",
+        "statement_digest": "sha256:" + "e" * 64, "active": active,
+        "outcome": "pass" if exit_code == 0 else "fail",
+        "harness_request_id": request["harness_request_id"],
+        "request_artifact_id": request["artifact_id"],
+        "plan_digest": request["plan_digest"], "policy_digest": request["policy_digest"],
+        "snapshot_digest": request["snapshot_digest"], "backend": backend,
+        "producer_model": None,
+        "prerequisite_research_ids": list(request["prerequisite_research_ids"]),
+        "file_bindings": [{"path": path, "sha256": "sha256:" + "9" * 64}
+                          for path in paths],
+        "exit_code": exit_code, "spike_gate": verdict, "supersedes": supersedes,
+        "result_facts": {
+            "run_id": "fixture", "backend": backend,
+            "plan_digest": request["plan_digest"], "policy_digest": request["policy_digest"],
+            "snapshot_digest": request["snapshot_digest"],
+            "operation_facts": {key: "sha256:" + character * 64
+                for key, character in zip((
+                    "operation_digest", "qualification_record_digest",
+                    "execution_binding_digest", "image_digest", "input_digest",
+                    "process_digest", "topology_digest", "timing_digest"), "3456789a")},
+            "stdout": {"bytes_seen": 0, "sha256": "sha256:" + "0" * 64},
+            "stderr": {"bytes_seen": 0, "sha256": "sha256:" + "0" * 64},
+            "natural_exit": True, "forced_termination": False,
+            "exit_code": exit_code,
+            "verdict": verdict, "cleanup_proven": True,
+            "postflight_identity_digest": backend["execution_binding_digest"],
+            "harness_result_digest": "sha256:" + "e" * 64,
+        },
+    }
+
+
 def check_argument_view(result: dict, contract: dict, errors: list[str], where: str) -> None:
     """D2A §4: ArgumentView closed, referential integrity, audit cross-field, delimiters."""
     argument = result.get("argument")
@@ -1130,8 +1202,8 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
     artifact_kinds = set(contract.get("artifact_kinds", []))
     artifact_outcomes = set(contract.get("artifact_outcomes", []))
     spike_gates = set(contract.get("spike_gates", []))
-    research_outcomes = artifact_outcomes - spike_gates
-    spike_outcomes = spike_gates
+    spike_outcomes = {gate.lower() for gate in spike_gates}
+    research_outcomes = artifact_outcomes - spike_outcomes
 
     def _bad_path(p: Any) -> bool:
         return not isinstance(p, str) or not p or not RELATIVE_POSIX_RE.match(p)
@@ -1218,24 +1290,22 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                       "observed_content_digest"):
                 if fb in art:
                     errors.append(f"{p}: spike_request artifact must not carry field {fb!r}")
-            if not isinstance(art.get("harness_request_id"), str) or not art.get("harness_request_id"):
-                errors.append(f"{p}: spike_request harness_request_id must be nonempty")
-            if not isinstance(art.get("command"), str) or not art.get("command"):
-                errors.append(f"{p}: spike_request command must be nonempty")
-            if not _is_digest(art.get("command_digest")):
-                errors.append(f"{p}: spike_request command_digest must be sha256:<64hex>")
-            df = art.get("dependent_files", []) or []
-            if not isinstance(df, list) or not df:
-                errors.append(f"{p}: dependent_files must be a nonempty array")
-            else:
-                df_seen: list[str] = []
-                for fp in df:
-                    if _bad_path(fp):
-                        errors.append(f"{p}: dependent_files path {fp!r} must be normalized relative posix")
-                    elif fp in df_seen:
-                        errors.append(f"{p}: dependent_files path {fp!r} is not unique")
-                    else:
-                        df_seen.append(fp)
+            if not _is_digest(art.get("harness_request_id")):
+                errors.append(f"{p}: spike_request harness_request_id must be sha256:<64hex>")
+            for field in ("draft_digest", "plan_digest", "policy_digest",
+                          "snapshot_basis_id", "snapshot_digest"):
+                if not _is_digest(art.get(field)):
+                    errors.append(f"{p}: spike_request {field} must be sha256:<64hex>")
+            if art.get("operation_timeout_seconds") != 210:
+                errors.append(f"{p}: spike_request operation timeout must be sealed at 210")
+            if not isinstance(art.get("draft"), dict) or not isinstance(art.get("inputs"), list):
+                errors.append(f"{p}: generic spike_request draft and inputs must be present")
+            df = [item.get("path") for item in art.get("inputs", [])
+                  if isinstance(item, dict)]
+            if not df:
+                errors.append(f"{p}: generic spike_request file bindings must be nonempty")
+            elif len(df) != len(set(df)) or any(_bad_path(path) for path in df):
+                errors.append(f"{p}: generic spike_request file binding paths are invalid")
             _check_prereqs(art, p, cdigest, supporting_research_by_digest, errors)
             hrid = art.get("harness_request_id") if isinstance(art.get("harness_request_id"), str) else None
             if aid is not None and hrid is not None:
@@ -1253,12 +1323,14 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                 errors.append(f"{p}: spike active must be boolean")
             if art.get("outcome") not in spike_outcomes:
                 errors.append(f"{p}: spike outcome {art.get('outcome')!r} must be {sorted(spike_outcomes)}")
-            if not isinstance(art.get("harness_request_id"), str) or not art.get("harness_request_id"):
-                errors.append(f"{p}: spike harness_request_id must be nonempty")
-            if not isinstance(art.get("command"), str) or not art.get("command"):
-                errors.append(f"{p}: spike command must be nonempty")
-            if not _is_digest(art.get("command_digest")):
-                errors.append(f"{p}: spike command_digest must be sha256:<64hex>")
+            if not _is_digest(art.get("harness_request_id")):
+                errors.append(f"{p}: spike harness_request_id must be sha256:<64hex>")
+            for field in ("request_artifact_id", "plan_digest", "policy_digest",
+                          "snapshot_digest"):
+                if not _is_digest(art.get(field)):
+                    errors.append(f"{p}: spike {field} must be sha256:<64hex>")
+            if not isinstance(art.get("result_facts"), dict):
+                errors.append(f"{p}: generic spike result_facts must be present")
             _check_prereqs(art, p, cdigest, supporting_research_by_digest, errors)
             fb = art.get("file_bindings", []) or []
             fb_paths: list[str] = []
@@ -1290,17 +1362,16 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             sup = art.get("supersedes")
             if sup is not None and not _is_digest(sup):
                 errors.append(f"{p}: supersedes must be null or sha256:<64hex>")
-            # invariant 5: spike_gate == pass iff exit_code == 0; outcome == pass iff gate pass.
-            if gate == "pass" and isinstance(ec, int) and not isinstance(ec, bool) and ec != 0:
-                errors.append(f"{p}: spike_gate pass requires exit_code 0, got {ec!r}")
-            if gate == "fail" and isinstance(ec, int) and not isinstance(ec, bool) and ec == 0:
-                errors.append(f"{p}: spike_gate fail requires a non-zero exit_code, got {ec!r}")
-            if art.get("outcome") == "pass" and gate != "pass":
-                errors.append(f"{p}: outcome pass requires spike_gate pass, got {gate!r}")
-            if art.get("outcome") == "fail" and gate != "fail":
-                errors.append(f"{p}: outcome fail requires spike_gate fail, got {gate!r}")
-            # invariant 3: exactly one earlier matching spike_request (claim/harness/command/
-            # command_digest/ordered prerequisite_research_ids).
+            # invariant 5: typed PASS is natural exit zero; FAIL is every natural nonzero.
+            if gate == "PASS" and isinstance(ec, int) and not isinstance(ec, bool) and ec != 0:
+                errors.append(f"{p}: spike_gate PASS requires exit_code 0, got {ec!r}")
+            if gate == "FAIL" and isinstance(ec, int) and not isinstance(ec, bool) and ec == 0:
+                errors.append(f"{p}: spike_gate FAIL requires a non-zero exit_code, got {ec!r}")
+            if art.get("outcome") == "pass" and gate != "PASS":
+                errors.append(f"{p}: outcome pass requires spike_gate PASS, got {gate!r}")
+            if art.get("outcome") == "fail" and gate != "FAIL":
+                errors.append(f"{p}: outcome fail requires spike_gate FAIL, got {gate!r}")
+            # invariant 3: exactly one earlier request named by content address.
             hrid = art.get("harness_request_id") if isinstance(art.get("harness_request_id"), str) else None
             key = (cid if isinstance(cid, str) else "", hrid) if hrid else None
             req = requests_by_key.get(key) if key else None
@@ -1310,18 +1381,21 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             else:
                 if cdigest is not None and cdigest != req.get("claim_digest"):
                     errors.append(f"{p}: spike result claim_digest {cdigest!r} != request {req.get('claim_digest')!r}")
-                if art.get("command") != req.get("command"):
-                    errors.append(f"{p}: spike result command {art.get('command')!r} != request {req.get('command')!r}")
-                if art.get("command_digest") != req.get("command_digest"):
-                    errors.append(f"{p}: spike result command_digest {art.get('command_digest')!r} != request")
+                for field in ("plan_digest", "policy_digest", "snapshot_digest", "backend"):
+                    if art.get(field) != req.get(field):
+                        errors.append(f"{p}: spike result {field} differs from request")
+                if art.get("request_artifact_id") != req.get("artifact_id"):
+                    errors.append(f"{p}: spike result request_artifact_id differs from request")
                 if art.get("prerequisite_research_ids") != req.get("prerequisite_research_ids"):
                     errors.append(f"{p}: spike result prerequisite_research_ids "
                                   f"{art.get('prerequisite_research_ids')!r} != request "
                                   f"{req.get('prerequisite_research_ids')!r}")
-                # invariant 7: file_binding paths exactly equal request dependent_files, same order.
-                if fb_paths and fb_paths != req.get("dependent_files"):
+                # invariant 7: result file paths exactly equal captured request bindings.
+                request_paths = [item.get("path") for item in req.get("inputs", [])
+                                 if isinstance(item, dict)]
+                if fb_paths and fb_paths != request_paths:
                     errors.append(f"{p}: file_binding paths {fb_paths!r} != request "
-                                f"dependent_files {req.get('dependent_files')!r}")
+                                  f"captured paths {request_paths!r}")
             # invariant 4: at most one direct result per request.
             if key is not None:
                 results_per_request[key] = results_per_request.get(key, 0) + 1
@@ -1769,7 +1843,8 @@ def _minimal_valid_state() -> dict:
     """A minimal valid state wrapper for child-matrix validation."""
     return {
         "protocol": "empirica/v2",
-        "state_schema": "empirica.run/2",
+        "state_schema": "empirica.run/3",
+        "spike_backend": {"kind": "spikes_unavailable"},
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
         "invocation": {"host": "test", "interactive": True,
@@ -2082,9 +2157,12 @@ def check_trusted_payload(request: dict, result: dict, registry: dict,
             errors.append(f"{pw}: evidence_leaf harness_request_id {hrid!r} does not "
                           f"match a sealed spike_request")
         else:
-            if payload.get("command_digest") != req.get("command_digest"):
-                errors.append(f"{pw}: evidence_leaf command_digest {payload.get('command_digest')!r} "
-                              f"!= sealed request {req.get('command_digest')!r}")
+            for field in ("request_artifact_id", "plan_digest", "policy_digest",
+                          "snapshot_digest"):
+                expected = req.get("artifact_id") if field == "request_artifact_id" else req.get(field)
+                if payload.get(field) != expected:
+                    errors.append(f"{pw}: evidence_leaf {field} {payload.get(field)!r} "
+                                  f"!= sealed request {expected!r}")
             if payload.get("prerequisite_research_ids") != req.get("prerequisite_research_ids"):
                 errors.append(f"{pw}: evidence_leaf prerequisite_research_ids "
                               f"{payload.get('prerequisite_research_ids')!r} != sealed request "
@@ -2354,12 +2432,13 @@ def check_schema_mirror(request_schema: dict, response_schema: dict, contract: d
     research_outcomes = set(research_b.get("properties", {}).get("outcome", {}).get("enum", []))
     spike_outcomes = set(spike_b.get("properties", {}).get("outcome", {}).get("enum", []))
     spike_gate_enum = set(spike_b.get("properties", {}).get("spike_gate", {}).get("enum", []))
-    if research_outcomes != (reg_outcomes - reg_gates):
+    lowered_gates = {gate.lower() for gate in reg_gates}
+    if research_outcomes != (reg_outcomes - lowered_gates):
         errors.append(f"{where}: response researchArtifact.outcome enum {sorted(research_outcomes)} != "
-                      f"registry artifact_outcomes minus spike_gates {sorted(reg_outcomes - reg_gates)}")
-    if spike_outcomes != reg_gates:
+                      f"registry non-spike artifact outcomes {sorted(reg_outcomes - lowered_gates)}")
+    if spike_outcomes != lowered_gates:
         errors.append(f"{where}: response spikeArtifact.outcome enum {sorted(spike_outcomes)} != "
-                      f"registry spike_gates {sorted(reg_gates)}")
+                      f"lowercase registry spike_gates {sorted(lowered_gates)}")
     if spike_gate_enum != reg_gates:
         errors.append(f"{where}: response spikeArtifact.spike_gate enum {sorted(spike_gate_enum)} != "
                       f"registry spike_gates {sorted(reg_gates)}")
@@ -2543,7 +2622,9 @@ def main() -> int:
             from application.v2 import PRIVATE_GOVERNANCE_OPERATIONS
             private_gov_ops = PRIVATE_GOVERNANCE_OPERATIONS
         except ImportError:
-            pass
+            # Schema/registry validation remains available while unreleased downstream spike
+            # composition is intentionally cut over in checkpoints.
+            private_gov_ops = ("governance_context", "governance_decision")
         check_next_action_surfaces(registry, public_tools, errors, "public-contract",
                                    private_gov_ops)
         expected_refusals = sorted(code for code, row in registry["reasons"].items()
@@ -2788,6 +2869,12 @@ def main() -> int:
         check_protocol_identity(expected, errors, f"{where}:expected")
         check_banned_fields(expected, errors, f"{where}:expected")
         result = expected.get("result", {})
+        reason_codes = [reason.get("code") for reason in result.get("reasons", ())
+                        if isinstance(reason, dict)]
+        run_backend = result.get("run", {}).get("spike_backend") if isinstance(result.get("run"), dict) else None
+        if (any(isinstance(code, str) and code.startswith("claim.spike_") for code in reason_codes)
+                and (not isinstance(run_backend, dict) or run_backend.get("kind") != "qualified")):
+            errors.append(f"{where}: claim.spike_* reason requires a qualified fixture spike_backend")
         check_allow_cross_field(result, errors, f"{where}:expected")
         check_response_reasons(result, registry, errors, f"{where}:expected")
         check_run_view_fields(result, registry, errors, f"{where}:expected")
@@ -3187,6 +3274,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # Direct schema negatives: convergence contradictions both directions.
     def schema_rejects(envelope: dict, kind: str) -> bool:
+        envelope = copy.deepcopy(envelope)
         before = len(errors)
         validate_schema(envelope, "empirica/v2", kind, "neg-schema")
         # Move any schema errors into a local check; return True if rejected.
@@ -3304,6 +3392,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
                "obligations": {"active": [], "deferred": []}, "residuals": [],
                "freshness": {"changes": []}, "children": [], "next_actions": [],
+               "spike_backend": {"kind": "spikes_unavailable"},
                "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                                         "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
                "host": {"profile_id": "claude-code", "tier": "foreground_only",
@@ -3560,9 +3649,20 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     def _d2c_arg() -> dict:
         _ed = registry_digest([R1, R2, P1])
-        return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
+        backend = {"kind": "qualified", "backend": "docker",
+                   "profile_id": "docker-isolated-v1",
+                   "qualification_record_digest": d64,
+                   "execution_binding_digest": d64}
+        request = _validation_spike_request(
+            sequence=2, artifact_id=Q1, claim_digest=d64,
+            prerequisites=[R1, R2], paths=REQ_FILES, backend=backend)
+        result = _validation_spike_result(
+            sequence=3, artifact_id=P1, request=request, claim_digest=d64,
+            exit_code=0, active=True, supersedes=None)
+        value = {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
             "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
+            "spike_backend": backend,
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,
@@ -3578,23 +3678,15 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "code",
                  "source_ref": "src/a.py", "citation": "Observed test source.", "verification": VERIFICATION},
-                {"sequence": 2, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
-                 "kind": "spike_request", "statement_digest": d64,
-                 "harness_request_id": "h1", "command": "make test", "command_digest": d64,
-                 "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1, R2]},
-                {"sequence": 3, "artifact_id": P1, "claim_id": "G0", "claim_digest": d64,
-                 "kind": "spike", "statement_digest": d64, "active": True, "outcome": "pass",
-                 "harness_request_id": "h1", "command": "make test", "command_digest": d64,
-                 "prerequisite_research_ids": [R1, R2],
-                 "file_bindings": [{"path": "src/a.py", "sha256": d64},
-                                   {"path": "tests/a_test.py", "sha256": d64}],
-                 "exit_code": 0, "spike_gate": "pass", "supersedes": None}],
+                request,
+                result],
             "route_stamp": 1, "investigation_stamp": 2,
             "audit": {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
                 "reviewed_frozen_scope_digest": None, "reviewed_deferred_scope_digest": d64,
                 "reviewed_claims": [{"claim_id": "G0", "evidence_digest": _ed}],
                 "findings": []}}
+        return value
 
     def _arg_env(argument: dict) -> dict:
         return {"type": "Allow", "converged": False, "run": full_rv, "argument": argument}
@@ -3645,14 +3737,14 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         errors.append("NEG D2C empty prerequisite_research_ids: expected schema rejection")
     env = _full_env(_d2c_arg())
     env["result"]["argument"]["artifacts"][3]["file_bindings"] = []
-    if not schema_rejects(env, "response"):
-        errors.append("NEG D2C empty file_bindings: expected schema rejection")
+    if schema_rejects(env, "response"):
+        errors.append("POS D2C empty generic-spike file_bindings: unexpected schema rejection")
     env = _full_env(_d2c_arg())
     env["result"]["argument"]["artifacts"][3]["supersedes"] = "not-a-digest"
     if not schema_rejects(env, "response"):
         errors.append("NEG D2C malformed supersedes: expected schema rejection")
     env = _full_env(_d2c_arg())
-    env["result"]["argument"]["artifacts"][2]["dependent_files"] = ["C:\\Users"]
+    env["result"]["argument"]["artifacts"][2]["draft"]["inputs"][0] = "C:\\Users"
     if not schema_rejects(env, "response"):
         errors.append("NEG D2C dependent_files bad path: expected schema rejection")
     env = _full_env(_d2c_arg())
@@ -3678,13 +3770,13 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
            "no earlier spike_request", "spike result no earlier request")
     arg = _d2c_arg()
-    arg["artifacts"][3]["command"] = "make check"
+    arg["artifacts"][3]["plan_digest"] = "sha256:" + "9" * 64
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "spike result command", "spike result command mismatch")
+           "spike result plan_digest", "spike result plan mismatch")
     arg = _d2c_arg()
-    arg["artifacts"][3]["command_digest"] = "sha256:" + "9" * 64
+    arg["artifacts"][3]["policy_digest"] = "sha256:" + "9" * 64
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "spike result command_digest", "spike result command_digest mismatch")
+           "spike result policy_digest", "spike result policy mismatch")
     arg = _d2c_arg()
     arg["artifacts"][3]["prerequisite_research_ids"] = [R2, R1]
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
@@ -3696,23 +3788,21 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     arg = _d2c_arg()
     arg["artifacts"][3]["exit_code"] = 1
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "spike_gate pass requires exit_code 0", "gate pass but non-zero exit")
+           "spike_gate PASS requires exit_code 0", "gate pass but non-zero exit")
     arg = _d2c_arg()
-    arg["artifacts"][3]["spike_gate"] = "fail"
+    arg["artifacts"][3]["spike_gate"] = "FAIL"
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "spike_gate fail requires", "gate fail but zero exit")
+           "spike_gate FAIL requires", "gate fail but zero exit")
     arg = _d2c_arg()
     arg["artifacts"][3]["outcome"] = "fail"
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "outcome fail requires spike_gate fail", "outcome fail but gate pass")
+           "outcome fail requires spike_gate FAIL", "outcome fail but gate pass")
     # invariant 4: a second direct result for the same request.
     arg = _d2c_arg()
-    arg["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "6" * 64,
-        "claim_id": "G0", "claim_digest": d64, "kind": "spike", "statement_digest": d64,
-        "active": False, "outcome": "fail", "harness_request_id": "h1", "command": "make test",
-        "command_digest": d64, "prerequisite_research_ids": [R1, R2],
-        "file_bindings": [{"path": "src/a.py", "sha256": d64}, {"path": "tests/a_test.py", "sha256": d64}],
-        "exit_code": 1, "spike_gate": "fail", "supersedes": None})
+    arg["artifacts"].append(_validation_spike_result(
+        sequence=4, artifact_id="sha256:" + "6" * 64,
+        request=arg["artifacts"][2], claim_digest=d64,
+        exit_code=1, active=False, supersedes=None))
     expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
            "more than one direct result", "two results for one request")
     # invariant 6: prerequisite points to a spike_request (not supporting research).
@@ -3760,9 +3850,26 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     def _d2c_super_arg() -> dict:
         _ed = registry_digest([R1, P1])
+        backend = {"kind": "qualified", "backend": "docker",
+                   "profile_id": "docker-isolated-v1",
+                   "qualification_record_digest": d64,
+                   "execution_binding_digest": d64}
+        request1 = _validation_spike_request(
+            sequence=1, artifact_id=Q1, claim_digest=d64,
+            prerequisites=[R1], paths=REQ_FILES, backend=backend)
+        result0 = _validation_spike_result(
+            sequence=2, artifact_id=P0, request=request1, claim_digest=d64,
+            exit_code=1, active=False, supersedes=None)
+        request2 = _validation_spike_request(
+            sequence=3, artifact_id=Q2, claim_digest=d64,
+            prerequisites=[R1], paths=REQ_FILES, backend=backend)
+        result1 = _validation_spike_result(
+            sequence=4, artifact_id=P1, request=request2, claim_digest=d64,
+            exit_code=0, active=True, supersedes=P0)
         return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
             "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
+            "spike_backend": backend,
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,
@@ -3774,28 +3881,10 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                  "kind": "research", "statement_digest": d64, "active": True,
                  "outcome": "supporting", "source_kind": "web",
                  "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
-                {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
-                 "kind": "spike_request", "statement_digest": d64,
-                 "harness_request_id": "h1", "command": "make test", "command_digest": d64,
-                 "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1]},
-                {"sequence": 2, "artifact_id": P0, "claim_id": "G0", "claim_digest": d64,
-                 "kind": "spike", "statement_digest": d64, "active": False, "outcome": "fail",
-                 "harness_request_id": "h1", "command": "make test", "command_digest": d64,
-                 "prerequisite_research_ids": [R1],
-                 "file_bindings": [{"path": "src/a.py", "sha256": d64},
-                                   {"path": "tests/a_test.py", "sha256": d64}],
-                 "exit_code": 1, "spike_gate": "fail", "supersedes": None},
-                {"sequence": 3, "artifact_id": Q2, "claim_id": "G0", "claim_digest": d64,
-                 "kind": "spike_request", "statement_digest": d64,
-                 "harness_request_id": "h2", "command": "make test", "command_digest": d64,
-                 "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1]},
-                {"sequence": 4, "artifact_id": P1, "claim_id": "G0", "claim_digest": d64,
-                 "kind": "spike", "statement_digest": d64, "active": True, "outcome": "pass",
-                 "harness_request_id": "h2", "command": "make test", "command_digest": d64,
-                 "prerequisite_research_ids": [R1],
-                 "file_bindings": [{"path": "src/a.py", "sha256": d64},
-                                   {"path": "tests/a_test.py", "sha256": d64}],
-                 "exit_code": 0, "spike_gate": "pass", "supersedes": P0}],
+                request1,
+                result0,
+                request2,
+                result1],
             "route_stamp": 1, "investigation_stamp": 2,
             "audit": {"verdict": "passed", "current": True, "pending": False, "independence": "distinct",
                 "reviewed_argument_digest": d64, "reviewed_goal_digest": d64,
@@ -3818,16 +3907,16 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
            "superseded but still active", "superseded spike still active")
     # invariant 12: more than one active spike per claim digest.
     arg = _d2c_arg()
-    arg["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "7" * 64,
-        "claim_id": "G0", "claim_digest": d64, "kind": "spike", "statement_digest": d64,
-        "active": True, "outcome": "pass", "harness_request_id": "h2", "command": "make test",
-        "command_digest": d64, "prerequisite_research_ids": [R1, R2],
-        "file_bindings": [{"path": "src/a.py", "sha256": d64}, {"path": "tests/a_test.py", "sha256": d64}],
-        "exit_code": 0, "spike_gate": "pass", "supersedes": None})
-    arg["artifacts"].insert(2, {"sequence": 2, "artifact_id": "sha256:" + "8" * 64,
-        "claim_id": "G0", "claim_digest": d64, "kind": "spike_request", "statement_digest": d64,
-        "harness_request_id": "h2", "command": "make test", "command_digest": d64,
-        "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1, R2]})
+    duplicate_request = _validation_spike_request(
+        sequence=2, artifact_id="sha256:" + "8" * 64, claim_digest=d64,
+        prerequisites=[R1, R2], paths=REQ_FILES,
+        backend=arg["spike_backend"])
+    duplicate_result = _validation_spike_result(
+        sequence=4, artifact_id="sha256:" + "7" * 64,
+        request=duplicate_request, claim_digest=d64,
+        exit_code=0, active=True, supersedes=None)
+    arg["artifacts"].append(duplicate_result)
+    arg["artifacts"].insert(2, duplicate_request)
     # re-sequence to keep strictly increasing order
     for idx, a in enumerate(arg["artifacts"]):
         a["sequence"] = idx
@@ -3866,16 +3955,16 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
            "approved but active refuting research", "approved with refuting evidence")
     # invariant 13: approved with active failing spike.
     arg = _d2c_arg()
-    arg["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "a" * 64,
-        "claim_id": "G0", "claim_digest": d64, "kind": "spike", "statement_digest": d64,
-        "active": True, "outcome": "fail", "harness_request_id": "h2", "command": "make test",
-        "command_digest": d64, "prerequisite_research_ids": [R1, R2],
-        "file_bindings": [{"path": "src/a.py", "sha256": d64}, {"path": "tests/a_test.py", "sha256": d64}],
-        "exit_code": 1, "spike_gate": "fail", "supersedes": None})
-    arg["artifacts"].insert(2, {"sequence": 2, "artifact_id": "sha256:" + "b" * 64,
-        "claim_id": "G0", "claim_digest": d64, "kind": "spike_request", "statement_digest": d64,
-        "harness_request_id": "h2", "command": "make test", "command_digest": d64,
-        "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1, R2]})
+    failing_request = _validation_spike_request(
+        sequence=2, artifact_id="sha256:" + "b" * 64, claim_digest=d64,
+        prerequisites=[R1, R2], paths=REQ_FILES,
+        backend=arg["spike_backend"])
+    failing_result = _validation_spike_result(
+        sequence=4, artifact_id="sha256:" + "a" * 64,
+        request=failing_request, claim_digest=d64,
+        exit_code=1, active=True, supersedes=None)
+    arg["artifacts"].append(failing_result)
+    arg["artifacts"].insert(2, failing_request)
     for idx, a in enumerate(arg["artifacts"]):
         a["sequence"] = idx
     arg["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "a" * 64, P1]
@@ -3945,6 +4034,16 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     R_X = "sha256:" + "c" * 64
     _ed_g0 = registry_digest([R1, P1])
     _ed_g1 = registry_digest([R_X])
+    leak_backend = {"kind": "qualified", "backend": "docker",
+                    "profile_id": "docker-isolated-v1",
+                    "qualification_record_digest": d64,
+                    "execution_binding_digest": d64}
+    leak_request = _validation_spike_request(
+        sequence=1, artifact_id=Q1, claim_digest=d64,
+        prerequisites=[R1], paths=REQ_FILES, backend=leak_backend)
+    leak_result = _validation_spike_result(
+        sequence=2, artifact_id=P1, request=leak_request, claim_digest=d64,
+        exit_code=0, active=True, supersedes=None)
     arg_leak = {"root_claim_id": "G0", "argument_digest": d64, "goal_digest": d64,
         "frozen_scope_digest": None, "deferred_scope_digest": d64,
         "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -3962,17 +4061,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "web",
              "source_ref": "https://example.test/s", "citation": "Observed test source.", "verification": VERIFICATION},
-            {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": d64,
-             "kind": "spike_request", "statement_digest": d64,
-             "harness_request_id": "h1", "command": "make test", "command_digest": d64,
-             "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1]},
-            {"sequence": 2, "artifact_id": P1, "claim_id": "G0", "claim_digest": d64,
-             "kind": "spike", "statement_digest": d64, "active": True, "outcome": "pass",
-             "harness_request_id": "h1", "command": "make test", "command_digest": d64,
-             "prerequisite_research_ids": [R1],
-             "file_bindings": [{"path": "src/a.py", "sha256": d64},
-                               {"path": "tests/a_test.py", "sha256": d64}],
-             "exit_code": 0, "spike_gate": "pass", "supersedes": None},
+            leak_request,
+            leak_result,
             {"sequence": 3, "artifact_id": R_X, "claim_id": "G1", "claim_digest": d64,
              "kind": "research", "statement_digest": d64, "active": True,
              "outcome": "supporting", "source_kind": "code",
@@ -4060,7 +4150,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # its own diagnostic substring so a case cannot pass for the wrong reason.
     R1 = "sha256:" + "1" * 64
     P1 = "sha256:" + "3" * 64
-    CMD = "sha256:" + "d" * 64
     FSHA = "sha256:" + "9" * 64
     EV = "sha256:" + "a" * 64
     ARG = "sha256:" + "0" * 64
@@ -4110,8 +4199,10 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 "reviewed_claims": reviewed_claims, "scope_review": scope_review}
 
     def _evidence_leaf_payload(exit_code=0, result_digest=P1,
-                                command_digest=CMD) -> dict:
-        return {"harness_request_id": "h1", "command_digest": command_digest,
+                                plan_digest="sha256:" + "e" * 64) -> dict:
+        return {"harness_request_id": Q1, "request_artifact_id": Q1,
+                "plan_digest": plan_digest, "policy_digest": "sha256:" + "f" * 64,
+                "snapshot_digest": "sha256:" + "c" * 64,
                 "prerequisite_research_ids": [R1],
                 "file_bindings": [{"path": "src/a.py", "sha256": FSHA},
                                    {"path": "tests/a_test.py", "sha256": FSHA}],
@@ -4263,22 +4354,23 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                           "missing_capabilities": []}}
 
     def _artifacts() -> list:
+        backend = {"kind": "qualified", "backend": "docker",
+                   "profile_id": "docker-isolated-v1",
+                   "qualification_record_digest": "sha256:" + "a" * 64,
+                   "execution_binding_digest": "sha256:" + "b" * 64}
+        request = _validation_spike_request(
+            sequence=1, artifact_id=Q1, claim_digest=WORD,
+            prerequisites=[R1], paths=REQ_FILES, backend=backend)
+        result = _validation_spike_result(
+            sequence=2, artifact_id=P1, request=request, claim_digest=WORD,
+            exit_code=0, active=True, supersedes=None)
         return [
             {"sequence": 0, "artifact_id": R1, "claim_id": "G0", "claim_digest": WORD,
              "kind": "research", "statement_digest": STMT, "active": True,
              "outcome": "supporting", "source_kind": "web", "source_ref": "src/a.py",
              "citation": "Observed test source.", "verification": VERIFICATION},
-            {"sequence": 1, "artifact_id": Q1, "claim_id": "G0", "claim_digest": WORD,
-             "kind": "spike_request", "statement_digest": STMT,
-             "harness_request_id": "h1", "command": "make test", "command_digest": CMD,
-             "dependent_files": list(REQ_FILES), "prerequisite_research_ids": [R1]},
-            {"sequence": 2, "artifact_id": P1, "claim_id": "G0", "claim_digest": WORD,
-             "kind": "spike", "statement_digest": STMT, "active": True,
-             "outcome": "pass", "harness_request_id": "h1", "command": "make test",
-             "command_digest": CMD, "prerequisite_research_ids": [R1],
-             "file_bindings": [{"path": "src/a.py", "sha256": FSHA},
-                               {"path": "tests/a_test.py", "sha256": FSHA}],
-             "exit_code": 0, "spike_gate": "pass", "supersedes": None}]
+            request,
+            result]
 
     def _arg_view(frozen=None, audit_state="passed") -> dict:
         covered = audit_state in ("passed", "failed")
@@ -4417,12 +4509,12 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         {"child_id": "c1", "purpose": "audit", "state": "completed"}]),
         "argument": _arg2}, registry, e, "neg"),
         "gating coverage", "audit_verdict reordered coverage")
-    # evidence_leaf wrong command_digest vs sealed request.
+    # evidence_leaf wrong plan_digest vs sealed request.
     req = _req_cmd(_trusted("evidence_leaf", None,
-        _evidence_leaf_payload(command_digest="sha256:" + "z" * 64)))
+        _evidence_leaf_payload(plan_digest="sha256:" + "z" * 64)))
     expect(lambda e: check_trusted_payload(req, {"run": _run_view(),
         "argument": _arg_view()}, registry, e, "neg"),
-        "command_digest", "evidence_leaf wrong command_digest")
+        "plan_digest", "evidence_leaf wrong plan_digest")
     # evidence_leaf wrong result_digest vs spike result.
     req = _req_cmd(_trusted("evidence_leaf", None,
         _evidence_leaf_payload(result_digest="sha256:" + "z" * 64)))

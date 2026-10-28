@@ -27,6 +27,11 @@ from unittest.mock import patch
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+_TESTS = PLUGIN_ROOT / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+from core import spike_plan  # noqa: E402
 
 import jsonschema  # noqa: E402
 
@@ -41,6 +46,7 @@ from adapters.codex import (  # noqa: E402
 from adapters.codex.correlation import CorrelationError, correlate, request_id  # noqa: E402
 from adapters.codex.lifecycle import _start, explicit_activation  # noqa: E402
 from adapters.codex.transport import BridgeTransport  # noqa: E402
+force_absent_sandbox_home()
 
 _REQUEST_SCHEMA = json.loads(
     (PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "request.schema.json").read_text(
@@ -205,6 +211,25 @@ class OfficialShapeTests(unittest.TestCase):
         self.assertIsNone(value.get("last_assistant_message"))
 
 
+class GenericMcpContractTests(unittest.TestCase):
+    def test_codex_mcp_exposes_generic_plan_and_result_facts_with_closed_timeout(self) -> None:
+        manifest = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        self.assertEqual(manifest["mcpServers"]["empirica"]["tool_timeout_sec"], 360)
+        self.assertEqual(
+            (spike_plan.WORKLOAD_TIMEOUT_SECONDS,
+             spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS), (120, 210))
+        tools = json.loads((PLUGIN_ROOT / "vendor/contracts/empirica/v2/public-tools.json").read_text())
+        actions = tools["schemas"]["model"]["empirica_observe"]["properties"]["action"]["oneOf"]
+        spike = next(item for item in actions
+                     if item["properties"]["kind"].get("const") == "spike_request")
+        self.assertEqual(set(spike["required"]), {"kind", "claim_id", "plan"})
+        self.assertNotIn("command", spike["properties"])
+        fixture = json.loads((PLUGIN_ROOT.parents[1] / "contracts/empirica/v2/fixtures/getargument-spike-approved.json").read_text())
+        result = next(item for item in fixture["expected"]["result"]["argument"]["artifacts"]
+                      if item["kind"] == "spike")
+        self.assertEqual(result["result_facts"]["verdict"], "PASS")
+
+
 class StartRunTests(unittest.TestCase):
     def test_minimal_start_run_is_schema_valid_with_no_actor_or_budgets(self) -> None:
         request = build_start_run_request(
@@ -220,6 +245,27 @@ class StartRunTests(unittest.TestCase):
         self.assertEqual(request["command"]["goal"], "prove X")
         self.assertTrue(request["command"]["selector"]["project"])
         self.assertTrue(request["command"]["selector"]["session"])
+
+    def test_spike_profile_is_optional_exact_host_launch_authority(self) -> None:
+        omitted = build_start_run_request(_payload(prompt="$empirica goal"), environ={})
+        self.assertNotIn("spike_profile", omitted["command"])
+        for profile in ("docker-isolated-v1", "docker-networked-v1"):
+            request = build_start_run_request(
+                _payload(prompt="$empirica goal"),
+                environ={"EMPIRICA_SPIKE_PROFILE": profile})
+            _assert_valid(request)
+            self.assertEqual(request["command"]["spike_profile"], profile)
+        for malformed in ("", "docker-rust-v1", " docker-isolated-v1", "other"):
+            with self.subTest(malformed=malformed), self.assertRaisesRegex(
+                    ValueError, "EMPIRICA_SPIKE_PROFILE"):
+                build_start_run_request(
+                    _payload(prompt="$empirica goal"),
+                    environ={"EMPIRICA_SPIKE_PROFILE": malformed})
+        with patch.dict(os.environ, {"EMPIRICA_SPIKE_PROFILE": "invalid"}, clear=False), \
+                patch("adapters.codex.lifecycle._dispatch") as dispatched:
+            result = _start(_payload(prompt="$empirica goal"))
+        self.assertIn("EMPIRICA_SPIKE_PROFILE", result["systemMessage"])
+        dispatched.assert_not_called()
 
     def test_actor_field_is_never_emitted_even_when_model_present(self) -> None:
         request = build_start_run_request(

@@ -3,6 +3,7 @@ import atexit
 import io
 import itertools
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -11,6 +12,7 @@ import tempfile
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).resolve().parents[1] / "run_suites.py"
 PY = sys.executable
@@ -19,13 +21,19 @@ _SCRATCH = tempfile.mkdtemp(prefix="run-suites-test-")
 atexit.register(shutil.rmtree, _SCRATCH, ignore_errors=True)
 os.environ["RUN_SUITES_DURATIONS"] = str(Path(_SCRATCH) / "durations.json")
 _RUNS = itertools.count()
+# The scheduling variables are the runner's: every name it reads with os.environ.get("...") (RUN_SUITES_GROUPS is read
+# through GROUPS_ENV, and is nesting, not scheduling, so it stays inherited).
+SCHEDULING = frozenset(re.findall(r'os\.environ\.get\("([A-Z_]+)"', SCRIPT.read_text()))
 
 
 def runner_env(**extra: str) -> dict:
-    """The environment of a runner under test: independent of the machine. A test that needs concurrency must not depend on
-    the host's load average (under ``make check`` it exceeds the CPU count and the runner admits one suite at a time), nor on
-    a durations file another test wrote (it fixes the start order). A test that needs a load or a history passes its own."""
-    return {**os.environ, "RUN_SUITES_MAX_LOAD": "1000000",
+    """The environment of a runner under test: independent of the machine and of the caller's scheduling. A test that
+    needs concurrency must not depend on the host's load average (under ``make check`` it exceeds the CPU count and the
+    runner admits one suite at a time), on an outer ``JOBS`` cap (``make check JOBS=1`` exports it into this suite), nor
+    on a durations file another test wrote (it fixes the start order). A test that needs a load, a cap or a history
+    passes its own."""
+    inherited = {name: value for name, value in os.environ.items() if name not in SCHEDULING}
+    return {**inherited, "RUN_SUITES_MAX_LOAD": "1000000",
             "RUN_SUITES_DURATIONS": str(Path(_SCRATCH) / f"durations-{next(_RUNS)}.json"), **extra}
 
 
@@ -35,6 +43,13 @@ def run(*suites: str) -> subprocess.CompletedProcess:
 
 def say(text: str, code: int = 0) -> str:
     return f"{PY} -c \"import sys; print('{text}'); print('err-{text}', file=sys.stderr); sys.exit({code})\""
+
+
+def meet(directory: str, name: str, names: str, tries: int) -> str:
+    """A suite that marks itself started and passes only once every one of ``names`` has, checking ``tries`` times 0.1 s
+    apart: a rendezvous, so suites run one at a time fail it."""
+    wait = " && ".join(f"[ -f {Path(directory) / n} ]" for n in names)
+    return f"sh -c 'touch {Path(directory) / name}; for i in $(seq {tries}); do {wait} && exit 0; sleep 0.1; done; exit 1'"
 
 
 class RunSuites(unittest.TestCase):
@@ -74,11 +89,28 @@ class RunSuites(unittest.TestCase):
         """A rendezvous, not a stopwatch: each suite marks itself started and passes only once all three are, so the run
         passes only if they run side by side (run one at a time, the first would wait for the others and fail)."""
         with tempfile.TemporaryDirectory() as directory:
-            def meet(name: str) -> str:
-                flags = [str(Path(directory) / n) for n in "abc"]
-                wait = " && ".join(f"[ -f {f} ]" for f in flags)
-                return f"sh -c 'touch {Path(directory) / name}; for i in $(seq 600); do {wait} && exit 0; sleep 0.1; done; exit 1'"
-            done = run(f"a={meet('a')}", f"b={meet('b')}", f"c={meet('c')}")
+            done = run(*(f"{n}={meet(directory, n, 'abc', 600)}" for n in "abc"))
+        self.assertEqual(done.returncode, 0, done.stdout)
+
+    def test_runner_env_drops_the_callers_scheduling_but_keeps_explicit_overrides(self):
+        """``make check JOBS=1`` exports JOBS=1 into the suite that runs these tests; a runner under test must not inherit
+        the caller's scheduling, while a test that passes its own value still gets it."""
+        outer = {"JOBS": "1", "RUN_SUITES_MAX_LOAD": "0.001", "RUN_SUITES_TIMEOUT": "5"}
+        self.assertTrue({"JOBS", "RUN_SUITES_MAX_LOAD", "RUN_SUITES_TIMEOUT", "RUN_SUITES_DURATIONS"} <= SCHEDULING)
+        with mock.patch.dict(os.environ, outer):
+            # only the scheduling variables are compared: a failure must never print the rest of the environment
+            seen = {name: runner_env().get(name) for name in outer}
+            self.assertEqual(seen, {"JOBS": None, "RUN_SUITES_MAX_LOAD": "1000000", "RUN_SUITES_TIMEOUT": None})
+            explicit = runner_env(JOBS="2", RUN_SUITES_TIMEOUT="7")
+            self.assertEqual((explicit.get("JOBS"), explicit.get("RUN_SUITES_TIMEOUT")), ("2", "7"))
+            self.assertEqual(runner_env(JOBS="").get("JOBS"), "")
+
+    def test_an_outer_jobs_cap_does_not_serialize_a_runner_under_test(self):
+        """The same, end to end and bounded: under an inherited JOBS=1 the first participant of a two-suite rendezvous
+        gives up after about 5 s (the inherited 5 s suite limit would stop it too), so the defect fails in seconds."""
+        with mock.patch.dict(os.environ, {"JOBS": "1", "RUN_SUITES_TIMEOUT": "5"}), \
+                tempfile.TemporaryDirectory() as directory:
+            done = run(*(f"{n}={meet(directory, n, 'ab', 50)}" for n in "ab"))
         self.assertEqual(done.returncode, 0, done.stdout)
 
     def test_bad_arguments_are_refused(self):
@@ -259,7 +291,8 @@ class Lifecycle(unittest.TestCase):
         sys.path.insert(0, str(SCRIPT.parent))
         import run_suites
         buffer = io.StringIO()
-        with mock.patch.object(run_suites, "stop", return_value=False), contextlib.redirect_stdout(buffer):
+        with mock.patch.object(run_suites, "stop", return_value=False), contextlib.redirect_stdout(buffer), \
+                mock.patch.dict(os.environ, runner_env(), clear=True):
             code = run_suites.main([f"a={say('x')}"])
         self.assertEqual(code, 1)
         self.assertIn("could not be verified", buffer.getvalue())

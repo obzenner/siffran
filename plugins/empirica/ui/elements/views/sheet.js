@@ -16,9 +16,22 @@ export function noticeHtml(key) {
   return key ? `<div class="alert" role="alert" data-variant="destructive"><section class="flex flex-wrap items-center gap-s"><span>${t(key)}</span><button type="button" class="btn" data-variant="outline" data-size="sm" data-retry>${t("detail.retry")}</button></section></div>` : "";
 }
 
+/** Compact, explicitly read-only display of the observer-owned immutable backend binding. */
+function spikeBackendHtml(backend) {
+  if (backend === null) return "";
+  if (backend.kind === "spikes_unavailable")
+    return `<aside class="alert" role="note" data-spike-backend><strong>${t("spike_backend.unavailable")}</strong><span class="text-xs">${t("spike_backend.read_only")}</span></aside>`;
+  const identity = (value, label) => {
+    const short = `${value.slice(0, 15)}…${value.slice(-8)}`;
+    return `<details class="text-xs"><summary class="cursor-pointer">${t(label)} <code class="font-mono">${esc(short)}</code></summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
+  };
+  const profile = t(`spike.profile.${backend.profile_id}`);
+  return `<aside class="flex min-w-0 flex-col gap-3xs rounded-m border border-border p-xs text-xs" role="note" data-spike-backend><span>${joined(t("spike_backend.qualified"), profile, t("spike_backend.read_only"), t("spike_backend.not_health"))}</span>${identity(backend.qualification_record_digest, "spike_backend.record")}${identity(backend.execution_binding_digest, "spike_backend.execution")}</aside>`;
+}
+
 /** The run's head: its standing, its goal, and one line of where it is (project, attempt, claims, last change), then the
  * session to copy. The project's repository and the full time are a hover away. */
-function headerHtml({ row, project, attempts, now }) {
+function headerHtml({ row, project, attempts, detail, now }) {
   const where = joined(
     project ? `<span title="${esc(project.repo ?? "")}" data-project>${esc(project.label)}</span>` : "",
     t("row.attempt", { at: row.generation, of: attempts.length }),
@@ -30,6 +43,7 @@ function headerHtml({ row, project, attempts, now }) {
     <h1 class="text-l font-semibold" tabindex="-1" data-title>${row.goal === null ? t("goal.unread") : esc(clip(row.goal, 160))}</h1>
     ${row.goal !== null && row.goal.length > 160 ? `<ev-more text="${esc(row.goal)}"></ev-more>` : ""}
     <p class="text-xs text-muted-foreground" data-where>${where}</p>
+    ${detail ? spikeBackendHtml(detail.spike_backend) : ""}
     ${row.session ? `<div class="flex flex-col gap-3xs text-xs">${sessionHtml(row.session)}${sessionContextHtml(row.session)}</div>` : ""}
   </header>`;
 }

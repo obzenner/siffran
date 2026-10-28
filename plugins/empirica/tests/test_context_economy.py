@@ -18,6 +18,8 @@ from pathlib import Path
 import jsonschema
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
 from adapters import public_tools as _pt
 from adapters.public_tools import PublicTools
 from application import protocol as _proto
@@ -29,6 +31,7 @@ from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_
                               sized_configure_run)
 from core.canonical import canonical_digest
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
 PI_PROFILE = host_profile_id("pi")
 
@@ -83,8 +86,9 @@ def closure_offenders(node, path="", found=None):
     """Return the paths of every open (non-closed) or unresolved object-capable schema node.
 
     A model-facing schema node is an offender when any of the following holds:
-      * it is object-capable (``_object_capable``) but does not close with
-        ``additionalProperties: false``;
+      * it is object-capable (``_object_capable``) but neither closes with
+        ``additionalProperties: false`` nor declares a typed value schema and bounded
+        ``propertyNames`` for a deliberately dynamic map;
       * it declares a ``properties`` map with an unconstrained property schema ``{}`` (an open
         property that admits any object);
       * it carries a ``$ref`` -- a projected model-facing schema must be fully dereferenced, so
@@ -101,7 +105,20 @@ def closure_offenders(node, path="", found=None):
         return found
     if "$ref" in node:
         found.append(path)
-    if _object_capable(node) and node.get("additionalProperties") is not False:
+    additional = node.get("additionalProperties")
+    names = node.get("propertyNames")
+    name_pattern = None
+    if isinstance(names, dict):
+        name_pattern = names.get("pattern")
+        if name_pattern is None and isinstance(names.get("allOf"), list):
+            name_pattern = next((item.get("pattern") for item in names["allOf"]
+                                 if isinstance(item, dict) and item.get("pattern")), None)
+    bounded_map = (
+        isinstance(additional, dict) and bool(additional)
+        and bool(name_pattern)
+        and type(node.get("maxProperties")) is int and node["maxProperties"] >= 0
+    )
+    if _object_capable(node) and additional is not False and not bounded_map:
         found.append(path)
     # An unconstrained property schema {} is open even inside a closed parent.
     props = node.get("properties")
@@ -140,6 +157,12 @@ class SchemaCompletenessTests(unittest.TestCase):
         self.assertIn(".properties.x", closure_offenders(
             {"type": "object", "additionalProperties": False,
              "properties": {"x": {"$ref": "#/$defs/foo"}}}))
+        # A deliberately dynamic map is closed by bounded key syntax and a typed value schema.
+        self.assertEqual(closure_offenders({
+            "type": "object", "maxProperties": 2,
+            "propertyNames": {"pattern": "^[A-Z]+$", "maxLength": 8},
+            "additionalProperties": {"type": "string"},
+        }), [])
         # A nested open object inside a closed parent is flagged at its own path.
         parent = {"type": "object", "additionalProperties": False,
                   "properties": {"child": {"type": "object", "additionalProperties": True}}}
@@ -403,21 +426,22 @@ class SizeBudgetTests(_ServiceHarness):
     path and is not serialized onto Claude/Codex's MCP result.
 
     Measured sizes at authoring (chars of model-visible rendered text):
-        pending RunView read            855
-        approved RunView read           872
-        audit-pending RunView read      676
-        terminal RunView report         928
-        audit-pending Block             743
-        configure approve result        872
-        configure dismiss result       1059
-        configure edit->confirm result  872
-    Largest measured state = 1059 (configure dismiss); CEILING = 1200 leaves 141 chars headroom.
+        pending RunView read           1051
+        approved RunView read          1068
+        audit-pending RunView read      896
+        terminal RunView report        1147
+        audit-pending Block             992
+        configure approve result       1068
+        configure dismiss result       1255 (1257 UTF-8 bytes)
+        configure edit->confirm result 1068
+    Largest measured state = 1257 UTF-8 bytes (configure dismiss); CEILING = 1300 leaves 43 bytes headroom.
+    The character ceiling remains mirrored with Pi and the largest case also asserts the stricter UTF-8 byte size.
     Re-attaching the full presentation (dialog + scope) to the pending RunView pushes the
     JSON to 3577 chars, well past the ceiling, so the reduction is guarded rather than asserted
     only to be > 0.
     """
 
-    CEILING = 1200
+    CEILING = 1300
     ROLE_PROFILE = CLAUDE_PROFILE
 
     @staticmethod
@@ -426,6 +450,9 @@ class SizeBudgetTests(_ServiceHarness):
 
     def _text_size(self, tool_result) -> int:
         return len(tool_result["content"][0]["text"])
+
+    def _text_bytes(self, tool_result) -> int:
+        return len(tool_result["content"][0]["text"].encode("utf-8"))
 
     def _mediator(self, elicit):
         from adapters.governance import HostGovernance
@@ -505,7 +532,11 @@ class SizeBudgetTests(_ServiceHarness):
         self.assertEqual(sc["reasons"][0]["code"], "governance.approval_unavailable")
         self.assertEqual(sc["run"]["governance"]["state"], "pending")
         self.assertEqual(dialogs, 1, "dismiss is a single dialog")
+        unavailable = _proto.author_view_labels()["spike_backend_unavailable"]
+        self.assertIn(unavailable, out["content"][0]["text"],
+                      "the largest view must retain the unavailable spike guidance")
         self.assertLess(self._text_size(out), self.CEILING, "configure dismiss")
+        self.assertLess(self._text_bytes(out), self.CEILING, "configure dismiss UTF-8 bytes")
 
         # edit -> locked confirmation -> Allow + approved + edited budget + exactly two dialogs.
         self.setUp()

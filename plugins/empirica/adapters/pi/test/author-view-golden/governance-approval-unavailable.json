@@ -19,7 +19,7 @@
       "basis": "sha256:c567b9b11be5534f8b9c90f2e12813b3cb45dbfcb677d4393083bf3f4e4dad4c",
       "contract": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "relevant_sections": [
           "core",
           "roles",
@@ -123,7 +123,10 @@
         "independence": null,
         "findings": []
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "spike_backend": {
+        "kind": "spikes_unavailable"
+      }
     },
     "reasons": [
       {
@@ -140,5 +143,5 @@
       }
     ]
   },
-  "text": "Block active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nAudit: required\n\nReasons:\n  governance.approval_unavailable: Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.\n    next: host: governance_context; report_convergence intent=stop\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
+  "text": "Block active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nReasons:\n  governance.approval_unavailable: Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.\n    next: host: governance_context; report_convergence intent=stop\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
 }

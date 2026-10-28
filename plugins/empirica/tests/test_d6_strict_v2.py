@@ -46,6 +46,7 @@ if _REPO_ROOT is None:
 _PLUGIN_ROOT = _REPO_ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(_PLUGIN_ROOT))
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE  # noqa: E402
+from test_d7_transactions import spike_action  # noqa: E402
 from application.protocol import host_profile_id, stored  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
@@ -263,7 +264,8 @@ class D6ProtocolPrevalidation(unittest.TestCase):
     def test_committed_valid_active_state_loads(self):
         """The committed valid-active state fixture loads and has exact identity."""
         self.assertEqual(_VALID_ACTIVE_STATE["protocol"], _PROTOCOL)
-        self.assertEqual(_VALID_ACTIVE_STATE["state_schema"], "empirica.run/2")
+        self.assertEqual(_VALID_ACTIVE_STATE["state_schema"], "empirica.run/3")
+        self.assertEqual(_VALID_ACTIVE_STATE["spike_backend"], {"kind": "spikes_unavailable"})
         self.assertEqual(_VALID_ACTIVE_STATE["status"], "active")
         self.assertTrue(_VALID_ACTIVE_STATE["children"])
 
@@ -308,8 +310,7 @@ def _build_action_sample(kind: str) -> dict:
                 "result": "supports", "payload": {
                     "source_ref": "src/example.py:1", "citation": "Observed line."}}
     if kind == "spike_request":
-        return {"kind": "spike_request", "claim_id": "C0", "command": "pytest",
-                "dependent_files": ["f.py"]}
+        return spike_action()
     if kind == "configure_run":
         return {"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1,
                                                        "max_audit_spawns": 2},
@@ -698,6 +699,35 @@ class D6StrictRunStateTests(unittest.TestCase):
         encoded = mod.encode_state(classification.state)
         self.assertEqual(encoded, _VALID_ACTIVE_STATE,
                          "state.encode() must reproduce the exact closed document with no defaults")
+
+    def test_exact_run2_is_current_corrupt_without_decode_or_compatibility_state(self):
+        mod = _import_run_state()
+        run2 = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+        run2["state_schema"] = "empirica.run/2"
+        run2.pop("spike_backend")
+        classified = mod.classify_and_decode(run2)
+        self.assertEqual(classified.kind, "current_corrupt")
+        self.assertIsNone(classified.state)
+        run2["spike_backend"] = {"kind": "spikes_unavailable"}
+        self.assertEqual(mod.classify_and_decode(run2).kind, "current_corrupt")
+
+    def test_a_schema_valid_state_the_decoder_refuses_is_current_corrupt(self):
+        """The schema's ``$`` also matches before a final newline; the decoder's ``fullmatch`` does not."""
+        mod = _import_run_state()
+        from application.protocol import schema_validator
+        for field in ("qualification_record_digest", "execution_binding_digest"):
+            with self.subTest(field=field):
+                raw = json.loads(json.dumps(_VALID_ACTIVE_STATE))
+                raw["spike_backend"] = {
+                    "kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
+                    "qualification_record_digest": "sha256:" + "a" * 64,
+                    "execution_binding_digest": "sha256:" + "b" * 64}
+                self.assertEqual(mod.classify_and_decode(raw).kind, "valid")
+                raw["spike_backend"][field] += "\n"
+                schema_validator("state").validate(raw)
+                classified = mod.classify_and_decode(raw)
+                self.assertEqual(classified.kind, "current_corrupt")
+                self.assertIsNone(classified.state)
 
     def test_strict_state_roundtrip_no_defaults(self):
         """Valid committed fixture roundtrips through classify_and_decode → encode with no

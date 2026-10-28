@@ -56,8 +56,9 @@ class EvidenceFixture(ConformanceCase):
     SURFACE_AT_START = "human"
 
     def start(self, profile: str | None = None, *, graph: dict | None = None, kind: str = "ordinary",
-              mode: str = "deliberative", **invocation):
+              mode: str = "deliberative", qualified: bool = False, **invocation):
         drv = self.bind_driver("ADR-0067", "slice-1", "verification classes", profile_id=profile)
+        drv._service._coordinator.spike_authority_selector.qualified_next = qualified
         run_id = self.start_run(drv, goal="Confirm what the service cannot verify.",
                                 control_mode=mode, invocation={**TEST_INVOCATION, "human_surface": self.SURFACE_AT_START, **invocation})
         self.dispatch(drv, observe_action(run_id=run_id, action=action_route(reason="route")))

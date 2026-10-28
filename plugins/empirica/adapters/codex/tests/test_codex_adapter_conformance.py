@@ -13,12 +13,26 @@ from unittest.mock import patch
 PLUGIN_ROOT = Path(__file__).resolve().parents[3]
 if str(PLUGIN_ROOT) not in sys.path:
     sys.path.insert(0, str(PLUGIN_ROOT))
+_TESTS = PLUGIN_ROOT / "tests"
+if str(_TESTS) not in sys.path:
+    sys.path.insert(0, str(_TESTS))
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 from adapters.codex.lifecycle import _start, _stop  # noqa: E402
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.governance import HostGovernance  # noqa: E402
 from application.protocol import host_profile_id  # noqa: E402
+force_absent_sandbox_home()
 CODEX_PROFILE = host_profile_id("codex-cli")
+
+
+def _spike_action() -> dict:
+    return {"kind": "spike_request", "claim_id": "G0", "plan": {
+        "schema": "empirica.spike-plan-draft/2",
+        "image": "example/probe:local",
+        "argv": ["/usr/bin/python3", "/inputs/probe.py"],
+        "inputs": ["probe.py"],
+        "environment": {}}}
 
 
 class CodexAdapterConformanceTests(unittest.TestCase):
@@ -82,6 +96,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
             os.chdir(repo)
             with patch.dict(os.environ, {
                 "EMPIRICA_HOME": str(home), "EMPIRICA_REPO_DIR": str(repo),
+                "EMPIRICA_SANDBOX_HOME": str(root / "sandbox-absent"),
                 "EMPIRICA_AUTO_DELEGATION": "1",
             }, clear=False):
                 started = _start(payload)
@@ -98,7 +113,7 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 observe({"kind": "graph", "payload": {
                     "root": "G0",
                     "claims": [{"id": "G0", "text": "Codex drives Empirica v2.",
-                                "gating": True, "kind": "needs-experiment"}],
+                                "gating": True, "kind": "ordinary"}],
                     "edges": [],
                 }})
                 approved = observe({"kind": "configure_run",
@@ -110,8 +125,6 @@ class CodexAdapterConformanceTests(unittest.TestCase):
                 observe({"kind": "research", "claim_id": "G0", "source_kind": "code",
                          "result": "supports", "payload": {"source_ref": "probe.py",
                                                                "citation": "print('reachable')"}})
-                observe({"kind": "spike_request", "claim_id": "G0",
-                         "command": "python3 probe.py", "dependent_files": ["probe.py"]})
                 observe({"kind": "freeze"})
 
                 stop_payload = {**payload, "hook_event_name": "Stop",

@@ -23,6 +23,22 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import verify  # noqa: E402
 
 
+def unscheduled():
+    """A test's own scheduling: no outer cap. verify.py reads its cap only through run_suites.jobs_cap(), where an empty
+    ``JOBS`` means no cap, so a ``make check JOBS=1`` that exports JOBS=1 into this suite never serializes a wave these
+    tests start (in process or as a subprocess, whose environment is built from os.environ inside the test)."""
+    return mock.patch.dict(os.environ, {"JOBS": ""})
+
+
+class Unscheduled(unittest.TestCase):
+    """Each test runs under :func:`unscheduled`, scoped to the test (patched in setUp, restored by cleanup)."""
+
+    def setUp(self):
+        patch = unscheduled()
+        patch.start()
+        self.addCleanup(patch.stop)
+
+
 def run(*args: str, env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
     """``verify.py`` with ``args``, admitting its steps whatever the machine's load (a loaded host would hold a wave's
     second step back and the timing assertions would measure the host, not the script)."""
@@ -91,7 +107,20 @@ class StepsTests(unittest.TestCase):
         self.assertNotIn("test_observer_smoke", dry)
 
 
-class RunTests(unittest.TestCase):
+class RunTests(Unscheduled):
+    def test_an_outer_jobs_cap_does_not_reach_the_runs_these_tests_start(self):
+        """Bounded: under an outer JOBS=1 the fixture leaves verify uncapped, in process and in a subprocess whose second
+        step waits at most 5 s for the first."""
+        with mock.patch.dict(os.environ, {"JOBS": "1"}), unscheduled():
+            self.assertIsNone(verify.jobs_cap())
+            with tempfile.TemporaryDirectory() as scratch:
+                flag = Path(scratch) / "flag"
+                # a starts, then waits for b's mark; b marks only once it has seen a's: serialized, a gives up after 5 s
+                hold = f"touch {flag}; for i in $(seq 50); do [ -f {flag}.b ] && exit 0; sleep 0.1; done; exit 1"
+                wait = f"for i in $(seq 50); do [ -f {flag} ] && touch {flag}.b && exit 0; sleep 0.1; done; exit 1"
+                done = run("--step", f"a=sh -c {shlex.quote(hold)}", "--with", f"b=sh -c {shlex.quote(wait)}")
+        self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+
     def test_it_stops_at_the_first_failing_step_and_names_it(self):
         done = run("--step", "first=true", "--step", "second=false", "--step", "third=true")
         self.assertNotEqual(done.returncode, 0)
@@ -131,7 +160,7 @@ class RunTests(unittest.TestCase):
         self.assertEqual(len(homes), 2)
 
 
-class LockTests(unittest.TestCase):
+class LockTests(Unscheduled):
     """dev-install and ui-install are skipped while their lockfile is the one they last passed with."""
 
     def test_the_locked_installs_are_dev_install_and_ui_install_their_record_inside_what_they_install(self):
@@ -276,7 +305,7 @@ def _kill_group(pgid: int) -> None:
         pass
 
 
-class GroupOwnerTests(unittest.TestCase):
+class GroupOwnerTests(Unscheduled):
     """AST-4: verify cleans up through the owner run_suites uses; a nested run_suites' groups are its too. Tiny limits."""
 
     def nested(self, inner_grace: float, outer_grace: float) -> tuple[int, float, int]:

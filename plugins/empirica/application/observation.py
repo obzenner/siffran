@@ -5,21 +5,16 @@ from __future__ import annotations
 import hashlib
 
 from core.freshness import (
-    FileBinding, FileObservation, ObservationState, PathContractError, canonical_digest,
-    execution_facts, observations_digest, required_paths, validate_relative_posix_path,
+    FileObservation, ObservationState, canonical_digest, observations_digest, required_paths,
 )
 from .history_records import (
     OBSERVATION_BASIS_KEYS, OBSERVATION_BASIS_KIND, OBSERVATION_BASIS_VERSION,
     OBSERVATION_ROW_KEYS, OBSERVATION_SOURCE_KEYS,
 )
-from .ports import (
-    CapturedFile, ExecutionSnapshot, HarnessResult, ObservationSnapshot, WorkspaceCapture,
-)
+from .ports import CapturedFile, ObservationSnapshot, WorkspaceCapture
 
 
 class ObservationUnavailable(Exception): ...
-class HarnessUnavailable(Exception): ...
-class HarnessContractError(Exception): ...
 
 _EMPTY_BASIS = canonical_digest(())
 
@@ -56,15 +51,6 @@ def _validate_content(cf):
             raise ObservationUnavailable("captured content digest mismatch")
     elif cf.content is not None:
         raise ObservationUnavailable("non-present capture requires null content")
-
-
-def _validate_dependent_paths(dependent_paths) -> tuple[str, ...]:
-    if not isinstance(dependent_paths, tuple) or not dependent_paths:
-        raise PathContractError("dependent_paths must be a nonempty tuple")
-    paths = [validate_relative_posix_path(p) for p in dependent_paths]
-    if len(set(paths)) != len(paths):
-        raise PathContractError("dependent_paths must be duplicate-free")
-    return tuple(paths)
 
 
 def build_observation_snapshot(active_heads, workspace):
@@ -107,52 +93,3 @@ def observation_basis_body(sources, policy_inputs, clock_inputs=()):
     }
     assert set(body) | {"artifact_id"} == OBSERVATION_BASIS_KEYS
     return body
-
-
-def build_execution_snapshot(dependent_paths, workspace):
-    paths = _validate_dependent_paths(dependent_paths)
-    capture = _capture(paths, workspace)
-    files = _validate_capture(capture, paths)
-    bindings = []
-    captured = []
-    for cf in files:
-        obs = cf.observation
-        if obs.state is not ObservationState.PRESENT:
-            raise ObservationUnavailable("execution capture must be present")
-        bindings.append(FileBinding(obs.path, obs.sha256))
-        captured.append(cf.content)
-    digest = canonical_digest([(b.path, b.sha256) for b in bindings])
-    return ExecutionSnapshot(tuple(bindings), tuple(captured), digest)
-
-
-def execute_spike_bound(command, dependent_paths, workspace, harness):
-    """Capture once, execute from immutable bytes, and retain the exact observation basis."""
-    if not isinstance(command, str) or not command:
-        raise ValueError("command must be a nonempty string")
-    paths = _validate_dependent_paths(dependent_paths)
-    capture = _capture(paths, workspace)
-    files = _validate_capture(capture, paths)
-    if any(cf.observation.state is not ObservationState.PRESENT for cf in files):
-        raise ObservationUnavailable("execution capture must be present")
-    bindings = tuple(FileBinding(cf.observation.path, cf.observation.sha256) for cf in files)
-    execution = ExecutionSnapshot(
-        bindings, tuple(cf.content for cf in files),
-        canonical_digest([(b.path, b.sha256) for b in bindings]))
-    observations = tuple(cf.observation for cf in files)
-    observation = ObservationSnapshot(
-        observations, capture.basis_id, observations_digest(observations))
-    try:
-        result = harness.run(command, execution)
-    except Exception as exc:
-        raise HarnessUnavailable("harness run failed") from exc
-    if not isinstance(result, HarnessResult):
-        raise HarnessContractError("harness must return a HarnessResult")
-    if result.snapshot_digest != execution.snapshot_digest:
-        raise HarnessContractError("harness echoed a mismatched snapshot digest")
-    return execution_facts(bindings, result), execution, observation
-
-
-def execute_spike(command, dependent_paths, workspace, harness):
-    """Compatibility projection of the canonical bound executor's facts."""
-    facts, _, _ = execute_spike_bound(command, dependent_paths, workspace, harness)
-    return facts

@@ -114,6 +114,30 @@ class SuiteOwnership(unittest.TestCase):
             self.assertTrue(self.fast[name], f"check-{name} selects no test file")
         self.assertIn("plugins/empirica/tests/v2/test_a1_boundaries.py", self.fast["evidence"])
         self.assertNotIn("plugins/empirica/tests/v2/test_a1_boundaries.py", self.fast["core"])
+        self.assertIn(
+            "plugins/empirica/tests/v2/test_budget_freeze_terminal.py", self.fast["core"])
+        self.assertIn(
+            "plugins/empirica/tests/v2/test_evidence_freshness.py", self.fast["evidence"])
+        self.assertIn(
+            "plugins/empirica/tests/v2/test_public_host_path.py", self.fast["evidence"])
+        self.assertIn(
+            "plugins/empirica/tests/test_execution_adapter.py", self.fast["core"])
+
+    def test_check_core_selects_the_three_real_escape_transaction_cases_and_integration_runs_the_whole_module(self):
+        """A named selection of an integration module's cases is that module's one fast home (as test_governance's are):
+        the fast gate runs exactly these three D7 cases, and the integration target still runs the whole module."""
+        module = "plugins/empirica/tests/test_d7_transactions.py"
+        self.assertIn(module, self.fast["core"])
+        self.assertIn(module, self.integration["empirica-core-integration"])
+        core = re.sub(r"\\\n", " ", dry("check-core"))
+        selected = set(re.findall(r"\btest_d7_transactions\.D7TransactionTests\.(\w+)", core))
+        self.assertEqual(selected, {
+            "test_real_generic_docker_harness_result_is_admitted_by_plan_spike_result",
+            "test_any_valid_input_order_binds_one_canonical_draft",
+            "test_overlapping_or_duplicate_root_inputs_are_invalid_before_any_docker_read",
+        })
+        self.assertNotRegex(core, r"unittest[^\n]*\btest_d7_transactions(\s|$)", "the whole module is integration-only")
+        self.assertNotIn(module, set().union(*(owned for name, owned in self.fast.items() if name != "core")))
 
     def test_the_same_basename_in_another_directory_is_unowned(self):
         # core runs plugins/methodologist/tests/test_core.py; a new test_core.py elsewhere must not ride on its name

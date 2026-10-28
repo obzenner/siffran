@@ -9,7 +9,7 @@
       "basis": "sha256:71753fcee5e4654cfe3aa6c01931d70825651c54e2f5d02cce3ab0547778207d",
       "contract": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "relevant_sections": [
           "terminal",
           "audit",
@@ -67,8 +67,11 @@
         "independence": "distinct",
         "findings": []
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "spike_backend": {
+        "kind": "spikes_unavailable"
+      }
     }
   },
-  "text": "Allow (converged=true) converged — no governance\nrun_id: run-fx\nAudit: passed (distinct)\n\nSatisfied obligations:\n  empirica/G0\n\nChildren:\n  audit: completed"
+  "text": "Allow (converged=true) converged — no governance\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: passed (distinct)\n\nSatisfied obligations:\n  empirica/G0\n\nChildren:\n  audit: completed"
 }

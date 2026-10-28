@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "governed task",
   "invocation": {
     "host": "test",
@@ -146,11 +146,17 @@
           "reviewed_deferred_scope_digest": null,
           "reviewed_claims": [],
           "findings": []
+        },
+        "spike_backend": {
+          "kind": "spikes_unavailable"
         }
       },
       "audit_role_profile": "empirica:empirica-auditor"
     }
   ],
   "observation_basis_digest": "sha256:d0ab2b75f9473424954b6638a5eb0af9f4c74849e849f9431d10c5a4dfd00249",
-  "committed_artifact_head_id": "sha256:c25304b5de05c8da2827590145e27290ace4b7c608a6a106798c86e1b5d75ead"
+  "committed_artifact_head_id": "sha256:c25304b5de05c8da2827590145e27290ace4b7c608a6a106798c86e1b5d75ead",
+  "spike_backend": {
+    "kind": "spikes_unavailable"
+  }
 }

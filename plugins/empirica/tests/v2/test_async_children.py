@@ -248,8 +248,11 @@ class AsyncChildrenTests(ConformanceCase):
         # Later evidence event through private ingress: structurally valid but deliberately
         # unbound late payload (first-terminal rejection before semantic admission).
         ev_payload = build_evidence_leaf_payload(
-            harness_request_id="hreq-late-unbound",
-            command_digest="sha256:" + "e" * 64,
+            harness_request_id="sha256:" + "d" * 64,
+            request_artifact_id="sha256:" + "d" * 64,
+            plan_digest="sha256:" + "e" * 64,
+            policy_digest="sha256:" + "c" * 64,
+            snapshot_digest="sha256:" + "b" * 64,
             prerequisite_research_ids=["sha256:" + "f" * 64],
             file_bindings=[{"path": "src/late.py", "sha256": "sha256:" + "0" * 64}],
             exit_code=0,

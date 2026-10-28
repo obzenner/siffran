@@ -168,7 +168,7 @@ def _evidence_shown_and_left_open():
 
 
 def _stopped_then_drifted():
-    b, run = _begin("drift", [("C0", "needs-experiment", "Spike-backed claim")])
+    b, run = _begin("drift", [("C0", "needs-experiment", "Spike-backed claim")], qualified=True)
     b.research(run, "C0")
     b.spike(run, "C0", "probe-command", {"src.py": b"old\n"})
     b.evaluate(run, "stop")
@@ -226,7 +226,7 @@ def _stop(b, run):
 
 def _converged(drift=False):
     def build():
-        b, run = _begin("converged", [("C0", "needs-experiment", "Spike-backed claim")])
+        b, run = _begin("converged", [("C0", "needs-experiment", "Spike-backed claim")], qualified=True)
         b.research(run, "C0")
         b.spike(run, "C0", "proof-command", {"bound.py": b"old\n"})
         b.audit(run, "pass")
@@ -255,7 +255,8 @@ def _stopped_then_drifted_as(status):
     """A run that ended as ``status`` with a passing experiment, and the experiment's file changed afterwards."""
     def build():
         kw = {"budgets": {"max_passes": 1, "max_spawns": 1, "max_audit_spawns": 2}} if status == "stopped_budget" else {}
-        b, run = _begin("drift-" + status, [("C0", "needs-experiment", "Spike-backed claim")], **kw)
+        b, run = _begin("drift-" + status, [("C0", "needs-experiment", "Spike-backed claim")],
+                        qualified=True, **kw)
         b.research(run, "C0")
         b.spike(run, "C0", "probe-command", {"src.py": b"old\n"})
         if status == "stopped_budget":
@@ -349,10 +350,20 @@ def _refuted_and_supported():
 
 
 def _spike_failed():
-    b, run = _begin("spike-failed", [("C0", "needs-experiment", "The probe passes")])
+    b, run = _begin("spike-failed", [("C0", "needs-experiment", "The probe passes")], qualified=True)
     b.research(run, "C0", ref="probe.md")
     b.spike(run, "C0", "probe --strict", {"probe.py": b"x\n"}, exit_code=1)
     return b, run
+
+
+def _spike_without_inputs(exit_code=0):
+    """A spike that captures no file binds none: the observer reads it as the gate and the author view do."""
+    def build():
+        b, run = _begin(f"spike-no-inputs-{exit_code}", [("C0", "needs-experiment", "The probe passes")], qualified=True)
+        b.research(run, "C0", ref="probe.md")
+        b.spike(run, "C0", "probe", {}, exit_code=exit_code)
+        return b, run
+    return build
 
 
 def _decision_rejected():
@@ -442,6 +453,8 @@ VARIANTS = {
     "refuted": (_refuted, set()),
     "refuted_and_supported": (_refuted_and_supported, set()),
     "spike_failed": (_spike_failed, set()),
+    "spike_without_inputs": (_spike_without_inputs(), set()),
+    "spike_without_inputs_failed": (_spike_without_inputs(1), set()),
     "decision_rejected": (_decision_rejected, set()),
     "regraph_removed": (_regraph_removed, set()),
     "human_after_changed_pass": (_human_after_changed_pass, set()),

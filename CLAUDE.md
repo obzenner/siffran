@@ -94,9 +94,9 @@ All methodologies must be rooted in computer science, mathematics, or establishe
 ## Validation
 
 ```
-make check          # fast static + core + Claude + Codex + Pi contributor gate
-make check-ci       # fast gate without Pi; PI_CHECKS=1 opts Pi in
-make check-<suite>  # static | core | claude | codex | pi — the one you are working in
+make check          # the eight fast suites in parallel: static, core, evidence, observer, claude, codex, pi, ui
+make check-ci       # the fast gate without Pi and UI; PI_CHECKS=1 opts them in
+make check-<suite>  # static | core | evidence | observer | claude | codex | pi | ui — the one you are working in
 make test           # all fast deterministic tests, including Pi
 make native-qualification  # operator procedure entrypoint; launches nothing
 make validate       # manifests only
@@ -111,7 +111,7 @@ The table below and the `## Plugins` table in `README.md` are **generated** — 
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.10.1 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 5.0.1 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 6.0.0 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## README

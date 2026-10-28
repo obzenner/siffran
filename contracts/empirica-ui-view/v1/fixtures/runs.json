@@ -80,7 +80,7 @@
     "started": 1790601600.0,
     "state": "active",
     "updated": 1790602560.0,
-    "version": "sha256:4f5ffb0f9f99afc5972433f83e49e994b07af3f6e748201ffe02d2ab394a4cfd"
+    "version": "sha256:79e04e2f812b65ba5836745f15401c31b758da7de2f88405e104110b243a86f8"
    }
   ],
   "audit": {
@@ -265,7 +265,10 @@
    "started": 1790601600.0,
    "state": "active",
    "updated": 1790602560.0,
-   "version": "sha256:4f5ffb0f9f99afc5972433f83e49e994b07af3f6e748201ffe02d2ab394a4cfd"
+   "version": "sha256:79e04e2f812b65ba5836745f15401c31b758da7de2f88405e104110b243a86f8"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -343,7 +346,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:4f5ffb0f9f99afc5972433f83e49e994b07af3f6e748201ffe02d2ab394a4cfd"
+  "version": "sha256:79e04e2f812b65ba5836745f15401c31b758da7de2f88405e104110b243a86f8"
  },
  "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1": {
   "attempts": [
@@ -409,7 +412,7 @@
     "started": 1790601180.0,
     "state": "active",
     "updated": 1790601540.0,
-    "version": "sha256:6b9afeeff2b10934d9fb4c53edbd7ad48930f3383f78295a9dee086478f02692"
+    "version": "sha256:519061b940aeb09c47098c6b893fe3579309ab2c7dd349f2ae62bce8faa7658e"
    }
   ],
   "audit": {
@@ -550,7 +553,10 @@
    "started": 1790601180.0,
    "state": "active",
    "updated": 1790601540.0,
-   "version": "sha256:6b9afeeff2b10934d9fb4c53edbd7ad48930f3383f78295a9dee086478f02692"
+   "version": "sha256:519061b940aeb09c47098c6b893fe3579309ab2c7dd349f2ae62bce8faa7658e"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -580,7 +586,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:6b9afeeff2b10934d9fb4c53edbd7ad48930f3383f78295a9dee086478f02692"
+  "version": "sha256:519061b940aeb09c47098c6b893fe3579309ab2c7dd349f2ae62bce8faa7658e"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
   "attempts": [
@@ -646,7 +652,7 @@
     "started": 1790595240.0,
     "state": "active",
     "updated": 1790595840.0,
-    "version": "sha256:7055495441e76d5f838445f64a37de4b17bb384fc9a3d20f478c5d0c1943a942"
+    "version": "sha256:76a71e6259c42cc4482e7ae7e2359c57581796659e637e1b49c799b36bcfb381"
    }
   ],
   "audit": {
@@ -801,7 +807,10 @@
    "started": 1790595240.0,
    "state": "active",
    "updated": 1790595840.0,
-   "version": "sha256:7055495441e76d5f838445f64a37de4b17bb384fc9a3d20f478c5d0c1943a942"
+   "version": "sha256:76a71e6259c42cc4482e7ae7e2359c57581796659e637e1b49c799b36bcfb381"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -843,7 +852,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:7055495441e76d5f838445f64a37de4b17bb384fc9a3d20f478c5d0c1943a942"
+  "version": "sha256:76a71e6259c42cc4482e7ae7e2359c57581796659e637e1b49c799b36bcfb381"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
   "attempts": [
@@ -922,7 +931,7 @@
     "started": 1790591040.0,
     "state": "stopped_residual",
     "updated": 1790591760.0,
-    "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+    "version": "sha256:cad65820047e571786e4018ee2dd70015e3417198efd7f2378c98bcb8a2e1da2"
    },
    {
     "ask": null,
@@ -1003,7 +1012,7 @@
     "started": 1790591820.0,
     "state": "active",
     "updated": 1790592900.0,
-    "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+    "version": "sha256:22da84217658db208fcb54f0223003b820b8294412165c6680dc2bca815990d4"
    }
   ],
   "audit": {
@@ -1183,7 +1192,10 @@
    "started": 1790591040.0,
    "state": "stopped_residual",
    "updated": 1790591760.0,
-   "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+   "version": "sha256:cad65820047e571786e4018ee2dd70015e3417198efd7f2378c98bcb8a2e1da2"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -1258,7 +1270,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+  "version": "sha256:cad65820047e571786e4018ee2dd70015e3417198efd7f2378c98bcb8a2e1da2"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
   "attempts": [
@@ -1337,7 +1349,7 @@
     "started": 1790591040.0,
     "state": "stopped_residual",
     "updated": 1790591760.0,
-    "version": "sha256:568e6833ea3daae6cea4a475234ff946f028f20f8f6d4e131c5c9332c461a45c"
+    "version": "sha256:cad65820047e571786e4018ee2dd70015e3417198efd7f2378c98bcb8a2e1da2"
    },
    {
     "ask": null,
@@ -1418,7 +1430,7 @@
     "started": 1790591820.0,
     "state": "active",
     "updated": 1790592900.0,
-    "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+    "version": "sha256:22da84217658db208fcb54f0223003b820b8294412165c6680dc2bca815990d4"
    }
   ],
   "audit": {
@@ -1467,17 +1479,114 @@
     "id": "C1",
     "proof": [
      {
-      "command": "python -m pytest tests/test_colour.py",
-      "exit_code": 0,
-      "files": [
-       {
-        "path": "src/colour.py",
-        "sha256": "sha256:39e3f5bc086a21615f8f05427a6b051008b35723cfea8bba663cb141fc25de3b"
+      "request": {
+       "argv": [
+        "/usr/bin/python3",
+        "/inputs/probe.py",
+        "--exact-argv"
+       ],
+       "artifact_id": "sha256:487f4966f67198b557e04bf35646f505e6515948f091c3e55fda268d230f488b",
+       "claim_id": "C1",
+       "declared_inputs": [
+        "src/colour.py"
+       ],
+       "draft_schema": "empirica.spike-plan-draft/2",
+       "environment_names": [
+        "MODE"
+       ],
+       "harness_request_id": "sha256:1e97749f66d5606444c09e8bb3391ec343be45867b4b6c85df1b182cc792454a",
+       "identities": {
+        "capture_digest": "sha256:1e49f86766e7316b5b05b50652ae7a2174bf55c6312a60c7e4d1147140002f47",
+        "draft_digest": "sha256:a508fa73a20c38a3e2b3cb99236a672e678961ec526df59507a40a6dff916164",
+        "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "plan_digest": "sha256:69ac4456feaaf31307d8facf371724c7463edb340717933ab093589d49a80835",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_basis_id": "sha256:f3c9ecdf61f8ff11c8d220b9e24be5bc4bc083f181b30c8d85c898897b087cd6",
+        "snapshot_digest": "sha256:cddb522e93f749ac35b249c04a7a43bc90158b49601f32c6a46a472b049d8dde"
+       },
+       "image": {
+        "architecture": "arm64",
+        "os": "linux",
+        "raw_architecture": "arm64",
+        "raw_os": "linux",
+        "requested_reference": "example/probe:local",
+        "sealed_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+       },
+       "input_bytes": 5,
+       "input_count": 1,
+       "inputs": [
+        {
+         "bytes": 5,
+         "path": "src/colour.py",
+         "sha256": "sha256:39e3f5bc086a21615f8f05427a6b051008b35723cfea8bba663cb141fc25de3b"
+        }
+       ],
+       "limits": {
+        "core_bytes": 0,
+        "cpu_count": 2,
+        "max_file_size_bytes": 67108864,
+        "memory_bytes": 2147483648,
+        "memory_swap_bytes": 2147483648,
+        "open_files": 1024,
+        "operation_timeout_seconds": 210,
+        "pids": 256,
+        "shm_bytes": 67108864,
+        "staging_bytes": 67108864,
+        "staging_file_bytes": 67108864,
+        "staging_files": 256,
+        "stderr_bytes": 1048576,
+        "stdout_bytes": 1048576,
+        "tmp_tmpfs_bytes": 67108864,
+        "work_tmpfs_bytes": 536870912,
+        "workload_timeout_seconds": 120
+       },
+       "profile_id": "docker-isolated-v1",
+       "runtime": {
+        "gid": 65534,
+        "inputs_mount": "/inputs",
+        "tmpdir": "/tmp",
+        "uid": 65534,
+        "workdir": "/work"
        }
-      ],
-      "gate": "pass",
-      "outcome": "pass",
-      "output": "not_retained",
+      },
+      "result": {
+       "artifact_id": "sha256:8cd0f39b8e0b7b387295ab0a74f93b353e07f8d5f7b79b1281b6b200ec28db9e",
+       "cleanup_proven": true,
+       "exit_code": 0,
+       "gate": "PASS",
+       "harness_request_id": "sha256:1e97749f66d5606444c09e8bb3391ec343be45867b4b6c85df1b182cc792454a",
+       "harness_result_digest": "sha256:5f5dc48583d25a02a7756668c5acef1859a663c60e668f9a9ee26d381c9af6cc",
+       "identities": {
+        "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "input_digest": "sha256:cddb522e93f749ac35b249c04a7a43bc90158b49601f32c6a46a472b049d8dde",
+        "operation_digest": "sha256:063bd51742f1ca8f53066539d5ff51551e71684917181d906c49789759c4bfff",
+        "plan_digest": "sha256:69ac4456feaaf31307d8facf371724c7463edb340717933ab093589d49a80835",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "process_digest": "sha256:b140b5471558f75042af64877517cfb1f565a4cd0c68e726534822e9033bd277",
+        "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_artifact_id": "sha256:487f4966f67198b557e04bf35646f505e6515948f091c3e55fda268d230f488b",
+        "snapshot_digest": "sha256:cddb522e93f749ac35b249c04a7a43bc90158b49601f32c6a46a472b049d8dde",
+        "timing_digest": "sha256:d1dccf9ad95a789256e99b68bc8970bbe1dbaf44f3c5aba008332cfb10e3659a",
+        "topology_digest": "sha256:025d13427268235934b3509d4a9b4ddfbf4235aa663e2b5df9d0a0b401a3b2b8"
+       },
+       "natural_exit": true,
+       "outcome": "pass",
+       "postflight_identity_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "postflight_proven": true,
+       "producer_model": "anthropic/claude-sonnet-4-6",
+       "profile_id": "docker-isolated-v1",
+       "realization_image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "request_artifact_id": "sha256:487f4966f67198b557e04bf35646f505e6515948f091c3e55fda268d230f488b",
+       "stderr": {
+        "bytes_seen": 0,
+        "sha256": "sha256:7963500450b54d1dd838f49cf272614df9530eeaac3d41c69e83560ddcf79256"
+       },
+       "stdout": {
+        "bytes_seen": 0,
+        "sha256": "sha256:3dc8268e33bc7cd2ab3291f728d7d3352299cf3570d5660fda6eeef67edfcf16"
+       }
+      },
       "state": "current"
      }
     ],
@@ -1627,7 +1736,14 @@
    "started": 1790591820.0,
    "state": "active",
    "updated": 1790592900.0,
-   "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+   "version": "sha256:22da84217658db208fcb54f0223003b820b8294412165c6680dc2bca815990d4"
+  },
+  "spike_backend": {
+   "backend": "docker",
+   "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "kind": "qualified",
+   "profile_id": "docker-isolated-v1",
+   "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
   "stale": [],
   "steps": [
@@ -1683,7 +1799,7 @@
     "at": 1790592480.0,
     "bookkeeping": false,
     "claim": "C1",
-    "command": "python -m pytest tests/test_colour.py",
+    "command": null,
     "kind": "spike_request",
     "n": 5,
     "outcome": null,
@@ -1695,7 +1811,7 @@
     "at": 1790592540.0,
     "bookkeeping": false,
     "claim": "C1",
-    "command": "python -m pytest tests/test_colour.py",
+    "command": null,
     "kind": "spike",
     "n": 6,
     "outcome": "pass",
@@ -1704,7 +1820,7 @@
     "terminal": false
    },
    {
-    "at": 1790592540.0,
+    "at": 1790592600.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -1716,24 +1832,12 @@
     "terminal": false
    },
    {
-    "at": 1790592600.0,
-    "bookkeeping": true,
-    "claim": null,
-    "command": null,
-    "kind": "observation_basis",
-    "n": 8,
-    "outcome": null,
-    "standing": null,
-    "subject": "run",
-    "terminal": false
-   },
-   {
     "at": 1790592840.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
     "kind": "attribution",
-    "n": 9,
+    "n": 8,
     "outcome": null,
     "standing": null,
     "subject": "run",
@@ -1745,7 +1849,7 @@
     "claim": null,
     "command": null,
     "kind": "audit_verdict",
-    "n": 10,
+    "n": 9,
     "outcome": "fail",
     "standing": null,
     "subject": "run",
@@ -1753,7 +1857,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:8a172772e99dc0e79da6ce65de5260a92d923d8ad61ae09eed59fb14f698c007"
+  "version": "sha256:22da84217658db208fcb54f0223003b820b8294412165c6680dc2bca815990d4"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
   "attempts": [
@@ -1836,7 +1940,7 @@
     "started": 1790595900.0,
     "state": "active",
     "updated": 1790596440.0,
-    "version": "sha256:7ae5fdf67d16e9c0592406656165124947b4d694ebef4473bccd50b290da3164"
+    "version": "sha256:74fed3e24d6c35bae142c6878ec3a5711d5ca03c11b04e447c5f0263cde22b94"
    }
   ],
   "audit": {
@@ -2026,7 +2130,10 @@
    "started": 1790595900.0,
    "state": "active",
    "updated": 1790596440.0,
-   "version": "sha256:7ae5fdf67d16e9c0592406656165124947b4d694ebef4473bccd50b290da3164"
+   "version": "sha256:74fed3e24d6c35bae142c6878ec3a5711d5ca03c11b04e447c5f0263cde22b94"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -2068,7 +2175,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:7ae5fdf67d16e9c0592406656165124947b4d694ebef4473bccd50b290da3164"
+  "version": "sha256:74fed3e24d6c35bae142c6878ec3a5711d5ca03c11b04e447c5f0263cde22b94"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "attempts": [
@@ -2163,7 +2270,7 @@
     "started": 1790587260.0,
     "state": "stopped_residual",
     "updated": 1790587980.0,
-    "version": "sha256:53c262630b8778e71dbe3315272e768f5d9daa3fb643826848025a0fe76a7aec"
+    "version": "sha256:475eaa32be2d1ca80f01e3267fc870c569c39dea4dd894dec7509f25e33d41a8"
    }
   ],
   "audit": {
@@ -2387,7 +2494,10 @@
    "started": 1790587260.0,
    "state": "stopped_residual",
    "updated": 1790587980.0,
-   "version": "sha256:53c262630b8778e71dbe3315272e768f5d9daa3fb643826848025a0fe76a7aec"
+   "version": "sha256:475eaa32be2d1ca80f01e3267fc870c569c39dea4dd894dec7509f25e33d41a8"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -2463,7 +2573,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:53c262630b8778e71dbe3315272e768f5d9daa3fb643826848025a0fe76a7aec"
+  "version": "sha256:475eaa32be2d1ca80f01e3267fc870c569c39dea4dd894dec7509f25e33d41a8"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
   "attempts": [
@@ -2558,7 +2668,7 @@
     "started": 1790586000.0,
     "state": "converged",
     "updated": 1790587200.0,
-    "version": "sha256:5ca1238eb42aee3999ed18c6f7b56225b5c287c1e3052121180bc6c99c12ecd5"
+    "version": "sha256:bf601c8ef4de25e501cb5fe99a93ea851e9d406fc3d04a10ed06f3c769566938"
    }
   ],
   "audit": {
@@ -2605,17 +2715,114 @@
     "id": "C1",
     "proof": [
      {
-      "command": "python -m pytest tests/test_cache.py",
-      "exit_code": 0,
-      "files": [
-       {
-        "path": "src/cache.py",
-        "sha256": "sha256:dd0d562a7494b2d8456203ed7fbd11d2d6181377197cd7d0858617eb7412e644"
+      "request": {
+       "argv": [
+        "/usr/bin/python3",
+        "/inputs/probe.py",
+        "--exact-argv"
+       ],
+       "artifact_id": "sha256:73933790c59abbaec2487f5a284e127137078f2d08c7f08cd1ba268895c69751",
+       "claim_id": "C1",
+       "declared_inputs": [
+        "src/cache.py"
+       ],
+       "draft_schema": "empirica.spike-plan-draft/2",
+       "environment_names": [
+        "MODE"
+       ],
+       "harness_request_id": "sha256:769c8d98074cc36b3133af58625c677108e900dd123cbd07e4c576e680b4dbaf",
+       "identities": {
+        "capture_digest": "sha256:3d332650439eb0b83f1e279fc874e4bfe5123982e49b91fb89f56f8c2b004552",
+        "draft_digest": "sha256:5f867f966395321f1d7a09c1772e2264ddb9c34a51a3a903c9f35d31f5e2b016",
+        "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "plan_digest": "sha256:eef72d826a797eb29396ca8e88bb6e004c192e34dc8ce0bee4b33b8a83438055",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_basis_id": "sha256:d84f92b6ff678bbc57f169a1c0e9bc603bb462fc3a6cdce16a83ada702ca683c",
+        "snapshot_digest": "sha256:3bc500499f7fdc22ed491ee8eae611228df75e846b777d46b017d86f4fd0d1d5"
+       },
+       "image": {
+        "architecture": "arm64",
+        "os": "linux",
+        "raw_architecture": "arm64",
+        "raw_os": "linux",
+        "requested_reference": "example/probe:local",
+        "sealed_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+       },
+       "input_bytes": 9,
+       "input_count": 1,
+       "inputs": [
+        {
+         "bytes": 9,
+         "path": "src/cache.py",
+         "sha256": "sha256:dd0d562a7494b2d8456203ed7fbd11d2d6181377197cd7d0858617eb7412e644"
+        }
+       ],
+       "limits": {
+        "core_bytes": 0,
+        "cpu_count": 2,
+        "max_file_size_bytes": 67108864,
+        "memory_bytes": 2147483648,
+        "memory_swap_bytes": 2147483648,
+        "open_files": 1024,
+        "operation_timeout_seconds": 210,
+        "pids": 256,
+        "shm_bytes": 67108864,
+        "staging_bytes": 67108864,
+        "staging_file_bytes": 67108864,
+        "staging_files": 256,
+        "stderr_bytes": 1048576,
+        "stdout_bytes": 1048576,
+        "tmp_tmpfs_bytes": 67108864,
+        "work_tmpfs_bytes": 536870912,
+        "workload_timeout_seconds": 120
+       },
+       "profile_id": "docker-networked-v1",
+       "runtime": {
+        "gid": 65534,
+        "inputs_mount": "/inputs",
+        "tmpdir": "/tmp",
+        "uid": 65534,
+        "workdir": "/work"
        }
-      ],
-      "gate": "pass",
-      "outcome": "pass",
-      "output": "not_retained",
+      },
+      "result": {
+       "artifact_id": "sha256:7120f0fc1cebda95c95b0e49282c3e1649193c62fba3d90c3894b0512d92e02c",
+       "cleanup_proven": true,
+       "exit_code": 0,
+       "gate": "PASS",
+       "harness_request_id": "sha256:769c8d98074cc36b3133af58625c677108e900dd123cbd07e4c576e680b4dbaf",
+       "harness_result_digest": "sha256:d965323832ce5544f652e651ddc9a15b0b57c5f298480d96ada0f4ff3958de56",
+       "identities": {
+        "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "input_digest": "sha256:3bc500499f7fdc22ed491ee8eae611228df75e846b777d46b017d86f4fd0d1d5",
+        "operation_digest": "sha256:063bd51742f1ca8f53066539d5ff51551e71684917181d906c49789759c4bfff",
+        "plan_digest": "sha256:eef72d826a797eb29396ca8e88bb6e004c192e34dc8ce0bee4b33b8a83438055",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "process_digest": "sha256:b140b5471558f75042af64877517cfb1f565a4cd0c68e726534822e9033bd277",
+        "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_artifact_id": "sha256:73933790c59abbaec2487f5a284e127137078f2d08c7f08cd1ba268895c69751",
+        "snapshot_digest": "sha256:3bc500499f7fdc22ed491ee8eae611228df75e846b777d46b017d86f4fd0d1d5",
+        "timing_digest": "sha256:d1dccf9ad95a789256e99b68bc8970bbe1dbaf44f3c5aba008332cfb10e3659a",
+        "topology_digest": "sha256:025d13427268235934b3509d4a9b4ddfbf4235aa663e2b5df9d0a0b401a3b2b8"
+       },
+       "natural_exit": true,
+       "outcome": "pass",
+       "postflight_identity_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "postflight_proven": true,
+       "producer_model": "anthropic/claude-sonnet-4-6",
+       "profile_id": "docker-networked-v1",
+       "realization_image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "request_artifact_id": "sha256:73933790c59abbaec2487f5a284e127137078f2d08c7f08cd1ba268895c69751",
+       "stderr": {
+        "bytes_seen": 0,
+        "sha256": "sha256:7963500450b54d1dd838f49cf272614df9530eeaac3d41c69e83560ddcf79256"
+       },
+       "stdout": {
+        "bytes_seen": 0,
+        "sha256": "sha256:3dc8268e33bc7cd2ab3291f728d7d3352299cf3570d5660fda6eeef67edfcf16"
+       }
+      },
       "state": "current"
      }
     ],
@@ -2790,7 +2997,14 @@
    "started": 1790586000.0,
    "state": "converged",
    "updated": 1790587200.0,
-   "version": "sha256:5ca1238eb42aee3999ed18c6f7b56225b5c287c1e3052121180bc6c99c12ecd5"
+   "version": "sha256:bf601c8ef4de25e501cb5fe99a93ea851e9d406fc3d04a10ed06f3c769566938"
+  },
+  "spike_backend": {
+   "backend": "docker",
+   "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "kind": "qualified",
+   "profile_id": "docker-networked-v1",
+   "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
   "stale": [],
   "steps": [
@@ -2846,7 +3060,7 @@
     "at": 1790586660.0,
     "bookkeeping": false,
     "claim": "C1",
-    "command": "python -m pytest tests/test_cache.py",
+    "command": null,
     "kind": "spike_request",
     "n": 5,
     "outcome": null,
@@ -2858,7 +3072,7 @@
     "at": 1790586720.0,
     "bookkeeping": false,
     "claim": "C1",
-    "command": "python -m pytest tests/test_cache.py",
+    "command": null,
     "kind": "spike",
     "n": 6,
     "outcome": "pass",
@@ -2867,24 +3081,12 @@
     "terminal": false
    },
    {
-    "at": 1790586720.0,
-    "bookkeeping": true,
-    "claim": null,
-    "command": null,
-    "kind": "observation_basis",
-    "n": 7,
-    "outcome": null,
-    "standing": null,
-    "subject": "run",
-    "terminal": false
-   },
-   {
     "at": 1790586780.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
     "kind": "research",
-    "n": 8,
+    "n": 7,
     "outcome": "supporting",
     "standing": "current",
     "subject": "claim",
@@ -2896,7 +3098,7 @@
     "claim": null,
     "command": null,
     "kind": "observation_basis",
-    "n": 9,
+    "n": 8,
     "outcome": null,
     "standing": null,
     "subject": "run",
@@ -2908,7 +3110,7 @@
     "claim": null,
     "command": null,
     "kind": "attribution",
-    "n": 10,
+    "n": 9,
     "outcome": null,
     "standing": null,
     "subject": "run",
@@ -2920,7 +3122,7 @@
     "claim": null,
     "command": null,
     "kind": "audit_verdict",
-    "n": 11,
+    "n": 10,
     "outcome": "pass",
     "standing": null,
     "subject": "run",
@@ -2938,7 +3140,7 @@
    ],
    "status": "converged"
   },
-  "version": "sha256:5ca1238eb42aee3999ed18c6f7b56225b5c287c1e3052121180bc6c99c12ecd5"
+  "version": "sha256:bf601c8ef4de25e501cb5fe99a93ea851e9d406fc3d04a10ed06f3c769566938"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1": {
   "attempts": [
@@ -3021,7 +3223,7 @@
     "started": 1790594100.0,
     "state": "active",
     "updated": 1790595180.0,
-    "version": "sha256:ef77ccf3dd75b165e6427fe6e7c32b6920e645e06b63f45096b09cd7dd4cbf1a"
+    "version": "sha256:7a25e02a67c3a4e2f05c64600806e3719245d9d48e8aba078c24a27f612aa3c1"
    }
   ],
   "audit": {
@@ -3213,7 +3415,10 @@
    "started": 1790594100.0,
    "state": "active",
    "updated": 1790595180.0,
-   "version": "sha256:ef77ccf3dd75b165e6427fe6e7c32b6920e645e06b63f45096b09cd7dd4cbf1a"
+   "version": "sha256:7a25e02a67c3a4e2f05c64600806e3719245d9d48e8aba078c24a27f612aa3c1"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -3291,7 +3496,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:ef77ccf3dd75b165e6427fe6e7c32b6920e645e06b63f45096b09cd7dd4cbf1a"
+  "version": "sha256:7a25e02a67c3a4e2f05c64600806e3719245d9d48e8aba078c24a27f612aa3c1"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
   "attempts": [
@@ -3470,7 +3675,7 @@
     "started": 1790592960.0,
     "state": "active",
     "updated": 1790594040.0,
-    "version": "sha256:31e3f962923d3679d96c18b90d5a5a7c5612d72427db330f4beabc7fad2a4cf0"
+    "version": "sha256:70232cf98bebc22883468d7dcbf7e41fd31e9c89ac05e2605ee8042fa36c3edf"
    }
   ],
   "audit": {
@@ -3943,7 +4148,10 @@
    "started": 1790592960.0,
    "state": "active",
    "updated": 1790594040.0,
-   "version": "sha256:31e3f962923d3679d96c18b90d5a5a7c5612d72427db330f4beabc7fad2a4cf0"
+   "version": "sha256:70232cf98bebc22883468d7dcbf7e41fd31e9c89ac05e2605ee8042fa36c3edf"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -4105,7 +4313,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:31e3f962923d3679d96c18b90d5a5a7c5612d72427db330f4beabc7fad2a4cf0"
+  "version": "sha256:70232cf98bebc22883468d7dcbf7e41fd31e9c89ac05e2605ee8042fa36c3edf"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
   "attempts": [
@@ -4220,7 +4428,7 @@
     "started": 1790588040.0,
     "state": "active",
     "updated": 1790589120.0,
-    "version": "sha256:c09092b71532354c07977913ee95fd7b428a4ec61609f8c699696532795c0725"
+    "version": "sha256:062bf25b5daedb6ca02f8ca95072268c1889aafbfa0a1a4ac7ad65e345c1884d"
    }
   ],
   "audit": {
@@ -4498,7 +4706,10 @@
    "started": 1790588040.0,
    "state": "active",
    "updated": 1790589120.0,
-   "version": "sha256:c09092b71532354c07977913ee95fd7b428a4ec61609f8c699696532795c0725"
+   "version": "sha256:062bf25b5daedb6ca02f8ca95072268c1889aafbfa0a1a4ac7ad65e345c1884d"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -4612,7 +4823,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:c09092b71532354c07977913ee95fd7b428a4ec61609f8c699696532795c0725"
+  "version": "sha256:062bf25b5daedb6ca02f8ca95072268c1889aafbfa0a1a4ac7ad65e345c1884d"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
   "attempts": [
@@ -4691,7 +4902,7 @@
     "started": 1790590140.0,
     "state": "stopped_frozen",
     "updated": 1790590980.0,
-    "version": "sha256:1b26658a8af6523ca7c7d61eab67cd3e646e1bac7c96e65eaa5a2939c7b58a33"
+    "version": "sha256:43e979d41797fc7ba1f150b173facbd8b55125403d941d7c0feb6bfe3e6a7d37"
    }
   ],
   "audit": {
@@ -4868,7 +5079,10 @@
    "started": 1790590140.0,
    "state": "stopped_frozen",
    "updated": 1790590980.0,
-   "version": "sha256:1b26658a8af6523ca7c7d61eab67cd3e646e1bac7c96e65eaa5a2939c7b58a33"
+   "version": "sha256:43e979d41797fc7ba1f150b173facbd8b55125403d941d7c0feb6bfe3e6a7d37"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
   },
   "stale": [],
   "steps": [
@@ -4956,7 +5170,7 @@
    ],
    "status": "stopped_frozen"
   },
-  "version": "sha256:1b26658a8af6523ca7c7d61eab67cd3e646e1bac7c96e65eaa5a2939c7b58a33"
+  "version": "sha256:43e979d41797fc7ba1f150b173facbd8b55125403d941d7c0feb6bfe3e6a7d37"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
   "attempts": [
@@ -5031,6 +5245,7 @@
    "updated": null,
    "version": "sha256:ad1acbc5695e3e476c12f0ede032abec3828ff3f451fef0b9ccec73a07b49132"
   },
+  "spike_backend": null,
   "stale": null,
   "steps": null,
   "stop": null,
@@ -5096,7 +5311,7 @@
     "started": 1790589180.0,
     "state": "stopped_budget",
     "updated": 1790590080.0,
-    "version": "sha256:11e49a7b56e1ad39abb645369da064c09319eab2c21ee83bc08d21c4956ee691"
+    "version": "sha256:9d092b46d185e8582bb1c323c82a23c8b337d890ab87608b621ead9be254fa66"
    }
   ],
   "audit": {
@@ -5112,17 +5327,114 @@
     "id": "C0",
     "proof": [
      {
-      "command": "python bench/import.py",
-      "exit_code": 0,
-      "files": [
-       {
-        "path": "import/query.sql",
-        "sha256": "sha256:8903abffd68710879da59014708c6187f8e839fadc2bdf94ae73a036aa591623"
+      "request": {
+       "argv": [
+        "/usr/bin/python3",
+        "/inputs/probe.py",
+        "--exact-argv"
+       ],
+       "artifact_id": "sha256:e458a5692d7a89be5a1e47cf2c9f39a1af91aca2a471bbf006bf518d39769827",
+       "claim_id": "C0",
+       "declared_inputs": [
+        "import/query.sql"
+       ],
+       "draft_schema": "empirica.spike-plan-draft/2",
+       "environment_names": [
+        "MODE"
+       ],
+       "harness_request_id": "sha256:25a6ee42762c4999aa6100801864e8fed17a3a59d5a12798a4a4f9d89f911df2",
+       "identities": {
+        "capture_digest": "sha256:cc4f6bc2f5bae60014006716a8f37347814581a41daed74ab142d384aa2e9979",
+        "draft_digest": "sha256:388501e7e1259f1ece3083a20daeb277e83bc13cb8d0993127a8999dc2644199",
+        "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "plan_digest": "sha256:737b229293a4b5bc45441f34c634f1373df55ea23c0a4b1250d085368f813fc9",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "snapshot_basis_id": "sha256:8849253fb838eb4562eb839f08961ef3db24963bb2a996c07f79f873d33855a8",
+        "snapshot_digest": "sha256:7097877ba79a0f33cc209f3601703c86003e9d48b197a62b794de8e0831d8b3f"
+       },
+       "image": {
+        "architecture": "arm64",
+        "os": "linux",
+        "raw_architecture": "arm64",
+        "raw_os": "linux",
+        "requested_reference": "example/probe:local",
+        "sealed_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+       },
+       "input_bytes": 9,
+       "input_count": 1,
+       "inputs": [
+        {
+         "bytes": 9,
+         "path": "import/query.sql",
+         "sha256": "sha256:8903abffd68710879da59014708c6187f8e839fadc2bdf94ae73a036aa591623"
+        }
+       ],
+       "limits": {
+        "core_bytes": 0,
+        "cpu_count": 2,
+        "max_file_size_bytes": 67108864,
+        "memory_bytes": 2147483648,
+        "memory_swap_bytes": 2147483648,
+        "open_files": 1024,
+        "operation_timeout_seconds": 210,
+        "pids": 256,
+        "shm_bytes": 67108864,
+        "staging_bytes": 67108864,
+        "staging_file_bytes": 67108864,
+        "staging_files": 256,
+        "stderr_bytes": 1048576,
+        "stdout_bytes": 1048576,
+        "tmp_tmpfs_bytes": 67108864,
+        "work_tmpfs_bytes": 536870912,
+        "workload_timeout_seconds": 120
+       },
+       "profile_id": "docker-isolated-v1",
+       "runtime": {
+        "gid": 65534,
+        "inputs_mount": "/inputs",
+        "tmpdir": "/tmp",
+        "uid": 65534,
+        "workdir": "/work"
        }
-      ],
-      "gate": "pass",
-      "outcome": "pass",
-      "output": "not_retained",
+      },
+      "result": {
+       "artifact_id": "sha256:eda796063e22d75923ec2eaf00b72e666b260c97145eb8498ba042c26cbf8733",
+       "cleanup_proven": true,
+       "exit_code": 0,
+       "gate": "PASS",
+       "harness_request_id": "sha256:25a6ee42762c4999aa6100801864e8fed17a3a59d5a12798a4a4f9d89f911df2",
+       "harness_result_digest": "sha256:1487b4232e54b67a3e8f73789b60b1d303545914a3dd4c5d3728662416ada201",
+       "identities": {
+        "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "input_digest": "sha256:7097877ba79a0f33cc209f3601703c86003e9d48b197a62b794de8e0831d8b3f",
+        "operation_digest": "sha256:063bd51742f1ca8f53066539d5ff51551e71684917181d906c49789759c4bfff",
+        "plan_digest": "sha256:737b229293a4b5bc45441f34c634f1373df55ea23c0a4b1250d085368f813fc9",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "process_digest": "sha256:b140b5471558f75042af64877517cfb1f565a4cd0c68e726534822e9033bd277",
+        "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "request_artifact_id": "sha256:e458a5692d7a89be5a1e47cf2c9f39a1af91aca2a471bbf006bf518d39769827",
+        "snapshot_digest": "sha256:7097877ba79a0f33cc209f3601703c86003e9d48b197a62b794de8e0831d8b3f",
+        "timing_digest": "sha256:d1dccf9ad95a789256e99b68bc8970bbe1dbaf44f3c5aba008332cfb10e3659a",
+        "topology_digest": "sha256:025d13427268235934b3509d4a9b4ddfbf4235aa663e2b5df9d0a0b401a3b2b8"
+       },
+       "natural_exit": true,
+       "outcome": "pass",
+       "postflight_identity_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+       "postflight_proven": true,
+       "producer_model": "anthropic/claude-sonnet-4-6",
+       "profile_id": "docker-isolated-v1",
+       "realization_image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "request_artifact_id": "sha256:e458a5692d7a89be5a1e47cf2c9f39a1af91aca2a471bbf006bf518d39769827",
+       "stderr": {
+        "bytes_seen": 0,
+        "sha256": "sha256:7963500450b54d1dd838f49cf272614df9530eeaac3d41c69e83560ddcf79256"
+       },
+       "stdout": {
+        "bytes_seen": 0,
+        "sha256": "sha256:3dc8268e33bc7cd2ab3291f728d7d3352299cf3570d5660fda6eeef67edfcf16"
+       }
+      },
       "state": "current"
      }
     ],
@@ -5258,7 +5570,14 @@
    "started": 1790589180.0,
    "state": "stopped_budget",
    "updated": 1790590080.0,
-   "version": "sha256:11e49a7b56e1ad39abb645369da064c09319eab2c21ee83bc08d21c4956ee691"
+   "version": "sha256:9d092b46d185e8582bb1c323c82a23c8b337d890ab87608b621ead9be254fa66"
+  },
+  "spike_backend": {
+   "backend": "docker",
+   "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+   "kind": "qualified",
+   "profile_id": "docker-isolated-v1",
+   "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
   },
   "stale": [],
   "steps": [
@@ -5302,7 +5621,7 @@
     "at": 1790589780.0,
     "bookkeeping": false,
     "claim": "C0",
-    "command": "python bench/import.py",
+    "command": null,
     "kind": "spike_request",
     "n": 4,
     "outcome": null,
@@ -5314,7 +5633,7 @@
     "at": 1790589840.0,
     "bookkeeping": false,
     "claim": "C0",
-    "command": "python bench/import.py",
+    "command": null,
     "kind": "spike",
     "n": 5,
     "outcome": "pass",
@@ -5323,7 +5642,7 @@
     "terminal": false
    },
    {
-    "at": 1790589840.0,
+    "at": 1790589900.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -5335,24 +5654,12 @@
     "terminal": false
    },
    {
-    "at": 1790589900.0,
-    "bookkeeping": true,
-    "claim": null,
-    "command": null,
-    "kind": "observation_basis",
-    "n": 7,
-    "outcome": null,
-    "standing": null,
-    "subject": "run",
-    "terminal": false
-   },
-   {
     "at": 1790589960.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
     "kind": "evidence_presentation",
-    "n": 8,
+    "n": 7,
     "outcome": null,
     "standing": null,
     "subject": "run",
@@ -5364,7 +5671,7 @@
     "claim": null,
     "command": null,
     "kind": "evidence_confirmation",
-    "n": 9,
+    "n": 8,
     "outcome": "approve",
     "standing": null,
     "subject": "run",
@@ -5380,6 +5687,6 @@
    ],
    "status": "stopped_budget"
   },
-  "version": "sha256:11e49a7b56e1ad39abb645369da064c09319eab2c21ee83bc08d21c4956ee691"
+  "version": "sha256:9d092b46d185e8582bb1c323c82a23c8b337d890ab87608b621ead9be254fa66"
  }
 }

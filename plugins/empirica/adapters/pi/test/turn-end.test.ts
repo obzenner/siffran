@@ -39,7 +39,8 @@ function governance(mode: Mode, pending = false) {
 }
 
 function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "human_wait" = "real"): Result {
-  const run: Record<string, unknown> = { id: HANDLE, status: "active", basis: "sha256:0", governance: governance(mode, kind === "human_wait"),
+  const run: Record<string, unknown> = { id: HANDLE, status: "active", basis: "sha256:0",
+    spike_backend: { kind: "spikes_unavailable" }, governance: governance(mode, kind === "human_wait"),
     confirmation_batch: null, children: [] };
   let reason: Record<string, unknown> = { code: "claim.research_missing", message: REASON };
   if (kind === "budget") reason = { code: "budget.exhausted", parameters: { resource: "pass" }, message: "pass budget exhausted." };
@@ -56,7 +57,8 @@ function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "hum
   return { type: "Block", run, reasons: [reason] } as never;
 }
 
-const CONVERGED = { type: "Allow", converged: true, run: { id: HANDLE, status: "converged" } } as unknown as Result;
+const CONVERGED = { type: "Allow", converged: true,
+  run: { id: HANDLE, status: "converged", spike_backend: { kind: "spikes_unavailable" } } } as unknown as Result;
 const basis = (n: number): Basis => `sha256:${n}`;
 
 /** The Result for one state of the registry table in one mode, or null where the state cannot arise there. */
@@ -142,10 +144,11 @@ async function wired(answer: (revision: number) => Result) {
   const requests: Request[] = [];
   createEmpiricaExtension({
     dispatch: (request) => { requests.push(request); return { ...envelope(request.command.type === "StartRun" ? ({ type: "Allow", converged: false,
-      run: { id: HANDLE, status: "active" } } as never) : answer(revision)), request_id: request.request_id }; },
+      run: { id: HANDLE, status: "active", spike_backend: { kind: "spikes_unavailable" } } } as never) : answer(revision)), request_id: request.request_id }; },
     deriveSelector: () => ({ project: "p", session: "s" }),
     privateIngress: async () => ({ protocol: PROTOCOL, request_id: "trusted-governance",
-      result: { type: "Inert", reason: "unsupported_host_event", run: { id: HANDLE, status: "active" } } }) as never,
+      result: { type: "Inert", reason: "unsupported_host_event",
+        run: { id: HANDLE, status: "active", spike_backend: { kind: "spikes_unavailable" } } } }) as never,
     ownerEnv: {},
     resolveAuditContract: async () => ({ agentFilePath: path.resolve(DEFAULT_SKILLS_DIR, "..", "agents", "pi", "empirica-auditor.md"),
       model: "bedrock/auditor-model", agentScope: "project", auditRetrieval: ["local", "workspace"] }),

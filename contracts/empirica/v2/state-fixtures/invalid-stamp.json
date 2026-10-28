@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "Prove stamp overflow is rejected procedurally.",
   "invocation": {
     "host": "test",
@@ -51,5 +51,8 @@
       "approval_capability": "unavailable"
     },
     "proposal_digest": "sha256:d3bb5217b72c253dd84bf497fe8045e29e5b9586351842006cf28d0a55486331"
+  },
+  "spike_backend": {
+    "kind": "spikes_unavailable"
   }
 }

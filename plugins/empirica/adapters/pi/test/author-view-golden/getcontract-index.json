@@ -6,7 +6,7 @@
       "digest": "<contract-digest>",
       "index": {
         "id": "empirica/public",
-        "version": "4.0.0",
+        "version": "6.0.0",
         "sections": [
           {
             "id": "core",
@@ -454,11 +454,11 @@
           },
           {
             "id": "spike.run",
-            "description": "Request a deterministic harness spike against active research."
+            "description": "Submit one closed generic spike plan draft only for a run with an exact immutable generic Docker binding; unavailable substrate admits no evidence."
           },
           {
             "id": "spike.regate",
-            "description": "Re-gate a stale spike with current prerequisites."
+            "description": "Submit one closed generic spike plan draft only for a run with an exact immutable generic Docker binding; unavailable substrate admits no evidence."
           },
           {
             "id": "budget.raise",

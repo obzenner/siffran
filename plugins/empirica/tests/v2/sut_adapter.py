@@ -56,7 +56,8 @@ def bind_selector(operation_context: str, reason_codes: list[str],
 
 
 def compose_application(workspace, harness, runs, artifacts, host,
-                        profile_id, limits, clock):
+                        profile_id, limits, clock, spike_authority_selector=None,
+                        image_resolver=None):
     """Import ``application.v2`` and call its ``compose()`` factory — the only composition entry.
 
     Raises :class:`driver.V2SeamAbsent` (late import, no load-time cycle) when the seam is absent
@@ -84,6 +85,8 @@ def compose_application(workspace, harness, runs, artifacts, host,
     return compose(
         workspace=workspace, harness=harness, runs=runs, artifacts=artifacts,
         host=host, profile_id=profile_id, limits=limits, clock=clock,
+        spike_authority_selector=spike_authority_selector,
+        image_resolver=image_resolver,
     )
 
 
@@ -130,9 +133,6 @@ class LiveDriver:
     def workspace_error(self, path: str, code: str) -> None:
         self._workspace.set_error(path, code)
 
-    def harness_complete(self, command: str, exit_code: int) -> None:
-        self._harness.complete(command, exit_code)
-
     def reload(self) -> "LiveDriver":
         reloaded = self._service.reload()
         return LiveDriver(
@@ -154,9 +154,17 @@ class LiveDriver:
         # observe call. Transport facts only; never derives claim/audit/run policy.
         return self._workspace.observe_history()
 
-    def harness_invocations(self) -> tuple[dict, ...]:
-        # D4-S2 transport telemetry: harness invocation history as returned attestations.
-        return self._harness.invocations()
+    def qualify_next_generic_run(self) -> None:
+        """Make the fake authority selector return one exact generic binding at StartRun."""
+        self._service._coordinator.spike_authority_selector.qualified_next = True
+
+    def generic_harness_complete(self, exit_code: int) -> None:
+        """Queue one natural verdict for the next sealed generic harness request."""
+        self._harness.complete(exit_code)
+
+    def generic_harness_requests(self) -> tuple:
+        """Return the sealed requests that reached the fake generic harness."""
+        return self._harness.requests()
 
     # ---- D4-S2 trusted application ingress (D2C correction) -------------
     # These invoke the real private composition ingress, not fake-only telemetry. The private
@@ -250,13 +258,16 @@ class LiveDriver:
         self._service.inject_run_state(key, dict(state))
 
 
-def bind_live(workspace, harness, runs, artifacts, host, profile_id, limits, clock):
+def bind_live(workspace, harness, runs, artifacts, host, profile_id, limits, clock,
+              spike_authority_selector=None, image_resolver=None):
     """Compose the real v2 service through the fake ports and wrap it behind ``ConformanceDriver``.
 
     The only SUT composition entry point. ``driver.new_driver`` calls this; tests never do.
     """
     service = compose_application(
         workspace, harness, runs, artifacts, host, profile_id, limits, clock,
+        spike_authority_selector=spike_authority_selector,
+        image_resolver=image_resolver,
     )
     return LiveDriver(
         service, workspace, harness, runs, artifacts, host, profile_id, limits, clock,

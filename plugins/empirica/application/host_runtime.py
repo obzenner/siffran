@@ -40,8 +40,8 @@ def in_range(version: object, minimum: str, maximum_exclusive: str) -> bool:
 def _inside(path: object, root: object) -> bool:
     """Whether ``path`` is strictly below the absolute directory ``root`` (lexically; no filesystem).
 
-    POSIX paths only, by design: the Pi adapter is POSIX-only (spikes run through ``/bin/sh`` under
-    POSIX resource limits), so a Windows-style path is rejected rather than interpreted.
+    POSIX paths only, by design: the Pi adapter and its reviewed runtime owner paths are
+    POSIX-only, so a Windows-style path is rejected rather than interpreted.
     """
     if not isinstance(path, str) or not isinstance(root, str):
         return False

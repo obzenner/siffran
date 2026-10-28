@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/2",
+  "state_schema": "empirica.run/3",
   "goal": "Prove strict v2 state codec roundtrip with no defaults.",
   "invocation": {
     "host": "test",
@@ -79,6 +79,9 @@
           "reviewed_deferred_scope_digest": null,
           "reviewed_claims": [],
           "findings": []
+        },
+        "spike_backend": {
+          "kind": "spikes_unavailable"
         }
       },
       "audit_role_profile": "empirica:empirica-auditor",
@@ -113,5 +116,8 @@
     "delegation_envelope": null,
     "pre_approval_revisions": 0,
     "post_approval_revisions": 0
+  },
+  "spike_backend": {
+    "kind": "spikes_unavailable"
   }
 }

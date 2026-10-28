@@ -20,7 +20,7 @@
         "basis": "sha256:a590acf5c28abbc3eab84ffed534cc3efa353fb872a3a2e35414889425b8b4da",
         "contract": {
           "id": "empirica/public",
-          "version": "4.0.0",
+          "version": "6.0.0",
           "relevant_sections": [
             "children",
             "recovery"
@@ -64,7 +64,10 @@
           "independence": null,
           "findings": []
         },
-        "confirmation_batch": null
+        "confirmation_batch": null,
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        }
       },
       "reasons": [
         {

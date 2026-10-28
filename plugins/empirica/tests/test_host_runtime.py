@@ -18,10 +18,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "tests"))
 
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
 from adapters import bridge  # noqa: E402
 from application import host_runtime, protocol  # noqa: E402
 from core.projection import project_invocation  # noqa: E402
 from governance_setup import TEST_INVOCATION, host_runtime_for, invocation_for  # noqa: E402
+force_absent_sandbox_home()
 
 CASES = json.loads((ROOT / "tests/fixtures/host-runtime-cases.json").read_text(encoding="utf-8"))["cases"]
 PI = next(p for p in protocol._HOST_PROFILES["profiles"] if p["host_id"] == "pi")

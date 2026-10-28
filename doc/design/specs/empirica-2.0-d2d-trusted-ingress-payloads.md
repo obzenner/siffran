@@ -1,8 +1,8 @@
 # Empirica 2.0 D2D — closed trusted-ingress payloads
 
-> Historical Empirica 2.0 design; superseded by public contract 3.0.0 and ADR 0060/0061.
+> Historical Empirica 2.0 design rationale retained for the current 6.0.0 closed trusted ingress.
 
-**Status:** Parent-frozen bounded contract amendment exposed by D4-S3a.
+**Status:** Implemented; current wire is `empirica/v2` and current state is `empirica.run/3`.
 
 ## Why reopened
 
@@ -97,21 +97,29 @@ Rules:
 
 ### `evidence_leaf`
 
-For v2 the trusted evidence leaf is the deterministic harness result for a sealed spike request.
-Required closed payload:
+For the current v2 contract the trusted evidence leaf correlates a deterministic generic result to
+an already committed sealed request. It is not a command execution port and does not authorize host
+execution. Required closed payload:
 
 ```text
 harness_request_id          nonempty
-command_digest              digest256
+request_artifact_id         digest256
+plan_digest                 digest256
+policy_digest               digest256
+snapshot_digest             digest256
 prerequisite_research_ids   nonempty unique ordered digest256 array
 file_bindings               nonempty closed [{path,sha256}]
 exit_code                   integer
 result_digest               digest256
 ```
 
-Gate is derived from exit_code and is not supplied. Claim/command identity comes from the sealed
-request and is not caller repeated. Research remains the author `research` action validated/sealed by
-the application, not a trusted evidence_leaf wire variant.
+The application correlates every request identity and derives uppercase `PASS` only from a natural
+zero exit and uppercase `FAIL` only from a natural nonzero exit. A timeout, forced termination,
+output limit, OOM, capture, staging, lifecycle, cleanup, journal, identity, authority, or postflight
+ambiguity carries no result payload. Claim identity, closed plan draft, immutable backend, and
+framework-owned policy come from the sealed request and are not caller repeated. Research remains
+the author `research` action validated and sealed by the application, not a trusted evidence-leaf
+wire variant.
 
 ## Registry/schema parity
 
@@ -126,7 +134,8 @@ Procedural validation/fixtures enforce:
 - auditor child matches one admitted pending audit child;
 - audit reviewed_claims exact approved-gating coverage and current digests;
 - audit argument/goal/frozen/deferred digests current;
-- evidence result matches one sealed spike result exactly and in order;
+- evidence result matches one already committed sealed generic request exactly and in order, with
+  plan, policy, snapshot, file-binding, and request-artifact correlation;
 - audit verdict's child_id resolves to exactly one audit-purpose completed child, and an
   auditor attribution's child_id resolves to exactly one audit-purpose pending child.
 
@@ -144,8 +153,8 @@ Add valid fixtures for each trusted action plus same-model/decorrelated/unverifi
 and frozen audit coverage. Add one-mutation raw negatives for unknown/missing/extra fields, null
 relations, forbidden independence/gate/deferred reviewed claim, nested event alias, and private/native
 leaks. Add procedural negatives for wrong child/artifact/digest/coverage, duplicate identity/path
-before any map construction, and mismatched field correlation (hash, exit, command, prerequisite,
-result).
+before any map construction, and mismatched field correlation (request, plan, policy, snapshot,
+file hash, natural exit, prerequisite, and result).
 
 ## D1 clarification
 

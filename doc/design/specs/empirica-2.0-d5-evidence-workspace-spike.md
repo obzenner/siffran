@@ -1,264 +1,217 @@
-# Empirica 2.0 D5/D5-F — pure freshness and immutable spike-execution contracts
+# Empirica 2.0 D5/D5-F — pure freshness and immutable generic-spike contracts
 
-**Status:** Implemented in D5-F; historical rationale for `core/freshness.py`.
+**Status:** Superseded. Its Docker sandbox, qualification, and outcome sections describe an earlier
+unreleased design and are not current; the current design is
+[`empirica-6-docker-spike-mvp.md`](empirica-6-docker-spike-mvp.md), the current limits are
+public-contract clause `evidence/spike/limits`, and the normative support contract is
+[`contracts/empirica-docker-spike/v1`](../../../contracts/empirica-docker-spike/v1/README.md). The
+pure-core/adapter ownership decision below remains current.
 
-## Purpose and stage boundary
+## Purpose and preserved decision
 
-D5 defines the minimum host-neutral facts and ports that D7 must consume. D5-F proves deterministic
-freshness, immutable-byte spike execution, fail-closed observation, and no-I/O core. It does **not**
-add `application.v2`, dispatch commands, project RunView, mutate repositories, append/supersede
-artifacts, implement CAS, change adapters/service, or make D4 behavior green.
+D5 established the separation between pure evidence/freshness decisions and effectful workspace or
+sandbox adapters. That architectural decision remains current: core code consumes immutable typed
+facts, the application owns capture and correlation, adapters own observation and effects, and no
+core module performs filesystem, subprocess, Docker, clock, network, or repository I/O.
 
-D6 later subtracts v1/compatibility and adds strict v2 dispatch. D7 integrates one observation
-snapshot into every state-bearing transaction and builds the one D2C spike-result statement. D7-W
-owns CAS/retry/interleaving proof. D5 records those handoff obligations but does not simulate a
-transaction or add a second state model.
+The original command-string execution DTOs are not retained. The current design replaces them with a
+the then-current unreleased multi-container draft (superseded by the Empirica 6 MVP), a single canonical workspace-capture basis, an immutable
+framework-sealed plan and snapshot, an exact run-bound generic backend, and closed generic result
+facts. There is no migration reader, dual form, command alias, dependent-file alias, or host execution
+fallback.
 
-## Allowed files and size debit
+## Ownership
 
-Production:
+- `core/freshness.py` owns immutable file observations, file bindings, active spike heads,
+  observation-state vocabulary, and canonical observation digests.
+- `core/spike_plan_draft.py` validates the author's closed generic draft.
+- `core/spike_plan.py` owns framework policy, sealed plan identity, resource/security ceilings,
+  workload timeout (120 seconds), and backend-operation timeout (210 seconds).
+- `application/observation.py` captures current active bindings for freshness reads only.
+- `application/generic_spike.py` captures and seals a draft, constructs immutable generic harness
+  requests, validates exact result echoes, and projects request/result facts.
+- `application/transaction.py` owns request-before-effects and result-after-effects CAS admission.
+- `adapters/sandbox/*` own generic qualification, planning, staging, execution, journaling, cleanup,
+  postflight, and bounded process effects.
 
-- `plugins/empirica/core/freshness.py`
-- `plugins/empirica/application/ports.py`
-- `plugins/empirica/application/observation.py`
+No layer accepts an authored profile, policy, authority, host path, Docker option, image-acquisition
+instruction, credential, derived capture fact, or runtime identity.
 
-Tests:
-
-- `plugins/empirica/tests/test_freshness.py`
-- `plugins/empirica/tests/test_observation.py`
-
-Architecture metadata/test adjustment only if needed for these exact boundaries. No service,
-adapters, v1 wire/state, D4, contracts, manifests, or Make changes.
-
-D5 may add at most **450 reachable production LOC** across the three named files. Tests do not count
-as runtime reduction. D5 claims no reduction. Before D6 acceptance, its frozen deletion budget must
-repay all D5 runtime additions plus D6 additions and still reduce the D0 reachable total by at least
-one line; relocation/generated/vendor code still counts.
-
-## Strict D2 path and digest SSOT
-
-`validate_relative_posix_path(value) -> str` validates; it never cleans or rewrites. It accepts the
-input unchanged only when already in D2 strict normalized form:
-
-- nonempty string, `/` separators only;
-- no leading `/`, backslash, NUL, colon anywhere, empty segment, `.` segment, `..` segment,
-  repeated separator, or trailing separator.
-
-One constructor/predicate is reused for requested paths, bindings, observations, and active heads.
-Canonical set-like path unions are lexical duplicate-free tuples **after** strict validation.
-
-A digest is exact lowercase `sha256:<64 hex>`. Canonical JSON hashing sorts mapping keys, preserves
-sequence order, and rejects sets/frozensets and unsupported values. Sequence order is identity.
-Command digest is SHA-256 of exact UTF-8 command bytes; no trimming/normalization.
-
-## Pure core facts and functions
-
-Closed immutable values in `core/freshness.py`:
+## Immutable freshness values
 
 ```text
-FileBinding(path, sha256)
-FileObservation(path, state, sha256|null)
 ObservationState = present | missing | unreadable | non_regular | outside_workspace
+FileObservation(path, state, sha256 | null)
+FileBinding(path, sha256)
+ObservationSnapshot(observations, basis_id, observations_digest)
 ActiveSpikeHead(artifact_id, claim_id, harness_request_id, file_bindings)
-FreshnessChange(path, state)                   # never a hash
-StaleHead(artifact_id, changes)
-FreshnessEvaluation(stale_heads)
-ExecutionFacts(file_bindings, exit_code, gate, result_digest)
 ```
 
-- bindings always require a digest and are unique by path; their supplied sequence order is identity;
-- present observations require a digest; non-present observations require null;
-- `ActiveSpikeHead.artifact_id` is digest256; claim/request IDs are nonempty opaque strings;
-- bindings are nonempty, strict-path-valid, ordered, and unique by path;
-- `FreshnessEvaluation` has one representation: ordered stale heads with each head's ordered changes.
-  D7 may derive aggregate public changes/stale IDs; D5 does not store duplicate lists;
-- `ExecutionFacts` contains only newly observed execution facts. It repeats no request command,
-  request ID, claim identity, snapshot digest, statement digest, or artifact identity. D7 builds and
-  hashes the sole D2C spike-result statement.
+Rules retained from D5:
 
-Pure functions:
+1. paths are normalized repository-relative POSIX paths;
+2. present observations require a digest and every non-present observation forbids one;
+3. bindings require present content digests;
+4. duplicate paths are rejected rather than overwritten;
+5. observation order is canonical and participates in `observations_digest`;
+6. freshness compares an active result's immutable bindings with one current observation snapshot;
+7. present digest mismatch and every non-present state are stale;
+8. current equal digests are fresh;
+9. no cache, timestamp, or mutable latest pointer is approval authority.
 
-1. `required_paths(active_heads)` returns the lexical union of all supplied active-head bindings.
-   Every supplied active head is considered regardless of recorded pass/fail gate; active projection
-   is trusted D7 input.
-2. `validate_observations(requested_paths, observations)` requires exact one-to-one coverage in the
-   requested canonical order. Missing, extra, duplicate, reordered, malformed, or path mismatch
-   raises typed `ObservationContractError`.
-3. `evaluate_freshness(active_heads, observations)` compares each binding to the exact observation.
-   Same present digest is fresh. Present digest mismatch yields state `present`; absent/error yields
-   its exact state. Output includes only stale heads and hash-free changes, in supplied head/binding
-   order. It executes/plans nothing.
-4. `gate_from_exit_code`: non-boolean integer zero→pass, nonzero→fail; other values reject.
-5. `execution_facts(bindings, harness_result)` validates exact result types and derives gate only from
-   exit code.
-6. Canonical digest helpers reject non-finite floats recursively and serialize only standard JSON
-   scalar values, with sequence order preserved.
+## Closed author draft
 
-No public `compare_spike`, `SpikeFreshness`, `RegatePlan`, planner, partial attestation digest, or
-aggregate `files_hash` compatibility field.
-
-`core/freshness.py` imports no filesystem, subprocess, clock, environment, repository, adapter, or
-application module and performs no I/O.
-
-## Application port facts
-
-`application/ports.py` contains Protocols and immutable transport facts only.
-
-### Captured workspace fact
+A public spike action contains exactly:
 
 ```text
-CapturedFile(observation: FileObservation, content: bytes|null)
+kind      spike_request
+claim_id  nonempty canonical claim id
+plan      superseded unreleased multi-container author shape
 ```
 
-- present requires immutable bytes whose SHA-256 equals observation.sha256;
-- non-present requires null content;
-- content is private execution material and is never projected/persisted as evidence;
-- a tuple of CapturedFile is one atomic port return, not separately read hashes/bytes.
+The draft declares bounded containers, exact selectable repository/config digests supplied by an
+operator out of band, numeric users, entrypoint/argv arrays, environment overrides, container workdirs, named input mounts, private tmpfs,
+resources, declared inputs, optional private topology, and startup order. Exactly one container is the
+verdict container. The isolated profile permits declared internal private networks for intra-plan
+communication and denies outbound egress. The networked profile permits framework-created
+non-internal private networks, framework-derived sole aliases, and outbound Internet egress. Neither
+profile permits host ingress or published ports. Ports, host networking,
+privileged mode, device/socket/config mounts, public endpoints, mutable image tags, pulls, credentials,
+and ambient host paths are outside the vocabulary. Empirica exposes no public image discovery, and a
+qualification probe image is backend evidence rather than a runtime allowlist. Environment override
+values persist verbatim in the immutable request, so they must never contain credentials or secrets;
+observer/UI/author projections contain only names and no standalone value fingerprint or length. Required content-addressed draft/plan identities can confirm guessed low-entropy values, so authored values must never contain secrets.
 
-### Ports
+## One-basis capture and sealing
+
+`capture_and_seal_generic_plan(draft, workspace)` performs one `Workspace.observe(...)` call over the
+globally canonical set of declared paths. It requires each entry to be present, regular, readable,
+byte-backed, unique, correctly digested, and within per-file and aggregate framework limits. The
+returned immutable snapshot partitions those exact bytes by declared input without reading again.
+
+The application then seals:
+
+- canonical draft and `draft_digest`;
+- framework-owned policy and `policy_digest`;
+- captured inputs, bindings, basis, bytes, and `snapshot_digest`;
+- plan and `plan_digest`;
+- exact immutable `GenericQualifiedBackend` selected once at `StartRun`.
+
+A malformed, reordered, missing, extra, duplicate, mutated, or over-limit observation refuses before
+sandbox effects. The harness receives no workspace port and cannot reacquire live repository bytes.
+
+## Generic request and result ports
+
+The application port is typed, not a command executor:
 
 ```text
-Workspace.observe(paths: tuple[str,...]) -> WorkspaceCapture
-WorkspaceCapture(basis_id: str, files: tuple[CapturedFile,...])
-SpikeHarness.run(command: str, snapshot: ExecutionSnapshot) -> HarnessResult
-HarnessResult(exit_code:int, result_digest:digest256, snapshot_digest:digest256)
+GenericHarnessRequest(
+  run_id, backend, plan, plan_digest, policy_digest, snapshot
+)
+
+GenericHarnessResult(
+  run_id, backend, plan_digest, policy_digest, snapshot_digest,
+  operation_facts, container_facts, verdict_container_id,
+  verdict, verdict_exit, cleanup_proven, postflight_identity_digest
+)
+
+GenericHarnessUnavailable(reason)
 ```
 
-Workspace returns one coherent batch: a nonempty opaque basis ID plus exactly one capture per
-requested path. The complete tuple represents one immutable workspace generation; an implementation
-that cannot obtain a coherent multi-file capture fails unavailable rather than mixing generations.
-It does not normalize/drop invalid input. Errors become exact non-present states rather than partial
-bytes.
+`GenericOperationFacts` bind the operation, qualification record, execution binding, images, inputs,
+processes, topology, and timing. Each `GenericContainerFact` contains closed stdout/stderr byte counts
+and digests, natural-exit/forced-termination facts, and an exit code only where valid. These facts
+contain no raw output, credential, host/runtime/staging path, Docker socket/config value, endpoint,
+inspect/attach payload, or runtime container ID.
 
-`ObservationSnapshot`, `ExecutionSnapshot`, `HarnessResult`, and `ExecutionFacts` are invalid-state-
-resistant immutable facts: direct construction validates tuple/type/cardinality/order, unique binding
-paths, content-to-binding digests, canonical snapshot digest, digest fields, non-boolean integer exit
-code, and `gate == gate_from_exit_code(exit_code)`. Empty observation snapshot uses a nonempty canonical
-basis ID. Malformed port values remain representable only at `CapturedFile`/`WorkspaceCapture`, where
-the shell rejects them fail-closed.
+The exact result validator rejects mismatched run, backend, plan, policy, snapshot, operation,
+container set, verdict container, cleanup, or postflight identity. Every refusal is unavailable and
+produces no deterministic result artifact.
 
-The harness receives no Workspace and never uses the live workspace as its execution cwd or input
-view. It executes against materialized captured bytes whose initial modes are read-only, applies an
-inherited per-file write limit (including stdout/stderr), hashes the bounded stdout/stderr bytes,
-and terminates the spawned process group at completion or timeout. The production filesystem
-adapter opens workspace components descriptor-relatively with no-follow semantics and verifies the
-same descriptor before and after reading.
+## Verdict semantics
 
-This is an **evidence-integrity and resource boundary**, not an operating-system security sandbox.
-The command retains the invoking agent's filesystem, environment, credential, and network authority;
-a same-authority process can deliberately chmod materialized files or access absolute host paths.
-Empirica never claims containment against such a command. Host sandboxing and credentials remain
-outside the protocol threat model as stated by ADR-0042; CI remains the shipping trust boundary. A
-same-authority command may also create a new session to escape process-group cleanup, so cleanup is
-a cooperative resource bound rather than containment against a hostile command.
+Only the verdict container's natural exit yields a typed verdict:
 
-HarnessResult echoes the exact supplied snapshot digest. It carries no gate/approval/claim/artifact
-facts. Harness is a trusted deterministic boundary; application rejects snapshot-digest mismatch.
+- natural exit `0` → `GenericVerdict.PASS` and dossier outcome `pass`;
+- natural nonzero exit, including natural `124` or `125` → `GenericVerdict.FAIL` and dossier outcome
+  `fail`.
 
-## Imperative shell factories
+Timeout, forced termination, output limit, OOM, capture, staging, attach, inspect, identity, cleanup,
+journal, recovery, authority, census, or postflight ambiguity is unavailable, not FAIL. Service
+container exits never decide the verdict. A caller cannot supply the verdict, exit, outcome, gate,
+cleanup proof, or postflight identity.
 
-`application/observation.py` owns:
+## Authority and sandbox boundary
 
-```text
-build_observation_snapshot(active_heads, workspace) -> ObservationSnapshot
-build_execution_snapshot(dependent_paths, workspace) -> ExecutionSnapshot
-execute_spike(command, dependent_paths, workspace, harness) -> ExecutionFacts
-```
+`StartRun` observes authority once. Only `type(selected) is GenericQualifiedBackend` persists a
+qualified binding; every exception, unknown value, old value, or subclass freezes
+`{"kind":"spikes_unavailable"}`. Production composition is exactly `GenericQualificationStore`,
+`GenericBackendSelector`, `GenericAuthorityResolver`, and `GenericDockerHarness`.
 
-A private `_capture(paths, workspace)` may be shared; there is no duplicated policy.
+`EMPIRICA_SPIKE_PROFILE` is launch-process authority only. Absence means isolated; only
+`docker-isolated-v1` and `docker-networked-v1` are accepted; malformed values refuse before
+`StartRun`. Qualification is pull-disabled, uses an already-local exact repository/config digest,
+runs seven ordered probes under 600 seconds, proves exact pre/post container/network census equality, and affects only
+future runs.
 
-### Observation snapshot
+The backend operation owns one 210-second deadline around the 120-second workload. Pi owns a
+300-second spike transport deadline and Claude MCP owns 360 seconds, preserving
+`120 < 210 < 300 < 360`; ordinary Pi transport remains 30 seconds.
 
-- compute complete `required_paths` once;
-- empty set returns canonical empty immutable snapshot with zero Workspace calls;
-- otherwise call Workspace exactly once with the complete tuple;
-- catch port exceptions as typed `ObservationUnavailable`;
-- validate the coherent batch basis, exact captures/content digests/coverage, then discard private
-  contents;
-- return immutable observations, opaque basis ID, and digest; no partial/default snapshot.
+## Two-CAS application admission
 
-### Execution snapshot and spike
+A spike request is one transaction with two durable admissions:
 
-- dependent paths are a nonempty tuple of strict-valid unique paths; preserve the sealed request's
-  exact supplied sequence order and never sort or normalize it;
-- command is a nonempty string and is passed byte-for-byte (whitespace is preserved); invalid command
-  fails before Workspace/Harness calls;
-- call Workspace exactly once for the complete tuple;
-- every result must be present with immutable bytes and matching digest; otherwise
-  `ObservationUnavailable` before harness invocation;
-- construct bindings and digest from that same coherent capture, never a separate per-file or later
-  read;
-- call harness exactly once with exact command and exact immutable snapshot;
-- reject harness exception as `HarnessUnavailable` and echoed snapshot mismatch as
-  `HarnessContractError`;
-- return `ExecutionFacts` from snapshot bindings + harness result; derive gate only from exit code;
-- no append, activation, supersession, approval, request identity, or transaction mutation.
+1. validate the closed draft and current claim/research prerequisites;
+2. capture one canonical workspace basis and seal request facts;
+3. append the immutable `spike_request` artifact and manifest, then CAS the run state;
+4. only after request CAS succeeds, invoke the generic harness exactly once;
+5. validate the closed result against the sealed request and freshly re-observe exact bindings;
+6. append the result artifact and manifest, then CAS the run state;
+7. on a result-CAS conflict, revalidate and retry only result admission with the same facts; never
+   rerun the harness in that call.
 
-The API accepts command + dependent paths, not an undefined active-head/request union and not a second
-sealed-request DTO. D7 supplies those two values from the canonical D2C `spike_request` and correlates
-all request-owned IDs/digests/prerequisites when building the result statement.
+A crash or a separate public call may execute a reachable sealed request that has no result. A crash
+before request CAS performs no effect. A result without a reachable committed request is never
+admitted. Physical artifact orphans not linked by a committed manifest are ignored.
 
-## Normative D7/D7-W handoff
+## Fresh state-bearing reads
 
-Every D7 GetRun, GetArgument, RestoreRun, and EvaluateRun transaction that can report derived state,
-reasons, audit coverage, obligations, or convergence obtains a complete ObservationSnapshot for the
-active-head set selected by that transaction revision. Static GetContract/contract identity lookup is
-observation-free.
+Every `GetRun`, `GetArgument`, and `EvaluateRun` assembles a fresh observation snapshot for the
+complete deduplicated set of active spike bindings. It does not persist freshness. The RunView
+projects exact ordered changes; `claim.spike_stale` carries the same change list. Repeating the same
+observation is stable. Supersession preserves history, deactivates the old result, and leaves
+unrelated active results untouched.
 
-A transaction may take repeated **complete** captures, but a successful CAS commit has exactly one
-unmixed snapshot basis: evaluation and projection are recomputed wholly from the latest selected
-snapshot, and the decision binds that snapshot's basis ID/digest plus canonical active-head identity.
-A CAS conflict always discards the entire attempt and reselects heads/re-observes. An active-set change
-or any workspace-basis change detected before commit likewise discards the attempt and re-observes,
-or fails closed. The contract does not invent an unavailable atomic filesystem/CAS operation or
-require an unconditional second observation; it requires retry for every detected change and never
-permits observations, freshness results, or projections from different captures/attempts to mix.
+Re-gating uses another canonical public `spike_request`; there is no hidden re-gate command. Only the
+stale claim's new request/result supersedes its prior result. Result-CAS retry does not rerun either
+the stale claim or unrelated claims.
 
-D7-W must test head add/remove between observation/commit, changed observation after failed CAS,
-overlapping paths as one lexical call while all heads evaluate, and full re-observation/recomputation
-on retry. These are future D7-W acceptance tests, not D5 fake-CAS behavior.
+## Verification retained and strengthened
 
-D7 re-gates only through a fresh canonical D2C spike_request, calls `execute_spike` with that request's
-exact command/dependent-file order, and alone appends/supersedes via CAS. D5 has no re-gate planner.
+The restored v2 freshness suite proves:
 
-## D5-F proofs
+1. separately submitted research and generic result combine on the same claim;
+2. caller-supplied approval fields cannot approve;
+3. claim wording changes detach prior evidence while preserving history;
+4. request artifact precedes and exactly correlates the result artifact;
+5. only natural PASS approves and natural FAIL refutes across claim kinds;
+6. stale results remain visible even when another reason dominates claim state;
+7. every state-bearing read observes every active bound path;
+8. present edits, missing, unreadable, non-regular, outside-workspace, and digest changes fail closed;
+9. re-gating invokes the fake generic harness once, supersedes only the stale result, preserves
+   unrelated evidence, and restores freshness;
+10. all workspace reads cross the explicit observation port.
 
-Red-first tests cover:
+Generic application, plan, staging, authority, execution, effects, harness, qualification, run/3,
+contract, observer, and host-adapter suites independently prove the closed boundaries above. Tests
+use a programmable generic fake authority and harness; they do not run Docker or execute a host
+command.
 
-1. strict already-normalized D2 paths; all empty/dot/dotdot/repeated/trailing/backslash/absolute/
-   colon-anywhere/NUL forms reject unchanged, including `dir/a:b`;
-2. five observation states and digest/content branch invariants;
-3. sequence-preserving canonical JSON digest; mapping permutation stable, sequence permutation changes
-   identity, unordered containers and nested/non-nested NaN/positive or negative infinity reject;
-4. exact observation coverage/order: missing/extra/duplicate/reordered/path mismatch fail;
-5. fresh match and present/missing/unreadable/non_regular/outside_workspace stale changes per head;
-6. every supplied active head evaluates, including overlapping paths and heads independent of gate;
-7. empty observation snapshot makes zero calls; nonempty makes exactly one complete lexical call;
-8. workspace exception/malformed capture/content-digest mismatch fail with no partial snapshot;
-9. snapshot/facts immutability plus direct-constructor negatives for cardinality/order/content/digest,
-   duplicate bindings, and exit/gate contradiction;
-10. execution snapshot preserves the exact supplied dependent-file order, contains matching immutable
-    captured bytes/bindings, and harness is called exactly once with no workspace argument;
-11. mutate fake workspace after observe returns and before harness runs: harness sees original captured
-    bytes and echoed digest, never mutated ambient bytes; a harness requiring ambient cwd/workspace is
-    unavailable/rejected by the fake contract;
-12. non-present execution capture prevents harness call; harness exception and snapshot echo mismatch
-    fail closed;
-13. exit code is sole gate authority; empty/non-string command rejects before any port call while
-    exact nonempty whitespace is preserved; deterministic ExecutionFacts contain no request/statement/
-    attestation identity;
-14. AST/import proof core freshness has no I/O imports/calls;
-15. historical 2F5 reversal without core I/O: fixed sealed facts + changed supplied observations
-    becomes stale; identical supplied observations remain identical.
+## Guardrails
 
-Fakes record calls/captured bytes/results only and contain no freshness/adjudication policy.
-
-## Stop conditions and verification
-
-Stop if implementation needs public D2 wire changes, v1 compatibility, adapter behavior, transaction
-semantics, repository mutation, or a second identity/state representation.
-
-Run `make check-core`, `make check-static`, D4 preflight green, D4 normal still red only at absent seam,
-`git diff --check`, empty index. Record exact runtime LOC/file debit and an honest D5 red-first report
-containing the observed pre-production ImportError/ModuleNotFoundError commands/output and final green
-commands; no reduction claim.
+This design retains no command-string execution port, old Docker profile, qualification loader,
+alternate harness, host fallback, migration, dual state reader, or compatibility type. Generated
+schemas, fixtures, public tools, vendor copies, and goldens are updated only through their Make-owned
+generators. Contributor acceptance is `make check`, plus `make adr-check`, `make docs-check`,
+`make suites-check`, `make lint`, `make empirica-architecture-check`, and `git diff --check`.

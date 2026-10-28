@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from . import governance
+from . import governance, spike_plan
 
 
 def delegated_auto(command: Mapping[str, Any]) -> bool:
@@ -83,11 +83,20 @@ class OperationalState:
     children: tuple[Mapping[str, Any], ...]
     observation_basis_digest: str
     committed_artifact_head_id: str | None
+    spike_backend: Mapping[str, Any]
 
     def __post_init__(self) -> None:
+        binding = self.spike_backend
+        if not isinstance(binding, Mapping):
+            raise ValueError("run/3 requires a spike backend binding")
+        if spike_plan.spike_backend_kind(binding) is None:
+            if binding.get("kind") == "qualified":
+                raise ValueError("run/3 qualified spike backend is malformed")
+            raise ValueError("run/3 unavailable spike backend is malformed")
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))
         object.__setattr__(self, "children", _immutable(self.children))
+        object.__setattr__(self, "spike_backend", _immutable(self.spike_backend))
         if self.frozen_claim_ids is not None:
             object.__setattr__(self, "frozen_claim_ids", tuple(self.frozen_claim_ids))

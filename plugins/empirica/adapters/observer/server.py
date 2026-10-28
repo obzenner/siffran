@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import socket
 import sys
 import threading
 import traceback
@@ -322,6 +323,15 @@ def _call(route: str, query: dict[str, str]) -> tuple:
 
 def serve(sources: Sources, port: int = 0, root: Path = UI) -> ThreadingHTTPServer:
     """A bound, not yet running, server on 127.0.0.1 (``port`` 0 picks a free one)."""
-    server = ThreadingHTTPServer((HOST, port), handler_for(sources, root))
-    server.daemon_threads = True
-    return server
+    return _Server((HOST, port), handler_for(sources, root))
+
+
+#: The listen backlog: the system's maximum. socketserver's default of 5 makes macOS reset the connections of a page's
+#: burst of module requests beyond it, so the page never loads.
+LISTEN_BACKLOG = socket.SOMAXCONN
+
+
+class _Server(ThreadingHTTPServer):
+    # class attributes: server_activate() listens inside __init__, so an instance attribute set afterwards is too late
+    daemon_threads = True
+    request_queue_size = LISTEN_BACKLOG
