@@ -266,6 +266,46 @@ class StaticPathTests(unittest.TestCase):
         self.assertIsNone(demo.sheet("nope"))
 
 
+class DemoWindowTests(unittest.TestCase):
+    """The demo is fixed: its window is the fixtures' own, whatever ``since`` this machine's clock makes the UI ask
+    (the strip's window is the clock's last 30 days), so the summary's numbers and the run lists the strip links to them
+    agree on every date the demo is opened, not only while the fixtures sit inside that window. This pins the clock time
+    bomb the browser journey first met: the strip said "1 failed audit" and its list went empty once the fixtures left
+    the clock's window (``ui/tests/browser.journeys.mjs``, the failed-audit strip number)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.demo = Demo()
+
+    def _fixture_times(self, key: str) -> list[float]:
+        """Every event time the fixtures hold for one run (its audits, dropped claims and decisions, the times the
+        observer windows count by); a run's writes are its row's own ``updated``."""
+        detail = self.demo.sheet(key)
+        events = [*(detail.get("audits") or ()), *(detail.get("dropped") or ()), *(detail.get("decisions") or ())]
+        return [t for t in (e.get("at") for e in events) if t is not None]
+
+    def test_every_window_leaves_the_strip_s_numbers_and_the_lists_they_link_to_agreeing(self):
+        rows = json.loads((DEMO / "rows.json").read_text(encoding="utf-8"))
+        held = [t for r in rows for t in [r["updated"], *self._fixture_times(r["key"])] if t is not None]
+        latest = max(held)
+        hour = 3_600
+        # one window that holds every fixture moment, then clocks the UI could have whenever the demo is opened: the
+        # hour after the last one, the strip's 30 days past that, and years past it. ``since`` the clock asks is still
+        # validated by the server; the demo answers it with the fixtures' own window.
+        for since in (None, 0.0, latest - 30 * 86400, latest + hour, latest + hour + 30 * 86400, latest + hour + 3 * 86400 * 366):
+            with self.subTest(window=since):
+                summary = self.demo.summary(since)
+                filters = {} if since is None else {"since": str(since)}
+                for flag, name in (("failed_audit", "failed_audits"), ("refuted", "refutations"), ("decided", "decisions")):
+                    listed = self.demo.runs({"flag": flag, **filters}, limit=200)
+                    # the runs the aggregates say carry the fact in this window are the runs its strip link lists
+                    self.assertEqual(listed["total"], summary["aggregates"]["runs"][name], name)
+                    # the failed-audits number the journey checks against its list: the fixtures one event in one run
+                    if name == "failed_audits":
+                        self.assertEqual(len(listed["rows"]), summary["aggregates"]["facts"]["failed_audits"],
+                                         "the strip's failed-audits number and the runs its link lists")
+
+
 class DroppedClientTests(unittest.TestCase):
     """A client that resets its connection while the server is writing must not take the server down (R3 M1)."""
 

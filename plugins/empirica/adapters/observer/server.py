@@ -70,7 +70,10 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'se
 
 class Demo:
     """The vendored fixtures, read once: the summary, rows and sheets of a store the real service built, paged and searched
-    by the same functions the live index uses (``application.observer_index``)."""
+    by the same functions the live index uses (``application.observer_index``). The demo is fixed: its window is the
+    fixtures' own, so a ``since`` the caller asks narrows nothing — not the summary and not the run list — and the numbers
+    the strip shows and the lists it links to them agree on whatever date the demo is opened, never only while the
+    fixtures sit inside the clock's window."""
 
     def __init__(self, folder: Path = DEMO) -> None:
         self._summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
@@ -80,7 +83,8 @@ class Demo:
         self._facts = {key: _index.facts(sheet) for key, sheet in self._sheets.items()}
 
     def summary(self, since: float | None = None, tz: str = "UTC", **_: Any) -> dict[str, Any]:
-        """The fixtures' summary (the demo is fixed: its window is the fixtures' own), its calendar in ``tz``."""
+        """The fixtures' summary (the demo is fixed: its window is the fixtures' own, whatever ``since`` is asked), its
+        calendar in ``tz``."""
         if tz == self._summary["calendar"]["tz"]:
             return self._summary
         ids = [p["id"] for p in self._summary["projects"]]
@@ -88,8 +92,11 @@ class Demo:
                 "token": _index.token([self._summary["token"], tz])}
 
     def runs(self, filters: dict[str, str], cursor: str | None = None, limit: int = _index.PAGE, **_: Any) -> dict:
+        # the demo's window is the fixtures' own (``summary`` answers every period the same), so the ``since`` the caller
+        # asks — the clock's window the UI computes — narrows neither: what a number says and what its list shows agree
+        fixed = {name: value for name, value in filters.items() if name != "since"}
         return {"contract": CONTRACT, "pending": 0,
-                **_index.page(self._rows, self._labels, lambda r: _index.matches(r, filters, self._facts.get(r["key"])),
+                **_index.page(self._rows, self._labels, lambda r: _index.matches(r, fixed, self._facts.get(r["key"])),
                               cursor, limit, self._summary["token"])}
 
     def search(self, query: str, cursor: str | None = None, limit: int = _index.PAGE, **_: Any) -> dict:
