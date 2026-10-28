@@ -14,6 +14,7 @@ verify-or-refuse.
 Every test isolates the home namespace by pointing ``EMPIRICA_HOME`` at a fresh temp dir, so
 nothing here touches a developer's real ``~/.empirica-plugin`` or anything outside it.
 """
+import errno
 import os
 import stat
 import sys
@@ -21,6 +22,7 @@ import tempfile
 import threading
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).parent
 PLUGIN = HERE.parent  # plugins/empirica — makes `core` and `adapters` importable as packages
@@ -249,6 +251,185 @@ class TestRead(_Isolated):
             self.store.read(self.key, "not-a-digest")
         with self.assertRaises(ValueError):
             self.store.path(self.key, "sha256:short")
+
+class TestDigestNames(_Isolated):
+    """Review-1 finding 14: a document's filename is the body of a ``sha256:`` digest — the prefix
+    is part of the identity, not decoration the name of which is sliced off blindly."""
+
+    def test_only_a_sha256_digest_names_a_document(self):
+        self.assertEqual(self.store.path(self.key, "sha256:" + "0" * 64).name, "0" * 64 + ".json")
+
+    def test_everything_else_is_refused_on_both_paths(self):
+        for bad in ("md5:" + "0" * 64,
+                    "0123456" + "0" * 64,
+                    "sha256:" + "g" * 64,
+                    "SHA256:" + "0" * 64,
+                    "sha256:" + "0" * 64 + "0",
+                    "sha256:" + "0" * 32,
+                    "sha256:",
+                    "",
+                    None,
+                    42,
+                    b"sha256:" + b"0" * 64):
+            with self.subTest(digest=repr(bad)):
+                with self.assertRaises(ValueError):
+                    self.store.path(self.key, bad)
+                with self.assertRaises(ValueError):
+                    self.store.read(self.key, bad)
+
+
+class TestWriteDurability(_Isolated):
+    """Review-1 finding 17: the published mode is durable with the bytes, and a first write's new
+    directory entries survive a crash too."""
+
+    def test_the_mode_is_set_before_the_bytes_are_synced(self):
+        order: list[str] = []
+        real_fchmod, real_fsync = os.fchmod, os.fsync
+
+        def fchmod(fd, mode):
+            order.append("fchmod")
+            real_fchmod(fd, mode)
+
+        def fsync(fd):
+            order.append("fsync")
+            real_fsync(fd)
+
+        with mock.patch("os.fchmod", side_effect=fchmod), mock.patch("os.fsync", side_effect=fsync):
+            path, digest = self.store.write(self.key, DATA)
+        self.assertEqual(order[:2], ["fchmod", "fsync"])
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+        self.assertEqual(self.store.read(self.key, digest), DATA)
+
+    def test_a_first_write_also_flushes_the_generation_directory(self):
+        """The first write creates the ``hitl`` directory; its directory entry too must reach the
+        disk, so the flushed set is the ``hitl`` directory and its parent generation directory."""
+        flushed: list[Path] = []
+        with mock.patch("adapters.state.fsio._fsync_dir",
+                        side_effect=lambda directory: flushed.append(Path(directory))):
+            path, _ = self.store.write(self.key, DATA)
+        hitl_dir = path.parent
+        generation = hitl_dir.parent
+        self.assertIn(hitl_dir.absolute(), {p.absolute() for p in flushed})
+        self.assertIn(generation.absolute(), {p.absolute() for p in flushed})
+        # a second document in the established directory flushes the entry, not the parent again
+        flushed.clear()
+        other = hitl.render({"schema": "empirica.hitl/1", "kind": "evidence", "n": 3})
+        with mock.patch("adapters.state.fsio._fsync_dir",
+                        side_effect=lambda directory: flushed.append(Path(directory))):
+            self.store.write(self.key, other)
+        self.assertEqual([p.absolute() for p in flushed], [hitl_dir.absolute()])
+
+
+class TestHardLinkSupport(_Isolated):
+    """Review-1 finding 18: a filesystem without hard links fails with a named condition, so a host
+    can tell "this storage cannot hold the sidecar" from "this document is corrupt"."""
+
+    def test_link_unsupported_errors_become_a_named_error(self):
+        for number, name in ((errno.EPERM, "EPERM"), (errno.EXDEV, "EXDEV"), (errno.EMLINK, "EMLINK")):
+            with self.subTest(errno=name):
+                def refused(src, dst, *, dir_fd=None, _number=number):
+                    raise OSError(_number, f"link refused ({name})")
+
+                with mock.patch("os.link", side_effect=refused):
+                    with self.assertRaises(hitl_sidecar.HardLinkUnsupported):
+                        self.store.write(self.key, DATA)
+                self.assertEqual(self.documents(), [])  # nothing was published
+
+
+class TestLinkRace(_Isolated):
+    """Review item 6, sidecar: the ``os.link`` -> ``FileExistsError`` branch, made deterministic —
+    the raced name's bytes alone decide between idempotent success and refusal."""
+
+    def _race_plant(self, planted: bytes):
+        def plant(src, dst, *, dir_fd=None):
+            Path(dst).write_bytes(planted)  # exactly what a racing writer or attacker would leave
+            raise FileExistsError(17, "the name was taken")
+
+        with mock.patch("os.link", side_effect=plant):
+            return self.store.write(self.key, DATA)
+
+    def test_the_racer_publishing_the_same_bytes_is_idempotent(self):
+        path, digest = self._race_plant(DATA)
+        self.assertEqual(self.store.read(self.key, digest), DATA)  # idempotent success
+        self.assertEqual([p.name for p in self.store.dir(self.key).iterdir()],
+                         [f"{digest[len('sha256:'): ]}.json"])  # our temp was cleaned up
+
+    def test_the_racer_publishing_other_bytes_fails_closed_and_cleans_up(self):
+        planted = b"{ a hostile plant at the digest name }"
+        with self.assertRaises(hitl_sidecar.DocumentMismatch):
+            self._race_plant(planted)
+        digest_name = f"{hitl.digest(DATA)[7:]}.json"
+        self.assertEqual((self.store.dir(self.key) / digest_name).read_bytes(), planted)
+        self.assertEqual([p.name for p in self.store.dir(self.key).iterdir()
+                           if p.name.startswith(".tmp.")], [])
+
+
+class TestFifoRefusal(_Isolated):
+    """Review-1 finding 16: a FIFO swapped at the document path must be refused promptly — an
+    unhardened ``open`` for read would block until a writer appears, hanging the run's dialog."""
+
+    BOUND = 5.0  # seconds; the refusal must be orders of magnitude faster
+
+    def _outcomes(self, call):
+        outcome: dict = {}
+
+        def guarded():
+            try:
+                outcome["result"] = call()
+            except BaseException as exc:  # noqa: BLE001  (record, don't lose)
+                outcome["error"] = exc
+
+        worker = threading.Thread(target=guarded, daemon=True)
+        worker.start()
+        worker.join(self.BOUND)
+        self.assertFalse(worker.is_alive(), "the FIFO refused the read by hanging on it")
+        self.assertEqual(list(outcome), ["error"])
+        return outcome["error"]
+
+    def _plant_fifo_and_lie_about_lstat(self):
+        """Plant a FIFO at the digest name and make the pre-open checks believe it is a regular
+        file, so only the open itself separates a hardened read from a hang."""
+        digest = hitl.digest(DATA)
+        hitl_dir = self.store.dir(self.key)
+        hitl_dir.mkdir(parents=True)
+        fifo = hitl_dir / f"{digest[7:]}.json"
+        os.mkfifo(fifo)
+        return (fifo, digest, mock.patch("stat.S_ISREG", side_effect=lambda mode: True),
+                mock.patch("stat.S_ISLNK", side_effect=lambda mode: False))
+
+    def test_read_refuses_a_swapped_fifo_promptly(self):
+        fifo, digest, regular_lies, link_lies = self._plant_fifo_and_lie_about_lstat()
+        with regular_lies, link_lies:
+            error = self._outcomes(lambda: self.store.read(self.key, digest))
+        self.assertIsInstance(error, hitl_sidecar.DocumentMismatch)
+        fifo.unlink()
+
+    def test_the_existing_document_check_refuses_a_swapped_fifo_promptly(self):
+        fifo, digest, regular_lies, link_lies = self._plant_fifo_and_lie_about_lstat()
+        with regular_lies, link_lies:
+            error = self._outcomes(lambda: self.store.write(self.key, DATA))
+        self.assertIsInstance(error, hitl_sidecar.DocumentMismatch)
+        fifo.unlink()
+
+
+class TestHomeIsAbsolute(_Isolated):
+    """Review-1 finding 19: Q4 decided the form shows an absolute path — so a relative
+    ``EMPIRICA_HOME`` must become absolute the moment the store is built, without resolving
+    symlinks (an absolute path is not a canonical path)."""
+
+    def test_a_relative_home_publishes_absolute_paths(self):
+        previous = os.getcwd()
+        os.chdir(self._tmp.name)  # so "relhome" resolves against the test's own sandbox
+        try:
+            store = hitl_sidecar.HitlDocuments(Path("relhome"))
+            path, digest = store.write(self.key, DATA)
+            self.assertTrue(path.is_absolute())
+            self.assertEqual(path, Path.cwd() / "relhome" / "projects" / "proj"
+                             / "runs" / "runA" / "gen-1" / "hitl"
+                             / f"{digest[len('sha256:'): ]}.json")
+            self.assertEqual(store.read(self.key, digest), DATA)
+        finally:
+            os.chdir(previous)
 
 
 if __name__ == "__main__":
