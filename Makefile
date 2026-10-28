@@ -138,7 +138,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check lifecycle-gates-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run3-check dev-python ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -149,6 +149,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_author_view
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_hitl_document
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
