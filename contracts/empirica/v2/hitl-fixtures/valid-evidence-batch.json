@@ -1,0 +1,39 @@
+{
+  "claims": [
+    {
+      "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "claim_id": "G0",
+      "text": "Root claim"
+    },
+    {
+      "claim_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "claim_id": "G1",
+      "text": "The kernel size is positive."
+    }
+  ],
+  "key": "sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+  "kind": "evidence",
+  "records": [
+    {
+      "citation": "The observed source supports G0.",
+      "claim_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "claim_id": "G0",
+      "record_id": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+      "source_kind": "web",
+      "source_ref": "https://example.test/source",
+      "verification_class": "retrievable"
+    },
+    {
+      "citation": "The kernel size observed at runtime must be positive.",
+      "claim_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "claim_id": "G1",
+      "record_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+      "source_kind": "runtime",
+      "source_ref": "runtime:kernel-size-observed",
+      "spike_unavailable": "A fact of definition; no deterministic check can establish it.",
+      "verification_class": "observed"
+    }
+  ],
+  "run_id": "run-fx",
+  "schema": "empirica.hitl/1"
+}

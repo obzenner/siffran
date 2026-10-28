@@ -17,6 +17,10 @@ dispatch and treats an unknown command or decision as `unsupported`, never as su
   and a `trusted/ingress` PublicContract section discoverable through GetContract
   (`contracts/empirica/v2/public-contract.json`), plus exact host profiles
   (`contracts/empirica/v2/host-profiles.json`) and request/response schemas. The
+  `empirica.hitl/1` human-in-the-loop document schema
+  (`contracts/empirica/v2/hitl.schema.json`, ADR-0072) lives in this folder too — source tree only,
+  not vendored into the plugin — with its fixtures under `contracts/empirica/v2/hitl-fixtures/`.
+  The
   `GetArgument` response projects the one canonical typed `artifacts` union
   (research | `spike_request` | spike) as the public bounded provenance view. v2 is the sole
   Empirica runtime protocol: its registry is inert structured data consumed by the core and

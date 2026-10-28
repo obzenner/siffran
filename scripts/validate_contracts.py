@@ -1839,6 +1839,73 @@ def check_state_child_branch_matrix(state_schema: dict, contract: dict,
                               f"{bad_value!r} was NOT rejected")
 
 
+def check_hitl_bytes(raw: bytes, doc: Any, where: str, errors: list[str]) -> None:
+    """The hitl byte form is pinned before the renderer exists (ADR-0072, Q2): a document's
+    bytes are its identity (its ``document_digest`` covers exactly them), so every fixture
+    must already be in the canonical pretty form — ``json.dumps(doc, sort_keys=True, indent=2,
+    ensure_ascii=False)`` plus one trailing newline, encoded UTF-8.
+    """
+    canonical = (json.dumps(doc, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    if raw != canonical:
+        errors.append(f"{where}: bytes are not the pinned pretty form (json.dumps(doc, sort_keys=True, "
+                      f"indent=2, ensure_ascii=False) + one trailing newline, UTF-8)")
+
+
+def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: list[str]) -> None:
+    """One mutation per hitl rule, each with the diagnostic it must produce, so a fixture that
+    silently became valid (or a byte check that stopped checking) cannot pass quietly.
+    The same harness as ``run_negatives``; skipped until the schema and the valid fixtures exist.
+    """
+    import copy
+
+    if not hitl_schema or not hitl_docs:
+        return
+
+    def expect(run, expected: str, label: str) -> None:
+        local: list[str] = []
+        run(local)
+        if not local:
+            errors.append(f"NEG hitl {label}: expected rejection but none produced")
+        elif not any(expected in e for e in local):
+            errors.append(f"NEG hitl {label}: rejected but no diagnostic contains {expected!r}; got {local}")
+
+    def schema_errors(bad: Any, where: str):
+        def run(local: list[str]) -> None:
+            if Draft202012Validator is None:
+                return
+            for e in Draft202012Validator(hitl_schema).iter_errors(bad):
+                local.append(f"{where}: {e.message}")
+        return run
+
+    config = hitl_docs.get("valid-configuration-approve")
+    evidence = hitl_docs.get("valid-evidence-batch")
+    if config:
+        bad = copy.deepcopy(config)
+        bad["schema"] = "empirica.hitl/0"
+        expect(schema_errors(bad, "neg"), "empirica.hitl/1", "schema const bites")
+        bad = copy.deepcopy(config)
+        del bad["goal"]
+        expect(schema_errors(bad, "neg"), "goal", "a per-kind required field bites")
+        bad = copy.deepcopy(config)
+        bad["surprise"] = 1
+        expect(schema_errors(bad, "neg"), "Additional properties", "the closed document bites")
+        # byte-form mutations: each variant must lose to the canonical pretty form (the fixture
+        # carries a non-ASCII administrator dash so ASCII escaping bites too).
+        wrong_indent = (json.dumps(config, sort_keys=True, indent=4, ensure_ascii=False) + "\n").encode("utf-8")
+        expect(lambda local: check_hitl_bytes(wrong_indent, config, "neg", local),
+               "pretty form", "byte form pins the 2-space indent")
+        no_newline = json.dumps(config, sort_keys=True, indent=2, ensure_ascii=False).encode("utf-8")
+        expect(lambda local: check_hitl_bytes(no_newline, config, "neg", local),
+               "pretty form", "byte form pins the trailing newline")
+        ascii_escaped = (json.dumps(config, sort_keys=True, indent=2) + "\n").encode("utf-8")
+        expect(lambda local: check_hitl_bytes(ascii_escaped, config, "neg", local),
+               "pretty form", "byte form pins literal UTF-8 (no ASCII escaping)")
+    if evidence:
+        bad = copy.deepcopy(evidence)
+        bad["budgets"] = []
+        expect(schema_errors(bad, "neg"), "Additional properties", "cross-kind content bites")
+
+
 def _minimal_valid_state() -> dict:
     """A minimal valid state wrapper for child-matrix validation."""
     return {
@@ -2782,6 +2849,57 @@ def main() -> int:
             elif expected_sub and not any(expected_sub in e for e in produced):
                 errors.append(f"{where}: rejected but no diagnostic contains "
                               f"{expected_sub!r}; got {produced}")
+
+    # --- hitl documents (ADR-0072): the empirica.hitl/1 schema, its fixtures, and the pinned bytes ---
+    hitl_schema = schemas.get(("empirica/v2", "hitl"), {})
+    if not hitl_schema:
+        errors.append("contracts/empirica/v2/hitl.schema.json: the empirica.hitl/1 schema is missing")
+    hitl_fixture_dir = V2 / "hitl-fixtures"
+    hitl_fixture_paths = sorted(hitl_fixture_dir.glob("*.json")) if hitl_fixture_dir.is_dir() else []
+    REQUIRED_HITL_FIXTURES = {
+        "valid-configuration-approve", "valid-configuration-confirm-edited",
+        "valid-evidence-batch", "valid-evidence-terminal",
+        "invalid-wrong-schema", "invalid-unknown-kind", "invalid-unknown-field",
+        "invalid-unknown-nested-field", "invalid-missing-required",
+        "invalid-configuration-on-evidence",
+    }
+    hitl_names = {p.name.removesuffix(".json") for p in hitl_fixture_paths}
+    for name in sorted(REQUIRED_HITL_FIXTURES - hitl_names):
+        errors.append(f"contracts/empirica/v2/hitl-fixtures/{name}.json: required hitl fixture is missing")
+    # Map fixture name -> (expect_valid, expected_substring in the rejection).
+    hitl_expect: dict[str, tuple[bool, str | None]] = {
+        "valid-configuration-approve": (True, None),
+        "valid-configuration-confirm-edited": (True, None),
+        "valid-evidence-batch": (True, None),
+        "valid-evidence-terminal": (True, None),
+        "invalid-wrong-schema": (False, "'empirica.hitl/1' was expected"),
+        "invalid-unknown-kind": (False, "is not one of ['configuration', 'evidence']"),
+        "invalid-unknown-field": (False, "Additional properties"),
+        "invalid-unknown-nested-field": (False, "Additional properties"),
+        "invalid-missing-required": (False, "'goal' is a required property"),
+        "invalid-configuration-on-evidence": (False, "Additional properties"),
+    }
+    hitl_docs: dict[str, dict] = {}
+    for path in hitl_fixture_paths:
+        name = path.name.removesuffix(".json")
+        where = str(path.relative_to(ROOT))
+        doc = load(path)
+        expect_valid, expected_sub = hitl_expect.get(name, (True, None))
+        if expect_valid:
+            validate_schema_instance(doc, "empirica/v2", "hitl", where)
+            hitl_docs[name] = doc
+            check_hitl_bytes(path.read_bytes(), doc, where, errors)
+        else:
+            before = len(errors)
+            validate_schema_instance(doc, "empirica/v2", "hitl", where)
+            produced = errors[before:]
+            del errors[before:]
+            if not produced:
+                errors.append(f"{where}: invalid hitl fixture was NOT rejected")
+            elif expected_sub and not any(expected_sub in e for e in produced):
+                errors.append(f"{where}: rejected but no diagnostic contains "
+                              f"{expected_sub!r}; got {produced}")
+    run_hitl_negatives(hitl_schema, hitl_docs, errors)
 
     # --- v2 fixtures ---
     REQUIRED_V2_FIXTURES = {

@@ -1,0 +1,18 @@
+{
+  "claims": [],
+  "key": "sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+  "kind": "evidence",
+  "records": [],
+  "run_id": "run-fx",
+  "schema": "empirica.hitl/1",
+  "terminal": {
+    "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "residuals": [
+      {
+        "id": "obligation.audit",
+        "required": "Obtain a current independent audit of every approved gating claim."
+      }
+    ],
+    "status": "stopped_residual"
+  }
+}
