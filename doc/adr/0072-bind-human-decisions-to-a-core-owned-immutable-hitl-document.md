@@ -67,6 +67,13 @@ human decided on without trusting the adapter that showed them.
 * Digest recorded only in the sidecar file and the form, not in state ("not-P", rejected: the record could not
   prove which document a human decided on without trusting the adapter or the file system; the decision's
   fingerprint covers only the payload the adapter submits, `core/governance.py:57,287`).
+* A recorded "what the dialog stood beside" block inside the digested document — reviews left, the human-surface
+  observation, a separate budgets-used map (rejected, review-1 finding 1: the core re-renders the document and
+  refuses a mismatch at every decision, but `present` itself appends a receipt that the interaction counters
+  count (`application/governance.py:96-101`, `core/governance.py:173-176`), and `trusted_human_surface` rewrites
+  `human_surface` between calls (`application/transaction.py:417-419`), so a digest over those values changes under
+  the human's own answer and the recompute would refuse every decision. The document records only the decided
+  content plus facts fixed for the run's lifetime).
 * One core-owned immutable JSON document per decision, written beside the run's record and bound into the
   run's own state by its digest (chosen).
 
@@ -78,18 +85,57 @@ The core owns and renders one immutable JSON document for every human-in-the-loo
 schema `empirica.hitl/1` at `contracts/empirica/v2/hitl.schema.json` (source tree only; like the state
 fixtures and `shared-defs.json` it is not vendored into the plugin today). Two kinds:
 
-* **configuration** — what the "approve run configuration" and "confirm edited configuration" forms ask
-  (ADR-0063): the goal, the sizing rationale, every budget with used/minimum/maximum, the amendment and its
-  priors (`(was …)`), and an explicit `context_when_shown` block (budgets used, reviews left, host and its
-  invocation facts) marked **not part of the decision** — it explains what the dialog stood beside, so it can
-  change without changing what is being approved (`reviews_left`, budgets and host come from the same dialog
-  model the forms build from today: `contracts/empirica/v2/shared-defs.json:383-391`,
-  `plugins/empirica/adapters/governance.py:79-86`).
+* **configuration** — what the configuration forms ask (ADR-0063): an explicit `question` discriminator
+  (`approve` \| `confirm_amendment`, below), the goal, the sizing rationale marked as author-unverified
+  (`rationale_source: "author_unverified"` — the contract's unverified label the forms render under today,
+  so the author's untrusted text never reads as a core statement, ADR-0063), the `control_mode` (it is inside
+  the `proposal_digest` the decision binds — `core/governance.py:70-76` — and authorises later automatic
+  acceptances), every budget with used/minimum/maximum, the amendment and its `(was …)` priors on a
+  `confirm_amendment` document, and a `context_when_shown` block of **run-fixed invocation facts only**
+  (host, signal, interactive, delegation, audit_retrieval — `core/projection.py:299-305`; recorded at
+  StartRun and never rewritten, unlike `human_surface`, which `trusted_human_surface` rewrites,
+  `application/transaction.py:417-419`). The block is marked **not part of the decision**: it explains what
+  the dialog stood beside. Nothing volatile is inside it — no `reviews_left` (the `present` receipt changes
+  it, `core/governance.py:173-176`), no `human_surface` (rewritten between calls), no separate budgets-used
+  map (`budgets[].used` already carries it): the form shows reviews-left live from the dialog instead
+  (`contracts/empirica/v2/shared-defs.json:383-391`, `plugins/empirica/adapters/governance.py:79-86`).
 * **evidence** — what the end-of-pass evidence confirmation batch asks, and the terminal "end this run
-  without converging" consent (ADR-0067): every record with its source, quote, verification class and the
-  "why no deterministic check" reason where one exists, every claim with its text, and the terminal consent's
-  status and unresolved residue (`plugins/empirica/adapters/confirmation.py:118-155`,
-  `plugins/empirica/core/evaluation.py:1374-1480`).
+  without converging" consent (ADR-0067): every record with its source, quote, verification class,
+  **`claim_text`** (checked against the record's `claim_digest`, the digest binding that claim's id and
+  text, `core/evaluation.py:277-280` — the text is the content the human judges a quote against) and
+  **`outcome`** (supporting or refuting — a human cannot judge a quote without knowing what it claims to
+  be), the "why no deterministic check" reason where one exists, every claim with its text, and the
+  terminal consent's status and unresolved residue
+  (`plugins/empirica/adapters/confirmation.py:118-155`, `plugins/empirica/core/evaluation.py:1374-1480`).
+
+Which rows count as the terminal residual content is **selected by one core function** from a GetRun-shaped
+snapshot — the run view's active obligation rows that are not satisfied, excluding the terminal consent row
+itself (`core/projection.py:139-147` for a row's shape, `:188-205` for the active row set, whose content
+depends on the snapshot's command, which is why the GetRun shape is the one source; implemented in PR 10, the
+presenting leg) — so the presentation and the consent cannot disagree on what ending now would leave
+unresolved.
+
+### The question and the amendment's priors
+
+Which configuration form is shown is an **explicit `question` discriminator in the document** — `approve` or
+`confirm_amendment` — derived by the core, never by the adapter: it is `confirm_amendment` iff some receipt
+has `outcome == "amend"` and `plan_revision + 1 == governance.plan_revision`; otherwise `approve`. The
+governance state word is **not** the discriminator (`HUMAN_WAIT_STATES` includes `rejected`, a state in which
+a re-present is admitted, `core/governance.py:189`): the most common edit — a human amendment before the
+first approval — goes through `revise`, which leaves the state `pending` whenever `approval_kind` is `None`
+(`core/governance.py:137-138`); an author revision after the first approval yields `revision_pending` with
+no human amendment (an author `configure_run` goes through the same `revise`,
+`core/evaluation.py:1607-1622`); the adapters themselves already show the review
+form whenever no prior dialog exists (`adapters/governance.py:233-234`). The document still carries
+`governance_state` as information, covering `pending`, `revision_pending` and `rejected`.
+
+The confirm document's `(was …)` priors are not derivable any other way — the state's proposal has already
+been replaced at the amend commit (`application/governance.py:81-90`) — so run/4 records them
+**on the receipt the amendment finalises**: `receipts[].superseded_budgets`, written by the sole receipt
+writer (`application/governance.py:94-102`) from `state.governance["proposal"]["budgets"]` — read from the
+state, not the already-revised `governed` — and `null` for every other outcome. The invariant checks:
+non-null if and only if `outcome == "amend"`, and its keys are exactly the ceilings
+(`core/governance.py:46`).
 
 ### Deterministic bytes and the digest
 
@@ -100,6 +146,23 @@ guarantees — string keys are sorted, non-finite floats and unordered container
 `document_digest` is the `sha256:`-prefixed SHA-256 of exactly those bytes, serialized and verified the way
 every other digest in the core is (`core/canonical.py:34-37`). Because the rendering is a pure function of
 run state, two readers get byte-identical documents.
+
+**Every free-text field is display-escaped through the core's one escaper** — `safe_text`, which doubles a
+backslash and turns bidi and zero-width characters into their `\uXXXX` escapes rather than emitting them
+literally (`core/projection.py:287-293`): goal and rationale arrive through it with the dialog, and the
+builder applies it to every remaining free-text field (claim text, citation, source_ref, the
+"why no deterministic check" reason, a residual's `required` line). A bidi override or a zero-width space
+must never reach the file a human opens in a terminal — this document is the one surface meant to be trusted.
+The raw wording stays bound by its digests (`claim_digest`, `statement_digest`), which the escape cannot
+change because the digests are computed before the document is built.
+
+**The core hands the adapter the rendered document as `document: {text, digest}`** — the exact rendered
+UTF-8 string plus its digest, published in the private presentation answers (below). No adapter or transport
+ever re-renders a dict, so there is exactly one renderer of the decision surface, and the private response
+schemas validate the pair as a string plus a `digest256`
+(`contracts/empirica/v2/response.schema.json:2413`, `contracts/empirica/v2/request.schema.json:275`) —
+which is also why `hitl.schema.json` stays source-only and **not vendored**:
+nothing in a private response is ever validated against the hitl schema, only against the string+digest pair.
 
 ### The digest is recorded where the decision is recorded ("P")
 
@@ -121,8 +184,21 @@ machine-local directory the adapter writes).
 
 The order is fixed, and spending follows the successful check, never the reverse:
 
-1. **Ask** — the adapter asks the core for the document. Read-only: nothing is spent, no receipt is written
-   (the context ask is the read-only leg of the same transaction; `application/governance.py:39-48`).
+1. **Ask** — the adapter asks the core for the document. The ask itself spends nothing and writes no receipt,
+   and the context leg of the same transaction may commit `governance.context` when the
+   host's ingress or author observation changed (`application/governance.py:40-49,103-104`) — that commit
+   changes no digested content, so the document the answer carries stays valid. For configuration, the
+   private `governance_context` presentation result carries `document: {text, digest}` beside the private
+   dialog it already carries (`application/v2.py:114-122`, `governancePresentation`,
+   `contracts/empirica/v2/shared-defs.json:383-391`). For evidence, the carrier is the private
+   `trusted_evidence_presentation` response (`application/v2.py:141-150`,
+   `application/transaction.py:388`): a call whose `document_digest` is absent or wrong is refused with
+   `evidence.document_mismatch`, nothing is spent, and the refusal's private result carries
+   `document: {text, digest}` for the batch named by `key` — so the refusal **is** the fetch: the adapter
+   writes the document it names and repeats the call (the leg already retries once,
+   `adapters/confirmation.py:204-217`). The public `GetRun` run view, `GetArgument` and the evaluation
+   results never carry the document: its content is not secret, but its digest and path have no reason to
+   become an author-facing contract.
 2. **Write** — the adapter writes the document bytes to
    `$EMPIRICA_HOME/projects/<p>/runs/<r>/gen-<n>/hitl/<sha256>.json` **once**: `O_EXCL`, mode `0444`; if the
    file already exists, its bytes must be identical, else the adapter refuses. The directory is the one
@@ -132,7 +208,8 @@ The order is fixed, and spending follows the successful check, never the reverse
    (`adapters/state/fsio.py:98-122` writes 0600 temp + rename; a new sibling is the implementation, the
    symlink refusal at `fsio.py:78-96` is the pattern).
 3. **Present** — the adapter sends `present` with the `document_digest`; the core recomputes the document and
-   refuses a mismatch, and a stale run is refused with nothing spent.
+   refuses a mismatch, and a stale run is refused with nothing spent — a mismatch here spends nothing
+   either: the reason-code ordering below puts the stale gates first and a mismatch last.
 4. **Show** — the form shows a short summary plus the document's path and digest (below).
 5. **Decide** — the submitted decision carries the `document_digest`, which the core checks again before
    admitting it (the check extends the decision gate that already binds a submission to its run, revision and
@@ -177,6 +254,9 @@ vendor copies follow (`make empirica-public-tools-sync`, `make vendor-contracts`
   proves exactly which words were decided on.
 * Good, because one owner renders the decision surface: no host re-words a trust fact, and two readers of
   one document get the same bytes.
+* Good, because nothing volatile is inside the digest: no value the human's own answer or the host's surface
+  observation can change between the fetch, `present` and the decision, so the core's recompute at the
+  decision always matches the document the human read.
 * Good, because the digest in state makes a forged or edited provenance story falsifiable from the run's own
   record.
 * Bad, because `empirica.run/3` runs do not carry over: they classify corrupt, so an operator's old runs end
@@ -185,75 +265,99 @@ vendor copies follow (`make empirica-public-tools-sync`, `make vendor-contracts`
   `adapters/state/*` and the vendored contracts are all inside the closure
   (`plugins/empirica/adapters/sandbox/common.py:35-137`; the rule at `doc/testing.md:82-84`) — so **every
   installed qualification is invalidated and native requalification is required after release**, and the
-  closure-touching PRs of the stack land together (ADR-0071's qualification binding).
+  closure-touching PRs of the stack land together (ADR-0071's qualification binding). Within the stack the
+  two closure surfaces move at different points (review-1 finding 23): the manifest's **path list** first
+  changes in PR 07, when the application first imports `core/hitl.py` (and the adapter sidecar follows in
+  PR 08/09); the closure's **content** — the implementation digest over the listed files — already changes
+  in PR 06, when the vendored state schema turns run/4.
 * Bad, because a human must open a file to read the detail; on Claude the form cannot do it for them.
 * The observer listing of the documents (surfacing the digest and the path of a run's HITL documents) is an
   `empirica-ui-view/v1` change and a **follow-up**, not part of this record.
 * Empirica releases this as a major version bump (**7.0.0**), at the end of the stack, with its upgrade guide.
 
-## Proposed sub-decisions (open questions; confirm in review)
+## Sub-decisions (decided; review-1 confirmed the choices)
 
-### Q1 · How the adapter obtains the document before `present`
+### Q1 · How the adapter obtains the document before `present` (decided)
 
-**Proposed**: carry the rendered document in the read-only answer the host already gets before it can build
-the form — for configuration, the `governance_context` presentation (`application/v2.py:113-122` →
-`application/governance.py:39-48`, whose result already carries the private dialog, `governancePresentation`,
-`shared-defs.json:383-391`), and its evidence equivalent, the answer that already carries the presentable
-batch (the same run view and batch hand-back `private_bridge.py:99-106` and `adapters/confirmation.py:187-221`
-use today). Nothing else changes on that leg: it spends nothing.
+The document travels as the **rendered pair** `document: {text, digest}` in the private presentation answers,
+never as a dict an adapter renders: for configuration the `governance_context` presentation result carries it
+beside the private dialog (`application/v2.py:114-122`); for evidence the private
+`trusted_evidence_presentation` response carries it, with the refusal-carries-document pattern — a call
+whose `document_digest` is absent or wrong is refused with `evidence.document_mismatch`, nothing is spent,
+the refusal's private result carries the pair for the batch named by `key`, and the adapter writes and
+repeats the call (`adapters/confirmation.py:204-217` — the leg already retries once; the fetch–present window
+cannot drift because the refusal is the fetch). The context ask itself spends nothing and writes no receipt,
+but may commit `governance.context` when the host's ingress or author observation changed
+(`application/governance.py:40-49,103-104`) — a commit that touches no digested content.
 
-*Rejected*: a new read-only trusted operation (a `hitl_document` handler). Every trusted operation carries a
-payload shape, a private-response validation and guard wiring on both hosts
-(`application/v2.py:111-150`, `adapters/bridge.py:234-256`, `adapters/pi/private_bridge.py:133-149`,
-`request.schema.json:1250` — `governanceContextPayload` is `author` and `ingress` only); a second answer to
-the same question adds that surface to gain nothing, and leaves two answers to keep consistent.
-*proposed; confirm in review.*
+*Rejected*: a new read-only trusted operation (a `hitl_document` handler) — every trusted operation carries a
+payload shape, a private-response validation and guard wiring on both hosts (`application/v2.py:111-150`,
+`adapters/bridge.py:234-256`, `adapters/pi/private_bridge.py:133-149`, `request.schema.json:1250` —
+`governanceContextPayload` is `author` and `ingress` only); a second answer to the same question adds that
+surface to gain nothing. *Rejected*: carrying the evidence document in the public `GetRun` run view,
+`GetArgument` or the evaluation results — that would make the document's digest and path an author-facing
+contract surface (the public-tool schemas, the contract digest and the author view all move) for content that
+is not secret but has no reason to be author-visible.
 
-### Q2 · Byte format details
+### Q2 · Byte format details (decided)
 
-**Proposed**: schema-declared content, but **sorted keys** (the order is `core/canonical.py`'s, so the bytes
-never depend on a schema's field order or on regeneration), `ensure_ascii=False` (literal UTF-8, the owner's
-rule, `canonical.py:18,24`), 2-space indent, one trailing newline, and the document's numbers are integers
-only (floats never reach these payloads; non-finite floats are rejected, `canonical.py:14-16`). The
-`document_digest` is the SHA-256 of exactly those bytes, newline included.
+Schema-declared content, but **sorted keys** (the order is `core/canonical.py`'s, so the bytes never depend
+on a schema's field order or on regeneration), `ensure_ascii=False` (literal UTF-8, the owner's rule,
+`canonical.py:18,24`), 2-space indent, one trailing newline, and the document's numbers are integers only
+(floats never reach these payloads; non-finite floats are rejected, `canonical.py:14-16`). The
+`document_digest` is the SHA-256 of exactly those bytes, newline included. Two additions review-1 fixed:
+**every free-text field is display-escaped with the core's one escaper** (`safe_text`,
+`core/projection.py:287-293`) — the raw wording stays bound by its digests — and **the core hands the adapter
+the rendered `text` plus its `digest`, so no adapter or transport ever re-renders a dict** (the private
+response validates the pair as a string plus a `digest256`, `response.schema.json:2413`).
 
 *Rejected*: schema-declaration key order (the order of properties is not a serialization contract; two
 builders or a regeneration could disagree — sorted is what the core already guarantees everywhere);
 no-trailing-newline (a POSIX text file ends one); compact bytes (unreadable; `canonical_json` is for
 digests, not for people); re-serializing through `canonical_json` and pretty-printing an independent copy
-(two renderers to keep identical — the pretty form and its digest must come from one code path).
-*proposed; confirm in review.*
+(two renderers to keep identical — the pretty form and its digest must come from one code path); raw
+unescaped free text beside escaped goal and rationale (a bidi override in a citation would reach the file a
+human opens).
 
-### Q3 · The refusal reason codes for a digest mismatch
+### Q3 · The refusal reason codes for a digest mismatch (decided)
 
-**Proposed**: two new reason codes, following the domain-prefixed naming the contract already uses
-(`governance.*`, `evidence.*`, beside `governance.stale_proposal` at
-`contracts/empirica/v2/public-contract.json:1899`): **`governance.document_mismatch`** for the configuration
-decision and present leg, and **`evidence.document_mismatch`** for the evidence presentation, the
-confirmation and the terminal consent. Both take the `host_recovery` disposition (like `stale_proposal`) and
-carry the message-and-next-actions the contract rows give, so the recovery table
-(`plugins/empirica/skills/empirica/references/recovery.md`, regenerated from the contract by
-`make empirica-recovery-reference`) grows its rows from the contract alone.
+Two new reason codes, following the domain-prefixed naming the contract already uses (`governance.*`,
+`evidence.*`, beside `governance.stale_proposal` at `contracts/empirica/v2/public-contract.json:1899`):
+**`governance.document_mismatch`** for the configuration decision and present leg, and
+**`evidence.document_mismatch`** for the evidence presentation, the confirmation and the terminal consent.
+Both take the `host_recovery` disposition (like `stale_proposal`) and carry the message-and-next-actions the
+contract rows give, so the recovery table (`plugins/empirica/skills/empirica/references/recovery.md`,
+regenerated from the contract by `make empirica-recovery-reference`) grows its rows from the contract alone.
+The evaluation ordering is fixed: `governance.stale_proposal` and the evidence key/staleness gates come first
+— a document mismatch is reported only when the proposal and revision (or the batch `key`) still match — **a
+mismatch at `present` spends nothing**, and the recovery row for the decision leg says that the present
+receipt is already spent, so the recovery is to fetch the document and present again, costing **one review
+unit** of `PROPOSAL_INTERACTIONS = 3` (`core/governance.py:22`, the counters the refusal words stay
+faithful to, `core/governance.py:168-177`).
 
 *Rejected*: reusing `governance.stale_proposal` (its words say the decision was bound to another
 revision/digest of the *proposal* — a document mismatch is a different fact with a different recovery: fetch
 the document, do not re-propose); one shared `hitl.document_mismatch` (the contract's reason codes are
-domain-prefixed, and the two flows offer different next actions). *proposed; confirm in review.*
+domain-prefixed, and the two flows offer different next actions); reporting a mismatch before the stale
+reasons (the mismatch would hide the more useful fact that the proposal or key itself is stale).
 
-### Q4 · What the short forms show
+### Q4 · What the short forms show (decided)
 
-**Proposed**: the digest as `sha256:` followed by its first 12 hex characters, and the document's
-**absolute** path. Both fit the one owner of the dialog lengths — a title of 40 columns, a description of
-200, lines wrapped at 72 (`adapters/confirmation.py:30-40`; Pi renders what is built here, goldens at 50 and
-80 columns) — and 12 hex is the scan length the repo already uses for identifiers (`short_id`,
-`ID_SIZE = 12`, `application/observer_index.py:66,75`). The full digest and the document path are on the
-decision record; the form's digest is for the eyes, not for verification.
+The digest as `sha256:` followed by its first 12 hex characters (the scan length the repo already uses for
+identifiers, `short_id`, `ID_SIZE = 12`, `application/observer_index.py:66,75`), and the document's
+**absolute** path on **its own line, exempt from wrapping** — the path is a copy-paste surface, wrapping
+breaks the paste, and a realistic path under `$EMPIRICA_HOME` (roughly 160–200 characters) plainly does not
+fit the wrapped text widths anyway (`adapters/confirmation.py:30-40`, the one owner of the dialog lengths);
+the digest line and the exempt path line are pinned by the form goldens. The sidecar returns an absolute path
+even under a relative `EMPIRICA_HOME` (the home is made absolute at construction, never resolved — it must
+not follow a symlink). The full digest and the document path are on the decision record; the form's digest
+is for the eyes, not for verification.
 
 *Rejected*: the full 64-hex digest in the form (spends the one line the path needs, and the full value is in
 the document and in the run's state, not needed on glass); a `~`-relative path (shorter, but the operator's
-`$EMPIRICA_HOME` need not be under their shell's `~`, and a printed path that a human must expand by hand is
-a false convenience for a copy-paste surface; an absolute path is pasted as-is). *proposed; confirm in
-review.*
+`$EMPIRICA_HOME` need not be under their shell's `~`, and a printed path that a human must expand by hand is a
+false convenience for a copy-paste surface; an absolute path is pasted as-is); wrapping the path into the
+description text (a wrapped path is a corrupted paste).
 
 ## Confirmation
 
