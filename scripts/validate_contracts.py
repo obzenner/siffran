@@ -1878,7 +1878,9 @@ def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: li
         return run
 
     config = hitl_docs.get("valid-configuration-approve")
+    confirm = hitl_docs.get("valid-configuration-confirm-edited")
     evidence = hitl_docs.get("valid-evidence-batch")
+    terminal = hitl_docs.get("valid-evidence-terminal")
     if config:
         bad = copy.deepcopy(config)
         bad["schema"] = "empirica.hitl/0"
@@ -1889,6 +1891,24 @@ def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: li
         bad = copy.deepcopy(config)
         bad["surprise"] = 1
         expect(schema_errors(bad, "neg"), "Additional properties", "the closed document bites")
+        # the configuration's own required facts (review-1 finding 6)
+        for missing in ("question", "control_mode", "rationale_source"):
+            bad = copy.deepcopy(config)
+            bad.pop(missing, None)
+            expect(schema_errors(bad, "neg"), f"'{missing}' is a required property",
+                   f"the required {missing} bites")
+        # the question is the form discriminator, not the state word (review-1 finding 2)
+        bad = copy.deepcopy(config)
+        bad["question"] = "confirm_amendment"
+        expect(schema_errors(bad, "neg"), "'amendment' is a required property",
+               "confirm_amendment names the amendment it confirms")
+        bad = copy.deepcopy(config)
+        bad["amendment"] = confirm["amendment"] if confirm else {"budgets": {
+            "max_passes": {"value": 6, "was": 8},
+            "max_spawns": {"value": 1, "was": 1},
+            "max_audit_spawns": {"value": 2, "was": 2}}}
+        expect(schema_errors(bad, "neg"), "should not be valid",
+               "an approve document carries no amendment")
         # byte-form mutations: each variant must lose to the canonical pretty form (the fixture
         # carries a non-ASCII administrator dash so ASCII escaping bites too).
         wrong_indent = (json.dumps(config, sort_keys=True, indent=4, ensure_ascii=False) + "\n").encode("utf-8")
@@ -1904,6 +1924,20 @@ def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: li
         bad = copy.deepcopy(evidence)
         bad["budgets"] = []
         expect(schema_errors(bad, "neg"), "Additional properties", "cross-kind content bites")
+        for missing in ("claim_text", "outcome", "claim_digest"):
+            bad = copy.deepcopy(evidence)
+            bad["records"][0].pop(missing, None)
+            expect(schema_errors(bad, "neg"), f"'{missing}' is a required property",
+                   f"a record's required {missing} bites")
+    if terminal and evidence:
+        bad = copy.deepcopy(terminal)
+        bad["records"] = copy.deepcopy(evidence["records"])
+        expect(schema_errors(bad, "neg"), "is expected to be empty",
+               "the terminal consent holds no records")
+        bad = copy.deepcopy(terminal)
+        bad["claims"] = copy.deepcopy(evidence["claims"])
+        expect(schema_errors(bad, "neg"), "is expected to be empty",
+               "the terminal consent holds no claims")
 
 
 def _minimal_valid_state() -> dict:
@@ -2858,6 +2892,7 @@ def main() -> int:
     hitl_fixture_paths = sorted(hitl_fixture_dir.glob("*.json")) if hitl_fixture_dir.is_dir() else []
     REQUIRED_HITL_FIXTURES = {
         "valid-configuration-approve", "valid-configuration-confirm-edited",
+        "valid-configuration-confirm-pre-approval", "valid-configuration-rejected",
         "valid-evidence-batch", "valid-evidence-terminal",
         "invalid-wrong-schema", "invalid-unknown-kind", "invalid-unknown-field",
         "invalid-unknown-nested-field", "invalid-missing-required",
@@ -2866,25 +2901,34 @@ def main() -> int:
     hitl_names = {p.name.removesuffix(".json") for p in hitl_fixture_paths}
     for name in sorted(REQUIRED_HITL_FIXTURES - hitl_names):
         errors.append(f"contracts/empirica/v2/hitl-fixtures/{name}.json: required hitl fixture is missing")
-    # Map fixture name -> (expect_valid, expected_substring in the rejection).
-    hitl_expect: dict[str, tuple[bool, str | None]] = {
-        "valid-configuration-approve": (True, None),
-        "valid-configuration-confirm-edited": (True, None),
-        "valid-evidence-batch": (True, None),
-        "valid-evidence-terminal": (True, None),
-        "invalid-wrong-schema": (False, "'empirica.hitl/1' was expected"),
-        "invalid-unknown-kind": (False, "is not one of ['configuration', 'evidence']"),
-        "invalid-unknown-field": (False, "Additional properties"),
-        "invalid-unknown-nested-field": (False, "Additional properties"),
-        "invalid-missing-required": (False, "'goal' is a required property"),
-        "invalid-configuration-on-evidence": (False, "Additional properties"),
+    # Map fixture name -> the substring its rejection must contain (``None`` for valid ones).
+    # Validity itself derives from the name prefix (``valid-``/``invalid-``); an unmapped name fails the
+    # suite, so no fixture lands in the folder without a committed expectation (review-1 finding 13).
+    hitl_expect: dict[str, str | None] = {
+        "valid-configuration-approve": None,
+        "valid-configuration-confirm-edited": None,
+        "valid-configuration-confirm-pre-approval": None,
+        "valid-configuration-rejected": None,
+        "valid-evidence-batch": None,
+        "valid-evidence-terminal": None,
+        "invalid-wrong-schema": "'empirica.hitl/1' was expected",
+        "invalid-unknown-kind": "is not one of ['configuration', 'evidence']",
+        "invalid-unknown-field": "Additional properties",
+        "invalid-unknown-nested-field": "Additional properties",
+        "invalid-missing-required": "'goal' is a required property",
+        "invalid-configuration-on-evidence": "Additional properties",
     }
     hitl_docs: dict[str, dict] = {}
     for path in hitl_fixture_paths:
         name = path.name.removesuffix(".json")
         where = str(path.relative_to(ROOT))
         doc = load(path)
-        expect_valid, expected_sub = hitl_expect.get(name, (True, None))
+        if name not in hitl_expect:
+            errors.append(f"{where}: unmapped hitl fixture name {name!r}: a fixture is "
+                           "committed with its verdict in its name and its expectation in hitl_expect")
+            continue
+        expect_valid = name.startswith("valid-")
+        expected_sub = hitl_expect[name]
         if expect_valid:
             validate_schema_instance(doc, "empirica/v2", "hitl", where)
             hitl_docs[name] = doc

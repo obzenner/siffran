@@ -7,6 +7,7 @@
       "maximum": 1024,
       "minimum": 1,
       "short": "passes",
+      "unit": "passes",
       "used": 0,
       "value": 8
     },
@@ -17,7 +18,6 @@
       "maximum": 128,
       "minimum": 0,
       "short": "spawns",
-      "unit": "minutes",
       "used": 0,
       "value": 1
     },
@@ -33,11 +33,6 @@
     }
   ],
   "context_when_shown": {
-    "budgets_used": {
-      "max_audit_spawns": 0,
-      "max_passes": 0,
-      "max_spawns": 0
-    },
     "invocation": {
       "audit_retrieval": [
         "local",
@@ -45,21 +40,19 @@
       ],
       "delegation": false,
       "host": "test",
-      "human_surface": "unavailable",
       "interactive": true,
       "signal": "operator"
-    },
-    "reviews_left": {
-      "proposal": 2,
-      "total": 127
     }
   },
+  "control_mode": "deliberative",
   "goal": "Confirm the exact run configuration",
   "governance_state": "pending",
   "kind": "configuration",
   "plan_revision": 0,
   "proposal_digest": "sha256:7777777777777777777777777777777777777777777777777777777777777777",
+  "question": "approve",
   "rationale": "Sized for the supplied claims — two gating claims, three sources in every layer, one spike retry.",
+  "rationale_source": "author_unverified",
   "run_id": "run-fx",
   "schema": "empirica.hitl/1"
 }
