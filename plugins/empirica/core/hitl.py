@@ -3,11 +3,33 @@
 Each human decision of the forms workstream binds to one immutable core-owned JSON document
 (``doc/adr/0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md``): the native
 forms shrink to the decision plus its facts, and everything else — the whole sizing case for a
-configuration, every quote, class and why-no-spike reason for evidence, the terminal consent's
+configuration, every quote, class, outcome and why-no-spike reason for evidence, the terminal consent's
 residue — moves into a document rendered here and digested by its own bytes. ``hitl.schema.json``
-(``contracts/empirica/v2/hitl.schema.json``, PR 03) is the closed shape; the byte form below is the
-one its contract validator pins; the digest is what the decision payloads and the write-once sidecar
-will record (PRs 06–10).
+(``contracts/empirica/v2/hitl.schema.json``, PR 03, review-1 corrected) is the closed shape; the byte
+form below is the one its contract validator pins; the digest is what the decision payloads and the
+write-once sidecar will record (PRs 06–10).
+
+Review-1 decisions this module implements (ADR-0072, decided sub-decisions Q1–Q4):
+
+- **Nothing volatile is digested**: ``context_when_shown`` carries only the run-fixed invocation
+  facts (host, signal, interactive, delegation, audit_retrieval — recorded at StartRun and never
+  rewritten). A present receipt changes the reviews left (``application/governance.py:96-101``,
+  counted at ``core/governance.py:168-177``) and the host's answer rewrites ``human_surface``
+  (``application/transaction.py:417-419``), so neither can be inside the document or the core's
+  recompute at the decision would refuse every one.
+- **The question is the form discriminator** (:func:`question_of`), never the adapter's and never the
+  state word alone: ``confirm_amendment`` iff some receipt has ``outcome == "amend"`` and its
+  ``plan_revision + 1`` is the governed plan revision — a pre-approval amendment still parses
+  ``pending`` (``core/governance.py:137-138``), a later author revision yields ``revision_pending``
+  without a human amendment (``core/evaluation.py:1607-1622``), and ``rejected`` still admits a
+  re-present (``core/governance.py:189``).
+- **A record answers a claim**: it carries the claim's own text (checked against the wording digest
+  the record is bound to) and its outcome — a human cannot judge a quote without them.
+- **One escaper**: every free-text value that does not arrive already escaped is display-escaped here
+  with the core's one escaper (``core.projection.safe_text``, core/projection.py:287-293). The
+  dialog's goal, rationale and invocation facts arrive already escaped (``governance_dialog``,
+  core/projection.py:308-338); the raw wording stays bound by its digests, computed before the
+  document is built.
 
 This module is pure: no I/O, no clock, no adapter or application imports (only ``core``), no
 mutation of its inputs, and it is imported by nothing yet — the transaction wiring that binds
@@ -21,9 +43,10 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from core import citations
-from core.canonical import canonical_json
-from core.evaluation import TERMINAL_STATUSES, claim_digest
+from core.canonical import CanonicalJSONError, canonical_json
+from core.evaluation import TERMINAL_STATUSES, claim_digest, terminal_key
+from core.governance import HUMAN_WAIT_STATES
+from core.projection import safe_text
 
 #: The document's protocol identity (the schema's ``schema`` const, ``contracts/empirica/v2/hitl.schema.json``).
 SCHEMA_ID = "empirica.hitl/1"
@@ -32,12 +55,20 @@ SCHEMA_ID = "empirica.hitl/1"
 #: the architecture rule guards the removed trusted ``evidence`` action name, not this kind).
 CONFIGURATION = "configuration"
 EVIDENCE = "evidence"
+#: The configuration form's question (ADR-0072's discriminator, the schema's ``question`` enum).
+APPROVE = "approve"
+CONFIRM_AMENDMENT = "confirm_amendment"
 #: The dialog's budget-row keys, copied closed (core/projection.py:312-320 builds every row for
 #: exactly these, from ``core.governance.CEILINGS``, core/governance.py:46-47).
 _BUDGET_KEYS = ("key", "label", "short", "help", "value", "used", "minimum", "maximum")
+#: The run-fixed invocation facts the digested context carries (ADR-0072; the five that persist for
+#: the run's lifetime — never ``human_surface``, which the host's own answer rewrites).
+_INVOCATION_KEYS = ("host", "interactive", "signal", "delegation", "audit_retrieval")
 #: The ceilings an amendment names (the decision payload's own budget set,
 #: ``contracts/empirica/v2/request.schema.json`` ``governanceDecisionPayload.amendment``).
 _CEILINGS = ("max_passes", "max_spawns", "max_audit_spawns")
+_CONTROL_MODES = ("deliberative", "auto")
+_OUTCOMES = ("supporting", "refuting")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
@@ -48,10 +79,15 @@ def render(document: Any) -> bytes:
     floats, non-string keys, sets and unsupported types are refused here, before any bytes exist),
     then serialized as ``json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False)`` plus
     one trailing newline, UTF-8 — the form the contract validator pins in every fixture
-    (``scripts/validate_contracts.py`` ``check_hitl_bytes``) and ADR-0072's Q2 decided.
+    (``scripts/validate_contracts.py`` ``check_hitl_bytes``) and ADR-0072's Q2 decided. A value that
+    cannot be encoded as UTF-8 (a lone surrogate) refuses here as a :class:`CanonicalJSONError`,
+    like every other refusal of the one canonical owner.
     """
     canonical_json(document)
-    return (json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    try:
+        return (json.dumps(document, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    except UnicodeEncodeError as broken:
+        raise CanonicalJSONError(f"the document is not encodable as UTF-8: {broken}") from broken
 
 
 def digest(data: bytes) -> str:
@@ -64,9 +100,50 @@ def document_digest(document: Any) -> str:
     return digest(render(document))
 
 
+def question_of(governance: Mapping[str, Any]) -> str:
+    """Which configuration question the run's governance asks now (ADR-0072's discriminator).
+
+    ``confirm_amendment`` iff some receipt has ``outcome == "amend"`` (a human amendment performed
+    on the proposal this revision supersedes, ``application/governance.py:81-90,94-102``) whose
+    ``plan_revision + 1`` is the governed plan revision; ``approve`` otherwise. The state word alone
+    cannot tell them apart: a pre-approval amendment leaves ``pending`` (``core/governance.py:137-138``)
+    and a rejected decision re-presents, so the receipts are the only witness of an amendment.
+    Malformed input is refused as :class:`ValueError`, never as a stray ``KeyError``.
+    """
+    try:
+        plan_revision = governance["plan_revision"]
+        receipts = governance["receipts"]
+    except (KeyError, TypeError) as broken:
+        raise ValueError(f"the governance state lacks {broken!r}") from broken
+    if type(plan_revision) is not int:
+        raise ValueError("the governed plan revision is an integer")
+    for receipt in receipts:
+        if not isinstance(receipt, Mapping):
+            raise ValueError("a governance receipt is a mapping")
+        if (receipt.get("outcome") == "amend"
+                and receipt.get("plan_revision", -1) + 1 == plan_revision):
+            return CONFIRM_AMENDMENT
+    return APPROVE
+
+
+def _escaped(name: str, value: Any, where: str) -> str:
+    """One free-text value through the core's one escaper (ADR-0072); nonempty text, nothing else."""
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"{where} carries its {name} as nonempty text")
+    return safe_text(value)
+
+
+def _integer(name: str, value: Any, where: str) -> int:
+    """One numeric value as an exact ``int``: a bool or a float hides, so neither is admitted (review-1)."""
+    if type(value) is not int:
+        raise ValueError(f"{where} carries its {name} as an integer")
+    return value
+
+
 def configuration_document(*, run_id: str, dialog: Mapping[str, Any], proposal_digest: str,
-                          governance_state: str,
-                          priors: Mapping[str, int] | None = None) -> dict[str, Any]:
+                          governance: Mapping[str, Any],
+                          priors: Mapping[str, int] | None = None,
+                          question: str | None = None) -> dict[str, Any]:
     """Build the ``configuration`` document shown for approve-run-configuration and confirm-edited forms.
 
     Pure function of explicit inputs (ADR-0072): nothing is read, nothing is chosen here. Sources:
@@ -75,40 +152,64 @@ def configuration_document(*, run_id: str, dialog: Mapping[str, Any], proposal_d
       ``governanceDecisionPayload.run_id``; the transaction passes ``encode_handle(key)``,
       application/location.py:63) — the host's receipt id is NOT here and never will be.
     - ``dialog``: the production dialog ``core/projection.py:308-338`` ``governance_dialog`` returns
-      (how the projection builds it: core/projection.py:365-372 ``project_presentation``) — its
-      ``epoch`` is the plan revision, its ``goal``/``rationale`` are the escaped full texts
-      (core/projection.py:290-298), its ``budgets`` rows are the closed display rows
-      (core/projection.py:312-320), its ``reviews_left`` and ``invocation`` are the facts
-      (core/governance.py:168-177 ``interactions_remaining``; core/projection.py:299-305
-      ``INVOCATION_FACTS``/``project_invocation``).
-    - ``proposal_digest``: ``state.governance["proposal_digest"]`` (core/governance.py:79-97
-      ``proposal_digest``; :104-116 where it is set) — the digest the decision binds again.
-    - ``governance_state``: ``state.governance["state"]`` (core/governance.py:97-116 the pending
-      placeholder; :128-146 ``revise`` setting ``revision_pending``; HUMAN_WAIT_STATES, :189):
-      ``"pending"`` is the approve form, ``"revision_pending"`` the confirm-edited form
-      (adapters/governance.py:95,118). Anything else never asks a human and raises here.
+      (built by ``project_presentation``, core/projection.py:365-372) — its ``epoch`` is the plan
+      revision, its ``goal``/``rationale`` and its invocation facts arrive display-escaped there, its
+      ``budgets`` rows are the closed display rows. Its ``reviews_left`` and its invocation's
+      ``human_surface`` are read by nobody here: values that change under the human's own answer can
+      never be digested, or the document the human read is not the one the decision names.
+    - ``proposal_digest``: ``governance["proposal_digest"]`` (core/governance.py:79-97) — the digest
+      the decision binds again. The two must agree exactly.
+    - ``governance``: the run's governed state (``state.governance``, the honest witness): its
+      ``state`` must be the dialog's state word, its ``plan_revision`` the dialog's epoch, its
+      ``control_mode`` the dialog's, and its receipts (with :func:`question_of`) decide which
+      question this document asks.
+    - ``question``: optional; ``question_of(governance)`` by default. An explicit value must agree
+      with the derived one — an adapter re-deriving the discriminator is exactly what this refuses.
     - ``priors``: the superseded ceilings recorded at the amend commit (the run/4 field PR 06/07
-      adds; the confirm form's ``(was …)`` values, adapters/governance.py:110-115). ``None`` for
-      ``"pending"``; required and name-exact for ``"revision_pending"``.
+      adds; the confirm form's ``(was …)`` values, adapters/governance.py:110-115). Required for
+      ``confirm_amendment``, refused for ``approve``.
 
-    ``context_when_shown`` is recorded, never part of the decision (ADR-0072): what the dialog stood
-    beside when the human saw it, so it can change without changing what is being approved.
+    ``context_when_shown`` is context, never part of the decision (ADR-0072): the run-fixed
+    invocation facts the dialog stood beside, digested only because they cannot change between the
+    fetch, present and the decision.
     """
-    if governance_state not in ("pending", "revision_pending"):
-        raise ValueError(f"no configuration document for governance state {governance_state!r}")
     if not isinstance(run_id, str) or not run_id:
         raise ValueError("the configuration document names its run")
     if not isinstance(proposal_digest, str) or not _DIGEST.match(proposal_digest):
         raise ValueError("the configuration document binds a sha256 proposal digest")
     try:
+        governed_state = governance["state"]
+        governed_revision = governance["plan_revision"]
+        governed_digest = governance["proposal_digest"]
+        governed_mode = governance["control_mode"]
         epoch = dialog["epoch"]
         goal = dialog["goal"]
         rationale = dialog["rationale"]
         budgets = dialog["budgets"]
-        reviews_left = dialog["reviews_left"]
+        state = dialog["state"]
+        control_mode = dialog["control_mode"]
         invocation = dialog["invocation"]
     except (KeyError, TypeError, IndexError) as missing:
-        raise ValueError(f"the governance dialog lacks {missing!r}") from missing
+        raise ValueError(f"the governance inputs lack {missing!r}") from missing
+    if state != governed_state:
+        raise ValueError(f"the dialog says state {state!r} but the governance says {governed_state!r}")
+    epoch = _integer("epoch/plan_revision", epoch, "the configuration document")
+    if epoch != governed_revision:
+        raise ValueError(f"the dialog shows revision {epoch} but the governance is at {governed_revision}")
+    if proposal_digest != governed_digest:
+        raise ValueError("the dialog's proposal digest and the governed one disagree")
+    if control_mode != governed_mode:
+        raise ValueError(f"the dialog says control mode {control_mode!r} but the governance says "
+                         f"{governed_mode!r}")
+    if control_mode not in _CONTROL_MODES:
+        raise ValueError(f"unknown control mode {control_mode!r}")
+    if state not in HUMAN_WAIT_STATES:
+        raise ValueError(f"no configuration document for governance state {state!r}")
+    derived = question_of(governance)
+    if question is None:
+        question = derived
+    elif question != derived:
+        raise ValueError(f"the dialog asks {question!r} but the governed answer is {derived!r}")
     if not isinstance(goal, str) or not goal:
         raise ValueError("the configuration document carries the run's goal in full")
     if rationale is not None and (not isinstance(rationale, str) or not rationale):
@@ -121,37 +222,44 @@ def configuration_document(*, run_id: str, dialog: Mapping[str, Any], proposal_d
             raise ValueError("a dialog budget row is missing its display fields")
         if row["key"] not in _CEILINGS:
             raise ValueError(f"unknown ceiling {row['key']!r} in the dialog")
-        rows.append({key: row[key] for key in _BUDGET_KEYS})
+        rows.append({"key": row["key"], "label": _escaped("label", row["label"], "a dialog budget row"),
+                     "short": _escaped("short", row["short"], "a dialog budget row"),
+                     "help": _escaped("help", row["help"], "a dialog budget row"),
+                     "value": _integer("value", row["value"], "a dialog budget row"),
+                     "used": _integer("used", row["used"], "a dialog budget row"),
+                     "minimum": _integer("minimum", row["minimum"], "a dialog budget row"),
+                     "maximum": _integer("maximum", row["maximum"], "a dialog budget row")})
     if len({row["key"] for row in rows}) != len(_CEILINGS):
         raise ValueError("the dialog's budget rows do not name each ceiling once")
-    if not isinstance(reviews_left, Mapping) or not isinstance(invocation, Mapping):
-        raise ValueError("the dialog's shown facts are missing")
+    if not isinstance(invocation, Mapping) or any(key not in invocation for key in _INVOCATION_KEYS):
+        raise ValueError("the dialog's run-fixed invocation facts are missing")
 
     document: dict[str, Any] = {
         "schema": SCHEMA_ID,
         "kind": CONFIGURATION,
         "run_id": run_id,
-        "governance_state": governance_state,
+        "question": question,
+        "governance_state": state,
         "plan_revision": epoch,
         "proposal_digest": proposal_digest,
         "goal": goal,
         "rationale": rationale,
+        "rationale_source": "author_unverified",
+        "control_mode": control_mode,
         "budgets": rows,
         "context_when_shown": {
-            "budgets_used": {row["key"]: row["used"] for row in rows},
-            "reviews_left": {key: reviews_left[key] for key in ("proposal", "total")},
-            "invocation": {key: invocation[key] for key in
-                           ("host", "interactive", "signal", "delegation",
-                            "audit_retrieval", "human_surface")},
+            "invocation": {key: invocation[key] for key in _INVOCATION_KEYS},
         },
     }
-    if governance_state == "revision_pending":
+    if question == CONFIRM_AMENDMENT:
         if priors is None:
-            raise ValueError("a confirm-edited document names the amendment it confirms (priors)")
+            raise ValueError("a confirm_amendment document names the amendment it confirms (priors)")
         if set(priors) != set(_CEILINGS):
             raise ValueError("the amendment names exactly the three ceilings")
         document["amendment"] = {"budgets": {
-            row["key"]: {"value": row["value"], "was": priors[row["key"]]} for row in rows}}
+            row["key"]: {"value": row["value"],
+                         "was": _integer(row["key"], priors[row["key"]], "the amendment's priors")}
+            for row in rows}}
     elif priors is not None:
         raise ValueError("an approve document confirms no amendment")
     return document
@@ -168,14 +276,17 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
     - ``run_id``: the id the evidence presentation and confirmation payloads name
       (``contracts/empirica/v2/request.schema.json`` ``evidencePresentationPayload``/``evidenceConfirmationPayload``).
     - ``batch``: the core's own batch — ``confirmation_batch`` (core/evaluation.py:549-564) for the
-      end-of-pass items or ``terminal_batch`` (core/evaluation.py:499-501) for the terminal consent;
-      its ``key`` is what the presentation payload carries, its ``terminal`` member is
-      ``terminal_digest``/``terminal_key``'s binding (core/evaluation.py:478-492, statuses :456).
+      end-of-pass items or ``terminal_batch`` (core/evaluation.py:499-501) for the terminal consent.
+      A terminal batch's ``key`` must be the core's own ``terminal_key`` of its status and wording
+      (core/evaluation.py:486-489) — the same key the presentation admission checks — or nothing
+      is shown. Malformed input is refused as :class:`ValueError`.
     - ``records``: the batch's research rows by artifact id, as the projected argument carries them
-      (core/projection.py:577-591 — the same rows ``adapters/confirmation.py:118-134`` ``build_items``
-      reads): ``citation`` is the quote a human confirms, ``spike_unavailable`` the why-no-spike
-      reason that moves out of the form, ``verification`` the projected class
-      (fallback: ``core/citations.py:66-73`` ``verification_class``, the projection's own source).
+      (core/projection.py:586-590 — the same rows ``adapters.confirmation.build_items`` reads):
+      ``citation`` is the quote a human confirms, ``spike_unavailable`` the why-no-spike reason that
+      moves out of the form, ``verification`` the dossier's own class (required: the record is
+      verified the way the dossier says, never re-derived here), ``outcome`` the record's own
+      supporting/refuting verdict, and ``claim_id`` naming the claim row whose text the record
+      answers — bound by the record's ``claim_digest``, exactly as the batch's claims are.
     - ``claims``: the batch's claim rows by claim id, the argument's claim rows
       (core/projection.py:566-573 — ``text`` with ``wording_digest``, the digest of this id+text,
       core/evaluation.py:277-280 ``claim_digest``); the batch's own ``claim_digest`` must bind
@@ -193,15 +304,23 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
         raise ValueError("the document binds the batch's sha256 key")
     terminal = batch.get("terminal")
     if terminal is not None:
-        status = terminal.get("status")
+        if not isinstance(terminal, Mapping):
+            raise ValueError("the terminal consent is a mapping")
+        try:
+            status = terminal["status"]
+            wording = terminal["digest"]
+        except KeyError as missing:
+            raise ValueError(f"the terminal consent lacks {missing!r}") from missing
         if status not in TERMINAL_STATUSES:
             raise ValueError(f"unknown terminal status {status!r}")
+        if batch["key"] != terminal_key(status, wording):
+            raise ValueError("the terminal batch's key does not bind its status and wording digest")
         rows = []
         for row in residuals:
-            if not isinstance(row, Mapping) or not isinstance(row.get("id"), str) or not row["id"] \
-                    or not isinstance(row.get("required"), str) or not row["required"]:
-                raise ValueError("a residual row is missing its id or required line")
-            rows.append({"id": row["id"], "required": row["required"]})
+            if not isinstance(row, Mapping) or not isinstance(row.get("id"), str) or not row["id"]:
+                raise ValueError("a residual row is missing its id")
+            rows.append({"id": row["id"],
+                         "required": _escaped("required line", row.get("required"), "a residual row")})
         return {
             "schema": SCHEMA_ID,
             "kind": EVIDENCE,
@@ -219,23 +338,37 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
         row = records.get(record_id)
         if row is None:
             raise ValueError(f"the batch names record {record_id!r} but it was not provided")
-        for field in ("claim_id", "source_kind", "source_ref", "citation"):
+        for field in ("claim_id", "source_kind", "source_ref"):
             if not isinstance(row.get(field), str) or not row[field]:
                 raise ValueError(f"record {record_id!r} lacks its {field}")
         verification = row.get("verification")
-        row_class = (verification or {}).get("class") if isinstance(verification, Mapping) else None
-        if not isinstance(row_class, str):
-            row_class = citations.verification_class(row["source_kind"], row["source_ref"])
+        if not isinstance(verification, Mapping) \
+                or not isinstance(verification.get("class"), str) or not verification["class"]:
+            raise ValueError(f"record {record_id!r} lacks the dossier's verification class")
+        if row.get("outcome") not in _OUTCOMES:
+            raise ValueError(f"record {record_id!r} lacks its supporting/refuting outcome")
+        claim = claims.get(row["claim_id"])
+        if claim is None:
+            raise ValueError(f"record {record_id!r} answers claim {row['claim_id']!r} "
+                             "but the claim row was not provided")
+        text = claim.get("text")
+        if not isinstance(text, str) or not text:
+            raise ValueError(f"the claim {row['claim_id']!r} the record answers lacks its text")
+        bound = claim.get("wording_digest", claim_digest({"id": row["claim_id"], "text": text}))
+        if row.get("claim_digest") != bound:
+            raise ValueError(f"record {record_id!r} is not bound to the wording of the claim "
+                             f"{row['claim_id']!r} it answers")
         record = {"record_id": record_id, "claim_id": row["claim_id"],
-                  "source_kind": row["source_kind"], "source_ref": row["source_ref"],
-                  "citation": row["citation"], "verification_class": row_class}
-        if not _DIGEST.match(str(row.get("claim_digest", ""))):
-            raise ValueError(f"record {record_id!r} lacks its claim's wording digest")
-        record["claim_digest"] = row["claim_digest"]
+                  "claim_text": _escaped("claim text", text, f"record {record_id!r}"),
+                  "outcome": row["outcome"],
+                  "source_kind": row["source_kind"],
+                  "source_ref": _escaped("source_ref", row["source_ref"], f"record {record_id!r}"),
+                  "citation": _escaped("citation", row.get("citation"), f"record {record_id!r}"),
+                  "verification_class": verification["class"],
+                  "claim_digest": row["claim_digest"]}
         if row.get("spike_unavailable") is not None:
-            if not isinstance(row["spike_unavailable"], str) or not row["spike_unavailable"]:
-                raise ValueError("a why-no-spike reason is nonempty text")
-            record["spike_unavailable"] = row["spike_unavailable"]
+            record["spike_unavailable"] = _escaped("why-no-spike reason", row["spike_unavailable"],
+                                                  f"record {record_id!r}")
         record_rows.append(record)
     claim_rows = []
     for asked in batch["claims"]:
@@ -251,7 +384,7 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
                 f"the batch and the claim rows disagree on {asked['claim_id']!r}'s wording"
                 " — the document shows only what the batch actually asked")
         claim_rows.append({"claim_id": asked["claim_id"], "claim_digest": asked["claim_digest"],
-                           "text": text})
+                           "text": _escaped("claim text", text, "a claim row")})
     return {
         "schema": SCHEMA_ID,
         "kind": EVIDENCE,

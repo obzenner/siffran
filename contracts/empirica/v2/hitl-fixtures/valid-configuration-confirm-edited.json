@@ -24,7 +24,7 @@
       "minimum": 1,
       "short": "passes",
       "used": 0,
-      "value": 8
+      "value": 6
     },
     {
       "help": "Non-audit child agents",
@@ -63,8 +63,8 @@
   "goal": "Confirm the exact run configuration",
   "governance_state": "revision_pending",
   "kind": "configuration",
-  "plan_revision": 1,
-  "proposal_digest": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
+  "plan_revision": 2,
+  "proposal_digest": "sha256:e20f5258a188a382048b369a43ba8421e88094258afdc6a4f87096b4665dab2d",
   "question": "confirm_amendment",
   "rationale": "Sized for the supplied claims — two gating claims, three sources in every layer, one spike retry.",
   "rationale_source": "author_unverified",
