@@ -115,7 +115,9 @@ def _decide(governed: dict, payload: dict, budgets: dict) -> tuple[dict, dict]:
               "outcome": outcome, "plan_revision": payload["plan_revision"],
               "proposal_digest": payload["proposal_digest"],
               "approval_kind": payload["approval_kind"],
-              "superseded_budgets": superseded_budgets}
+              "superseded_budgets": superseded_budgets,
+              "document_digest": payload.get("document_digest")
+              if payload["approval_kind"] == "host_ui" else None}
     return {**governed, "receipts": [*governed["receipts"], receipt]}, budgets
 
 

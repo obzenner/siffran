@@ -407,7 +407,8 @@
               "plan_revision",
               "proposal_digest",
               "approval_kind",
-              "superseded_budgets"
+              "superseded_budgets",
+              "document_digest"
             ],
             "properties": {
               "id": {
@@ -481,6 +482,14 @@
                     }
                   }
                 ]
+              },
+              "document_digest": {
+                "description": "The immutable HITL document this receipt's decision was shown against (ADR-0072, PR 07): the sha256 of exactly the bytes the core rendered — verified against the state's own recomputation before the receipt was written, so a present bound to another state's document never records anything. Null where no document was verified: a present or decision that carried no document_digest (the expand stage), and every auto receipt — auto answers no human's question. A finalizing decision must name the document its own present receipt recorded.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^sha256:[0-9a-f]{64}$"
               }
             }
           }

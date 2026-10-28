@@ -385,6 +385,12 @@
             ]
           },
           {
+            "code": "governance.document_mismatch",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
             "code": "governance.receipt_replay",
             "sections": [
               "governance"

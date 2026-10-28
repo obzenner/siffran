@@ -1319,6 +1319,11 @@
             "present"
           ]
         },
+        "document_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The digest of the immutable HITL document this decision or present was shown (ADR-0072): optional on the wire at this stage, and checked whenever present — the core recomputes the document from the state it is given and refuses governance.document_mismatch on anything but an exact match. Auto never answers a human's question, so an auto decision carries none."
+        },
         "amendment": {
           "type": "object",
           "additionalProperties": false,
@@ -1376,6 +1381,25 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "approval_kind": {
+                "const": "auto"
+              }
+            },
+            "required": [
+              "approval_kind"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "document_digest"
+              ]
+            }
+          }
+        },
         {
           "if": {
             "properties": {

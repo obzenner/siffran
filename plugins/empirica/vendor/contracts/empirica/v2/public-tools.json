@@ -338,6 +338,16 @@
         "residual.accept"
       ]
     },
+    "governance.document_mismatch": {
+      "message": "The present or decision named a document that does not match the immutable document this state renders: nothing was spent at a refused present, and a refused decision kept its spent presentation. Fetch the document from the governance context answer and present it again (the present costs one review unit, of the 3 per configuration).",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
     "governance.interaction_limit": {
       "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
       "sections": [

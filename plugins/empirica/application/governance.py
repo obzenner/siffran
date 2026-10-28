@@ -3,13 +3,29 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from core import confirmation, governance as policy
+from core import confirmation, governance as policy, hitl
 from core.evaluation import bootstrap_precondition
 from core.records import Corrupt
 from .location import decode_handle
 from .run_state import classify_and_decode
 from .snapshot import HistoryCorrupt
 from . import protocol as _proto
+
+
+def _with_document(response: dict, *, run_id: str, snapshot) -> dict:
+    """ADR-0072 (Q1, PR 07): the private ``governance_context`` presentation result carries the
+    rendered ``document: {text, digest}`` beside the private dialog — the pair the core hands the
+    adapter, so no adapter re-renders a dict. Omitted where this state's configuration judgment
+    is not a human's now (there is no document to fetch); the decision legs never carry it — a
+    refusal's own presentation is the dialog alone, and the fetch is a fresh context ask."""
+    presentation = response["result"].get("presentation")
+    if presentation is not None:
+        document = hitl.configuration_pair(run_id=run_id, snapshot=snapshot)
+        if document is None:
+            presentation.pop("document", None)
+        else:
+            presentation["document"] = document
+    return response
 
 
 def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) -> dict:
@@ -48,7 +64,9 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 payload["interactive"] = state.invocation["interactive"]
                 governed = policy.revise(state.goal, governed, context=payload)
                 if governed == policy.plain(state.governance):
-                    return c._inert_with_run(rid, snapshot, presentation=True)
+                    return _with_document(
+                        c._inert_with_run(rid, snapshot, presentation=True),
+                        run_id=run_id, snapshot=snapshot)
             else:
                 reason = policy.decision_error(run_id, governed, payload,
                                              confirmation.interactions(snapshot))
@@ -97,15 +115,30 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     governed = policy.revise(state.goal, governed, proposal=proposed)
                 if outcome == "reject":
                     governed.update(state="rejected")
-                prior = next((r for r in governed["receipts"] if r["id"] == payload["receipt_id"]), None)
+                # ADR-0072 (Q3, PR 07): every existing refusal wins first — replay, staleness,
+                # interaction ceilings, budget and revision errors — and the document check comes
+                # last, spending nothing: a present bound to another state's document never
+                # writes a receipt, and a decision must name the document its own present bound.
+                given = decision.get("document_digest")
+                prior = next((r for r in governed["receipts"]
+                              if r["id"] == payload["receipt_id"]), None)
+                if given is not None and decision["approval_kind"] == "host_ui":
+                    expected = hitl.document_digest(
+                        hitl.configuration_for(run_id=run_id, snapshot=snapshot))
+                    if (expected != given
+                            or (prior is not None and prior.get("document_digest") != given)):
+                        return c._block_from_snapshot(
+                            snapshot, rid, "governance.document_mismatch", presentation=True)
                 fingerprint = policy.canonical_digest(payload)
                 if prior is None:
+                    byte_digest = given if decision["approval_kind"] == "host_ui" else None
                     governed["receipts"].append({"id": payload["receipt_id"], "fingerprint": fingerprint,
                         "presentation_fingerprint": fingerprint if outcome == "present" else None,
                         "outcome": outcome, "plan_revision": payload["plan_revision"],
                         "proposal_digest": payload["proposal_digest"],
                         "approval_kind": payload["approval_kind"],
-                        "superseded_budgets": superseded_budgets})
+                        "superseded_budgets": superseded_budgets,
+                        "document_digest": byte_digest})
                 else:
                     prior.update(fingerprint=fingerprint, outcome=outcome,
                                  superseded_budgets=superseded_budgets)
@@ -120,5 +153,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 continue
             return c._fault(rid, "unavailable")
         c.last_state = committed
-        return c._allow(rid, planned, presentation=True)
+        response = c._allow(rid, planned, presentation=True)
+        if context:
+            return _with_document(response, run_id=run_id, snapshot=planned)
+        return response
     return c._fault(rid, "conflict")

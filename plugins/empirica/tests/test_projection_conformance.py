@@ -119,6 +119,7 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
         "outcome": "approve", "plan_revision": 1,
         "proposal_digest": approved_digest, "approval_kind": "host_ui",
         "superseded_budgets": None,
+        "document_digest": None,
     }
     value.update(approved_digest=approved_digest, approval_kind="host_ui",
                  first_approval=True, receipts=[approval])
@@ -141,6 +142,7 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
             "outcome": "reject", "plan_revision": 2,
             "proposal_digest": value["proposal_digest"], "approval_kind": kind,
             "superseded_budgets": None,
+            "document_digest": None,
         })
     return value
 

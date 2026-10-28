@@ -12,6 +12,7 @@ fixed 8/1/2 envelope that inputs may only narrow.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, NamedTuple
@@ -33,6 +34,8 @@ DEFAULT_CEILINGS = MappingProxyType(
 HUMAN_CONFIGURATION = "human_configuration"
 UNAVAILABLE_CAPABILITY = "unavailable"
 APPROVAL_KINDS = ("host_ui", "auto")
+#: The recorded document binding's shape (ADR-0072, PR 07: ``receipts[].document_digest``).
+_DOCUMENT_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class Budget(NamedTuple):
@@ -349,6 +352,19 @@ def invariant(doc: Mapping) -> bool:
                     or receipt["plan_revision"] >= value["plan_revision"]):
                 return False
         elif receipt.get("superseded_budgets") is not None:
+            return False
+        # The document binding the decision named (ADR-0072, receipts[].document_digest, PR 07):
+        # the recorded digest is null exactly where no document was verified — an auto receipt
+        # answers no human's question — and a recorded value is a `sha256:`-prefixed SHA-256. The
+        # gate side (the application) refuses a decision whose digest differs from the one its
+        # present receipt recorded, so a finalized receipt keeps the document its present bound;
+        # the member's presence is the state schema's rule, checked at every decode.
+        recorded = receipt.get("document_digest")
+        if not (recorded is None
+                or (isinstance(recorded, str)
+                    and _DOCUMENT_DIGEST.fullmatch(recorded) is not None)):
+            return False
+        if recorded is not None and receipt["approval_kind"] == "auto":
             return False
         # The presentation fingerprint is bound to the immutable receipt kind.
         if ((receipt["presentation_fingerprint"] is None)

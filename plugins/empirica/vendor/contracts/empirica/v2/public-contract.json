@@ -1912,6 +1912,22 @@
       "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
       "disposition": "host_recovery"
     },
+    "governance.document_mismatch": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "The present or decision named a document that does not match the immutable document this state renders: nothing was spent at a refused present, and a refused decision kept its spent presentation. Fetch the document from the governance context answer and present it again (the present costs one review unit, of the 3 per configuration).",
+      "disposition": "host_recovery"
+    },
     "governance.receipt_replay": {
       "params": {
         "type": "object",

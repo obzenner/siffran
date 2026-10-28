@@ -32,8 +32,10 @@ Review-1 decisions this module implements (ADR-0072, decided sub-decisions Q1–
   document is built.
 
 This module is pure: no I/O, no clock, no adapter or application imports (only ``core``), no
-mutation of its inputs, and it is imported by nothing yet — the transaction wiring that binds
-decisions to these documents is PR 07, so ``IMPLEMENTATION_SOURCE_PATHS`` stays unchanged until then.
+mutation of its inputs, and — since PR 07 — it is imported by the application's governance
+transactions (``application/governance.py``), which is why ``core/hitl.py`` is in
+``IMPLEMENTATION_SOURCE_PATHS`` (the path list changed in PR 07; closure content already changed
+in PR 06, review-1 finding 23).
 """
 from __future__ import annotations
 
@@ -46,7 +48,7 @@ from typing import Any
 from core.canonical import CanonicalJSONError, canonical_json
 from core.evaluation import TERMINAL_STATUSES, claim_digest, terminal_key
 from core.governance import HUMAN_WAIT_STATES
-from core.projection import safe_text
+from core.projection import project_presentation, safe_text
 
 #: The document's protocol identity (the schema's ``schema`` const, ``contracts/empirica/v2/hitl.schema.json``).
 SCHEMA_ID = "empirica.hitl/1"
@@ -124,6 +126,61 @@ def question_of(governance: Mapping[str, Any]) -> str:
                 and receipt.get("plan_revision", -1) + 1 == plan_revision):
             return CONFIRM_AMENDMENT
     return APPROVE
+
+
+def configuration_for(*, run_id: str, snapshot: Any) -> dict[str, Any]:
+    """Derive every input of :func:`configuration_document` from one run snapshot (ADR-0072, PR 07).
+
+    The one derivation both private legs use — the core recomputes the document from the state it
+    is given, and only an exact match of the rendered bytes' digest admits the decision's
+    ``document_digest``. Reused, never rebuilt: the production dialog
+    (``core.projection.project_presentation`` → ``governance_dialog`` — a present cannot change it
+    in ways the document reads); the question (:func:`question_of`) and the ``(was …)`` priors, from
+    the run's own receipts (the amend receipt whose ``plan_revision + 1`` is the governed revision
+    carries the superseded ceilings PR 06 records); the run-fixed invocation facts and the control
+    mode, with the dialog. Nothing volatile is digested, so the derivation gives the same document
+    whether or not the receipt being presented is already in state — the review's soundness demand.
+    """
+    try:
+        governed = snapshot.state.governance
+        plan_revision = governed["plan_revision"]
+        receipts = governed["receipts"]
+        proposal_digest = governed["proposal_digest"]
+    except (AttributeError, KeyError, TypeError) as missing:
+        raise ValueError(f"the snapshot lacks its governance: {missing!r}") from missing
+    dialog = project_presentation(snapshot)["dialog"]
+    priors = None
+    for receipt in receipts:
+        try:
+            if (receipt["outcome"] == "amend"
+                    and receipt["plan_revision"] + 1 == plan_revision):
+                priors = receipt["superseded_budgets"]
+                break
+        except (KeyError, TypeError) as broken:
+            raise ValueError(f"a governance receipt lacks {broken!r}") from broken
+    return configuration_document(run_id=run_id, dialog=dialog,
+                                  proposal_digest=proposal_digest, governance=governed,
+                                  priors=priors)
+
+
+def configuration_pair(*, run_id: str, snapshot: Any) -> dict[str, str] | None:
+    """The core-rendered ``document: {text, digest}`` pair (ADR-0072 Q1) for one snapshot.
+
+    The exact rendered UTF-8 string plus its digest — the pair the private ``governance_context``
+    presentation result carries, so no adapter ever re-renders a dict. ``None`` exactly where no
+    configuration document exists for this state: its judgment is not a human's now (the
+    human-wait states alone have a form to show, ``HUMAN_WAIT_STATES``); a derivation that fails
+    on state that should have one refuses as :class:`ValueError`, never as ``None``.
+    """
+    try:
+        state = snapshot.state.governance["state"]
+    except (AttributeError, KeyError, TypeError) as missing:
+        raise ValueError(f"the snapshot lacks its governance: {missing!r}") from missing
+    if state not in HUMAN_WAIT_STATES:
+        return None
+    document = configuration_for(run_id=run_id, snapshot=snapshot)
+    data = render(document)
+    return {"text": data.decode("utf-8"), "digest": digest(data)}
 
 
 def _escaped(name: str, value: Any, where: str) -> str:

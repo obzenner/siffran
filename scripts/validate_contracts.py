@@ -1734,6 +1734,17 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
             or set(object_form.get("required", [])) != set(CEILINGS)):
         errors.append(f"{where}: governance.receipts superseded_budgets must be a closed object "
                       f"naming exactly the three ceilings ({', '.join(CEILINGS)}) required together")
+    # receipts[].document_digest (ADR-0072, PR 07): the recorded document binding is required on
+    # every receipt — the sole receipt writer records it, null where no document was verified —
+    # and a recorded value is exactly the digest256 pattern, like presentation_fingerprint.
+    if "document_digest" not in item.get("required", []):
+        errors.append(f"{where}: governance.receipts must require 'document_digest' "
+                      "on every receipt")
+    document = item.get("properties", {}).get("document_digest", {})
+    if (document.get("type") != ["string", "null"]
+            or document.get("pattern") != "^sha256:[0-9a-f]{64}$"):
+        errors.append(f"{where}: governance.receipts document_digest must be a string-or-null "
+                      "member carrying exactly the sha256 digest256 pattern")
     # purpose shape parity: state childRecord.purpose must exact-match the D2
     # request actionChildReserve.purpose AND the response childSummary.purpose
     # (both are nonempty opaque strings). Extract the actual request/response purpose
@@ -4841,6 +4852,26 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         superseded_object["additionalProperties"] = True
         expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
                "closed object", "state: receipts priors stop being closed")
+        # document-binding drift (ADR-0072, PR 07): a receipt that stops requiring the recorded
+        # document binding
+        bad_ss = copy.deepcopy(state_schema)
+        (bad_ss["properties"]["governance"]["properties"]["receipts"]
+         ["items"]["required"]).remove("document_digest")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "must require 'document_digest'", "state: receipts drop the document binding")
+        # document-binding drift: the member stops being a digest256 string-or-null
+        bad_ss = copy.deepcopy(state_schema)
+        document_member = (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                           ["items"]["properties"]["document_digest"])
+        document_member.pop("pattern")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "sha256 digest256 pattern", "state: receipts document member loses its pattern")
+        bad_ss = copy.deepcopy(state_schema)
+        document_member = (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                           ["items"]["properties"]["document_digest"])
+        document_member["type"] = "string"
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "string-or-null", "state: receipts document member stops admitting null")
     bad_state = {"budgets": {"max_passes": 1, "passes_used": 5,
                             "max_spawns": 0, "spawns_used": 0}}
     expect(lambda e: check_state_invariants(bad_state, e, "neg"),
