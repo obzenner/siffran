@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts"))  # the 
 
 from adapters.confirmation import HostConfirmation
 from adapters.governance import HostGovernance
+from adapters.state.hitl import HitlDocuments
 from core import governance
 from core.confirmation import presentable
 from governance_setup import AUDITOR, invocation_for
@@ -310,10 +312,11 @@ def _mediate(b, run, *, can_present):
         proposed = b.a.dispatch(drv, observe_action(run_id=run, action={
             "kind": "configure_run", "budgets": g["proposal"]["budgets"], "rationale": g["proposal"]["rationale"]}))
         service = drv._service
-        HostGovernance(PROFILE, elicit=later if can_present else None,
-                       context_ingress=lambda _p, run_id, payload: service.trusted_governance_context(run_id=run_id, payload=payload),
-                       decision_ingress=lambda _p, run_id, payload: service.trusted_governance_decision(run_id=run_id, payload=payload)
-                       )(proposed["result"])
+        with tempfile.TemporaryDirectory(prefix="observer-home-") as machine_home:
+            HostGovernance(PROFILE, elicit=later if can_present else None,
+                           context_ingress=lambda _p, run_id, payload: service.trusted_governance_context(run_id=run_id, payload=payload),
+                           decision_ingress=lambda _p, run_id, payload: service.trusted_governance_decision(run_id=run_id, payload=payload),
+                           documents=HitlDocuments(home=Path(machine_home)))(proposed["result"])
         if forms:
             return len(forms), True
     host = HostConfirmation(PROFILE, elicit=later if can_present else None, timeout=lambda: 900,

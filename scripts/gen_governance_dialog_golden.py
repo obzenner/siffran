@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import re
 from pathlib import Path
 import sys
 
@@ -15,6 +16,20 @@ from application.protocol import projection_controls  # noqa: E402
 from core.projection import governance_dialog  # noqa: E402
 
 OUT = ROOT / "plugins/empirica/tests/fixtures/governance-dialog-golden.json"
+
+#: The canonical approved document's hex identity (a fixed, realistic sample — the golden pins
+#: the bound lines, not a live run).
+_APPROVE_HEX = "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789"
+#: The canonical amendment document's hex identity.
+_AMEND_HEX = "1a2b3c4d5e6f789abcdef0123456789abcdef0123456789abcdef01234567890"
+#: The machine-home sample for the exempt path line (ADR-0072 Q4: absolute, unwrapped).
+_HOME_SAMPLE = "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl"
+
+
+def _document(hex_identity: str, *, amendment=None) -> dict:
+    digest = "sha256:" + hex_identity
+    return {"digest": digest, "path": f"{_HOME_SAMPLE}/{hex_identity}.json",
+            "amendment": amendment}
 
 
 def dialog(goal: str = "Confirm the exact run configuration", *,
@@ -48,11 +63,17 @@ def generate() -> dict:
     return {
         "dialogs": {"review": base, "confirmation": edited, "hostile": hostile,
                     "hostile_rationale": hostile_rationale},
-        "review": dict(zip(("message", "schema"), review_form(base, 900))),
-        "confirmation": dict(zip(("message", "schema"), confirm_form(edited, base, 900))),
-        "hostile": dict(zip(("message", "schema"), review_form(hostile, 900))),
+        "review": dict(zip(("message", "schema"),
+                            review_form(base, _document(_APPROVE_HEX), 900))),
+        "confirmation": dict(zip(("message", "schema"), confirm_form(
+            edited, _document(_AMEND_HEX, amendment={"budgets": {
+                "max_audit_spawns": {"value": 2, "was": 2},
+                "max_passes": {"value": 6, "was": 8},
+                "max_spawns": {"value": 1, "was": 1}}}), 900))),
+        "hostile": dict(zip(("message", "schema"),
+                             review_form(hostile, _document(_APPROVE_HEX), 900))),
         "hostile_rationale": dict(zip(("message", "schema"),
-                                       review_form(hostile_rationale, 900))),
+                                       review_form(hostile_rationale, _document(_APPROVE_HEX), 900))),
     }
 
 
@@ -67,8 +88,22 @@ def main() -> int:
             print(f"stale governance dialog golden: {OUT}", file=sys.stderr)
             return 1
         for name in ("review", "confirmation", "hostile", "hostile_rationale"):
-            lines = generated[name]["message"].splitlines()
-            if len(lines) > 8 or any(len(line) > 72 for line in lines) or "sha256:" in generated[name]["message"]:
+            message = generated[name]["message"]
+            lines = message.splitlines()
+            digest_line = next((i for i, line in enumerate(lines)
+                                 if line.startswith("Document: ")), None)
+            # ADR-0072 Q4: the forms stay compact — at most 8 lines, everything within 72 columns
+            # — except the document's absolute path, the one copy-paste surface, on its own line
+            # right after the short-digest line, never truncated or wrapped. The digest appears
+            # once, and only in the short form: the full value is in the document and the record.
+            if (digest_line is None or len(lines) > 8
+                    or re.fullmatch(r"Document: sha256:[0-9a-f]{12}", lines[digest_line]) is None
+                    or message.count("sha256:") != 1
+                    or any(len(line) > 72 for index, line in enumerate(lines)
+                           if index != digest_line + 1)
+                    or not lines[digest_line + 1].startswith("/")
+                    or not lines[digest_line + 1].endswith(".json")
+                    or len(lines[digest_line + 1]) > 200):
                 print("governance dialog bounds violated", file=sys.stderr)
                 return 1
         return 0

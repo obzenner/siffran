@@ -12,8 +12,10 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 
@@ -266,6 +268,14 @@ class _ServiceHarness(unittest.TestCase):
         self.run_id = self.req({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
                                 "invocation": dict(TEST_INVOCATION),
                                 "selector": {"project": "p", "session": "s"}})["run"]["id"]
+        # PR 08: mediating tests publish their HITL documents through a store under a temporary
+        # machine home — never the author's real $EMPIRICA_HOME (which is this harness's machines
+        # write root for the sidecar defaults the mediators construct).
+        machine_home = tempfile.TemporaryDirectory(prefix="economy-home-")
+        self.addCleanup(machine_home.cleanup)
+        machine_env = patch.dict("os.environ", {"EMPIRICA_HOME": machine_home.name})
+        machine_env.start()
+        self.addCleanup(machine_env.stop)
 
     def req(self, command):
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": "t",

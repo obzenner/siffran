@@ -12,8 +12,19 @@ from uuid import uuid4
 import jsonschema
 
 from adapters import bridge
+from adapters.state.fsio import SymlinkRefused
+from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments
 from application import protocol
+from application.location import decode_handle
+from core import hitl as core_hitl
 from core.governance import expected_approval_kind
+
+#: A document identity in full — the private answer's ``document.digest`` and the sidecar name.
+_FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+#: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's
+#: identifiers already use (``application.observer_index.ID_SIZE``). Kept a local literal so the
+#: host governance runtime does not inherit the observer identity family into the manifest.
+_SHORT_BODY = 12
 
 
 @dataclass(frozen=True)
@@ -91,15 +102,25 @@ def _rationale_lines(dialog: Mapping[str, Any]) -> tuple[str, ...]:
                                                        break_long_words=True,
                                                        break_on_hyphens=False))
 
+def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
+    """ADR-0072 Q4's bound lines: the short digest, then the document's absolute path on its own
+    line — the one line exempt from truncation and wrapping, because the path is the copy-paste
+    surface and a wrapped path is a corrupted paste."""
+    return (f"Document: {document['digest'][:7 + _SHORT_BODY]}", f"{document['path']}")
 
-def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
-    """Map a validated dialog model to Claude's editable elicitation form."""
+def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+    """Map a validated dialog and its written document to Claude's editable elicitation form.
+
+    The form keeps exactly what the human judges (ADR-0072 "What the forms keep"): the numbers
+    and the goal's first line; the rationale text lives in the document, pointed at by one line
+    under the contract-owned unverified label."""
     reviews = dialog["reviews_left"]["proposal"]
     count = f"{reviews} {'review' if reviews == 1 else 'reviews'} left"
     message = "\n".join((
         _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
         _line(f'Goal: "{dialog["goal"]}"', closing='"'),
-        *_rationale_lines(dialog),
+        _line(f"{dialog['rationale_label']} and full detail: in the document"),
+        *_document_lines(document),
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
@@ -107,24 +128,30 @@ def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     return message, {"type": "object", "properties": properties, "required": []}
 
 
-def _part(row: Mapping[str, Any], old: object) -> str:
-    """Render one compact confirmation value and its prior value when changed."""
+def _part(row: Mapping[str, Any], document: Mapping[str, Any]) -> str:
+    """Render one compact confirmation value and its prior when changed.
+
+    The ``(was …)`` priors are the document's own amendment values — the core-owned run/4
+    ``superseded_budgets`` reached through the rendered document, never a host-held dialog
+    snapshot (the host-held ``before`` dialog of the pre-PR-08 forms is gone: a host cannot be
+    trusted to hold what the record must prove)."""
     show = (lambda value: "on" if value else "off") if isinstance(row["value"], bool) else str
-    value, previous = show(row["value"]), show(old)
-    suffix = f" (was {previous})" if old != row["value"] else ""
+    value = show(row["value"])
+    priors = (document.get("amendment") or {}).get("budgets", {}) if isinstance(document, Mapping) else {}
+    old = priors[row["key"]]["was"] if row["key"] in priors else row["value"]
+    suffix = f" (was {show(old)})" if old != row["value"] else ""
     return f"{row['short']} {value}{suffix}"
 
-
-def confirm_form(dialog: Mapping[str, Any], before: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
-    """Map an amended dialog and its prior display to a buttons-only confirmation."""
-    old = {row["key"]: row["value"] for row in before["budgets"]}
-    budget_parts = [_part(row, old[row["key"]]) for row in dialog["budgets"]]
+def confirm_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+    """Map an amended dialog and its written document to a buttons-only confirmation."""
+    budget_parts = [_part(row, document) for row in dialog["budgets"]]
     message = "\n".join((
         _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
         _line(" · ".join(budget_parts)),
-        *_rationale_lines(dialog),
+        _line(f"{dialog['rationale_label']} and full detail: in the document"),
         *textwrap.wrap(dialog["amendment_warning"], width=72,
                        break_long_words=False, break_on_hyphens=False),
+        *_document_lines(document),
         "Accept = approve exactly this · Decline/Esc = keep edits pending",
     ))
     return message, {"type": "object", "properties": {}}
@@ -174,9 +201,13 @@ def _strip_presentation(result: dict) -> dict:
 
 class HostGovernance:
     def __init__(self, profile: str, *, elicit=None, context_ingress=bridge.trusted_governance_context,
-                 decision_ingress=bridge.trusted_governance_decision):
+                 decision_ingress=bridge.trusted_governance_decision, documents=None):
         self.profile, self.elicit = profile, elicit
         self.context_ingress, self.decision_ingress = context_ingress, decision_ingress
+        # PR 08 (ADR-0072 write-first): every config document is published once through the
+        # sidecar store under the real $EMPIRICA_HOME before any form is shown; tests inject a
+        # store under a temporary machine home.
+        self.documents = documents if documents is not None else HitlDocuments()
 
     def __call__(self, result: dict, *, confirmation: bool = False) -> dict:
         """Finalize one host mediation and convert all failures to typed closed results."""
@@ -189,8 +220,37 @@ class HostGovernance:
             return _strip_presentation(result)
         return _strip_presentation(mediated)
 
-    def _mediate(self, result: dict, *, confirmation: bool = False,
-                 before: Mapping[str, Any] | None = None) -> dict:
+    def _bound_document(self, context_result: dict) -> Mapping[str, Any] | None:
+        """Write-first (ADR-0072, PR 08): verify the private answer's rendered ``document`` pair,
+        publish its bytes once through the sidecar store beside the run's own record, and return
+        the shown-document record — the digest, the written file's absolute path, and the
+        core-owned amendment priors the confirm form reads. ``None`` means the mediation must
+        refuse (the document impossible to bind): the caller returns unavailable before any
+        present, nothing spent."""
+        presentation = context_result.get("presentation")
+        document = presentation.get("document") if isinstance(presentation, Mapping) else None
+        if not isinstance(document, Mapping):
+            return None
+        text, digest = document.get("text"), document.get("digest")
+        if (not isinstance(text, str) or not isinstance(digest, str)
+                or _FULL_DIGEST.fullmatch(digest) is None):
+            return None
+        try:
+            data = text.encode("utf-8")
+            if core_hitl.digest(data) != digest:
+                return None
+            key = decode_handle(context_result["run"]["id"])
+            if key is None:
+                return None
+            path, written = self.documents.write(key, data)
+            if written != digest:
+                return None
+            parsed = json.loads(text)
+        except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
+            return None
+        return {"digest": digest, "path": str(path), "amendment": parsed.get("amendment")}
+
+    def _mediate(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")
         if result.get("type") != "Allow" or not isinstance(run, dict) or not run.get("governance"):
             return result
@@ -213,6 +273,14 @@ class HostGovernance:
             return unavailable(result, g["prompt_error"])
         envelope = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                     "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
+        document = None
+        if approval_kind == "host_ui":
+            # write-first: bind the document (verify, publish once, read the path back) before any
+            # present; a document this state cannot bind refuses the mediation outright
+            document = self._bound_document(result)
+            if document is None:
+                return unavailable(result)
+            envelope["document_digest"] = document["digest"]
 
         def dismiss(message=None):
             stored = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "dismiss"})["result"]
@@ -230,8 +298,8 @@ class HostGovernance:
             if not isinstance(dialog, dict):
                 return dismiss()
             timeout = governance_timeout()
-            message, schema = (confirm_form(dialog, before, timeout) if confirmation and before is not None
-                               else review_form(dialog, timeout))
+            message, schema = (confirm_form(dialog, document, timeout) if confirmation
+                               else review_form(dialog, document, timeout))
             resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirmation)
             if isinstance(resolved, Dismiss):
                 return dismiss()
@@ -247,5 +315,5 @@ class HostGovernance:
             return stored
         revised = admitted.get("run", {}).get("governance", {}).get("plan_revision") != g["plan_revision"]
         if not confirmation and action == "approve" and admitted.get("type") == "Allow" and revised:
-            return self._mediate(admitted, confirmation=True, before=dialog)
+            return self._mediate(admitted, confirmation=True)
         return admitted

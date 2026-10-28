@@ -41,9 +41,10 @@ against the user running the process; see ADR-31's scope). This module deliberat
 dir_fd-relative operations; the write-first flow's guarantees are about the file, its mode and its
 name.
 
-Nothing here is wired into a runtime path yet: this module is imported by its regression suite only,
-so the implementation manifest stays unchanged until the bridge presents documents (ADR-0072's
-Present/Show steps, a later PR).
+Nothing here is wired into the evidence or residual surfaces yet: this module's writer is
+reached only from the MCP host governance mediation (``adapters.governance``, which publishes
+each configuration document before its form is shown, ADR-0072's Write/Present steps), and
+its readers remain the regression suite and the run's own record.
 """
 from __future__ import annotations
 

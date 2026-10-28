@@ -115,6 +115,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "adapters/sandbox/process.py",
     "adapters/state/__init__.py",
     "adapters/state/fsio.py",
+    "adapters/state/hitl.py",
     "adapters/state/identity.py",
     "adapters/state/located.py",
     "adapters/state/locations.py",

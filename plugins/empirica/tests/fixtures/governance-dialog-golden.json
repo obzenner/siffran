@@ -226,7 +226,7 @@
     }
   },
   "review": {
-    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAgent sizing rationale — unverified\nSized for the supplied claims and one independent audit retry.\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAgent sizing rationale — unverified and full detail: in the document\nDocument: sha256:0a1b2c3d4e5f\n/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl/0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
     "schema": {
       "type": "object",
       "properties": {
@@ -259,14 +259,14 @@
     }
   },
   "confirmation": {
-    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 2\nAgent sizing rationale — unverified\nSized for the supplied claims and one independent audit retry.\nWritten for the original proposal; not regenerated for these\nhuman-edited values\nAccept = approve exactly this · Decline/Esc = keep edits pending",
+    "message": "Empirica · confirm edited configuration (epoch 1 · 15 min)\npasses 6 (was 8) · spawns 1 · audits 2\nAgent sizing rationale — unverified and full detail: in the document\nWritten for the original proposal; not regenerated for these\nhuman-edited values\nDocument: sha256:1a2b3c4d5e6f\n/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl/1a2b3c4d5e6f789abcdef0123456789abcdef0123456789abcdef01234567890.json\nAccept = approve exactly this · Decline/Esc = keep edits pending",
     "schema": {
       "type": "object",
       "properties": {}
     }
   },
   "hostile": {
-    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxx…\"\nAgent sizing rationale — unverified\nSized for the supplied claims and one independent audit retry.\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "message": "Empirica · approve run configuration (epoch 0 · 2 reviews left · 15 min)\nGoal: \"line\\x0a\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>xxxxxxxxxxxxxxxxxxxx…\"\nAgent sizing rationale — unverified and full detail: in the document\nDocument: sha256:0a1b2c3d4e5f\n/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl/0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
     "schema": {
       "type": "object",
       "properties": {
@@ -299,7 +299,7 @@
     }
   },
   "hostile_rationale": {
-    "message": "Empirica · approve run configuration (epoch 2 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAgent sizing rationale — unverified\nline\\\\\\x1b\\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
+    "message": "Empirica · approve run configuration (epoch 2 · 2 reviews left · 15 min)\nGoal: \"Confirm the exact run configuration\"\nAgent sizing rationale — unverified and full detail: in the document\nDocument: sha256:0a1b2c3d4e5f\n/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl/0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json\nAccept = approve as shown · edit values → confirm again\nDecline = reject · Esc = decide later",
     "schema": {
       "type": "object",
       "properties": {
