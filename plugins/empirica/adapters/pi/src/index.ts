@@ -85,7 +85,7 @@ import {
 } from "./translate.ts";
 
 const MAX_AUDIT_SESSION_BYTES = 16 * 1024 * 1024;
-const PRIVATE_RESULT_KEYS = ["presentation", "dialog", "scope"] as const;
+const PRIVATE_RESULT_KEYS = ["presentation", "dialog", "scope", "document", "document_unavailable"] as const;
 
 // Recursively detect any private governance presentation field in a model-facing result.
 function containsPrivateResult(value: unknown): boolean {

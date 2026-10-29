@@ -10,9 +10,9 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, mkdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { HOST_PROFILE_ID } from "../src/host-profile.ts";
@@ -22,8 +22,8 @@ import { govern, refreshGovernance, piGovernanceContext } from "../src/governanc
 import { createPrivateIngress } from "../src/private-transport.ts";
 import { runJsonProcess } from "../src/process-transport.ts";
 import { contractProfileId, fakeCtx } from "./fakes.ts";
-import { recordedInvocation } from "./owner-fixture.ts";
 import type { Response } from "../src/contract.ts";
+import { INVOCATION, liveBridgeDirectory } from "./live-bridge-harness.ts";
 
 const py = process.env.EMPIRICA_PYTHON ?? "python3";
 let pythonAvailable = true;
@@ -34,13 +34,9 @@ try {
 }
 
 const SEL = { project: "live-pi", session: "smoke" };
-const INVOCATION = recordedInvocation();
-const bridgeScript = join(process.cwd(), "bridge.py");
-const testRepo = mkdtempSync(join(tmpdir(), "empirica-pi-live-"));
-const testHome = join(testRepo, "home");
-mkdirSync(testHome);
-execFileSync("git", ["init", "-q"], { cwd: testRepo });
+const { testRepo, testHome } = liveBridgeDirectory("");
 const BRIDGE_TIMEOUT_MS = 15_000;
+const bridgeScript = join(process.cwd(), "bridge.py");
 const bridge = createStdioBridgeDispatch({
   command: py,
   args: [bridgeScript],
@@ -114,6 +110,43 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
       ["present", "approve", "present", "approve"]);
     assert.equal(dialogs, 2);
     assert.ok(ui.some(line => line.includes("confirm edited configuration")));
+
+    // PR 09 (ADR-0072): the forms are bound to the written document. The private bridge wrote it
+    // once, write-first, under this run's machine home; every decision named it; both form rounds
+    // showed the short digest and the absolute path; and the record's own receipt — not the
+    // adapter's word — is what binds the final approval to the file's exact bytes.
+    const bound = ui.filter(line => line.startsWith("Document: sha256:"));
+    assert.equal(bound.length, 2, "each form names the document");
+    assert.match(bound[0]!, /^Document: sha256:[0-9a-f]{12}$/);
+    const written = readdirSync(testHome, { recursive: true, encoding: "utf8" })
+      .filter(name => name.split("/").includes("hitl") && name.endsWith(".json"))
+      .map(name => join(testHome, name));
+    assert.equal(written.length, 2, "the approve and confirm documents are both written");
+    for (const file of written) {
+      const mode = statSync(file).mode & 0o777;
+      assert.equal(mode, 0o444, `${file} must be read-only once published`);
+    }
+    // the record that binds the receipt to the document is the run's own state file, not the view
+    const stateFiles = readdirSync(testHome, { recursive: true, encoding: "utf8" })
+      .filter(name => name.endsWith("/run.json")).map(name => join(testHome, name));
+    const receipts = stateFiles.flatMap(file =>
+      (JSON.parse(readFileSync(file, "utf8")) as { governance?: { receipts?: Array<{
+        outcome: string; document_digest: string | null }> } }).governance?.receipts ?? []);
+    const final = receipts.filter(receipt => receipt.outcome === "approve").pop();
+    assert.ok(final, "an approval receipt exists");
+    const digests = written.map(file => `sha256:${createHash("sha256").update(readFileSync(file)).digest("hex")}`);
+    const finalDigest = final!.document_digest;
+    assert.ok(typeof finalDigest === "string" && digests.includes(finalDigest),
+      "the stored receipt names exactly the written file's digest");
+    for (const payload of payloads)
+      assert.ok(digests.includes(payload.document_digest as string),
+        "every present, decision and dismissal digest names a file the bridge wrote");
+    assert.equal(payloads.every(payload => typeof payload.document_digest === "string"), true,
+      "present, decision and dismissal all carried the document digest");
+    assert.ok(ui.join("\n").includes("and full detail: in the document"),
+      "the rationale pointer line is shown");
+    assert.ok(!ui.some(line => line.includes("sized for the supplied claim")),
+      "no rationale text on screen; it lives in the document");
     assert.ok(!ui.includes("Inventory is complete and authorized"));
   } finally {
     for (const [key, value] of Object.entries(previous)) {
@@ -121,53 +154,6 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     }
   }
 });
-
-for (const controlMode of ["deliberative", "auto"] as const) {
-  test(`Pi Reject submits ceilings only and persists a rejection (${controlMode})`, async () => {
-    const env = { ...process.env, EMPIRICA_HOME: testHome, EMPIRICA_REPO_DIR: testRepo };
-    const dispatch = createStdioBridgeDispatch({ command: py, args: [bridgeScript], cwd: testRepo, env });
-    const runOf = (response: Response) => {
-      assert.equal(response.result.type, "Allow", JSON.stringify(response.result));
-      assert.ok("run" in response.result && response.result.run);
-      return response.result.run as unknown as {
-        id: string; governance: { state: string; approved_digest: string | null } };
-    };
-    const run = runOf(await dispatch(startRunRequest(
-      { project: "pi-decisions", session: `real-reject-${controlMode}` }, "governed reject test",
-      `reject-start-${controlMode}`, INVOCATION, { controlMode })));
-    runOf(await dispatch(observeActionRequest(run.id, { kind: "graph", payload: {
-      root: "C0", claims: [{ id: "C0", text: "The supplied goal is achievable.", gating: true, kind: "ordinary" }], edges: [],
-    } }, `reject-graph-${controlMode}`)));
-    runOf(await dispatch(observeActionRequest(run.id, { kind: "configure_run",
-      budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 2 },
-      rationale: "sized for the supplied claim and one audit retry" }, `reject-proposal-${controlMode}`)));
-    const ctx = fakeCtx(testRepo); ctx.hasUI = true; ctx.model = { provider: "anthropic", id: "claude-sonnet-4-6" };
-    const submissions: Array<Record<string, unknown>> = [];
-    ctx.ui.custom = async factory => await new Promise(resolve => {
-      const component = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, resolve);
-      for (const key of ["\x1b[B", "\x1b[B", "\x1b[B", "\x1b[C", "\r"]) component.handleInput(key);
-    });
-    const previous = { EMPIRICA_HOME: process.env.EMPIRICA_HOME, EMPIRICA_REPO_DIR: process.env.EMPIRICA_REPO_DIR };
-    try {
-      process.env.EMPIRICA_HOME = testHome; process.env.EMPIRICA_REPO_DIR = testRepo;
-      const privateIngress = createPrivateIngress();
-      await govern(run.id, ctx, async request => {
-        const submission = (request.payload as { submission?: Record<string, unknown> } | undefined)?.submission;
-        if (submission) submissions.push(structuredClone(submission));
-        return privateIngress(request);
-      });
-      assert.deepEqual(submissions, [{ action: "reject",
-        configuration: { budgets: { max_passes: 8, max_spawns: 0, max_audit_spawns: 2 } } }]);
-      const persisted = runOf(await dispatch(getRunRequest(run.id, `reject-persisted-${controlMode}`)));
-      assert.equal(persisted.governance.state, "rejected");
-      assert.equal(persisted.governance.approved_digest, null);
-    } finally {
-      for (const [key, value] of Object.entries(previous)) {
-        if (value === undefined) delete process.env[key]; else process.env[key] = value;
-      }
-    }
-  });
-}
 
 test(
   "live bridge: StartRun with the exact profile creates a located v2 run",

@@ -226,6 +226,7 @@ class BridgeV2Tests(unittest.TestCase):
             _PLUGIN_ROOT / "tests/test_host_runtime.py",
             _PLUGIN_ROOT / "tests/test_governance_hosts.py",
             _PLUGIN_ROOT / "tests/test_context_economy.py",
+            _PLUGIN_ROOT / "tests/test_pi_private_bridge.py",
             _PLUGIN_ROOT / "tests/test_observer.py",
             _PLUGIN_ROOT / "tests/test_public_tools.py",
             _PLUGIN_ROOT / "tests/v2/driver.py",

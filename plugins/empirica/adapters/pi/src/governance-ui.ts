@@ -7,6 +7,7 @@ import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 import { EVIDENCE_WAIT_NOTICE, evidenceConfirmationWait } from "./evidence-ui.ts";
 import { initialState, reduce, renderLines } from "./dialog-view.ts";
+import type { BoundDocument } from "./dialog-view.ts";
 import type { Dialog, DialogDecision, DialogState, DialogTheme } from "./dialog-view.ts";
 
 const RECOVERY = PUBLIC_TOOLS.recovery;
@@ -20,10 +21,35 @@ interface Governance {
   context: { author: { provider_id: string; model_id: string } | null; ingress: string;
     interactive: boolean | null; delegation: boolean };
 }
-interface Presentation { dialog: Dialog; scope: unknown }
+/** The private presentation carries the bound document the Python bridge wrote (PR 09) and, when
+ * the pair could not be proven or published, the marker naming that failure instead. The
+ * document never crosses with its text: the human opens the absolute path. */
+interface Presentation {
+  dialog: Dialog;
+  scope: unknown;
+  document?: BoundDocument;
+  document_unavailable?: true;
+}
 
 function presentationOf(response: Response): Presentation | undefined {
   return (response.result as { presentation?: Presentation }).presentation;
+}
+
+/** Validate the bound document exactly as the private response validator does: a full digest
+ * and a nonempty absolute path, with core-owned priors the form must never recompute. Anything
+ * else is treated as absent, so a malformed pair refuses exactly like a missing one. */
+function boundDocument(presentation: Presentation | undefined): BoundDocument | undefined {
+  const document = !presentation || presentation.document_unavailable === true
+    ? undefined : presentation.document;
+  const digest = document?.digest;
+  const path = document?.path;
+  if (typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(digest)) return undefined;
+  if (typeof path !== "string" || !path.startsWith("/")) return undefined;
+  const priors = document?.priors;
+  if (priors !== null && priors !== undefined
+    && (typeof priors !== "object"
+      || Object.values(priors).some(prior => typeof prior !== "number"))) return undefined;
+  return { digest, path, priors: priors ?? null };
 }
 
 function stripPresentation(response: Response): Response {
@@ -89,7 +115,7 @@ interface DialogComponent {
 /** Run one native custom component with shared deadline and abort handling. */
 async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: number,
                           confirmation: boolean, signal?: AbortSignal,
-                          before?: Dialog): Promise<DialogDecision> {
+                          document?: BoundDocument): Promise<DialogDecision> {
   if (!ctx.ui.custom) return { type: "dismiss" };
   // Pi's RPC mode reports hasUI=true yet its `custom()` is `async () => undefined` (no component
   // can be shown; 1.0.0 and 1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
@@ -117,7 +143,7 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
     if (signal?.aborted) abort(); // an abort that landed before the listener existed
     const component: DialogComponent = {
       render: width => renderLines(dialog, state, width, theme,
-        { confirmation, before, timeoutMs: Math.max(0, deadline - Date.now()) }),
+        { confirmation, document, timeoutMs: Math.max(0, deadline - Date.now()) }),
       invalidate: () => {},
       handleInput: data => {
         const outcome = reduce(state, data, dialog, confirmation);
@@ -178,7 +204,7 @@ export function settlementNotice(result: Response["result"]): string | null {
 }
 
 export async function govern(runId: string, ctx: ExtensionContext, trusted: PrivateIngress,
-                             signal?: AbortSignal, confirmation?: { revision: number; digest: string; before: Dialog },
+                             signal?: AbortSignal, confirmation?: { revision: number; digest: string },
                              deadline = Date.now() + governanceTimeout(), fallback?: Response): Promise<Response> {
   let response: Response;
   try { response = await refreshGovernance(runId, ctx, trusted); }
@@ -189,7 +215,7 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
 
 async function mediateGovernance(response: Response, runId: string, ctx: ExtensionContext,
                                  trusted: PrivateIngress, signal?: AbortSignal,
-                                 confirmation?: { revision: number; digest: string; before: Dialog },
+                                 confirmation?: { revision: number; digest: string },
                                  deadline = Date.now() + governanceTimeout()): Promise<Response> {
   const result = response.result;
   if (!("run" in result) || !result.run || !["Allow", "Inert"].includes(result.type)) return response;
@@ -202,34 +228,40 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   if (g.prompt_error) return unavailable(response, g.prompt_error);
   const envelope = { run_id: runId, receipt_id: randomUUID(), proposal_digest: g.proposal_digest,
     plan_revision: g.plan_revision, approval_kind: approvalKind };
+  // PR 09 (ADR-0072 write-first): a host_ui mediation must hold the bridge-written bound
+  // document before anything is presented — no pair, or the bridge's own unavailable marker,
+  // means governance.approval_unavailable, nothing spent. States that wait on no human carry
+  // no document and never reach here by the state guard above. The auto lane binds nothing.
+  const bound = approvalKind === "host_ui" ? boundDocument(presentationOf(response)) : undefined;
+  if (approvalKind === "host_ui" && !bound) return unavailable(response);
+  const mediationEnvelope = bound ? { ...envelope, document_digest: bound.digest } : envelope;
   const dismiss = async (): Promise<Response> => {
     const stored = await trusted({ operation: "governance_decision", run_id: runId,
-      payload: { ...envelope, outcome: "dismiss" } });
+      payload: { ...mediationEnvelope, outcome: "dismiss" } });
     assertResponse(stored, "trusted-governance");
     return ["Allow", "Inert"].includes(stored.result.type) ? unavailable(stored) : stored;
   };
   if (approvalKind === "auto") {
     const admitted = await trusted({ operation: "governance_decision", run_id: runId,
-      payload: { ...envelope, outcome: "approve" } });
+      payload: { ...mediationEnvelope, outcome: "approve" } });
     assertResponse(admitted, "trusted-governance");
     return admitted;
   }
   if (!ctx.hasUI || !ctx.ui.custom || g.context.ingress === "unavailable"
       || signal?.aborted || Date.now() >= deadline) return unavailable(response);
   const presented = await trusted({ operation: "governance_decision", run_id: runId,
-    payload: { ...envelope, outcome: "present" } });
+    payload: { ...mediationEnvelope, outcome: "present" } });
   assertResponse(presented, "trusted-governance");
   if (presented.result.type !== "Allow" || !("run" in presented.result)) return presented;
   const dialog = presentationOf(presented)?.dialog;
   if (!dialog) return dismiss();
-  const selected = await showDialog(ctx, dialog, deadline, Boolean(confirmation), signal,
-    confirmation?.before);
+  const selected = await showDialog(ctx, dialog, deadline, Boolean(confirmation), signal, bound);
   if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return dismiss();
   const action = selected.type === "reject" ? "reject" : "approve";
   const configuration = selected.type === "approve" ? selected.configuration
     : { budgets: g.proposal.budgets };
   const admitted = await trusted({ operation: "governance_decision", run_id: runId,
-    payload: { ...envelope, submission: { action, configuration } } });
+    payload: { ...mediationEnvelope, submission: { action, configuration } } });
   assertResponse(admitted, "trusted-governance");
   if (["Fault", "Block"].includes(admitted.result.type)) {
     const stored = await dismiss();
@@ -241,7 +273,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   if (!confirmation && action === "approve" && admitted.result.type === "Allow" && revised) {
     const fresh = await refreshGovernance(runId, ctx, trusted);
     return mediateGovernance(fresh, runId, ctx, trusted, signal,
-      { revision: next.plan_revision, digest: next.proposal_digest, before: dialog }, deadline);
+      { revision: next.plan_revision, digest: next.proposal_digest }, deadline);
   }
   return admitted;
 }

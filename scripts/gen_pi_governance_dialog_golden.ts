@@ -13,10 +13,17 @@ const theme = { accent: (text: string) => text, muted: (text: string) => text,
   warning: (text: string) => text };
 const check = process.argv.includes("--check");
 
+/** The canonical bound document (ADR-0072 Q4): the short digest and the exempt absolute path —
+ * pinned here with the same identity the shared golden and the Python bridge writer derive. */
+const BRIDGE_HEX = "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789";
+const BRIDGE_HOME = "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl";
+const DOCUMENT = { digest: `sha256:${BRIDGE_HEX}`, path: `${BRIDGE_HOME}/${BRIDGE_HEX}.json`,
+  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 } };
+
 function screen(dialog: Dialog, state: DialogState, width: number,
-                confirmation = false, before?: Dialog): string {
+                confirmation = false): string {
   return renderLines(dialog, state, width, theme,
-    { confirmation, before, timeoutMs: 900_000 }).join("\n") + "\n";
+    { confirmation, timeoutMs: 900_000, document: DOCUMENT }).join("\n") + "\n";
 }
 
 const invalid = initialState(fixture.dialogs.review);
@@ -24,7 +31,7 @@ invalid.values.max_passes = 0;
 const cases: Record<string, (width: number) => string> = {
   review: width => screen(fixture.dialogs.review, initialState(fixture.dialogs.review), width),
   confirmation: width => screen(fixture.dialogs.confirmation,
-    initialState(fixture.dialogs.confirmation, true), width, true, fixture.dialogs.review),
+    initialState(fixture.dialogs.confirmation, true), width, true),
   hostile: width => screen(fixture.dialogs.hostile, initialState(fixture.dialogs.hostile), width),
   "hostile-rationale": width => screen(fixture.dialogs.hostile_rationale,
     initialState(fixture.dialogs.hostile_rationale), width),

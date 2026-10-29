@@ -6,6 +6,7 @@ import { expectedApprovalKind, govern, governanceTimeout, piGovernanceContext } 
 import { initialState, reduce, renderLines } from "../src/dialog-view.ts";
 import type { Dialog, DialogDecision } from "../src/dialog-view.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
+import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 import { fakeCtx } from "./fakes.ts";
 
 const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json", import.meta.url), "utf8")) as {
@@ -14,6 +15,15 @@ const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governa
 const reviewDialog = fixture.dialogs.review;
 const theme = { accent: (x: string) => x, muted: (x: string) => x, warning: (x: string) => x };
 const ENTER = "\r", DOWN = "\x1b[B", RIGHT = "\x1b[C", BACKSPACE = "\x7f", ESC = "\x1b[27u";
+
+/** The canonical bound document (ADR-0072 Q4 shape — PR 09: `digest`, absolute `path`, and the
+ * core-owned amendment `priors`) exactly as the Python private bridge returns it. PR 09's
+ * TypeScript carries no document text; this is the shape, pinned with the same identities the
+ * shared and Pi goldens use. */
+const BRIDGE_HEX = "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789";
+const BRIDGE_HOME = "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl";
+const DOCUMENT = { digest: `sha256:${BRIDGE_HEX}`, path: `${BRIDGE_HOME}/${BRIDGE_HEX}.json`,
+  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 } } as const;
 
 function drive(keys: string[], dialog = reviewDialog, confirmation = false): DialogDecision | undefined {
   let state = initialState(dialog, confirmation);
@@ -51,7 +61,7 @@ test("range error follows its row after focus moves", () => {
     if ("state" in result) state = result.state;
   }
   const lines = renderLines(reviewDialog, state, 80, theme,
-    { confirmation: false, timeoutMs: 900_000 });
+    { confirmation: false, timeoutMs: 900_000, document: DOCUMENT });
   assert.ok(lines.some(line => line.includes("Must be an integer between 1 and 1024")));
 });
 
@@ -61,20 +71,21 @@ test("edited integer is returned exactly", () => {
   if (result?.type === "approve") assert.equal(result.configuration.budgets.max_passes, 6);
 });
 
-test("renderLines shows an escaped, bounded prefix of a hostile goal at widths 80 and 50", () => {
+test("renderLines shows an escaped, bounded first line of a hostile goal at widths 80 and 50", () => {
   for (const width of [80, 50]) {
     const lines = renderLines(fixture.dialogs.hostile, initialState(fixture.dialogs.hostile), width, theme,
-      { confirmation: false, timeoutMs: 120_000 });
+      { confirmation: false, timeoutMs: 120_000, document: DOCUMENT });
     assert.ok(lines.every(line => visibleWidth(line) <= width));
     const start = lines.findIndex(line => line.startsWith("Goal  "));
-    const end = lines.findIndex(line => line.startsWith("Host  "));
-    const goal = lines.slice(start, end);
-    assert.equal(goal.length, 4, "the goal never takes more than four lines");
-    assert.match(goal[3], /… \(\+\d+ more lines\)$/);
-    const shown = goal.slice(0, 3).map(line => line.slice(6)).join("");
-    assert.ok(`"${fixture.dialogs.hostile.goal}"`.startsWith(shown), "the shown goal is an exact prefix");
+    assert.ok(start >= 0, "the goal line is present");
+    const plain = lines[start]!.replace(/\x1b\[0m/g, "");
+    assert.match(plain, /\u2026"$/);
+    const shown = plain.slice(6).slice(0, -1).replace(/\u2026$/, "");
+    assert.ok(`"${fixture.dialogs.hostile.goal}"`.startsWith(shown),
+      "the shown goal is an exact prefix, closed with an ellipsis and its quote");
+    assert.ok(lines.filter(line => line.startsWith("Goal  ")).length === 1, "the goal is one line");
     assert.ok(!lines.some(line => line.includes("\n")), "escaped control characters stay escaped");
-    if (width === 80) assert.ok(lines[0].includes("2 min"));
+    if (width === 80) assert.ok(lines[0]!.includes("2 min"));
   }
 });
 
@@ -82,18 +93,18 @@ test("renderLines matches checked-in screens byte-for-byte", () => {
   const invalid = initialState(reviewDialog); invalid.values.max_passes = 0;
   const cases = {
     review: (width: number) => renderLines(reviewDialog, initialState(reviewDialog), width, theme,
-      { confirmation: false, timeoutMs: 900_000 }),
+      { confirmation: false, timeoutMs: 900_000, document: DOCUMENT }),
     confirmation: (width: number) => renderLines(fixture.dialogs.confirmation,
       initialState(fixture.dialogs.confirmation, true), width, theme,
-      { confirmation: true, before: reviewDialog, timeoutMs: 900_000 }),
+      { confirmation: true, timeoutMs: 900_000, document: DOCUMENT }),
     hostile: (width: number) => renderLines(fixture.dialogs.hostile,
       initialState(fixture.dialogs.hostile), width, theme,
-      { confirmation: false, timeoutMs: 900_000 }),
+      { confirmation: false, timeoutMs: 900_000, document: DOCUMENT }),
     "hostile-rationale": (width: number) => renderLines(fixture.dialogs.hostile_rationale,
       initialState(fixture.dialogs.hostile_rationale), width, theme,
-      { confirmation: false, timeoutMs: 900_000 }),
+      { confirmation: false, timeoutMs: 900_000, document: DOCUMENT }),
     "range-error": (width: number) => renderLines(reviewDialog, invalid, width, theme,
-      { confirmation: false, timeoutMs: 900_000 }),
+      { confirmation: false, timeoutMs: 900_000, document: DOCUMENT }),
   };
   for (const [name, render] of Object.entries(cases)) {
     for (const width of [80, 50]) {
@@ -146,13 +157,21 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
         }
       }
     }
-    const withPresentation = request.operation === "governance_decision"
-      && (request.payload as { outcome?: string }).outcome === "present";
+    const withPresentation = (request.operation === "governance_decision"
+      && (request.payload as { outcome?: string }).outcome === "present")
+      || request.operation === "governance_context";
+    const document = (request.operation === "governance_context")
+      ? (documentOverride.value ?? DOCUMENT) : undefined;
     return structuredClone({ protocol: "empirica/v2", request_id: "trusted-governance",
       result: { type: "Allow", converged: false, run,
-        ...(withPresentation ? { presentation: { dialog, scope: null } } : {}) } }) as never;
+        ...(withPresentation ? { presentation: { dialog, scope: null,
+          ...(document ? { document } : {}),
+          ...(marker.value ? { document_unavailable: true } : {}) } } : {}) } }) as never;
   };
-  return { ctx, trusted, decisions, run, g, settings, get customCalls() { return customCalls; },
+  const documentOverride = { value: undefined as Record<string, unknown> | undefined };
+  const marker = { value: false };
+  return { ctx, trusted, decisions, run, g, settings, documentOverride, marker,
+    get customCalls() { return customCalls; },
     invoke: (signal?: AbortSignal, deadline?: number) => govern("run", ctx, trusted, signal, undefined, deadline) };
 }
 
@@ -353,14 +372,107 @@ test("initial ingress throw without fallback returns closed Fault", async () => 
   if (out.result.type === "Fault") assert.equal(out.result.fail_direction, "closed");
 });
 
-test("the amendment warning and rationale label are wrapped in full, never truncated", () => {
+test("the amendment warning is wrapped in full, never truncated, beside the document lines", () => {
   const dialog = fixture.dialogs.confirmation;
   for (const width of [80, 50]) {
-    const lines = renderLines(dialog, initialState(dialog), width, theme,
-      { confirmation: true, timeoutMs: 120_000, before: fixture.dialogs.review });
+    const lines = renderLines(dialog, initialState(dialog, true), width, theme,
+      { confirmation: true, timeoutMs: 120_000, document: DOCUMENT });
     assert.ok(lines.every(line => visibleWidth(line) <= width));
     const text = lines.map(line => line.trim()).join(" ");
     assert.ok(text.includes(dialog.amendment_warning), `warning truncated at ${width}`);
-    assert.ok(text.includes(dialog.rationale_label), `label truncated at ${width}`);
+    // the document lines: the short digest, then the absolute path, wrapped but never cut
+    const digestLine = lines.findIndex(line => line.startsWith("Document: "));
+    assert.ok(digestLine >= 0, `document digest line missing at ${width}`);
+    assert.match(lines[digestLine]!, /^Document: sha256:[0-9a-f]{12}$/);
+    const unwrapped = lines.join("").replace(/\n/g, "");
+    assert.ok(unwrapped.includes(DOCUMENT.path), `the whole path survives at ${width}`);
+    assert.ok(!DOCUMENT.path.includes("\u2026") && !lines.some(line => line.includes("\u2026.json")),
+      "the path is never cut short");
   }
+});
+
+test("the review screen keeps no rationale text and names the document", () => {
+  const dialog = fixture.dialogs.review;
+  for (const width of [80, 50]) {
+    const lines = renderLines(dialog, initialState(dialog), width, theme,
+      { confirmation: false, timeoutMs: 120_000, document: DOCUMENT });
+    assert.ok(!lines.join("\n").includes("Sized for the supplied claims"),
+      "the rationale body lives in the document, not on screen");
+    const pointer = lines.map(line => line.trim()).join(" ");
+    assert.ok(pointer.includes(dialog.rationale_label)
+      && pointer.includes("in the document"),
+      "one pointer region under the contract-owned label, never the rationale body");
+  }
+});
+
+test("the confirm screen takes its (was ...) priors from the document, not a host-held dialog", () => {
+  const dialog = fixture.dialogs.confirmation;
+  const withPriors = renderLines(dialog, initialState(dialog, true), 80, theme,
+    { confirmation: true, timeoutMs: 120_000, document: DOCUMENT });
+  assert.ok(withPriors.some(line => line.includes("6 (was 8)")),
+    "the amendment prior is shown from the document's priors");
+  const noPriors = renderLines(dialog, initialState(dialog, true), 80, theme,
+    { confirmation: true, timeoutMs: 120_000, document: { ...DOCUMENT, priors: null } });
+  assert.ok(!noPriors.some(line => line.includes("(was")),
+    "no prior in the document means no invented prior on screen");
+});
+// --- PR 09: write-first binding through the TypeScript mediation (ADR-0072) ---
+
+test("every governance decision payload carries the bound document's digest", async () => {
+  const h = harness([["6", ...toButtons, ENTER], [ENTER]]);
+  await h.invoke();
+  assert.deepEqual(outcomes(h), ["present", "approve", "present", "approve"]);
+  for (const payload of h.decisions)
+    assert.equal(payload.document_digest, DOCUMENT.digest, JSON.stringify(payload));
+  assert.equal(h.documentOverride.value, undefined);
+});
+
+test("present, decision and dismiss all name the document the human read", async () => {
+  const h = harness([[ESC]]);
+  await h.invoke();
+  assert.deepEqual(outcomes(h), ["present", "dismiss"]);
+  for (const payload of h.decisions)
+    assert.equal(payload.document_digest, DOCUMENT.digest);
+});
+
+test("no bound document on the context answer refuses before any present", async () => {
+  for (const kind of ["absent", "malformed", "marker"] as const) {
+    const h = harness([[ENTER, ENTER]]);
+    if (kind === "absent") h.documentOverride.value = {};
+    if (kind === "marker") h.marker.value = true;
+    if (kind === "malformed")
+      h.documentOverride.value = { digest: "sha256:" + "g".repeat(64), path: "/no/file" };
+    const result = await h.invoke();
+    assert.equal(result.result.type, "Block");
+    if (result.result.type === "Block")
+      assert.equal(result.result.reasons[0]!.code, "governance.approval_unavailable");
+    assert.deepEqual(h.decisions, [], "no present may accompany an unbindable document");
+    assert.equal(h.customCalls, 0);
+  }
+});
+
+test("a governance.document_mismatch Block reaches the caller unchanged", async () => {
+  const h = harness([[ENTER, ENTER]]);
+  const recovery = PUBLIC_TOOLS.recovery["governance.document_mismatch"];
+  const mismatch = structuredClone({ protocol: "empirica/v2", request_id: "trusted-governance",
+    result: { type: "Block", run: h.run,
+      reasons: [{ code: "governance.document_mismatch", parameters: {}, ...recovery }] } }) as never;
+  const trusted = async (request: Parameters<typeof h.trusted>[0]) =>
+    (request as { operation?: string }).operation === "governance_decision"
+      && (request.payload as { outcome?: string }).outcome === "present" ? mismatch : h.trusted(request);
+  const out = await govern("run", h.ctx, trusted);
+  assert.equal(out.result.type, "Block");
+  if (out.result.type === "Block")
+    assert.equal((out.result.reasons[0] as { code: string }).code, "governance.document_mismatch");
+  assert.deepEqual(outcomes(h), []);
+});
+
+test("the bound document never escapes into a model-facing result", async () => {
+  const h = harness([[ENTER, ENTER]]);
+  const out = await h.invoke();
+  const text = JSON.stringify(out);
+  assert.ok(!text.includes(DOCUMENT.path), "the absolute machine path is private");
+  assert.ok(!text.includes(DOCUMENT.digest), "the document's digest name is private to the mediation");
+  assert.ok(!text.includes('"document"'), "no private presentation member survives");
+  assert.ok(!text.includes("document_unavailable"), "the marker is private to the mediation");
 });

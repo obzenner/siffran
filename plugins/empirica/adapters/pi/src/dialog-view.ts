@@ -106,10 +106,19 @@ export function duration(timeoutMs: number): string {
   return seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} sec`;
 }
 
-const GOAL_LINES = 4;
 const INDENT = "      ";
+const SHORT_BODY = 12; // the ADR-0072 Q4 short digest: `sha256:` plus twelve hex
 
-export interface RenderOptions { confirmation: boolean; timeoutMs: number; before?: Dialog }
+/** The bound document the Python private bridge wrote (ADR-0072, PR 09): its full digest, the
+ * file's absolute path — the one copy-paste surface — and the core-owned amendment priors the
+ * confirm form's ``(was …)`` values come from (never recomputed by the host). No text crosses
+ * the Pi transport; the human opens the file. */
+export interface BoundDocument {
+  digest: string;
+  path: string;
+  priors: Record<string, number> | null;
+}
+export interface RenderOptions { confirmation: boolean; timeoutMs: number; document?: BoundDocument }
 
 /** Title on the left and run facts on the right; the facts move to their own line if narrow. */
 function header(dialog: Dialog, options: RenderOptions, width: number, theme: DialogTheme): string[] {
@@ -123,27 +132,35 @@ function header(dialog: Dialog, options: RenderOptions, width: number, theme: Di
   return gap >= 2 ? [title + " ".repeat(gap) + theme.muted(facts)] : [title, theme.muted(facts)];
 }
 
-/** The quoted goal, wrapped and bounded so the controls always stay on screen. */
-function goalLines(dialog: Dialog, width: number, theme: DialogTheme): string[] {
-  const wrapped = wrapTextWithAnsi(`"${dialog.goal}"`, Math.max(10, width - INDENT.length));
-  const shown = wrapped.length <= GOAL_LINES ? wrapped
-    : [...wrapped.slice(0, GOAL_LINES - 1), theme.muted(`… (+${wrapped.length - GOAL_LINES + 1} more lines)`)];
-  return shown.map((line, index) => (index ? INDENT : "Goal  ") + line);
+/** The goal's first line, quoted and bounded so the controls always stay on screen (ADR-0072
+ * "What the forms keep": the full detail lives in the document). */
+function goalLines(dialog: Dialog, width: number): string[] {
+  const first = `"${dialog.goal.split("\n")[0]}"`;
+  const gap = width - "Goal  ".length;
+  const shown = visibleWidth(first) <= gap ? first : truncateToWidth(first, gap - 1, "…") + "\"";
+  return [`Goal  ${shown}`];
 }
 
-function rationaleLines(dialog: Dialog, options: RenderOptions, width: number,
-                        theme: DialogTheme): string[] {
-  if (dialog.rationale === null) return [];
-  const wrap = (text: string, indent = 0) => wrapTextWithAnsi(text, Math.max(10, width - indent));
-  return [...wrap(dialog.rationale_label), ...wrap(dialog.rationale, 2).map(line => `  ${line}`),
-    ...(options.confirmation ? wrap(dialog.amendment_warning).map(line => theme.warning(line)) : [])];
+/** The one line under the contract-owned label that names where the rationale actually is. */
+function pointerLines(dialog: Dialog, width: number): string[] {
+  return wrapTextWithAnsi(`${dialog.rationale_label} and full detail: in the document`, Math.max(10, width));
 }
 
-function hostLine(dialog: Dialog): string[] {
-  if (!dialog.invocation) return [];
-  const { host, interactive, signal } = dialog.invocation;
-  const mode = interactive === null ? "unknown" : interactive ? "interactive" : "non-interactive";
-  return [`Host  ${host} · ${mode} · signal ${signal}`];
+/** ADR-0072 Q4's bound lines: the short digest, then the document's absolute path. Wider than
+the screen, the path wraps — it is never truncated or cut; a cut path is a corrupted paste. */
+function documentLines(document: BoundDocument | undefined, width: number): string[] {
+  if (!document) return [];
+  const short = `Document: ${document.digest.slice(0, "sha256:".length + SHORT_BODY)}`;
+  const lines = wrapTextWithAnsi(short, Math.max(10, width));
+  return [...lines, ...wrapTextWithAnsi(document.path, Math.max(10, width))];
+}
+
+/** The amendment warning, in full, in the confirm view only. */
+function warningLines(dialog: Dialog, options: RenderOptions, width: number,
+                      theme: DialogTheme): string[] {
+  if (!options.confirmation) return [];
+  return wrapTextWithAnsi(dialog.amendment_warning, Math.max(10, width))
+    .map(line => theme.warning(line));
 }
 
 type Control = BudgetControl;
@@ -160,12 +177,10 @@ function detailText(control: Control): string {
 function controlLines(dialog: Dialog, state: DialogState, options: RenderOptions,
                       width: number, theme: DialogTheme): string[] {
   const controls: Control[] = dialog.budgets;
-  const before = new Map((options.before?.budgets ?? [])
-    .map(row => [row.key, row.value] as const));
+  const priors = options.confirmation ? options.document?.priors ?? null : null;
   const shown = controls.map(control => {
-    const value = state.values[control.key], prior = before.get(control.key);
-    const was = options.confirmation && prior !== undefined && prior !== value
-      ? ` (was ${valueText(prior).replace(/^[☐☑] /, "")})` : "";
+    const value = state.values[control.key], prior = priors ? priors[control.key] : undefined;
+    const was = prior !== undefined && prior !== value ? ` (was ${valueText(prior)})` : "";
     return valueText(value) + was;
   });
   const labelWidth = Math.max(...controls.map(control => visibleWidth(control.label))) + 2;
@@ -204,15 +219,18 @@ function legendLine(options: RenderOptions, width: number, theme: DialogTheme): 
   return theme.muted(fitting.join(" · "));
 }
 
-/** Render the whole dialog frame for the supplied terminal width; every line fits the width. */
+/** Render the whole dialog frame for the supplied terminal width; every line fits the width.
+ * Both hosts keep the same content and order (PR 09 mirrors PR 08's Claude forms): header, the
+ * goal's first line (review only), the pointer line, the amendment warning (confirm only), the
+ * document digest line and the document's absolute path, the editable rows, buttons, hints. */
 export function renderLines(dialog: Dialog, state: DialogState, width: number, theme: DialogTheme,
                             options: RenderOptions): string[] {
   return [
     ...header(dialog, options, width, theme),
-    ...goalLines(dialog, width, theme),
-    ...hostLine(dialog),
-    "",
-    ...rationaleLines(dialog, options, width, theme),
+    ...(options.confirmation ? [] : goalLines(dialog, width)),
+    ...pointerLines(dialog, width),
+    ...warningLines(dialog, options, width, theme),
+    ...documentLines(options.document, width),
     "",
     ...controlLines(dialog, state, options, width, theme),
     "",

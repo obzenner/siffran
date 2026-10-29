@@ -55,6 +55,7 @@ EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.p
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
 EMPIRICA_HITL_SIDECAR_TESTS := $(PLUGINS_DIR)/empirica/tests/test_hitl_sidecar.py
+EMPIRICA_PI_PRIVATE_BRIDGE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_pi_private_bridge.py
 EMPIRICA_CITATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_citations.py
 EMPIRICA_OBSERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer.py
 EMPIRICA_OBSERVER_SERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_server.py
@@ -232,7 +233,7 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 		test_codex_adapter.StoreIsolationTests
 	@printf '$(BOLD)==> codex suite ok$(RESET)\n'
 
-check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
+check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check empirica-pi-private-bridge-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
 check-ui: ui-deps ## Fast observer-UI checks: every Vitest unit test (client, filters, layout, conventions, the elements and the page in happy-dom, properties over schema-derived rows and sheets, fixed fast-check seed; no watch, no coverage) and the audit — needs Node and make ui-install
@@ -445,7 +446,11 @@ pi-bundle-check: node_modules ## Validate repository-root Pi package composition
 	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py . --package-only
 
-.PHONY: empirica-pi-check empirica-author-view-golden empirica-governance-dialog-golden
+.PHONY: empirica-pi-check empirica-author-view-golden empirica-governance-dialog-golden empirica-pi-private-bridge-check
+
+empirica-pi-private-bridge-check: ## Check the Pi private bridge binds the written configuration document (write-first, one writer, no text across the transport)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PI_PRIVATE_BRIDGE_TESTS)
+
 empirica-pi-check: node_modules empirica-author-view-golden ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi

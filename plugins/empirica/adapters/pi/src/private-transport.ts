@@ -103,11 +103,36 @@ const typed = (type: string) => (value: unknown) => object(value) && value.type 
 const envelope = (value: unknown) => object(value) && value.protocol === "empirica/v2"
   && string(value.request_id) && object(value.result);
 
+/** The private governance presentation may carry the bound document the Python bridge wrote
+ * (ADR-0072, PR 09: full digest, absolute path, core-owned priors — never text) and, when the
+ * pair could not be proven or published, this marker instead. This validator is the transport's
+ * sole authority for the shape; an answer whose presentation carries anything else is invalid
+ * before any mediator reads it. */
+const GOVERNANCE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+function governanceEnvelope(value: unknown): boolean {
+  if (!envelope(value)) return false;
+  const result = (value as Record<string, unknown>).result as Record<string, unknown>;
+  const presentation = result.presentation;
+  if (presentation === undefined) return true;      // model-face stripping already happened, or no dialog ran
+  if (!object(presentation)) return false;
+  if (presentation.document_unavailable !== undefined && presentation.document_unavailable !== true)
+    return false;
+  const document = presentation.document;
+  if (document === undefined) return true;
+  if (!object(document) || typeof document.digest !== "string"
+    || !GOVERNANCE_DIGEST.test(document.digest)
+    || typeof document.path !== "string" || !document.path.startsWith("/"))
+    return false;
+  const priors = document.priors;
+  return priors === undefined || priors === null || (object(priors)
+    && Object.values(priors).every(prior => typeof prior === "number"));
+}
+
 /** Shape predicate per private operation; this table is the sole private-response validator. */
 const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => boolean } = {
   classify_identity: (value) => value === null || (object(value) && string(value.identity)),
-  governance_context: envelope,
-  governance_decision: envelope,
+  governance_context: governanceEnvelope,
+  governance_decision: governanceEnvelope,
   audit_prepare: (value) => object(value) && (
     (value.type === "audit_refused" && value.reason === "runtime_changed")
     || (value.type === "audit_excluded" && string(value.message) && Array.isArray(value.identities)

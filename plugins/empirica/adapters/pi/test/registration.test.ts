@@ -167,7 +167,15 @@ const PRESENTATION = { dialog: {
     { key: "max_passes", label: "Investigation passes", short: "passes", help: "Investigation passes the run may use", value: 8, used: 0, minimum: 1, maximum: 1024 },
     { key: "max_spawns", label: "Child spawns", short: "spawns", help: "Non-audit child agents", value: 1, used: 0, minimum: 0, maximum: 128 },
     { key: "max_audit_spawns", label: "Audit spawns", short: "audits", help: "Independent auditor launches", value: 1, used: 0, minimum: 0, maximum: 128 },
-  ] }, scope: { root: "C0" } };
+  ] }, scope: { root: "C0" },
+  // PR 09: the mediated presentation carries the bound document the Python bridge wrote —
+  // its full digest, the file's absolute path, and the core-owned priors (never its text).
+  document: {
+    digest: "sha256:" + "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789",
+    path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
+      + "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json",
+    priors: null,
+  } };
 
 function mediatedObserve(choice: "approve" | "dismiss"): {
   observe: () => Promise<{ content: { text: string }[]; details?: unknown }>; } {

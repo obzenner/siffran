@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -42,8 +43,70 @@ def _classify(_profile: str, _raw: dict, payload: dict):
                    source=payload.get("source", "pi-model"))
 
 
+#: A document identity in full — the private answer's ``document.digest`` and the sidecar name.
+_FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+
+
+def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | None] | None:
+    """Write-first (ADR-0072, PR 09): verify the core's rendered ``{text, digest}`` pair, publish
+    its bytes once through the sidecar store beside the run's own record, and return
+    ``(digest, absolute path, priors)``. ``priors`` is the document's own amendment block read
+    from the verified bytes — never recomputed — so the confirm form shows the record's ``was``
+    values, not a host-held dialog. ``None`` means the mediation must refuse: the pair was
+    absent, malformed, digest-inconsistent, or the storage refused the write."""
+    if not isinstance(document, dict):
+        return None
+    text, digest = document.get("text"), document.get("digest")
+    if not isinstance(text, str) or not isinstance(digest, str) or _FULL_DIGEST.fullmatch(digest) is None:
+        return None
+    # Lazy on purpose: the sidecar store chain is the document writer's cost, paid only by the
+    # operation that writes (governance_context) and not by the twelve other private operations
+    # this one-shot process shape also serves, whose startup stays exactly forms-08's
+    # (PR 09 measurement: whole-private-bridge import ~95 ms before and after this change).
+    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments
+    from application.location import decode_handle
+    from core import hitl as core_hitl
+    try:
+        data = text.encode("utf-8")
+        if core_hitl.digest(data) != digest:
+            return None
+        key = decode_handle(run_id)
+        if key is None:
+            return None
+        path, written = HitlDocuments().write(key, data)
+        if written != digest:
+            return None
+        amendment = json.loads(text).get("amendment")
+        priors = None
+        if isinstance(amendment, dict) and isinstance(amendment.get("budgets"), dict):
+            priors = {name: row.get("was") for name, row in amendment["budgets"].items()
+                      if isinstance(row, dict) and isinstance(row.get("was"), int)}
+    except (DocumentMismatch, HardLinkUnsupported, OSError, ValueError):
+        return None
+    return digest, path, priors
+
+
 def _governance_context(profile: str, raw: dict, payload: dict):
-    return bridge.trusted_governance_context(profile, raw["run_id"], payload)
+    response = bridge.trusted_governance_context(profile, raw["run_id"], payload)
+    result = response.get("result") if isinstance(response, dict) else None
+    presentation = result.get("presentation") if isinstance(result, dict) else None
+    if not isinstance(presentation, dict):
+        return response
+    document = presentation.get("document")
+    if document is None:
+        return response  # a state that waits on no human carries no document; that is normal
+    bound = _bind_document(raw["run_id"], document)
+    if bound is None:
+        # The pair could not be proven or published. Never hand the bytes to the transport and
+        # never let an adapter present a document no one has verified: strip the pair and mark
+        # the presentation, so the TypeScript mediation refuses `governance.approval_unavailable`
+        # before any present is sent.
+        presentation["document_unavailable"] = True
+        presentation.pop("document", None)
+        return response
+    digest, path, priors = bound
+    presentation["document"] = {"digest": digest, "path": str(path), "priors": priors}
+    return response
 
 
 def _governance_decision(profile: str, raw: dict, payload: dict):
