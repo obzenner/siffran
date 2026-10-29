@@ -1680,6 +1680,18 @@
               }
             ]
           }
+        },
+        "document_digest": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          ],
+          "description": "The digest of the immutable HITL evidence document the human was shown (ADR-0072, PR 10, the expand stage): optional on the wire today. Absent keeps today's behaviour exactly (the adapters of the PRs before the binding; the contract step makes the member required as string-or-null later). null is an explicit fetch: refused with evidence.document_mismatch, nothing admitted, the refusal's private result carrying document {text, digest} for the batch this receipt's own presentation named. A value must equal the document this state renders AND the one the presentation recorded; on acceptance it is recorded on every artifact of the receipt."
         }
       }
     },
@@ -1705,6 +1717,18 @@
         },
         "key": {
           "$ref": "#/$defs/digest256"
+        },
+        "document_digest": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          ],
+          "description": "The digest of the immutable HITL evidence document the human was shown (ADR-0072, PR 10, the expand stage): optional on the wire today. Absent keeps today's behaviour exactly (the adapters of the PRs before the binding; the contract step makes the member required as string-or-null later). null is an explicit fetch: refused with evidence.document_mismatch, nothing spent, the refusal's private result carrying document {text, digest} for the batch named by key — the refusal is the fetch; write the bytes and repeat the call. A value is checked: it must equal the document this state renders, and a confirmation's must also equal the digest its own presentation recorded; on acceptance it is recorded in the artifact body."
         }
       }
     },

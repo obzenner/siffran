@@ -13,7 +13,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
                              preflight_spike_request, plan_spike_request, plan_spike_result, valid_attribution)
-from core import confirmation, spike_plan, spike_plan_draft
+from core import confirmation, hitl, spike_plan, spike_plan_draft
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
 from core.ports import RunRepository
@@ -454,7 +454,22 @@ class Coordinator:
             if decision.result_type == "Inert":
                 return self._inert_with_run(request_id, snapshot)
             if decision.result_type == "Block":
-                return self._response(request_id, snapshot, decision)
+                response = self._response(request_id, snapshot, decision)
+                # ADR-0072 (PR 10): the document fetch for an evidence step is the mismatch
+                # refusal itself — its private result carries the core-rendered pair for the
+                # batch the call named, so no adapter re-renders a dict. The presentation names
+                # its ``key``; a confirmation asks for the batch its own presentation recorded.
+                # Never on the public wire: trusted ingress alone reaches here, and the private
+                # evidence response definition is the only schema that admits the member.
+                if decision.reason_code == "evidence.document_mismatch":
+                    key = payload.get("key")
+                    if key is None:
+                        shown = confirmation.presentation(snapshot, payload.get("receipt_id"))
+                        key = shown["key"] if shown is not None else None
+                    document = hitl.evidence_pair(run_id=run_id, snapshot=snapshot, key=key)
+                    if document is not None:
+                        response["result"]["document"] = document
+                return response
             try:
                 committed, _, _, planned = self._commit(
                     key, read.revision, snapshot, state, decision.intent.artifacts)

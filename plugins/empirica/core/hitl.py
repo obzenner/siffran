@@ -46,9 +46,10 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from core.canonical import CanonicalJSONError, canonical_json
-from core.evaluation import TERMINAL_STATUSES, claim_digest, terminal_key
+from core.evaluation import (TERMINAL_STATUSES, batch_candidates, claim_digest, derive_claims,
+                             terminal_key)
 from core.governance import HUMAN_WAIT_STATES, sized as _proposal_sized
-from core.projection import project_presentation, safe_text
+from core.projection import project_argument, project_presentation, project_runview, safe_text
 
 #: The document's protocol identity (the schema's ``schema`` const, ``contracts/empirica/v2/hitl.schema.json``).
 SCHEMA_ID = "empirica.hitl/1"
@@ -65,6 +66,16 @@ CONFIRM_AMENDMENT = "confirm_amendment"
 _BUDGET_KEYS = ("key", "label", "short", "help", "value", "used", "minimum", "maximum")
 #: The run-fixed invocation facts the digested context carries (ADR-0072; the five that persist for
 #: the run's lifetime — never ``human_surface``, which the host's own answer rewrites).
+#: The obligation id of the terminal consent itself (public-contract ``bootstrap.stage_obligations.
+#: terminal.obligation_id``) — the row PR 10's residual selection excludes, because the consent asks
+#: about the rest, never about itself (ADR-0072, the terminal-consent paragraph; review-1 finding 7).
+TERMINAL_OBLIGATION_ID = "obligation.terminal"
+#: The commands a run-view-shaped snapshot answers: the terminal residual rows depend on the
+#: snapshot's command (``core/projection.py`` reads it — the late-route row exists only for an
+#: ObserveAction command), so the run view's own source command is the one accepted shape for the
+#: evidence derivations below (the trusted evidence legs always assemble one of these).
+RUN_VIEW_COMMANDS = frozenset({"GetRun", "RestoreRun", "ResolveRun"})
+
 _INVOCATION_KEYS = ("host", "interactive", "signal", "delegation", "audit_retrieval")
 #: The ceilings an amendment names (the decision payload's own budget set,
 #: ``contracts/empirica/v2/request.schema.json`` ``governanceDecisionPayload.amendment``).
@@ -453,3 +464,83 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
         "records": record_rows,
         "claims": claim_rows,
     }
+
+
+def terminal_residuals(run_view: Any) -> tuple[dict[str, str], ...]:
+    """The residue a consent to end this run now would leave unresolved, from the run view
+    (ADR-0072): its active obligation rows that are not satisfied, as ``{id, required}``
+    rows ``evidence_document`` consumes, **excluding the terminal consent row itself** — the
+    consent asks about the rest, never about itself (review-1 finding 7). This is the one
+    core function that selects them; the presentation and the document cannot disagree on
+    what ending now would leave behind. Satisfied rows decided nothing overdue; a row the
+    gate holds behind an earlier one is still listed (holding is not resolving)."""
+    try:
+        rows = run_view["obligations"]["active"]
+    except (AttributeError, KeyError, TypeError) as missing:
+        raise ValueError(f"the run view lacks its obligation rows: {missing!r}") from missing
+    if not isinstance(rows, (list, tuple)):
+        raise ValueError("the run view's active obligations are not a row list")
+    selected: list[dict[str, str]] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            raise ValueError("an obligation row is not a mapping")
+        if row.get("id") == TERMINAL_OBLIGATION_ID or row.get("status") == "satisfied":
+            continue
+        try:
+            selected.append({"id": row["id"], "required": row["required"]})
+        except KeyError as missing:
+            raise ValueError(f"an obligation row lacks {missing!r}") from missing
+    return tuple(selected)
+
+
+def evidence_for(*, run_id: str, snapshot: Any, key: Any) -> dict[str, Any]:
+    """Derive every input of :func:`evidence_document` for the batch a payload names by ``key``
+    from one run snapshot (ADR-0072, PR 10 — the evidence counterpart of
+    :func:`configuration_for`).
+
+    The snapshot must be run-view-shaped (``GetRun``/``RestoreRun``/``ResolveRun`` — the shape the
+    trusted evidence legs assemble): the terminal batch's residual rows come from the run view, and
+    ``core.projection`` reads the snapshot's command. Reused, never rebuilt: the batch the core would
+    admit with this key (``batch_candidates`` — the end-of-pass batch or the terminal consent), the
+    argument row projections the adapter's own dialog builder reads (``project_argument`` — records
+    with their claim text and outcome, the batch's claim rows), and the one residual selection above.
+    A key the core would not admit now is a :class:`ValueError`, so an admission that already checked
+    the key cannot silently render a different batch. The derivation reads only state and evidence:
+    the same document results whether or not the presentation artifact for this batch already exists.
+    """
+    if not isinstance(key, str) or _DIGEST.match(key) is None:
+        raise ValueError("the evidence derivation binds the batch's sha256 key")
+    try:
+        command = snapshot.command["type"]
+    except (AttributeError, KeyError, TypeError) as missing:
+        raise ValueError(f"the snapshot lacks its command: {missing!r}") from missing
+    if command not in RUN_VIEW_COMMANDS:
+        raise ValueError(f"the evidence derivation is run-view-shaped, not {command!r}")
+    batch = next((b for b in batch_candidates(snapshot, derive_claims(snapshot))
+                  if b.get("key") == key), None)
+    if batch is None:
+        raise ValueError("the key is not a batch the core would admit now")
+    if batch.get("terminal") is not None:
+        return evidence_document(run_id=run_id, batch=batch, records={}, claims={},
+                                 residuals=terminal_residuals(project_runview(snapshot)))
+    argument = project_argument(snapshot)
+    records = {row["artifact_id"]: row for row in argument.get("artifacts", ())
+               if isinstance(row, Mapping) and row.get("kind") == "research"}
+    claims = {row["claim_id"]: row for row in argument.get("claims", ())}
+    return evidence_document(run_id=run_id, batch=batch, records=records, claims=claims)
+
+
+def evidence_pair(*, run_id: str, snapshot: Any, key: Any) -> dict[str, str] | None:
+    """The core-rendered ``document: {text, digest}`` pair (ADR-0072 step 1) for the evidence batch
+    a payload names by ``key`` — the pair a private ``evidence.document_mismatch`` refusal carries,
+    so no adapter ever re-renders a dict. ``None`` exactly where the key names no batch the core
+    would admit now (a refusal that never carried a document must not invent one); a batch that
+    exists and fails to build refuses as :class:`ValueError`, never as ``None``.
+    """
+    if not isinstance(key, str) or key not in {
+        batch["key"] for batch in batch_candidates(snapshot, derive_claims(snapshot))
+    }:
+        return None
+    document = evidence_for(run_id=run_id, snapshot=snapshot, key=key)
+    data = render(document)
+    return {"text": data.decode("utf-8"), "digest": digest(data)}

@@ -205,6 +205,13 @@
             ]
           },
           {
+            "code": "evidence.document_mismatch",
+            "sections": [
+              "evidence/research",
+              "terminal"
+            ]
+          },
+          {
             "code": "budget.exhausted",
             "sections": [
               "budget"

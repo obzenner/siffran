@@ -152,6 +152,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_author_view
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_hitl_document
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_evidence_document_binding
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)

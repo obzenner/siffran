@@ -1348,6 +1348,24 @@
       "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual.",
       "ended_message": "Supporting and refuting research conflicted when the run stopped."
     },
+    "evidence.document_mismatch": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "human.confirm_evidence",
+        "residual.accept"
+      ],
+      "sections": [
+        "evidence/research",
+        "terminal"
+      ],
+      "message": "The named document does not match this batch's. Write the document the refusal carries and show the same batch again.",
+      "ended_message": "A document named for this batch could not be verified when the run stopped.",
+      "disposition": "host_recovery"
+    },
     "budget.exhausted": {
       "params": {
         "type": "object",

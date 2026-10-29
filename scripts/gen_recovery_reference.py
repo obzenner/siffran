@@ -74,6 +74,7 @@ AUTHOR_GUIDANCE = {
     "governance.budget_invalid": "A proposed ceiling is below what is already used: resubmit `configure_run` with ceilings at least equal to usage.",
     "governance.stale_proposal": "The decision was bound to an older revision: read the run, then resubmit the current proposal for a new decision.",
     "governance.document_mismatch": "The host's dialog named a configuration document that no longer matches the run's state: resubmit a task-sized configure_run so the host shows you the current one; a refused present spent nothing, and a re-present after a refused decision costs one review unit (3 per configuration).",
+    "evidence.document_mismatch": "The evidence presentation, its confirmation or the consent to end the run named a different document than this batch renders: the refusal is the fetch — write the document it carries, show it, and present the same batch again with its digest (nothing was spent); a confirmation repeats the digest its own presentation recorded.",
     "governance.receipt_replay": "A superseded or conflicting decision was replayed and changed nothing: read the current proposal and act on that.",
     "governance.interaction_limit": "The dialog allowance is spent (3 per configuration, 128 per run): stop honestly or start a fresh run.",
     "governance.decision_conflict": "The submitted control and edited fields disagreed and nothing was approved: use one explicit decision path.",

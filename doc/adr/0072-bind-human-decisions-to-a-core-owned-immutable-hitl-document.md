@@ -106,7 +106,7 @@ fixtures and `shared-defs.json` it is not vendored into the plugin today). Two k
   **`outcome`** (supporting or refuting — a human cannot judge a quote without knowing what it claims to
   be), the "why no deterministic check" reason where one exists, every claim with its text, and the
   terminal consent's status and unresolved residue
-  (`plugins/empirica/adapters/confirmation.py:118-155`, `plugins/empirica/core/evaluation.py:1374-1480`).
+  (`plugins/empirica/adapters/confirmation.py:118-155`, `plugins/empirica/core/evaluation.py:1443-1525`).
 
 Which rows count as the terminal residual content is **selected by one core function** from a GetRun-shaped
 snapshot — the run view's active obligation rows that are not satisfied, excluding the terminal consent row
@@ -125,7 +125,7 @@ a re-present is admitted, `core/governance.py:189`): the most common edit — a 
 first approval — goes through `revise`, which leaves the state `pending` whenever `approval_kind` is `None`
 (`core/governance.py:137-138`); an author revision after the first approval yields `revision_pending` with
 no human amendment (an author `configure_run` goes through the same `revise`,
-`core/evaluation.py:1607-1622`); the adapters themselves already show the review
+`core/evaluation.py:1641-1656`); the adapters themselves already show the review
 form whenever no prior dialog exists (`adapters/governance.py:233-234`). The document still carries
 `governance_state` as information, covering `pending`, `revision_pending` and `rejected`.
 
@@ -191,12 +191,17 @@ The order is fixed, and spending follows the successful check, never the reverse
    private `governance_context` presentation result carries `document: {text, digest}` beside the private
    dialog it already carries (`application/v2.py:114-122`, `governancePresentation`,
    `contracts/empirica/v2/shared-defs.json:383-391`). For evidence, the carrier is the private
-   `trusted_evidence_presentation` response (`application/v2.py:141-150`,
-   `application/transaction.py:388`): a call whose `document_digest` is absent or wrong is refused with
-   `evidence.document_mismatch`, nothing is spent, and the refusal's private result carries
-   `document: {text, digest}` for the batch named by `key` — so the refusal **is** the fetch: the adapter
-   writes the document it names and repeats the call (the leg already retries once,
-   `adapters/confirmation.py:204-217`). The public `GetRun` run view, `GetArgument` and the evaluation
+   `trusted_evidence_presentation` **and** `trusted_evidence_confirmation` responses
+   (`application/v2.py:132-150`, `application/transaction.py:384-390`). At this stage (PR 10, the expand
+   step) the member is staged so today's adapters keep working: **absent** keeps today's behaviour
+   exactly (the legacy adapters of the PRs before the binding, removed by the contract step below);
+   **`null` is the explicit fetch** and **a wrong digest a mismatched call** — both refused with
+   `evidence.document_mismatch`, nothing spent, nothing admitted, and the refusal's private result
+   carries `document: {text, digest}` for the batch named by `key` (a confirmation's key is its own
+   presentation's) — so the refusal **is** the fetch: the adapter writes the document it names and
+   repeats the call with the digest (PR 11/12's adapters; the presentation leg already retries once,
+   `adapters/confirmation.py:204-217`). A confirmation must also name the digest its own presentation
+   recorded — a presentation that recorded none (legacy) confirms only the legacy way. The public `GetRun` run view, `GetArgument` and the evaluation
    results never carry the document: its content is not secret, but its digest and path have no reason to
    become an author-facing contract.
 2. **Write** — the adapter writes the document bytes to
@@ -242,7 +247,11 @@ written as `empirica.run/3` classify as corrupt, exactly as `empirica.run/2` doe
 (`plugins/empirica/tests/test_run4_binding.py:300-307`). The public wire keeps its axis `empirica/v2`; the
 requests gain `document_digest` — on the governance decision payload, the evidence presentation payload and
 the evidence confirmation payload (today required: `run_id`, `receipt_id` and `proposal_digest`/`key`/
-`decisions` respectively, `contracts/empirica/v2/request.schema.json:1278,1571,1662`) — and it becomes
+`decisions` respectively, `contracts/empirica/v2/request.schema.json:1278,1571,1662`). It is **optional and
+staged** (its value is `null` or `sha256:<64hex>`, PRs 07/10): absent keeps today's behaviour exactly and is
+checked whenever present; `null` is the explicit fetch and a wrong value a mismatch. The contract step
+(PR 13) makes the member required as `string | null`, so "absent" disappears and step 1's fetch sentence
+becomes literally true — and it becomes
 required for every `host_ui` receipt and every human evidence record, absent for `auto` (the same discipline
 `presentation_fingerprint` already has: `None` if and only if `auto`,
 `plugins/empirica/core/governance.py:353-356`). Because the payloads change, the public-tool schemas and the

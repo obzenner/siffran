@@ -246,6 +246,17 @@
         "graph.record"
       ]
     },
+    "evidence.document_mismatch": {
+      "message": "The named document does not match this batch's. Write the document the refusal carries and show the same batch again.",
+      "sections": [
+        "evidence/research",
+        "terminal"
+      ],
+      "next_actions": [
+        "human.confirm_evidence",
+        "residual.accept"
+      ]
+    },
     "host.subagents_missing": {
       "message": "No external pi-subagents `subagent` tool is active, so no independent audit can launch. Install one supported pi-subagents runtime and restart the host, or accept the residual.",
       "sections": [

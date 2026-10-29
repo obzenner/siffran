@@ -336,6 +336,23 @@ def validate_private_governance_response(response: object) -> bool:
     return True
 
 
+def validate_private_evidence_response(response: object) -> bool:
+    """Validate one application-private evidence response against the private-response
+    definition (public result, plus the ``document`` pair only an ``evidence.document_mismatch``
+    refusal may carry — ADR-0072, PR 10).
+
+    The public response schema has no ``document`` member anywhere, so a private evidence
+    refusal is validated here, never on the public wire; any other result carrying one is
+    invalid. A mismatch lets the caller fail closed with the same Fault shape ``dispatch_request``
+    produces.
+    """
+    try:
+        schema_validator("response", "privateEvidenceResponse").validate(response)
+    except (jsonschema.ValidationError, TypeError):
+        return False
+    return True
+
+
 def validate_trusted_payload(name: str, payload: object) -> bool:
     """Validate one adapter-private payload against the canonical closed schema."""
     if name not in _REQUEST_SCHEMA.get("$defs", {}):

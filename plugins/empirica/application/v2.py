@@ -136,7 +136,10 @@ class _Service:
             return terminal
         if not self._valid_trusted("evidenceConfirmationPayload", payload):
             return Coordinator._fault("trusted-confirmation", "invalid_request")
-        return self._coordinator.trusted_evidence_confirmation(run_id, payload)
+        response = self._coordinator.trusted_evidence_confirmation(run_id, payload)
+        if not _proto.validate_private_evidence_response(response):
+            return Coordinator._fault("trusted-confirmation", "unavailable")
+        return response
 
     def trusted_evidence_presentation(self, *, run_id, payload) -> dict:
         """Record that the host showed the human the pending batch; one human interaction."""
@@ -145,7 +148,10 @@ class _Service:
             return terminal
         if not self._valid_trusted("evidencePresentationPayload", payload):
             return Coordinator._fault("trusted-presentation", "invalid_request")
-        return self._coordinator.trusted_evidence_presentation(run_id, payload)
+        response = self._coordinator.trusted_evidence_presentation(run_id, payload)
+        if not _proto.validate_private_evidence_response(response):
+            return Coordinator._fault("trusted-presentation", "unavailable")
+        return response
 
     def trusted_human_surface(self, *, run_id, payload) -> dict:
         """Record whether the host can show a human a dialog now; the latest observation counts."""

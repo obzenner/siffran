@@ -786,13 +786,16 @@ class NextActionReachabilityTests(_ServiceHarness):
                 for reason in result.get("reasons", []) or []}
 
     def test_the_evidence_confirmation_directive_belongs_to_the_confirmation_reason_alone(self):
-        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by, the two reasons whose
-        wait is the confirmation batch: ``evidence.confirmation_required`` (evidence waits on a human) and
-        ``governance.terminal_stop_pending`` (a deliberative run's terminal stop waits on the same batch, ADR-0063)."""
+        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by, the three reasons whose
+        subject is the confirmation batch: ``evidence.confirmation_required`` (evidence waits on a human),
+        ``governance.terminal_stop_pending`` (a deliberative run's terminal stop waits on the same batch,
+        ADR-0063), and ``evidence.document_mismatch`` (the ADR-0072 fetch refusal: the recovery is the same
+        mediation over the same batch — write the document the refusal carries and present it again, PR 10)."""
         contract = _proto._PUBLIC_CONTRACT
         listing = {code for code, reason in contract["reasons"].items()
                    if "human.confirm_evidence" in reason.get("next_actions", [])}
-        self.assertEqual(listing, {"evidence.confirmation_required", "governance.terminal_stop_pending"})
+        self.assertEqual(listing, {"evidence.confirmation_required", "governance.terminal_stop_pending",
+                                   "evidence.document_mismatch"})
         confirmations = {d for d, row in contract["next_actions"].items()
                          if row["surface"].get("operation") == "confirmation"}
         self.assertEqual(confirmations, {"human.confirm_evidence"})
