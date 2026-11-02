@@ -466,7 +466,11 @@ class Coordinator:
                     if key is None:
                         shown = confirmation.presentation(snapshot, payload.get("receipt_id"))
                         key = shown["key"] if shown is not None else None
-                    document = hitl.evidence_pair(run_id=run_id, snapshot=snapshot, key=key)
+                    # m10 (review 2): the fetch renders with the snapshot's own run id, the same
+                    # value the recompute in ``core.evaluation`` uses — the two are equal only
+                    # because ``decode_handle`` is canonical, so the one source of the fact is the
+                    # snapshot, never the caller's handle spelling.
+                    document = hitl.evidence_pair(run_id=snapshot.run_id, snapshot=snapshot, key=key)
                     if document is not None:
                         response["result"]["document"] = document
                 return response

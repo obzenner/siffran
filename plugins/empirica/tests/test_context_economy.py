@@ -786,19 +786,28 @@ class NextActionReachabilityTests(_ServiceHarness):
                 for reason in result.get("reasons", []) or []}
 
     def test_the_evidence_confirmation_directive_belongs_to_the_confirmation_reason_alone(self):
-        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by, the three reasons whose
-        subject is the confirmation batch: ``evidence.confirmation_required`` (evidence waits on a human),
+        """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by, the two reasons whose
+        subject is an open human batch: ``evidence.confirmation_required`` (evidence waits on a human) and
         ``governance.terminal_stop_pending`` (a deliberative run's terminal stop waits on the same batch,
-        ADR-0063), and ``evidence.document_mismatch`` (the ADR-0072 fetch refusal: the recovery is the same
-        mediation over the same batch — write the document the refusal carries and present it again, PR 10)."""
+        ADR-0063). ``evidence.document_mismatch`` no longer lists it (review-2 m4/7b): the reason's recovery
+        is the author's lever that re-presents — ``convergence.report`` first, ``residual.accept`` second —
+        because a mismatched confirmation is rescued only by a fresh showing of the same batch, never
+        by repeating the confirm call the stale receipt names."""
         contract = _proto._PUBLIC_CONTRACT
         listing = {code for code, reason in contract["reasons"].items()
                    if "human.confirm_evidence" in reason.get("next_actions", [])}
-        self.assertEqual(listing, {"evidence.confirmation_required", "governance.terminal_stop_pending",
-                                   "evidence.document_mismatch"})
+        self.assertEqual(listing, {"evidence.confirmation_required", "governance.terminal_stop_pending"})
         confirmations = {d for d, row in contract["next_actions"].items()
                          if row["surface"].get("operation") == "confirmation"}
         self.assertEqual(confirmations, {"human.confirm_evidence"})
+
+    def test_a_document_mismatch_routes_the_author_to_the_fresh_showing_first(self):
+        """``evidence.document_mismatch`` is model-facing despite its ``host_recovery`` disposition, so its
+        next actions lead with the author action that re-presents (``convergence.report``) and keep the honest
+        stop (``residual.accept``) second — never the human-step ``human.confirm_evidence``, which names a
+        call the host makes, not a recovery the author can follow (review-2 m4, 7b)."""
+        row = _proto._PUBLIC_CONTRACT["reasons"]["evidence.document_mismatch"]
+        self.assertEqual(tuple(row["next_actions"]), ("convergence.report", "residual.accept"))
 
     def test_a_needs_decision_claim_emits_the_one_human_batch_reason(self):
         """A needs-decision claim is not a reason of its own: it is part of the one human batch, so the core

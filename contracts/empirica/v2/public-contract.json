@@ -1355,14 +1355,14 @@
         "properties": {}
       },
       "next_actions": [
-        "human.confirm_evidence",
+        "convergence.report",
         "residual.accept"
       ],
       "sections": [
         "evidence/research",
         "terminal"
       ],
-      "message": "The named document does not match this batch's. Write the document the refusal carries and show the same batch again.",
+      "message": "The named document no longer matches this batch; report again to have the batch shown again, or stop with the residual.",
       "ended_message": "A document named for this batch could not be verified when the run stopped.",
       "disposition": "host_recovery"
     },

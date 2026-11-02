@@ -247,13 +247,13 @@
       ]
     },
     "evidence.document_mismatch": {
-      "message": "The named document does not match this batch's. Write the document the refusal carries and show the same batch again.",
+      "message": "The named document no longer matches this batch; report again to have the batch shown again, or stop with the residual.",
       "sections": [
         "evidence/research",
         "terminal"
       ],
       "next_actions": [
-        "human.confirm_evidence",
+        "convergence.report",
         "residual.accept"
       ]
     },
