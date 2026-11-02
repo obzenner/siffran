@@ -1,9 +1,12 @@
 """The Pi private bridge binds the configuration document before the host shows it (ADR-0072).
 
-PR 09: ``private_bridge._governance_context`` is the one document writer for Pi. The private
-answer it returns to the adapter replaces the core's ``{text, digest}`` pair with the written
-file's identity — ``{digest, path, priors}`` — so the Pi transport never carries document bytes
-and the human opens the file at its absolute path. A pair that cannot be bound (malformed, digest
+PR 09: ``private_bridge._governance_context`` is the one document writer for Pi — and, since
+the review-2 m2 fix, only the mediator's own refresh (a raw ``bind_document: true``) qualifies;
+a plain refresh binds and writes nothing. The private answer it returns to the adapter replaces
+the core's ``{text, digest}`` pair with the written file's identity —
+``{digest, path, priors, question}``, with ``question`` the parsed document's core-derived
+discriminator (M1, review 2) — so the Pi transport never carries document bytes and the human
+opens the file at its absolute path. A pair that cannot be bound (malformed, digest
 inconsistent, storage refused) loses its document and gains ``document_unavailable: true`` so the
 adapter refuses ``governance.approval_unavailable`` before any present.
 """
@@ -82,7 +85,7 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
     def test_the_context_answer_binds_the_written_document_without_its_text(self):
         """The bridge verifies the core's rendered pair, writes it once beside the run, and hands
         the adapter the file's identity — never the bytes. Binding spends nothing."""
-        response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id},
+        response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id, "bind_document": True},
                                                       copy.deepcopy(self.context))
         presentation = response["result"]["presentation"]
         document = presentation["document"]
@@ -90,6 +93,10 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         self.assertRegex(document["digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertTrue(document["path"].startswith(str(self.machine_home)))
         self.assertTrue(Path(document["path"]).is_absolute())
+        # M1 (review 2): the answer also carries the parsed document's core-derived question —
+        # the discriminator the TypeScript mediation chooses the dialog from, never an
+        # adapter flag
+        self.assertEqual(document["question"], "approve")
         self.assertNotIn("document_unavailable", presentation)
         # the file was written exactly once, with the core's own bytes, read-only
         data = Path(document["path"]).read_bytes()
@@ -97,10 +104,25 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(os.stat(document["path"]).st_mode), 0o444)
         self.assertEqual(len(self._stored_receipts()), 0, "binding a document spends nothing")
 
+    def test_a_plain_refresh_carries_no_document_and_writes_nothing(self):
+        """m2 (review 2): only the mediator's own refresh (``bind_document: true``) binds.
+        A plain refresh — the one the TypeScript adapter runs in front of every tool_call
+        and session event — receives the answer with no document at all, marks nothing
+        unavailable, and writes nothing under the machine home. Binding spends nothing."""
+        response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id},
+                                                      copy.deepcopy(self.context))
+        presentation = response["result"]["presentation"]
+        self.assertNotIn("document", presentation)
+        self.assertNotIn("document_unavailable", presentation,
+                         "a plain refresh is not a refusal: nothing was asked of the writer")
+        self.assertEqual(list(self.machine_home.rglob("hitl/*.json")), [],
+                         "a plain refresh writes no document")
+        self.assertEqual(len(self._stored_receipts()), 0)
+
     def test_a_confirm_document_carries_the_core_owned_priors(self):
         """An amendment document binds too, and its priors are read out of the written document's
         own amendment block — the run/4 superseded ceilings, never recomputed by the host."""
-        answer = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id},
+        answer = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id, "bind_document": True},
                                                     copy.deepcopy(self.context))
         g = answer["result"]["run"]["governance"]
         envelope = {"run_id": self.run_id, "receipt_id": "r" * 32,
@@ -113,12 +135,13 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
             "action": "approve",
             "configuration": {"budgets": {"max_passes": 6, "max_spawns": 1, "max_audit_spawns": 2}}}})["result"]
         self.assertEqual(amended["run"]["governance"]["plan_revision"], g["plan_revision"] + 1)
-        response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id},
+        response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id, "bind_document": True},
                                                       copy.deepcopy(self.context))
         presentation = response["result"]["presentation"]
         self.assertNotIn("document_unavailable", presentation)
         document = presentation["document"]
         self.assertEqual(document["priors"], {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2})
+        self.assertEqual(document["question"], "confirm_amendment")
         # the priors are the record's own: read the written document and compare its amendment
         written = json.loads(Path(document["path"]).read_bytes())
         self.assertEqual(written["question"], "confirm_amendment")
@@ -137,7 +160,7 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
             return response
         real_context = bridge.trusted_governance_context
         with patch.object(bridge, "trusted_governance_context", forged):
-            response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id},
+            response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id, "bind_document": True},
                                                           copy.deepcopy(self.context))
         presentation = response["result"]["presentation"]
         self.assertNotIn("document", presentation)
@@ -157,7 +180,7 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         # the bridge loads its sidecar store lazily inside the writer, so the patch pins the
         # class where the function imports it from
         with patch("adapters.state.hitl.HitlDocuments", Broken):
-            response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id},
+            response = private_bridge._governance_context(PI_PROFILE, {"run_id": self.run_id, "bind_document": True},
                                                           copy.deepcopy(self.context))
         presentation = response["result"]["presentation"]
         self.assertNotIn("document", presentation)

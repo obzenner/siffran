@@ -7,18 +7,30 @@ import type { Dialog, DialogState } from "../plugins/empirica/adapters/pi/src/di
 const root = resolve(import.meta.dirname, "..");
 const fixture = JSON.parse(readFileSync(resolve(root, "plugins/empirica/tests/fixtures/governance-dialog-golden.json"), "utf8")) as {
   dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog; hostile_rationale: Dialog };
+  review: { message: string };
 };
 const out = resolve(root, "plugins/empirica/adapters/pi/test/dialog-view-golden");
 const theme = { accent: (text: string) => text, muted: (text: string) => text,
   warning: (text: string) => text };
 const check = process.argv.includes("--check");
 
-/** The canonical bound document (ADR-0072 Q4): the short digest and the exempt absolute path —
- * pinned here with the same identity the shared golden and the Python bridge writer derive. */
-const BRIDGE_HEX = "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789";
-const BRIDGE_HOME = "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl";
-const DOCUMENT = { digest: `sha256:${BRIDGE_HEX}`, path: `${BRIDGE_HOME}/${BRIDGE_HEX}.json`,
-  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 } };
+/** The canonical bound document (ADR-0072 Q4): the short digest line and the exempt absolute
+ * path, plus the core-owned priors and the core-derived `question` (M1, review 2). Derived
+ * from the shared golden's review message (M3, review 2) so the path the Pi goldens wrap is
+ * exactly the *real* sidecar layout the round-08 Claude fixture pins —
+ * `<home>/projects/s256-<64 hex>/runs/s256-<64 hex>/gen-<n>/hitl/<64 hex>.json`, ~274
+ * characters, never again a made-up short one: if the Python generator re-renders its home,
+ * the Pi goldens follow at the next regeneration and the check mode catches the drift. */
+const reviewMessage = fixture.review.message;
+const digestAt = reviewMessage.split("\n").findIndex(line => line.startsWith("Document: "));
+if (digestAt < 0) throw new Error("the fixture's review message names no document");
+const REAL_PATH = reviewMessage.split("\n")[digestAt + 1] as string;
+if (REAL_PATH.length <= 250)
+  throw new Error(`the fixture path must be the real layout, got ${REAL_PATH.length} characters`);
+const HEX_OF_PATH = (REAL_PATH.split("/").pop() ?? "").replace(/\.json$/, "");
+const DOCUMENT = { digest: `sha256:${HEX_OF_PATH}`, path: REAL_PATH,
+  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 },
+  question: "approve" } as const;
 
 function screen(dialog: Dialog, state: DialogState, width: number,
                 confirmation = false): string {

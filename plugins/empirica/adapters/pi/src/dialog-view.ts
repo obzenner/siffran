@@ -110,13 +110,15 @@ const INDENT = "      ";
 const SHORT_BODY = 12; // the ADR-0072 Q4 short digest: `sha256:` plus twelve hex
 
 /** The bound document the Python private bridge wrote (ADR-0072, PR 09): its full digest, the
- * file's absolute path — the one copy-paste surface — and the core-owned amendment priors the
- * confirm form's ``(was …)`` values come from (never recomputed by the host). No text crosses
- * the Pi transport; the human opens the file. */
+ * file's absolute path — the one copy-paste surface — the core-owned amendment priors the
+ * confirm form's ``(was …)`` values come from (never recomputed by the host), and the parsed
+ * document's core-derived ``question`` (M1, review 2) that alone chooses which dialog is
+ * shown. No text crosses the Pi transport; the human opens the file. */
 export interface BoundDocument {
   digest: string;
   path: string;
   priors: Record<string, number> | null;
+  question: "approve" | "confirm_amendment";
 }
 export interface RenderOptions { confirmation: boolean; timeoutMs: number; document?: BoundDocument }
 
@@ -147,12 +149,33 @@ function pointerLines(dialog: Dialog, width: number): string[] {
 }
 
 /** ADR-0072 Q4's bound lines: the short digest, then the document's absolute path. Wider than
-the screen, the path wraps — it is never truncated or cut; a cut path is a corrupted paste. */
+the screen the path wraps — never truncated or cut — because a cut path is a corrupted paste.
+M3 (review 2): the realistic sidecar path is ~276 characters (`<home>/projects/s256-<64 hex>/
+runs/s256-<64 hex>/gen-<n>/hitl/<64 hex>.json`), so it wraps at every realistic width, and it
+breaks **only at "/" boundaries**: every rendered fragment is a valid path piece and the joins
+rebuild the path exactly, the 69-character file name owns the last line whole so the digest's
+hex is never split, and no segment is ever cut while it fits the width. A single segment wider
+than the dialog width (the 70-column `s256-<64 hex>` directories below width 70) is cut by
+`renderLines`' global width rule — chosen over overflow, because every rendered line fits the
+width (at the widths the dialog tests pin, 80 and above, nothing is cut at all). */
 function documentLines(document: BoundDocument | undefined, width: number): string[] {
   if (!document) return [];
   const short = `Document: ${document.digest.slice(0, "sha256:".length + SHORT_BODY)}`;
-  const lines = wrapTextWithAnsi(short, Math.max(10, width));
-  return [...lines, ...wrapTextWithAnsi(document.path, Math.max(10, width))];
+  const head = wrapTextWithAnsi(short, Math.max(10, width));
+  const segments = document.path.match(/\/[^/]*/g) ?? [];
+  const path: string[] = [];
+  let line = "";
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index] as string;
+    const isFileName = index === segments.length - 1;
+    if (line !== "" && (isFileName || visibleWidth(line) + visibleWidth(segment) > width)) {
+      path.push(line);
+      line = "";
+    }
+    line += segment;
+  }
+  if (line !== "") path.push(line);
+  return [...head, ...path];
 }
 
 /** The amendment warning, in full, in the confirm view only. */

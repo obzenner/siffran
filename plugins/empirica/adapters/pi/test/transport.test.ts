@@ -335,3 +335,30 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
   for (const [operation, value] of rejected)
     assert.throws(() => assertPrivateResponse(operation, value), /response is invalid/, operation);
 });
+
+test("the governance presentation document names its question and never carries text", async () => {
+  const { assertPrivateResponse } = await import("../src/private-transport.ts");
+  const envelope = (document: unknown) => structuredClone({
+    protocol: "empirica/v2", request_id: "trusted-governance",
+    result: { type: "Allow", run: { id: "r" },
+      presentation: { dialog: {}, scope: null, document } } });
+  const goodDigest = "sha256:" + "a".repeat(64);
+  const goodPath = "/home/projects/s256-" + "a".repeat(64) + "/runs/s256-" + "b".repeat(64)
+    + "/gen-1/hitl/" + "c".repeat(64) + ".json";
+  // m11 (review 2): the TS never receives the document text — the human opens the file — and
+  // M1: the bound document names the core-derived question that chooses the form (review-2
+  // item 7). Anything else is refused before any mediator reads it.
+  assertPrivateResponse("governance_context", envelope(
+    { digest: goodDigest, path: goodPath, priors: null, question: "approve" }));
+  assertPrivateResponse("governance_context", envelope(
+    { digest: goodDigest, path: goodPath, priors: { max_passes: 8 }, question: "confirm_amendment" }));
+  const rejected = [
+    { digest: goodDigest, path: goodPath, priors: null,
+      question: "approve", text: "{\"question\": \"approve\"}" },
+    { digest: goodDigest, path: goodPath, priors: null },
+    { digest: goodDigest, path: goodPath, priors: null, question: "amend" },
+  ];
+  for (const document of rejected)
+    assert.throws(() => assertPrivateResponse("governance_context", envelope(document)),
+      /response is invalid/, JSON.stringify(document));
+});

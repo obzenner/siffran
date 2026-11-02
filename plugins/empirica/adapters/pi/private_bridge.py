@@ -47,22 +47,27 @@ def _classify(_profile: str, _raw: dict, payload: dict):
 _FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 
 
-def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | None] | None:
+def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | None, str] | None:
     """Write-first (ADR-0072, PR 09): verify the core's rendered ``{text, digest}`` pair, publish
     its bytes once through the sidecar store beside the run's own record, and return
-    ``(digest, absolute path, priors)``. ``priors`` is the document's own amendment block read
-    from the verified bytes — never recomputed — so the confirm form shows the record's ``was``
-    values, not a host-held dialog. ``None`` means the mediation must refuse: the pair was
-    absent, malformed, digest-inconsistent, or the storage refused the write."""
+    ``(digest, absolute path, priors, question)``. ``priors`` is the document's own amendment
+    block read from the verified bytes — never recomputed — so the confirm form shows the
+    record's ``was`` values, not a host-held dialog. ``question`` is the parsed document's
+    core-derived discriminator (M1, review 2) — ``approve`` or ``confirm_amendment`` — the one
+    fact the TypeScript mediation chooses which dialog to show from; anything else refuses.
+    ``None`` means the mediation must refuse: the pair was absent, malformed, digest-
+    inconsistent, its question not one of the two, or the storage refused the write."""
     if not isinstance(document, dict):
         return None
     text, digest = document.get("text"), document.get("digest")
     if not isinstance(text, str) or not isinstance(digest, str) or _FULL_DIGEST.fullmatch(digest) is None:
         return None
-    # Lazy on purpose: the sidecar store chain is the document writer's cost, paid only by the
-    # operation that writes (governance_context) and not by the twelve other private operations
-    # this one-shot process shape also serves, whose startup stays exactly forms-08's
-    # (PR 09 measurement: whole-private-bridge import ~95 ms before and after this change).
+    # Lazy on purpose: the sidecar store chain binds only the mediator's own refresh — the raw
+    # ``bind_document: true`` request (m2, review 2) — so its import cost is paid by the one
+    # operation that writes, never by the plain per-tool_call refreshes or the twelve other
+    # private operations this one-shot process shape also serves, whose startup stays
+    # exactly forms-08's (PR 09 measurement: whole-private-bridge import ~95 ms before and
+    # after this change).
     from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments
     from application.location import decode_handle
     from core import hitl as core_hitl
@@ -76,14 +81,18 @@ def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | 
         path, written = HitlDocuments().write(key, data)
         if written != digest:
             return None
-        amendment = json.loads(text).get("amendment")
+        parsed = json.loads(text)
+        question = parsed.get("question")
+        if question not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT):
+            return None
+        amendment = parsed.get("amendment")
         priors = None
         if isinstance(amendment, dict) and isinstance(amendment.get("budgets"), dict):
             priors = {name: row.get("was") for name, row in amendment["budgets"].items()
                       if isinstance(row, dict) and isinstance(row.get("was"), int)}
     except (DocumentMismatch, HardLinkUnsupported, OSError, ValueError):
         return None
-    return digest, path, priors
+    return digest, path, priors, question
 
 
 def _governance_context(profile: str, raw: dict, payload: dict):
@@ -95,6 +104,14 @@ def _governance_context(profile: str, raw: dict, payload: dict):
     document = presentation.get("document")
     if document is None:
         return response  # a state that waits on no human carries no document; that is normal
+    if raw.get("bind_document") is not True:
+        # (m2, review 2) A plain refresh — the one the TypeScript adapter runs in front of every
+        # tool_call, model_select and session event while the human is deciding — never binds:
+        # it is not the mediator's own refresh, no dialog is being shown from its answer, and
+        # the judgment an unbound document would serve is not the human's. Strip the pair and
+        # write nothing; the mediator binds when it actually mediates (bind_document: true).
+        presentation.pop("document", None)
+        return response
     bound = _bind_document(raw["run_id"], document)
     if bound is None:
         # The pair could not be proven or published. Never hand the bytes to the transport and
@@ -104,8 +121,9 @@ def _governance_context(profile: str, raw: dict, payload: dict):
         presentation["document_unavailable"] = True
         presentation.pop("document", None)
         return response
-    digest, path, priors = bound
-    presentation["document"] = {"digest": digest, "path": str(path), "priors": priors}
+    digest, path, priors, question = bound
+    presentation["document"] = {"digest": digest, "path": str(path), "priors": priors,
+                                 "question": question}
     return response
 
 

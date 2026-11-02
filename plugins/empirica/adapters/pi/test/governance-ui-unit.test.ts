@@ -11,19 +11,30 @@ import { fakeCtx } from "./fakes.ts";
 
 const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json", import.meta.url), "utf8")) as {
   dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog; hostile_rationale: Dialog };
+  review: { message: string };
 };
 const reviewDialog = fixture.dialogs.review;
 const theme = { accent: (x: string) => x, muted: (x: string) => x, warning: (x: string) => x };
 const ENTER = "\r", DOWN = "\x1b[B", RIGHT = "\x1b[C", BACKSPACE = "\x7f", ESC = "\x1b[27u";
 
-/** The canonical bound document (ADR-0072 Q4 shape — PR 09: `digest`, absolute `path`, and the
- * core-owned amendment `priors`) exactly as the Python private bridge returns it. PR 09's
- * TypeScript carries no document text; this is the shape, pinned with the same identities the
- * shared and Pi goldens use. */
-const BRIDGE_HEX = "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789";
-const BRIDGE_HOME = "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b/gen-1/hitl";
-const DOCUMENT = { digest: `sha256:${BRIDGE_HEX}`, path: `${BRIDGE_HOME}/${BRIDGE_HEX}.json`,
-  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 } } as const;
+/** The canonical bound document exactly as the Python private bridge returns it: the full
+ * `digest`, the file's absolute `path`, the core-owned amendment `priors`, and the
+ * core-derived `question` discriminator (M1, review 2) that chooses which dialog is shown.
+ * PR 09's TypeScript carries no document text; the human opens the file.
+ *
+ * The path comes from the shared golden fixture's review message (M3, review 2): the
+ * round-08 Claude fixture pins the *real* sidecar layout —
+ * `<home>/projects/s256-<64 hex>/runs/s256-<64 hex>/gen-<n>/hitl/<64 hex>.json` — so the
+ * Pi side can never drift back to a made-up layout without this test noticing. */
+const reviewMessage = fixture.review.message;
+const digestAt = reviewMessage.split("\n").findIndex(line => line.startsWith("Document: "));
+assert.ok(digestAt >= 0, "the fixture's review message names its document");
+const REAL_PATH = reviewMessage.split("\n")[digestAt + 1] as string;
+assert.ok(REAL_PATH.length > 250, `the fixture path is the real layout, got ${REAL_PATH.length}`);
+/** The path's file name is the document's own full digest, minus the `.json`. */
+const HEX_OF_PATH = (REAL_PATH.split("/").pop() ?? "").replace(/\.json$/, "");
+const DOCUMENT = { digest: `sha256:${HEX_OF_PATH}`, path: REAL_PATH,
+  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 }, question: "approve" } as const;
 
 function drive(keys: string[], dialog = reviewDialog, confirmation = false): DialogDecision | undefined {
   let state = initialState(dialog, confirmation);
@@ -129,12 +140,14 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
     }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };
   const run = { id: "run", status: "active", spike_backend: { kind: "spikes_unavailable" }, governance: g };
   const decisions: Array<Record<string, unknown>> = [];
+  const renders: string[][] = [];
   const settings: HarnessSettings = { onPresent() {}, onRefresh() {}, onCustom() {} };
   let refreshes = 0, customCalls = 0;
   const ctx = fakeCtx(); ctx.hasUI = true;
   ctx.ui.custom = async factory => await new Promise(resolve => {
     customCalls++;
     const component = factory({ requestRender() {} }, { fg: (_color, text) => text }, {}, resolve);
+    renders.push(component.render(80));
     settings.onCustom();
     for (const key of keyScripts.shift() ?? []) component.handleInput(key);
   });
@@ -160,8 +173,13 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
     const withPresentation = (request.operation === "governance_decision"
       && (request.payload as { outcome?: string }).outcome === "present")
       || request.operation === "governance_context";
+    // The bound document the core hands back: `approve` until the human amends, then the
+    // amended epoch's `confirm_amendment` — the question, not any adapter flag, picks the
+    // dialog (M1, review 2).
     const document = (request.operation === "governance_context")
-      ? (documentOverride.value ?? DOCUMENT) : undefined;
+      ? (documentOverride.value ?? { ...DOCUMENT,
+          question: g.plan_revision > 0 ? "confirm_amendment" as const : "approve" as const })
+      : undefined;
     return structuredClone({ protocol: "empirica/v2", request_id: "trusted-governance",
       result: { type: "Allow", converged: false, run,
         ...(withPresentation ? { presentation: { dialog, scope: null,
@@ -170,7 +188,7 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
   };
   const documentOverride = { value: undefined as Record<string, unknown> | undefined };
   const marker = { value: false };
-  return { ctx, trusted, decisions, run, g, settings, documentOverride, marker,
+  return { ctx, trusted, decisions, renders, run, g, settings, documentOverride, marker,
     get customCalls() { return customCalls; },
     invoke: (signal?: AbortSignal, deadline?: number) => govern("run", ctx, trusted, signal, undefined, deadline) };
 }
@@ -384,10 +402,17 @@ test("the amendment warning is wrapped in full, never truncated, beside the docu
     const digestLine = lines.findIndex(line => line.startsWith("Document: "));
     assert.ok(digestLine >= 0, `document digest line missing at ${width}`);
     assert.match(lines[digestLine]!, /^Document: sha256:[0-9a-f]{12}$/);
-    const unwrapped = lines.join("").replace(/\n/g, "");
-    assert.ok(unwrapped.includes(DOCUMENT.path), `the whole path survives at ${width}`);
-    assert.ok(!DOCUMENT.path.includes("\u2026") && !lines.some(line => line.includes("\u2026.json")),
-      "the path is never cut short");
+    // M3 (review 2): at every width the path lines break only at "/" boundaries; at widths
+    // where each segment fits (80), joining the fragments rebuilds the exact path and
+    // nothing is cut; below the widest segment (50 cut the 70-column `s256-<64 hex>` also
+    // the file name) the global width rule cuts the oversize line, never the wrap.
+    const pathLines = lines.filter(line => line.startsWith("/"));
+    assert.ok(pathLines.length > 1, `the ~274-character path wraps at ${width}`);
+    if (width >= 70) {
+      assert.equal(pathLines.join(""), DOCUMENT.path, `the whole path survives at ${width}`);
+      assert.ok(!lines.some(line => line.includes("\u2026") && line.startsWith("/")),
+        "a fitting path line is never cut");
+    }
   }
 });
 
@@ -475,4 +500,55 @@ test("the bound document never escapes into a model-facing result", async () => 
   assert.ok(!text.includes(DOCUMENT.digest), "the document's digest name is private to the mediation");
   assert.ok(!text.includes('"document"'), "no private presentation member survives");
   assert.ok(!text.includes("document_unavailable"), "the marker is private to the mediation");
+});
+
+test("the dialog shown follows the bound document's question after a dismissed confirm", async () => {
+  // M1 (review 2), the Pi half: amend 8→6, dismiss the confirm dialog, then mediate again
+  // on the same values (re-proposing them is a no-op revision). The epoch's document still
+  // asks confirm_amendment, so the next dialog is the CONFIRM view — with its (was 8) priors
+  // and the amendment warning — never the editable review view. The document chooses; the
+  // adapter's own recursion flag does not.
+  const h = harness([["6", ...toButtons, ENTER], [ESC], [ESC]]);
+  const first = await h.invoke();
+  assert.equal(first.result.type, "Block");
+  assert.deepEqual(outcomes(h), ["present", "approve", "present", "dismiss"]);
+  assert.equal(h.g.state, "pending");
+  assert.equal(h.g.proposal.budgets.max_passes, 6);
+  const second = await h.invoke();
+  assert.equal(h.customCalls, 3);
+  const confirm = h.renders[2].join("\n");
+  assert.ok(confirm.includes("confirm edited configuration"), confirm);
+  assert.ok(confirm.includes("6 (was 8)"), "the amendment prior is shown");
+  assert.ok(confirm.includes(reviewDialog.amendment_warning), "the amendment warning is shown");
+  assert.ok(!confirm.includes("reviews left"), "the confirm view never counts review capacity");
+  assert.deepEqual(outcomes(h),
+    ["present", "approve", "present", "dismiss", "present", "dismiss"]);
+});
+
+test("the path block wraps only at slash boundaries and gives the file name its own line", () => {
+  // M3 (review 2): the realistic path is ~274 characters and must wrap on every host. The
+  // Pi dialog breaks it only at "/" boundaries — every fragment is a valid path piece, the
+  // 69-character file name owns the last line, and no segment is ever split mid-hex at a
+  // width it fits. At widths below the widest segment ("s256-<64 hex>" is 70 columns, wider
+  // than 50) the chosen rule is the dialog's own: a line that cannot fit the width is cut by
+  // the global truncation, never let overflow — `renderLines` already truncates every line.
+  const base = { confirmation: false, timeoutMs: 900_000, document: DOCUMENT };
+  for (const width of [80, 50]) {
+    const lines = renderLines(reviewDialog, initialState(reviewDialog), width, theme, base);
+    assert.ok(lines.every(line => visibleWidth(line) <= width), `every line fits ${width}`);
+    const digestAt = lines.findIndex(line => line.startsWith("Document: "));
+    assert.ok(digestAt >= 0, "the short digest line");
+    const nextBlank = lines.findIndex((line, index) => index > digestAt && line === "");
+    const pathLines = lines.slice(digestAt + 1, nextBlank >= 0 ? nextBlank : lines.length);
+    assert.ok(pathLines.length > 1, `the 274-character path wraps at ${width}`);
+    assert.ok(pathLines.every(line => line.startsWith("/")),
+      "every path fragment starts at a segment boundary");
+    const fileName = "/" + (DOCUMENT.path.split("/").pop() ?? "");
+    if (width >= visibleWidth(fileName)) {
+      assert.equal(pathLines[pathLines.length - 1], fileName,
+        "the file name owns the last line, whole");
+      assert.equal(pathLines.join(""), DOCUMENT.path,
+        "nothing is lost or split joining the fragments back together");
+    }
+  }
 });

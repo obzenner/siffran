@@ -40,6 +40,10 @@ export interface PrivateIngressRequest<Op extends PrivateOperation = PrivateOper
   author?: Record<string, unknown>;
   auditor?: Record<string, unknown>;
   payload?: Record<string, unknown>;
+  /** Raw-level bind flag (m2, review 2): only the mediator's own refresh sets it, and only
+   * then does the Python bridge write the HITL document; a plain refresh requests the
+   * governance context without any document at all. */
+  bind_document?: boolean;
 }
 
 type IdentityResponse = Readonly<{
@@ -104,10 +108,12 @@ const envelope = (value: unknown) => object(value) && value.protocol === "empiri
   && string(value.request_id) && object(value.result);
 
 /** The private governance presentation may carry the bound document the Python bridge wrote
- * (ADR-0072, PR 09: full digest, absolute path, core-owned priors — never text) and, when the
- * pair could not be proven or published, this marker instead. This validator is the transport's
- * sole authority for the shape; an answer whose presentation carries anything else is invalid
- * before any mediator reads it. */
+ * (ADR-0072, PR 09: full digest, absolute path, core-owned priors, and the parsed document's
+ * `question` — `approve` or `confirm_amendment`, the core-derived discriminator (M1, review 2)
+ * that chooses which dialog is shown — never text, and never three `priors` any host may
+ * recompute) and, when the pair could not be proven or published, this marker instead. This
+ * validator is the transport's sole authority for the shape; an answer whose presentation
+ * carries anything else is invalid before any mediator reads it. */
 const GOVERNANCE_DIGEST = /^sha256:[0-9a-f]{64}$/;
 function governanceEnvelope(value: unknown): boolean {
   if (!envelope(value)) return false;
@@ -121,7 +127,9 @@ function governanceEnvelope(value: unknown): boolean {
   if (document === undefined) return true;
   if (!object(document) || typeof document.digest !== "string"
     || !GOVERNANCE_DIGEST.test(document.digest)
-    || typeof document.path !== "string" || !document.path.startsWith("/"))
+    || typeof document.path !== "string" || !document.path.startsWith("/")
+    || (document.question !== "approve" && document.question !== "confirm_amendment")
+    || "text" in document)
     return false;
   const priors = document.priors;
   return priors === undefined || priors === null || (object(priors)

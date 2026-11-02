@@ -5,9 +5,12 @@ detail: in the document
 Written for the original proposal; not regenerated
 for these human-edited values
 Document: sha256:0a1b2c3d4e5f
-/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4
-/r-5e0a91c88f2b/gen-1/hitl/0a1b2c3d4e5f6789abcdef0
-123456789abcdef0123456789abcdef0123456789.json
+/Users/amelia.dvn/.local/share/empirica/projects
+/s256-3f9c2a81b7d45e6c9f0a1b2c3d4e5f673f9c2a81b7d[0m…[0m
+/runs
+/s256-5e0a91c88f2b7d4c6e9a0b1d3f4e52785e0a91c88f2[0m…[0m
+/gen-1/hitl
+/0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789[0m…[0m
 
   Investigation passes  6 (was 8)
     used 0 · allowed 1–1024

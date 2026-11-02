@@ -36,8 +36,10 @@ function presentationOf(response: Response): Presentation | undefined {
 }
 
 /** Validate the bound document exactly as the private response validator does: a full digest
- * and a nonempty absolute path, with core-owned priors the form must never recompute. Anything
- * else is treated as absent, so a malformed pair refuses exactly like a missing one. */
+ * and a nonempty absolute path, with core-owned priors the form must never recompute, and the
+ * parsed document's core-derived ``question`` — ``approve`` or ``confirm_amendment`` —
+ * which alone chooses which dialog is shown (M1, review 2). Anything else is treated as
+ * absent, so a malformed pair refuses exactly like a missing one. */
 function boundDocument(presentation: Presentation | undefined): BoundDocument | undefined {
   const document = !presentation || presentation.document_unavailable === true
     ? undefined : presentation.document;
@@ -49,7 +51,9 @@ function boundDocument(presentation: Presentation | undefined): BoundDocument | 
   if (priors !== null && priors !== undefined
     && (typeof priors !== "object"
       || Object.values(priors).some(prior => typeof prior !== "number"))) return undefined;
-  return { digest, path, priors: priors ?? null };
+  const question = document?.question;
+  if (question !== "approve" && question !== "confirm_amendment") return undefined;
+  return { digest, path, priors: priors ?? null, question };
 }
 
 function stripPresentation(response: Response): Response {
@@ -67,9 +71,14 @@ export function piGovernanceContext(ctx: ExtensionContext): Record<string, unkno
 }
 
 export async function refreshGovernance(runId: string, ctx: ExtensionContext,
-                                        trusted: PrivateIngress): Promise<Response> {
+                                        trusted: PrivateIngress,
+                                        bind = false): Promise<Response> {
+  // (m2, review 2) Only the mediator's own refresh binds the HITL document: the raw-level
+  // ``bind_document`` flag makes the Python bridge write the decision document an actual
+  // present will name. A plain refresh — the one in front of every tool_call, model_select
+  // and session event — carries no document and writes none.
   const result = await trusted({ operation: "governance_context", run_id: runId,
-                                payload: piGovernanceContext(ctx) });
+    bind_document: bind || undefined, payload: piGovernanceContext(ctx) });
   assertResponse(result, "trusted-governance");
   return result;
 }
@@ -207,7 +216,7 @@ export async function govern(runId: string, ctx: ExtensionContext, trusted: Priv
                              signal?: AbortSignal, confirmation?: { revision: number; digest: string },
                              deadline = Date.now() + governanceTimeout(), fallback?: Response): Promise<Response> {
   let response: Response;
-  try { response = await refreshGovernance(runId, ctx, trusted); }
+  try { response = await refreshGovernance(runId, ctx, trusted, true); }
   catch { return fallback && "run" in fallback.result ? stripPresentation(unavailable(fallback)) : closedFault(); }
   try { return stripPresentation(await mediateGovernance(response, runId, ctx, trusted, signal, confirmation, deadline)); }
   catch { return stripPresentation("run" in response.result ? unavailable(response) : response); }
@@ -255,7 +264,13 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   if (presented.result.type !== "Allow" || !("run" in presented.result)) return presented;
   const dialog = presentationOf(presented)?.dialog;
   if (!dialog) return dismiss();
-  const selected = await showDialog(ctx, dialog, deadline, Boolean(confirmation), signal, bound);
+  // M1 (review 2), mirroring round 08's Claude fix: the bound document's core-derived
+  // ``question`` chooses which dialog the human answers — `confirm_amendment` shows the
+  // buttons-only confirm view with the document's (was …) priors, `approve` the editable
+  // review view — never the adapter's own recursion flag. The flag survives only as the
+  // re-entry guard (the stale-proposal check above and the recursion below).
+  const confirm = bound !== undefined && bound.question === "confirm_amendment";
+  const selected = await showDialog(ctx, dialog, deadline, confirm, signal, bound);
   if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return dismiss();
   const action = selected.type === "reject" ? "reject" : "approve";
   const configuration = selected.type === "approve" ? selected.configuration
@@ -271,7 +286,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   const next = "run" in admitted.result ? admitted.result.run?.governance as Governance | undefined : undefined;
   const revised = next && next.plan_revision !== g.plan_revision;
   if (!confirmation && action === "approve" && admitted.result.type === "Allow" && revised) {
-    const fresh = await refreshGovernance(runId, ctx, trusted);
+    const fresh = await refreshGovernance(runId, ctx, trusted, true);
     return mediateGovernance(fresh, runId, ctx, trusted, signal,
       { revision: next.plan_revision, digest: next.proposal_digest }, deadline);
   }
