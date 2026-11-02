@@ -272,7 +272,8 @@ class MediatorTests(MediatorFixture):
                   "source_kind": "web", "source_ref": URL, "quote": "q", "class": "retrievable",
                   "title": "t1", "description": "d1", "note_title": "n1"},
                  {"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t2", "description": "d2", "note_title": "n2"}]
-        message, schema = confirmation.form(items, 900)
+        document = {"digest": "sha256:" + "a" * 64, "path": "/machine/projects/p/runs/r/gen-0/hitl/" + "a" * 64 + ".json"}
+        message, schema = confirmation.form(items, 900, document)
         self.assertEqual(set(schema["properties"]), {"d1", "n1", "d2", "n2"})
         for key, prop in schema["properties"].items():
             self.assertEqual(prop["type"], "string", key)
@@ -282,14 +283,20 @@ class MediatorTests(MediatorFixture):
         self.assertEqual({p["default"] for k, p in schema["properties"].items() if k[0] == "d"}, {"later"})
         self.assertNotIn("max_passes", schema["properties"])
         self.assertNotIn("approve all", message.lower())
-        # What the human reads, per item: the source, the claim it supports, and the decision (decisions listed in order).
+        # What the human reads, per item: the source, its quote (the fact judged) and the decision
+        # (decisions first, in order). PR 11 (ADR-0072): the claim texts and the reasons no
+        # deterministic check exists are in the document the form points at, never in the message.
         self.assertIn(f"web source: {URL}", message)
-        self.assertIn("For claim C0: C", message)
+        self.assertIn('Quote: "q"', message)
+        self.assertNotIn("For claim C0", message)
         self.assertIn("2. Decision needed", message)
+        self.assertIn("Claim texts and their no-deterministic-check reasons: in the document.", message)
+        self.assertIn("Document: sha256:" + "a" * 12, message)
+        self.assertIn(document["path"], message, "the path is pasted as-is")
         observed = {"subject": "research", "id": "r3", "record_ids": ["r3"], "claims": [{"id": "C0", "text": "C"}],
                     "source_kind": "runtime", "source_ref": "none", "quote": "q", "class": "observed",
                     "reason": "No harness.", "title": "t3", "description": "d3", "note_title": "n3"}
-        self.assertIn("Why no deterministic check: No harness.", confirmation.form([observed], 900)[0])
+        self.assertNotIn("No harness.", confirmation.form([observed], 900, document)[0])
 
     # ---- F-Q4-2: every field names its subject; one source with one quote is one item -----------------------------
 
@@ -305,8 +312,8 @@ class MediatorTests(MediatorFixture):
         self.mediate(drv, run_id, human)
         message, schema = human.shown[0]
         self.assertEqual(set(schema["properties"]), {"d1", "n1"}, "two records of one source and quote are one item")
-        self.assertIn("For claim C0:", message)
-        self.assertIn("For claim C1:", message)
+        self.assertNotIn("For claim C0:", message)  # PR 11: the claim texts are in the document
+        self.assertNotIn("For claim C1:", message)
         self.assertEqual(message.count("Quote:"), 1)
         rows = self.rows(drv, run_id)
         self.assertEqual([r["verification"]["status"] for r in rows], ["confirmed_by_human"] * 2,
@@ -434,8 +441,9 @@ class ClaudeElicitationTests(EvidenceFixture):
     def test_the_batch_is_a_separate_form_from_the_configuration_review(self):
         from adapters import governance
         self.assertNotEqual(confirmation.form.__module__, governance.review_form.__module__)
-        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t", "description": "d",
-                                        "note_title": "n"}], 60)
+        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t",
+                                        "description": "d", "note_title": "n"}], 60,
+                                      {"digest": "sha256:" + "a" * 64, "path": "/machine/x.json"})
         self.assertFalse({"max_passes", "max_spawns", "max_audit_spawns"} & set(schema["properties"]))
 
 
@@ -454,9 +462,11 @@ class PiPrivateBridgeTests(EvidenceFixture):
     def test_presentation_relays_items_or_the_core_refusal(self):
         from unittest.mock import patch
         items = [{"subject": "claim", "id": "C1", "digest": "d", "text": "T"}]
-        with patch.object(confirmation, "present", return_value=("p-1", items)):
+        document = {"digest": "sha256:" + "a" * 64, "path": "/machine/projects/p/runs/r/gen-0/hitl/" + "a" * 64 + ".json"}
+        with patch.object(confirmation, "present", return_value=("p-1", items, document)):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
-                             {"type": "evidence_presentation", "receipt_id": "p-1", "items": items})
+                             {"type": "evidence_presentation", "receipt_id": "p-1", "items": items,
+                              "document": {"digest": document["digest"], "path": document["path"]}})
         with patch.object(confirmation, "present", return_value=confirmation.PRESENTATION_FAILED):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
                              {"type": "evidence_refused", "result": {"failure": "presentation_failed"}})

@@ -35,7 +35,7 @@ from adapters import bridge  # noqa: E402
 from adapters.state.hitl import DocumentMismatch  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from core import hitl as core_hitl  # noqa: E402
-from governance_setup import invocation_for  # noqa: E402
+from governance_setup import approve_current, invocation_for  # noqa: E402
 from test_governance import GRAPH  # noqa: E402
 
 PI_PROFILE = _proto.host_profile_id("pi")
@@ -186,6 +186,118 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         self.assertNotIn("document", presentation)
         self.assertIs(presentation["document_unavailable"], True)
         self.assertEqual(list(self.machine_home.rglob("hitl/*.json")), [])
+
+
+class PiEvidenceWriteFirstTests(unittest.TestCase):
+    """PR 11: the shared evidence flow writes the document before it presents (ADR-0072).
+
+    ``private_bridge._evidence_presentation`` calls the one shared ``present``
+    (adapters/confirmation.py), so the fetch → verify → write → present-with-digest sequence and its
+    sidecar file come to Pi with no bridge-specific logic. The screen data (the items) is the same
+    data as before; the presentation answer additionally names the written document's identity
+    (never its bytes) — what PR 12's dialog will render. The confirmation leg keeps today's shape:
+    the TypeScript mediator does not round-trip the digest yet (PR 12 wires it), and the core's
+    staging still admits a legacy confirmation of a bound presentation — pinned here so PR 12 has
+    its before-state. Everything runs on the isolated machine home and repo of this module's setUp
+    pattern; nothing may reach the developer's real ~/.empirica-plugin.
+    """
+
+    def setUp(self):
+        self.machine_root = Path(tempfile.mkdtemp(prefix="pi-bridge-evidence-"))
+        self.addCleanup(shutil.rmtree, self.machine_root, ignore_errors=True)
+        self.machine_home = self.machine_root / "home"
+        self.machine_home.mkdir(parents=True)
+        self.repo = self.machine_root / "repo"
+        os.makedirs(self.repo, exist_ok=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, capture_output=True)
+        environment = {"EMPIRICA_HOME": str(self.machine_home), "EMPIRICA_REPO_DIR": str(self.repo)}
+        self._env = patch.dict(os.environ, environment)
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        self.service = bridge.build_service(PI_PROFILE)
+        self.run_id = self._dispatch({"type": "StartRun", "control_mode": "deliberative",
+                                      "goal": "pi writes its evidence document first",
+                                      "invocation": invocation_for(PI_PROFILE),
+                                      "selector": {"project": "pi-evidence", "session": "governed"}})["run"]["id"]
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                       "action": {"kind": "route", "reason": "supplied context"}})
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                       "action": {"kind": "graph", "payload": copy.deepcopy(GRAPH)}})
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                       "action": {"kind": "configure_run",
+                                  "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                                  "rationale": "sized for the gating claims"}})
+        approve_current(self.service._coordinator, self.run_id)
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                       "action": {"kind": "investigate"}})
+        self.assertEqual(self.service.trusted_human_surface(
+            run_id=self.run_id, payload={"run_id": self.run_id, "surface": "human"})["result"]["type"],
+            "Allow")
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                       "action": {"kind": "research", "claim_id": GRAPH["root"], "source_kind": "runtime",
+                                  "result": "supports",
+                                  "payload": {"source_ref": "deploy output", "citation": "observed directly",
+                                              "spike_unavailable": "No harness."}}})
+
+    def _dispatch(self, command: dict) -> dict:
+        response = self.service.dispatch({**PROTOCOL_REQUEST, "command": command})
+        self.assertEqual(response["result"]["type"], "Allow", response["result"])
+        return response["result"]
+
+    def _presentation_rows(self) -> list[dict]:
+        view = self.service.dispatch({**PROTOCOL_REQUEST, "command": {"type": "GetRun", "run_id": self.run_id}})
+        assert view["result"]["type"] == "Allow"
+        return [row for row in self.service._coordinator.last_snapshot.history
+                if row.get("kind") == "evidence_presentation"]
+
+    def _confirmation_rows(self) -> list[dict]:
+        return [row for row in self.service._coordinator.last_snapshot.history
+                if row.get("kind") == "evidence_confirmation"]
+
+    def raw(self) -> dict:
+        return {"operation": "evidence_presentation", "run_id": self.run_id}
+
+    def test_the_presentation_writes_the_batches_document_before_it_is_shown(self):
+        answer = private_bridge._evidence_presentation(PI_PROFILE, self.raw(), {})
+        self.assertEqual(answer["type"], "evidence_presentation")
+        receipt_id, items = answer["receipt_id"], answer["items"]
+        self.assertTrue(items, "the batch was shown")
+        # the screen data Pi receives is today's: exactly the item keys the shared builder emits
+        for item in items:
+            self.assertEqual(item["subject"], "research")
+            self.assertEqual(set(item), {"subject", "id", "record_ids", "claims", "source_kind",
+                                        "source_ref", "quote", "class", "reason",
+                                        "title", "description", "note_title"})
+        document = answer["document"]
+        self.assertEqual(set(document), {"digest", "path"}, "no bytes cross the transport")
+        self.assertRegex(document["digest"], r"^sha256:[0-9a-f]{64}$")
+        self.assertTrue(document["path"].startswith(str(self.machine_home)))
+        data = Path(document["path"]).read_bytes()
+        self.assertEqual(core_hitl.digest(data), document["digest"])
+        self.assertEqual(stat.S_IMODE(os.stat(document["path"]).st_mode), 0o444)
+        # the core recorded the digested presentation, and the file WAS written before the show
+        rows = self._presentation_rows()
+        self.assertEqual([row["receipt_id"] for row in rows], [receipt_id])
+        self.assertEqual(rows[0]["document_digest"], document["digest"])
+        for path in self.machine_home.rglob("hitl/*.json"):
+            self.assertEqual(core_hitl.digest(path.read_bytes()), document["digest"],
+                             "exactly one document, the accepted presentation's own")
+
+    def test_pi_still_confirms_today_without_the_digest_and_it_is_admitted(self):
+        """PR 12 wires the digest round-trip through the TypeScript mediator; until then the bridge
+        forwards no digest and the core's staging admits the legacy confirmation of the bound
+        presentation. The presentation row keeps its digest; the confirmation row has none yet."""
+        presented = private_bridge._evidence_presentation(PI_PROFILE, self.raw(), {})
+        answer = private_bridge._evidence_confirmation(
+            PI_PROFILE, {"operation": "evidence_confirmation", "run_id": self.run_id},
+            {"receipt_id": presented["receipt_id"], "items": presented["items"],
+             "answers": [{"subject": "research", "id": presented["items"][0]["id"],
+                         "choice": "confirm", "note": None}]})
+        self.assertEqual(answer["type"], "evidence_receipt")
+        self.assertEqual(answer["result"]["type"], "Allow")
+        self.assertEqual(self._presentation_rows()[0]["receipt_id"], presented["receipt_id"])
+        self.assertTrue(self._presentation_rows()[0]["document_digest"])
+        self.assertEqual([row["document_digest"] for row in self._confirmation_rows()], [None])
 
 
 if __name__ == "__main__":

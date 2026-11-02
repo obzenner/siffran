@@ -1,19 +1,33 @@
 """Host mediation of the end-of-pass human confirmation (ADR-0067); the one flow every host shares.
 
 The core blocks ``report_convergence`` with ``evidence.confirmation_required`` and names what waits.
-A host then (1) records that it showed the human the batch (the *presentation*, which spends one
-interaction), (2) asks, one decision per item (Confirm / Reject with an optional note / Later for a
-record; Approve / Reject with an optional answer / Later for a ``needs-decision`` claim), and
-(3) submits one receipt with the decisions. **Later is an omitted item.** There is no "approve all".
+A host then (1) asks the core for the batch's HITL document — the **write-first** step of ADR-0072
+(PR 11): the first presentation carries ``document_digest: None``, the explicit fetch PR 10
+staged, and is refused with ``evidence.document_mismatch``, nothing spent, the refusal's private
+result carrying the core-rendered ``document: {text, digest}`` for the batch the ``key`` names —
+verifies the pair, publishes the bytes **once** through the write-once sidecar beside the run's
+own record, and repeats the same presentation with the digest —, then (2) asks, one decision per
+item (Confirm / Reject with an optional note / Later for a record; Approve / Reject with an
+optional answer / Later for a ``needs-decision`` claim), and (3) submits one receipt with the
+decisions, carrying the digest the presentation recorded (the core requires the confirmation to
+name what its own presentation showed). **Later is an omitted item.** There is no "approve all".
 
 This module decides no policy. It builds the batch from the run's own dossier, maps the human's answers
 to the receipt the core defines, and fails closed: a cancelled, timed-out, malformed or missing answer
 submits nothing beyond the presentation already spent, and grants nothing. Claude drives it with an MCP
 form; Pi drives the same ``present``/``submit`` through its private bridge and shows the items with its
 own dialogs.
+
+The forms are short (ADR-0072 "What the forms keep"): each item's source line and its quote (the
+quote is the fact a human judges) stay in the message beside the decision enums and note fields;
+the claim texts and the reasons no deterministic check exists are in the document, as are the
+terminal consent's residuals — the form points at the written file by its short digest and its
+absolute path, and names how many obligations ending now would leave unresolved.
 """
 from __future__ import annotations
 
+import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import textwrap
@@ -22,6 +36,8 @@ from uuid import uuid4
 
 from adapters import bridge
 from application import protocol
+from application.location import decode_handle
+from core import hitl as core_hitl
 from core.confirmation import is_terminal, presentable as batch_presentable
 from core.evaluation import TERMINAL_STATUSES, terminal_key
 from core.projection import project_host_failure, project_prompt_error
@@ -38,6 +54,15 @@ DESCRIPTION_LIMIT = 200
 _WIDTH = 72
 _PREFIX = 4  # "64. ": a batch holds at most 64 items
 NOTE_TITLE = "Note (optional)"
+#: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's identifiers
+#: already use (``application.observer_index.ID_SIZE``), kept a local literal for the same reason
+#: as ``adapters/governance.py``'s: this module must not inherit the observer identity family
+#: into the host-confirmation runtime identity.
+_SHORT_BODY = 12
+#: A document identity in full — the private answer's ``document.digest`` and the sidecar name.
+_FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
+#: The refusal that carries the fetch (PR 10's staging: ``null`` is the explicit fetch).
+_MISMATCH = "evidence.document_mismatch"
 
 #: choice -> the core outcome; ``later`` is deliberately absent (an omitted item).
 _RESEARCH = {"confirm": "confirm", "reject": "reject"}
@@ -184,26 +209,101 @@ def genuine_terminal(batch: Mapping[str, Any]) -> bool:
             and batch.get("key") == terminal_key(ended["status"], ended["digest"]))
 
 
+def _conflict(stored: Mapping[str, Any]) -> bool:
+    """The batch-key conflict: the one condition that re-enters the single retry, exactly as before
+    PR 11 — that the flow is now two calls changes neither the budget (still one) nor what a
+    conflict means: the batch the presentation named is no longer the current one."""
+    return stored.get("type") == "Fault" and stored.get("code") == "conflict"
+
+
+def _default_documents():
+    """The sidecar store under the real `$EMPIRICA_HOME`, built at the presentation, not at import:
+    the one-shot Pi private bridge processes that serve the operations with no document to write
+    must not pay the sidecar chain's import (the PR 09 measurement). Tests inject their own store."""
+    from adapters.state.hitl import HitlDocuments  # lazy: see the docstring
+    return HitlDocuments()
+
+
+def _bound_document(run_id: str, refused: Mapping[str, Any], store) -> dict[str, Any] | None:
+    """The write-first gate (ADR-0072, PR 11): a fetch refusal must be ``evidence.document_mismatch``
+    carrying exactly the core-rendered ``{text, digest}`` of the batch the fetch named. Verify the pair
+    (``core.hitl.digest`` of the encoded text — one definition, the core's own), publish the bytes
+    **once** through the write-once sidecar beside the run's own record, and return the
+    shown-document record: the full ``digest``, the written file's absolute ``path``, and — a terminal
+    batch only — ``residuals``, the count of obligations ending now would leave unresolved, **read out
+    of the written document itself** and never recomputed (the governance priors' precedent). ``None``
+    means nothing can be shown: the document was absent, malformed, digest-inconsistent, or the
+    storage refused the write — nothing was spent and the second call never happens."""
+    from adapters.state.fsio import SymlinkRefused
+    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported  # lazy, as above
+    reasons = refused.get("reasons")
+    if (refused.get("type") != "Block" or not isinstance(reasons, list) or not reasons
+            or reasons[0].get("code") != _MISMATCH):
+        return None
+    document = refused.get("document")
+    if not isinstance(document, Mapping):
+        return None
+    text, digest = document.get("text"), document.get("digest")
+    if (not isinstance(text, str) or not isinstance(digest, str)
+            or _FULL_DIGEST.fullmatch(digest) is None):
+        return None
+    try:
+        data = text.encode("utf-8")
+        if core_hitl.digest(data) != digest:
+            return None
+        key = decode_handle(run_id)
+        if key is None:
+            return None
+        path, written = store.write(key, data)
+        if written != digest:
+            return None
+        parsed = json.loads(text)
+    except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
+        return None
+    if not isinstance(parsed, Mapping):
+        return None
+    record = {"digest": digest, "path": str(path)}
+    terminal = parsed.get("terminal")
+    if isinstance(terminal, Mapping) and isinstance(terminal.get("residuals"), list):
+        record["residuals"] = len(terminal["residuals"])
+    return record
+
+
 def present(profile: str, run_id: str, *, dispatch: Callable[..., dict] = bridge.handle,
             ingress: Callable[..., dict] = bridge.trusted_evidence_presentation,
-            terminal: Mapping[str, Any] | None = None) -> tuple[str, list[dict[str, Any]]] | Outcome:
-    """Record the presentation of the core's current batch, then return ``(receipt_id, items)``.
+            documents: object = None, terminal: Mapping[str, Any] | None = None) -> tuple[str, list[dict[str, Any]], dict[str, Any]] | Outcome:
+    """Record the presentation of the core's current batch, write-first, then return
+    ``(receipt_id, items, {digest, path})``.
 
-    The batch is read from the run, or is the core's own terminal batch of the evaluation in hand (``terminal``, checked
-    below); the presentation names its key, and the core admits it only while that is still the current batch, so what is
-    recorded as shown is exactly what the human sees. When the batch changed in between the host reads again and tries once more; a second change shows
-    nothing and spends nothing. Anything else (the core refuses: already presented, interaction limit, nothing
-    pending; or the ingress faults, or raises) is ``PRESENTATION_FAILED``: the caller shows nothing, and the core's
-    own re-evaluation words the refusal it knows (``already_presented`` and ``interaction_limit`` outrank the
-    host's report).
+    The batch is read from the run, or is the core's own terminal batch of the evaluation in hand
+    (``terminal``, checked below); the presentation names its key, and the core admits it only while
+    that is still the current batch, so what is recorded as shown is exactly what the human sees.
+    The presentation is now two calls (PR 11): the **fetch** (`document_digest: None`) — refused with
+    ``evidence.document_mismatch``, nothing spent, its private result the core-rendered document of
+    the batch the key named — then, once the document's pair is verified and its bytes published
+    once beside the run's own record, the same presentation again with its digest. The receipt, the
+    items and the document's ``{digest, path}`` come back only on the accepted second call, so two
+    batches can never mix: the core re-checks the digest against the batch the key names and would
+    refuse the receipt (this module adds no second check of its own).
 
-    ``terminal`` is the terminal batch of the evaluation in hand (its ``confirmation_batch`` when that carries
-    ``terminal``): the end of a deliberative run is asked by the evaluation that reaches it, so no later read of the run
-    shows it. It is shown once, and only when it is the core's own: its status is one the core ends a run as and its key is
-    the key of its status and digest (``terminal_key``), so a status or digest the core never derived is never rendered; the
+    The one-retry behaviour for a conflicting batch key is unchanged: a genuine batch conflict on
+    either call re-enters exactly the one retry of before, while the fetch's *designed* refusal —
+    the mismatch that carries the document — is not a conflict: it neither consumes nor triggers
+    the retry and spends nothing. A second change shows nothing and spends nothing. Anything else
+    (the core refuses: already presented, interaction limit, nothing pending; or the ingress faults,
+    or raises; or the document is absent, inconsistent, or the storage refuses the write) is
+    ``PRESENTATION_FAILED``: the caller shows nothing, and the core's own re-evaluation words the
+    refusal it knows (``already_presented`` and ``interaction_limit`` outrank the host's report).
+
+    ``terminal`` is the terminal batch of the evaluation in hand (its ``confirmation_batch`` when that
+    carries ``terminal``): the end of a deliberative run is asked by the evaluation that reaches it,
+    so no later read of the run shows it. It is shown once, and only when it is the core's own: its
+    status is one the core ends a run as and its key is the key of its status and digest
+    (``terminal_key``), so a status or digest the core never derived is never rendered; the
     core still admits the presentation only while that key is current."""
     if terminal is not None and not (is_terminal(terminal) and genuine_terminal(terminal)):
         return PRESENTATION_FAILED
+    store = documents if documents is not None else _default_documents()
     for _attempt in range(1 if terminal else 2):
         batch = terminal if terminal else presentable(_call(profile, run_id, {"type": "GetRun"}, dispatch))
         argument = _call(profile, run_id, {"type": "GetArgument"}, dispatch).get("argument") if batch else None
@@ -211,10 +311,21 @@ def present(profile: str, run_id: str, *, dispatch: Callable[..., dict] = bridge
         if not items:
             return PRESENTATION_FAILED
         receipt_id = uuid4().hex
-        stored = ingress(profile, run_id, {"run_id": run_id, "receipt_id": receipt_id, "key": batch["key"]}).get("result", {})
+        # the fetch: nothing spent, and its refusal's private result is the document for this very key
+        fetched = ingress(profile, run_id, {"run_id": run_id, "receipt_id": receipt_id,
+                                            "key": batch["key"], "document_digest": None}).get("result", {})
+        if _conflict(fetched):
+            continue
+        document = _bound_document(run_id, fetched, store)
+        if document is None:
+            return PRESENTATION_FAILED
+        # the same presentation again, bound to the document the human will read
+        stored = ingress(profile, run_id, {"run_id": run_id, "receipt_id": receipt_id,
+                                          "key": batch["key"],
+                                          "document_digest": document["digest"]}).get("result", {})
         if stored.get("type") == "Allow":
-            return receipt_id, items
-        if not (stored.get("type") == "Fault" and stored.get("code") == "conflict"):
+            return receipt_id, items, document
+        if not _conflict(stored):
             return PRESENTATION_FAILED
     return PRESENTATION_FAILED
 
@@ -260,13 +371,21 @@ def decisions(items: Sequence[Mapping[str, Any]], answers: object) -> list[dict[
 
 def submit(profile: str, run_id: str, receipt_id: str, items: Sequence[Mapping[str, Any]],
            answers: object, *, ingress: Callable[..., dict] = bridge.trusted_evidence_confirmation,
-           ) -> dict[str, Any] | None:
-    """Submit one receipt for the answers; ``None`` when they grant nothing (Later, cancel, malformed)."""
+           document_digest: str | None = None) -> dict[str, Any] | None:
+    """Submit one receipt for the answers; ``None`` when they grant nothing (Later, cancel, malformed).
+
+    ``document_digest`` repeats the digest the presentation's own document recorded — the core
+    requires the confirmation to name it, and refuses (``evidence.document_mismatch``, nothing
+    admitted) a value that is not the one its own presentation recorded. A caller that carries no
+    digest (the Pi transport until PR 12 wires the round-trip) submits the legacy way the core's
+    staging still admits."""
     chosen = decisions(items, answers)
     if not chosen:
         return None
-    return ingress(profile, run_id, {"run_id": run_id, "receipt_id": receipt_id,
-                                     "decisions": chosen}).get("result", {})
+    payload = {"run_id": run_id, "receipt_id": receipt_id, "decisions": chosen}
+    if document_digest is not None:
+        payload["document_digest"] = document_digest
+    return ingress(profile, run_id, payload).get("result", {})
 
 
 # ---- the Claude form ------------------------------------------------------------------------
@@ -277,33 +396,60 @@ def _lines(text: str, indent: str = "   ") -> list[str]:
                          break_long_words=True, break_on_hyphens=False) or [indent]
 
 
-def _item_text(number: int, item: Mapping[str, Any]) -> list[str]:
+def _item_text(number: int, item: Mapping[str, Any], document: Mapping[str, Any]) -> list[str]:
+    """What the message shows of one item (ADR-0072 "What the forms keep"): the source line and the
+    quote stay — the quote is the fact judged; the claim text and the reasons no deterministic
+    check exists are in the document. A terminal item keeps its decision fully worded and names how
+    many obligations ending now would leave unresolved, read out of the written document."""
     if item["subject"] == "claim":
-        return [f"{number}. Decision needed", *_lines(item["text"])]
+        if item.get("terminal"):
+            return [f"{number}. Decision needed", *_lines(item["text"]), *_residual_lines(document)]
+        return [f"{number}. Decision needed"]
     head = [f"{number}. {item['source_kind']} source: {item['source_ref']}"]
-    body = [*_lines(f'Quote: "{item["quote"]}"'),
-            *(line for claim in item["claims"] for line in _lines(f"For claim {claim['id']}: {claim['text']}"))]
-    if item.get("reason"):
-        body += _lines("Why no deterministic check: " + item["reason"])
-    return head + body
+    return head + _lines(f'Quote: "{item["quote"]}"')
 
 
-def form(items: Sequence[Mapping[str, Any]], timeout: float) -> tuple[str, dict[str, Any]]:
-    """Map the batch to one flat MCP form: per item an enum decision and an optional note or answer."""
+def _residual_lines(document: Mapping[str, Any]) -> list[str]:
+    """The terminal consent's count line: the residuals live in the document; their count is shown
+    when it is known (``document["residuals"]``, read out of the written file by ``present``)."""
+    left = document.get("residuals")
+    if not isinstance(left, int) or isinstance(left, bool):
+        return []
+    if not left:
+        return _lines("Nothing would stay unresolved; the record is in the document.")
+    word = "obligation" if left == 1 else "obligations"
+    return _lines(f"{left} unresolved {word} would remain — they are listed in the document.")
+
+
+def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
+    """ADR-0072 Q4's bound lines: the short digest, then the document's absolute path on its own
+    line — the one line exempt from wrapping and truncation, because the path is the copy-paste
+    surface and a wrapped path is a corrupted paste."""
+    return (f"Document: {document['digest'][:7 + _SHORT_BODY]}", f"{document['path']}")
+
+
+def form(items: Sequence[Mapping[str, Any]], timeout: float,
+         document: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
+    """Map the batch and its written document to one flat MCP form: per item an enum decision and
+    an optional note or answer, plus the document's short digest and absolute path."""
     minutes = f"{timeout / 60:g} min" if timeout >= 60 else f"{timeout:g} sec"
     ending = len(items) == 1 and bool(items[0].get("terminal"))
     heading = "end this run without converging?" if ending else "evidence that needs you"
     message = [f"Empirica · {heading}  (" + minutes + ")", ""]
     properties: dict[str, Any] = {}
     for number, item in enumerate(items, 1):
-        message += _item_text(number, item)
+        message += _item_text(number, item, document)
         properties[f"d{number}"] = {
             "type": "string", "title": f"{number}. {item['title']}", "description": item["description"],
             "enum": list(CHOICES[item["subject"]]), "default": "later"}
         properties[f"n{number}"] = {
             "type": "string", "title": f"{number}. {item['note_title']}", "maxLength": _limit(item["subject"])}
     # The items come first: a host that collapses the message shows its first lines, which should carry the content.
-    message += ["", "Decide each item. Leave it on Later to decide another time.",
+    message += [""]
+    if not ending:
+        message += ["Claim texts and their no-deterministic-check reasons: in the document."]
+    message += [*_document_lines(document), "",
+                "Decide each item. Leave it on Later to decide another time.",
                 "Accept = send these decisions · Decline/Esc = send none"]
     return "\n".join(message), {"type": "object", "properties": properties, "required": []}
 
@@ -334,10 +480,15 @@ class HostConfirmation:
                  timeout: Callable[[], float] | None = None, dispatch: Callable[..., dict] = bridge.handle,
                  presentation_ingress: Callable[..., dict] = bridge.trusted_evidence_presentation,
                  confirmation_ingress: Callable[..., dict] = bridge.trusted_evidence_confirmation,
-                 surface_ingress: Callable[..., dict] = bridge.trusted_human_surface):
+                 surface_ingress: Callable[..., dict] = bridge.trusted_human_surface,
+                 documents: object = None):
         self.profile, self.elicit, self._timeout = profile, elicit, timeout
         self._dispatch, self._presentation, self._confirmation = dispatch, presentation_ingress, confirmation_ingress
         self._surface = surface_ingress
+        # PR 11 (ADR-0072 write-first): the shared ``present`` publishes the batch's document once
+        # through the sidecar store under the real $EMPIRICA_HOME before the form is shown; tests
+        # inject a store under a temporary machine home (``None`` means: build it at the call).
+        self._documents = documents
         self._unrecorded = False
 
     def observe(self, run_id: str) -> Outcome:
@@ -384,16 +535,17 @@ class HostConfirmation:
         run_id = result["run"]["id"]
         try:
             shown = present(self.profile, run_id, dispatch=self._dispatch, ingress=self._presentation,
-                            terminal=batch if is_terminal(batch) else None)
+                            documents=self._documents, terminal=batch if is_terminal(batch) else None)
         except Exception:  # noqa: BLE001 - nothing was recorded as shown
             return PRESENTATION_FAILED
         if isinstance(shown, Outcome):
             return shown
-        receipt_id, items = shown
+        receipt_id, items, document = shown
         try:
-            message, schema = form(items, self._timeout() if self._timeout else 900)
+            message, schema = form(items, self._timeout() if self._timeout else 900, document)
             answers = answers_from_form(self.elicit(message, schema), items)
-            submit(self.profile, run_id, receipt_id, items, answers, ingress=self._confirmation)
+            submit(self.profile, run_id, receipt_id, items, answers, ingress=self._confirmation,
+                   document_digest=document["digest"])
         except Exception:  # noqa: BLE001 - shown and spent; nothing is granted by a failure
             pass
         return OK

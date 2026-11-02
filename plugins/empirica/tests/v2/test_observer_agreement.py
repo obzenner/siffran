@@ -319,22 +319,27 @@ def _mediate(b, run, *, can_present):
                            documents=HitlDocuments(home=Path(machine_home)))(proposed["result"])
         if forms:
             return len(forms), True
-    host = HostConfirmation(PROFILE, elicit=later if can_present else None, timeout=lambda: 900,
-                            dispatch=lambda request, _profile: b.drv.request(request),
-                            presentation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_presentation(run_id, payload),
-                            confirmation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_confirmation(run_id, payload),
-                            surface_ingress=lambda _p, run_id, payload: b.drv.trusted_human_surface(run_id, payload["surface"]))
-    host.observe(run)
-    result = b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"]
-    # The owner's own answer once the host has looked (the snapshot of this very report): is its batch one that is presented,
-    # and does the core admit a human's batch at all? It admits none before the run has investigated: the core's own
-    # bootstrap obligations (route, graph, approval, investigation) are then not all satisfied, and the presentation is
-    # refused (``investigation.required``), so the host shows nothing.
-    seen = result.get("run") or {}
-    bootstrapped = all(o["status"] == "satisfied" for o in (seen.get("obligations") or {}).get("active", ())
-                       if o["id"] in BOOTSTRAP)
-    after_looking = presentable(seen.get("confirmation_batch")) and bootstrapped
-    host(result, lambda failure=None: b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"])
+    # PR 11 isolates the evidence mediator's own machine home the same way the governance one above does:
+    # the shared write-first present publishes the batch's document through the store, and nothing a
+    # test mediates may write the developer's real ~/.empirica-plugin.
+    with tempfile.TemporaryDirectory(prefix="observer-evidence-home-") as evidence_home:
+        host = HostConfirmation(PROFILE, elicit=later if can_present else None, timeout=lambda: 900,
+                                dispatch=lambda request, _profile: b.drv.request(request),
+                                presentation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_presentation(run_id, payload),
+                                confirmation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_confirmation(run_id, payload),
+                                surface_ingress=lambda _p, run_id, payload: b.drv.trusted_human_surface(run_id, payload["surface"]),
+                                documents=HitlDocuments(home=Path(evidence_home)))
+        host.observe(run)
+        result = b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"]
+        # The owner's own answer once the host has looked (the snapshot of this very report): is its batch one that is
+        # presented, and does the core admit a human's batch at all? It admits none before the run has investigated: the
+        # core's own bootstrap obligations (route, graph, approval, investigation) are then not all satisfied, and the
+        # presentation is refused (``investigation.required``), so the host shows nothing.
+        seen = result.get("run") or {}
+        bootstrapped = all(o["status"] == "satisfied" for o in (seen.get("obligations") or {}).get("active", ())
+                           if o["id"] in BOOTSTRAP)
+        after_looking = presentable(seen.get("confirmation_batch")) and bootstrapped
+        host(result, lambda failure=None: b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"])
     return len(forms), after_looking
 
 

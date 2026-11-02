@@ -95,7 +95,7 @@ class PresentationBindsWhatWasShown(MediatorFixture):
         self.research(drv, run_id, "web", URL)
         shown = confirmation.present(CLAUDE_PROFILE, run_id, dispatch=lambda req, _p: drv.request(req),
                                      ingress=self.racing(drv, run_id))
-        receipt_id, items = shown
+        receipt_id, items, document = shown
         self.assertEqual(len(items), 2)
         stored = self.presentations(drv, run_id)[-1]
         self.assertEqual(sorted(stored["record_ids"]), sorted(i["id"] for i in items))

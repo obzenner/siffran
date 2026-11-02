@@ -1,0 +1,439 @@
+"""PR 11 (ADR-0072): the shared evidence flow writes the document before it presents.
+
+``adapters.confirmation.present`` is the one evidence flow every host shares (Claude's MCP form
+inside ``HostConfirmation`` and the Pi private bridge both call it), so the write-first step lives
+there and both hosts get it:
+
+1. the first presentation carries ``document_digest: None`` — the explicit fetch PR 10 staged —
+   and the core refuses it with ``evidence.document_mismatch``, nothing spent, the refusal's
+   private result carrying the core-rendered ``document: {text, digest}`` for the batch the
+   ``key`` names;
+2. the adapter verifies the pair (``core.hitl.digest`` of the encoded text), publishes the bytes
+   **once** through the write-once sidecar beside the run's own record, and repeats the same
+   presentation with the digest;
+3. on acceptance the receipt, the items and the document's ``{digest, path}` come back, and the
+   submitted receipt repeats the presentation's digest (the core requires the confirmation to name
+   what its own presentation recorded).
+
+A document that is absent or inconsistent, or a write the storage refuses, shows nothing and spends
+nothing: the fetch spends no interaction and the second call never happens. The one-retry behaviour
+for a conflicting batch key is unchanged: the fetch is an ordinary presentation call for staleness
+purposes (a genuine batch conflict re-enters the single retry), while the fetch's *designed*
+refusal — the mismatch that carries the document — is not a conflict: it neither consumes nor
+triggers the retry and costs nothing.
+
+The short Claude forms keep the quotes (the fact judged), the source lines, the decision enums and
+the note fields; the claim texts and the reasons no deterministic check exists are in the document,
+pointed at by its short digest and its absolute path. The terminal consent keeps its decision fully
+worded and shows the count of obligations ending now would leave unresolved, read out of the
+written document itself.
+
+Every case runs on its own ``EMPIRICA_HOME`` (``ConformanceCase``) and every store here is injected
+under that case home — nothing reaches a real machine home.
+"""
+from __future__ import annotations
+
+import json
+import os
+import stat
+from pathlib import Path
+
+from adapters import confirmation
+from adapters.confirmation import HostConfirmation
+from adapters.public_tools import PublicTools
+from adapters.state.hitl import DocumentMismatch, HitlDocuments
+from core import hitl
+from core.confirmation import KIND, PRESENTATION
+from test_evidence_confirmation import URL, graph_with_decision
+from test_evidence_hosts import Human, MediatorFixture, accept
+from application.protocol import host_profile_id
+
+CLAUDE_PROFILE = host_profile_id("claude-code")
+#: The leading ``sha256:`` of every document identity (the same length the forms render after).
+_HEXAFTER = len("sha256:")
+
+
+def forged(digest: str) -> str:
+    """A digest one hex off (``0`` last unless the real one ends ``0``)."""
+    return digest[:-1] + ("0" if digest[-1] != "0" else "1")
+
+
+class WriteFirstFixture(MediatorFixture):
+    """The pending batch, a store injected under the case home, and an ingress that records every
+    call — the payload it carried and what the sidecar held at that moment — so the
+    fetch → write → present order is asserted, not assumed."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self.calls: list[dict] = []
+        self.research_added = 0
+
+    def store(self) -> HitlDocuments:
+        return HitlDocuments(home=Path(self.empirica_home))
+
+    def files(self) -> list[Path]:
+        return sorted(Path(self.empirica_home).rglob("hitl/*.json"))
+
+    def pending(self):
+        """A run whose research waits on a human, with the host's surface already recorded."""
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        self.look(drv, run_id)  # Claude records its surface before the presentation it shows
+        return drv, run_id
+
+    def record(self, ingress):
+        """Wrap a presentation ingress: keep every call's payload, its result, and the number of
+        documents the sidecar held when it was made."""
+        calls = self.calls
+
+        def wrapped(_profile, run, payload):
+            calls.append({"payload": dict(payload), "written": len(self.files())})
+            answer = ingress(_profile, run, payload)
+            calls[-1]["result"] = answer["result"]
+            return answer
+        return wrapped
+
+    def direct(self, drv):
+        return lambda _profile, run, payload: drv.trusted_evidence_presentation(run, payload)
+
+    def show(self, drv, run_id, ingress, documents=None):
+        return confirmation.present(CLAUDE_PROFILE, run_id,
+                                    dispatch=lambda req, _p: drv.request(req), ingress=ingress,
+                                    documents=documents)
+
+    def artifact_rows(self, drv, run_id, kind):
+        """The artifact bodies of one kind in the run's history, freshly snapshotted."""
+        self.snapshot(drv, run_id)
+        history = drv._service._coordinator.last_snapshot.history
+        return [row for row in history if row.get("kind") == kind]
+
+
+class WriteFirstPresentTests(WriteFirstFixture):
+    """The fetch, the write, the digested present — in that order, with the bytes, the mode and
+    the artifact bodies pinned."""
+
+    def setUp(self) -> None:
+        super().setUp()
+        self._drv, self._run_id = self.pending()
+
+    def test_present_fetches_then_writes_then_presents_with_the_digest(self):
+        drv, run_id = self._drv, self._run_id
+        ingress = self.record(self.direct(drv))
+        before = self.left(drv, run_id)
+        shown = self.show(drv, run_id, ingress, documents=self.store())
+        self.assertNotIsInstance(shown, confirmation.Outcome, "the batch is shown")
+        receipt, items, document = shown
+        # the two calls, in order: the fetch (nothing written yet), then the bound presentation
+        # made after the write — never before it
+        self.assertEqual(len(self.calls), 2)
+        first, second = self.calls
+        self.assertIs(first["payload"]["document_digest"], None, "the first call is the fetch")
+        self.assertEqual(first["payload"]["key"], second["payload"]["key"])
+        self.assertEqual(first["payload"]["receipt_id"], receipt)
+        self.assertEqual(first["written"], 0, "the fetch wrote nothing")
+        self.assertEqual(first["result"]["type"], "Block")
+        self.assertEqual(first["result"]["reasons"][0]["code"], "evidence.document_mismatch")
+        self.assertEqual(second["payload"]["document_digest"], document["digest"])
+        self.assertEqual(second["written"], 1, "the document was written before the accepted present")
+        # the written file holds exactly the core's bytes, is read-only, and sits at its own name
+        written = self.files()
+        self.assertEqual(len(written), 1)
+        text = first["result"]["document"]["text"]
+        self.assertEqual(written[0].read_bytes(), text.encode("utf-8"))
+        self.assertEqual(hitl.digest(written[0].read_bytes()), document["digest"])
+        self.assertEqual(written[0].name, document["digest"][_HEXAFTER:] + ".json")
+        self.assertEqual(stat.S_IMODE(os.stat(written[0]).st_mode), 0o444)
+        self.assertTrue(Path(document["path"]).is_absolute())
+        self.assertEqual(str(written[0]), document["path"])
+        # the presentation artifact records the digest, and exactly one interaction was spent
+        rows = self.artifact_rows(drv, run_id, PRESENTATION)
+        self.assertEqual([row["receipt_id"] for row in rows], [receipt])
+        self.assertEqual(rows[0]["document_digest"], document["digest"])
+        self.assertEqual(self.left(drv, run_id), before - 1)
+
+    def test_submit_repeats_the_presentation_digest_and_the_confirmation_records_it(self):
+        drv, run_id = self._drv, self._run_id
+        ingress = self.record(self.direct(drv))
+        receipt, items, document = self.show(drv, run_id, ingress, documents=self.store())
+        submitted = confirmation.submit(
+            CLAUDE_PROFILE, run_id, receipt, items,
+            [{"subject": items[0]["subject"], "id": items[0]["id"], "choice": "confirm", "note": None}],
+            ingress=lambda _p, run, payload: drv.trusted_evidence_confirmation(run, payload),
+            document_digest=document["digest"])
+        self.assertEqual(submitted["type"], "Allow", submitted)
+        self.assertEqual(self.artifact_rows(drv, run_id, PRESENTATION)[0]["document_digest"], document["digest"])
+        confirmed = [row for row in self.artifact_rows(drv, run_id, KIND) if row["receipt_id"] == receipt]
+        self.assertTrue(confirmed, "one receipt of the confirmed item")
+        self.assertEqual({row["document_digest"] for row in confirmed}, {document["digest"]})
+
+    # ---- nothing shown, nothing spent ---------------------------------------------------------
+
+    def test_a_refusal_without_a_publishable_document_shows_nothing_and_spends_nothing(self):
+        drv, run_id = self._drv, self._run_id
+        before = self.left(drv, run_id)
+        base = self.direct(drv)
+
+        def without_document(kind):
+            def ingress(_profile, run, payload):
+                answer = base(_profile, run, payload)
+                document = answer["result"].get("document")
+                if not (answer["result"].get("type") == "Block"
+                        and isinstance(document, dict)):
+                    return answer
+                if kind == "absent":
+                    answer["result"] = {key: value for key, value in answer["result"].items()
+                                        if key != "document"}
+                elif kind == "wrong digest":
+                    document["digest"] = forged(document["digest"])
+                elif kind == "wrong bytes":
+                    document["text"] = document["text"].replace("}", "}\n")
+                return answer
+            return ingress
+
+        for label in ("absent", "wrong digest", "wrong bytes"):
+            with self.subTest(label):
+                self.calls.clear()
+                ingress = self.record(without_document(label))
+                shown = self.show(drv, run_id, ingress, documents=self.store())
+                self.assertIs(shown, confirmation.PRESENTATION_FAILED)
+                self.assertEqual(len(self.calls), 1, "the second presentation call never happened")
+                self.assertEqual(self.files(), [])
+                self.assertEqual(self.artifact_rows(drv, run_id, PRESENTATION), [])
+                self.assertEqual(self.left(drv, run_id), before, "the fetch spends nothing")
+
+    def test_a_write_failure_shows_nothing_spends_nothing_and_never_presents(self):
+        drv, run_id = self._drv, self._run_id
+        before = self.left(drv, run_id)
+
+        class Refused:
+            def __init__(self, error):
+                self.error = error
+
+            def write(self, _key, _data):
+                raise self.error
+
+        for label, error in (("storage refused", OSError("the volume is read-only")),
+                             ("different bytes at the name", DocumentMismatch("published before"))):
+            with self.subTest(label):
+                self.calls.clear()
+                ingress = self.record(self.direct(drv))
+                shown = self.show(drv, run_id, ingress, documents=Refused(error))
+                self.assertIs(shown, confirmation.PRESENTATION_FAILED)
+                self.assertEqual(len(self.calls), 1, "the second presentation call never happened")
+                self.assertEqual(self.files(), [])
+                self.assertEqual(self.artifact_rows(drv, run_id, PRESENTATION), [])
+                self.assertEqual(self.left(drv, run_id), before, "nothing was spent")
+
+    # ---- the one retry for a conflicting key, and the two batches that never mix ---------------
+
+    def test_a_conflicting_fetch_gets_exactly_the_one_retry_of_before(self):
+        """The batch moves under the host between reading it and fetching it: the fetch is refused
+        the same Fault ``conflict`` the single presentation call had, the single retry re-reads the
+        batch, fetches, writes and presents; the fetch's own designed refusal (the mismatch) never
+        consumes the retry."""
+        drv, run_id = self._drv, self._run_id
+        base = self.direct(drv)
+
+        def racing(_profile, run, payload):
+            if self.research_added == 0:
+                self.research_added += 1
+                self.research(drv, run_id, "web", URL + "/unseen")  # the batch moves under the fetch
+            return base(_profile, run, payload)
+
+        ingress = self.record(racing)
+        shown = self.show(drv, run_id, ingress, documents=self.store())
+        self.assertNotIsInstance(shown, confirmation.Outcome, "the retry showed the new batch")
+        receipt, items, document = shown
+        conflicts = [call for call in self.calls if call["result"].get("code") == "conflict"]
+        self.assertEqual(len(conflicts), 1, "exactly one conflict, on the stale fetch")
+        self.assertEqual(len(self.calls), 3, "conflicting fetch, new fetch, digested present")
+        self.assertIs(self.calls[0]["payload"]["document_digest"], None)
+        self.assertEqual(self.artifact_rows(drv, run_id, PRESENTATION)[0]["receipt_id"], receipt)
+        self.assertEqual(self.artifact_rows(drv, run_id, PRESENTATION)[0]["document_digest"], document["digest"])
+        self.assertEqual(len(self.files()), 1)
+
+    def test_a_fetched_document_of_a_moved_batch_is_never_bound_to_the_new_present(self):
+        """The batch moves between the fetch and the digested present: the present is refused the
+        same ``conflict`` and the single retry starts over — a fresh fetch under the new key and a
+        new document. That the accepted presentation shows the batch it fetched is proven by the
+        core's own digest check (the receipt would not exist otherwise), and by the artifact's
+        recorded key."""
+        drv, run_id = self._drv, self._run_id
+        base = self.direct(drv)
+
+        def racing(_profile, run, payload):
+            if payload.get("document_digest") is not None and self.research_added == 0:
+                self.research_added += 1
+                self.research(drv, run_id, "web", URL + "/unseen")  # moves the key under the present
+            return base(_profile, run, payload)
+
+        ingress = self.record(racing)
+        shown = self.show(drv, run_id, ingress, documents=self.store())
+        self.assertNotIsInstance(shown, confirmation.Outcome, "the retry showed the new batch")
+        receipt, items, document = shown
+        fetched = self.calls[0]["result"].get("document")
+        self.assertIsInstance(fetched, dict, "the first attempt fetched its document")
+        self.assertNotEqual(fetched["digest"], document["digest"], "a new batch is a new document")
+        self.assertEqual(len(self.calls), 4, "fetch, conflicting present, new fetch, new present")
+        self.assertIs(self.calls[2]["payload"]["document_digest"], None,
+                     "the retry fetches the new batch like the first one fetched the old")
+        self.assertEqual(self.calls[3]["payload"]["document_digest"], document["digest"])
+        self.assertIs(self.calls[3]["result"].get("type"), "Allow")
+        accepted = self.artifact_rows(drv, run_id, PRESENTATION)[0]
+        self.assertEqual(accepted["receipt_id"], receipt)
+        self.assertEqual(accepted["document_digest"], document["digest"])
+        self.assertEqual(accepted["key"], self.calls[2]["payload"]["key"],
+                         "the accepted presentation names the batch it fetched")
+        self.assertEqual(len(self.files()), 2, "both documents were published beside the run")
+        self.assertEqual(hitl.digest(Path(document["path"]).read_bytes()), document["digest"])
+
+
+class ShortFormsTests(WriteFirstFixture):
+    """ADR-0072 "What the forms keep": the quotes, the source line, the enums and the notes stay;
+    the claim text, the reasons and the residuals are in the document the form points at."""
+
+    def document_lines(self, message: str) -> tuple[str, str]:
+        lines = message.splitlines()
+        document_line = next(line for line in lines if line.startswith("Document: sha256:"))
+        index = lines.index(document_line)
+        return document_line, lines[index + 1]
+
+    def test_the_evidence_form_keeps_the_quotes_and_moves_the_rest_to_the_document(self):
+        drv, run_id = self.start(graph=graph_with_decision())
+        self.research(drv, run_id, "runtime", "the deploy pipeline output",
+                      claim="C0", spike_unavailable="Needs production credentials.")
+        self.research(drv, run_id, "web", URL, claim="C0")
+        human = Human(accept())  # every item left on Later: the form is what is judged here
+        self.mediate(drv, run_id, human)
+        message, schema = human.shown[0]
+        self.assertIn(f"web source: {URL}", message)
+        self.assertIn("runtime source: the deploy pipeline output", message)
+        self.assertEqual(message.count("Quote:"), 2, "each grouped item keeps its quote")
+        for gone in ("Needs production credentials.", "For claim C0", "Why no deterministic check"):
+            self.assertNotIn(gone, message, f"{gone!r} moved to the document")
+        self.assertIn("1. Decision needed", message)
+        self.assertIn("no-deterministic-check reasons: in the document", message,
+                     "one line says where the moved text lives")
+        document_line, path_line = self.document_lines(message)
+        self.assertRegex(document_line, r"\ADocument: sha256:[0-9a-f]{12}\Z")
+        self.assertTrue(Path(path_line).is_absolute(), "the path is pasted as-is")
+        self.assertTrue(path_line.startswith(str(self.empirica_home)), path_line)
+        self.assertTrue(path_line.endswith(".json"))
+        self.assertTrue(path_line in message.splitlines(), "the path is alone on its own line")
+        self.assertEqual(stat.S_IMODE(os.stat(path_line).st_mode), 0o444)
+        for line in message.splitlines():
+            if line != path_line:
+                self.assertLessEqual(len(line), 72 + 3, line)  # wrapped; the path alone is exempt
+        self.assertEqual(set(schema["properties"]), {f"{prefix}{n}" for n in (1, 2, 3) for prefix in "dn"})
+        self.assertEqual(schema["properties"]["d1"]["enum"], ["later", "approve", "reject"])  # the claim
+        self.assertEqual(schema["properties"]["d2"]["enum"], ["later", "confirm", "reject"])
+        self.assertEqual(schema["properties"]["d3"]["enum"], ["later", "confirm", "reject"])
+        for number in (1, 2, 3):
+            self.assertEqual(schema["properties"][f"n{number}"]["title"], f"{number}. Note (optional)")
+
+    def test_the_terminal_form_keeps_the_decision_worded_and_names_the_residual_count(self):
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        approving = Human(accept(d1="approve"))
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
+                            confirm=self.mediator(drv, approving))
+        ended = tools.call_internal("report_convergence",
+                                    {"run_id": run_id, "intent": "stop"})["structuredContent"]
+        self.assertEqual(ended["run"]["status"], "stopped_residual", ended)
+        message, schema = approving.shown[0]
+        # the decision itself stays fully worded
+        self.assertIn("End this run as stopped_residual, without converging?", message)
+        self.assertIn("Approve to end it now", " ".join(message.split()),
+                    "the decision stays fully worded")
+        # the residuals are in the document; their count is read out of it
+        residual_rows = [row for path in self.files()
+                         for row in json.loads(path.read_bytes())["terminal"]["residuals"]]
+        self.assertTrue(residual_rows, "the fixture leaves something unresolved")
+        counted = (f"{len(residual_rows)} unresolved "
+                   f"{'obligation' if len(residual_rows) == 1 else 'obligations'}")
+        self.assertIn(counted + " would remain", message)
+        self.assertEqual([row["id"] for row in residual_rows],
+                         [row["id"] for row in residual_rows if row["id"] != "obligation.terminal"])
+        document_line, path_line = self.document_lines(message)
+        self.assertRegex(document_line, r"\ADocument: sha256:[0-9a-f]{12}\Z")
+        self.assertTrue(path_line.startswith(str(self.empirica_home)) and path_line.endswith(".json"))
+        self.assertEqual(schema["properties"]["d1"]["enum"], ["later", "approve", "reject"])
+
+
+class OneRunTwoDocumentsTests(WriteFirstFixture):
+    """An evidence batch confirmed, then the terminal consent confirmed: both artifacts carry the
+    digest of the file the mediation wrote for that very batch."""
+
+    def test_the_batch_and_the_consent_each_carry_the_digest_of_their_own_written_file(self):
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        confirming = Human(accept(d1="confirm"))
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
+                            confirm=self.mediator(drv, confirming))
+        tools.call_internal("report_convergence", {"run_id": run_id})
+        self.assertEqual(self.verification(drv, run_id)["status"], "confirmed_by_human",
+                         "the batch was confirmed through the form")
+
+        def digest_rows(terminal: bool) -> list[dict]:
+            self.snapshot(drv, run_id)
+            rows = [row for row in drv._service._coordinator.last_snapshot.history
+                    if row.get("kind") == PRESENTATION]
+            return [row for row in rows if ("terminal" in row) == terminal]
+
+        batch = digest_rows(terminal=False)
+        self.assertEqual(len(batch), 1, "one batch presentation")
+        batch_digest = batch[0]["document_digest"]
+        confirmations = [row for row in self.artifact_rows(drv, run_id, KIND) if row["receipt_id"] == batch[0]["receipt_id"]]
+        self.assertTrue(confirmations, "one confirmation of the batch")
+        self.assertEqual({row["document_digest"] for row in confirmations}, {batch_digest})
+        by_digest = {hitl.digest(path.read_bytes()): path for path in self.files()}
+        self.assertIn(batch_digest, by_digest, "the batch document was written")
+        self.assertEqual(stat.S_IMODE(os.stat(by_digest[batch_digest]).st_mode), 0o444)
+
+        # the same run's terminal consent, through the same shared flow
+        approving = Human(accept(d1="approve"))
+        tools2 = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
+                             confirm=self.mediator(drv, approving))
+        ended = tools2.call_internal("report_convergence",
+                                     {"run_id": run_id, "intent": "stop"})["structuredContent"]
+        self.assertEqual(ended["run"]["status"], "stopped_residual", ended)
+        consent = digest_rows(terminal=True)
+        self.assertEqual(len(consent), 1, "one terminal presentation")
+        consent_digest = consent[0]["document_digest"]
+        self.assertNotEqual(consent_digest, batch_digest, "the consent is its own document")
+        terminal_confirmations = [row for row in self.artifact_rows(drv, run_id, KIND)
+                                 if row["receipt_id"] == consent[0]["receipt_id"]]
+        self.assertEqual({row["document_digest"] for row in terminal_confirmations}, {consent_digest})
+        by_digest_after = {hitl.digest(path.read_bytes()): path for path in self.files()}
+        self.assertIn(consent_digest, by_digest_after, "the consent document was written")
+        self.assertEqual(hitl.digest(by_digest_after[consent_digest].read_bytes()), consent_digest)
+
+
+class InjectedStoreTests(WriteFirstFixture):
+    """The mediation takes the store as a constructor argument (tests inject one; the runtime
+    default is the sidecar under the real ``EMPIRICA_HOME``, built at the presentation)."""
+
+    def test_the_host_confirmation_mediation_uses_the_injected_store(self):
+        drv, run_id = self.pending()
+        store = self.store()
+        human = Human(accept(d1="confirm"))
+        mediated = HostConfirmation(
+            CLAUDE_PROFILE, elicit=human, timeout=lambda: 900,
+            dispatch=lambda req, _p: drv.request(req),
+            presentation_ingress=lambda _p, run, payload: drv.trusted_evidence_presentation(run, payload),
+            confirmation_ingress=lambda _p, run, payload: drv.trusted_evidence_confirmation(run, payload),
+            surface_ingress=lambda _p, run, payload: drv.trusted_human_surface(run, payload["surface"]),
+            documents=store)
+        blocked = self.report(drv, run_id)
+        mediated.observe(run_id)
+        mediated(blocked, self.reevaluator(drv, run_id))
+        self.assertEqual(self.verification(drv, run_id)["status"], "confirmed_by_human")
+        written = self.files()
+        self.assertEqual(len(written), 1)
+        accepted = self.artifact_rows(drv, run_id, PRESENTATION)[0]
+        self.assertEqual(accepted["document_digest"], hitl.digest(written[0].read_bytes()))
+
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

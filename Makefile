@@ -190,7 +190,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 check-evidence: ## Fast evidence rules: citations, confirmation, scenarios, A1 boundaries, home isolation, host adapter contracts
 	@printf '$(BOLD)==> evidence suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CITATION_TESTS)
-	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_evidence_confirmation test_evidence_freshness test_evidence_hosts test_evidence_scenarios test_a1_boundaries test_home_isolation test_public_host_path
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_evidence_confirmation test_evidence_freshness test_evidence_hosts test_evidence_scenarios test_evidence_write_first test_a1_boundaries test_home_isolation test_public_host_path
 
 check-observer: dev-python ## Fast observer store, projection and server tests; its cost by operation counts at n and 2n; the stateful observer = core machine (Hypothesis, fixed seed)
 	@printf '$(BOLD)==> observer suite$(RESET)\n'

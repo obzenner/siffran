@@ -178,13 +178,22 @@ def _audit_verdict(profile: str, raw: dict, payload: dict):
 
 
 def _evidence_presentation(profile: str, raw: dict, payload: dict):
-    """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py)."""
+    """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py).
+
+    PR 11: the shared ``present`` writes the batch's document first (fetch, verify, publish once,
+    present with the digest), so the sidecar file is written before anything is shown on either
+    host. The screen data the adapter receives is unchanged; the presentation answer now also names
+    the written document's ``{digest, path}`` — never the bytes — which the PR 12 dialog (not this
+    bridge) will render. The digest is not handed back into the confirmation leg yet: the TypeScript
+    mediator does not round-trip it (PR 12 wires it), and the core's staging still admits the
+    legacy confirmation of a bound presentation."""
     batch = payload.get("batch")
     shown = confirmation.present(profile, raw["run_id"], terminal=batch if confirmation.is_terminal(batch) else None)
     if isinstance(shown, confirmation.Outcome):  # nothing was shown or spent; the host reports presentation_failed
         return {"type": "evidence_refused", "result": {"failure": shown.failure}}
-    receipt_id, items = shown
-    return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items}
+    receipt_id, items, document = shown
+    return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items,
+            "document": {"digest": document["digest"], "path": document["path"]}}
 
 
 def _human_surface(profile: str, raw: dict, payload: dict):
@@ -192,8 +201,13 @@ def _human_surface(profile: str, raw: dict, payload: dict):
 
 
 def _evidence_confirmation(profile: str, raw: dict, payload: dict):
+    answers = payload["answers"]
+    # PR 12 wires the digest round-trip through the TypeScript mediator; until then a digest never
+    # reaches here, and ``submit`` omits the member when it does not (``None`` would be the fetch,
+    # which refuses every item — never send it).
+    digest = payload.get("document_digest")
     stored = confirmation.submit(profile, raw["run_id"], payload["receipt_id"], payload["items"],
-                                 payload["answers"])
+                                 answers, document_digest=digest if isinstance(digest, str) else None)
     if stored is None:
         return {"type": "evidence_none"}
     return {"type": "evidence_receipt", "result": stored}

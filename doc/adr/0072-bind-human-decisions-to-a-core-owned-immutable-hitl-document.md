@@ -30,7 +30,7 @@ border, and lists every budget with used and allowed (`plugins/empirica/adapters
 rationale through `:88-93`); the edited-configuration confirmation repeats the values with their "(was …)"
 priors and the amendment warning (`:110-132`). The end-of-pass batch embeds each claim's full text and each
 quote in the item itself, and carries a record's "why no deterministic check" reason
-(`plugins/empirica/adapters/confirmation.py:131-155`; the reason is `spike_unavailable`, `:153-155`); the
+(`plugins/empirica/adapters/confirmation.py:131-155`, the file before the workstream; the reason is `spike_unavailable`, `:153-155`); the
 terminal consent question is again a fully worded form item (`:127-134`). Pi renders the same content in its
 TUI dialog (`plugins/empirica/adapters/pi/src/dialog-view.ts:115-142`), the two hosts sharing one builder.
 
@@ -106,7 +106,7 @@ fixtures and `shared-defs.json` it is not vendored into the plugin today). Two k
   **`outcome`** (supporting or refuting — a human cannot judge a quote without knowing what it claims to
   be), the "why no deterministic check" reason where one exists, every claim with its text, and the
   terminal consent's status and unresolved residue
-  (`plugins/empirica/adapters/confirmation.py:118-155`, `plugins/empirica/core/evaluation.py:1443-1525`).
+  (`plugins/empirica/adapters/confirmation.py:143-176`, `plugins/empirica/core/evaluation.py:1443-1525`).
 
 Which rows count as the terminal residual content is **selected by one core function** from a GetRun-shaped
 snapshot — the run view's active obligation rows that are not satisfied, excluding the terminal consent row
@@ -200,7 +200,7 @@ The order is fixed, and spending follows the successful check, never the reverse
    carries `document: {text, digest}` for the batch named by `key` (a confirmation's key is its own
    presentation's) — so the refusal **is** the fetch: the adapter writes the document it names and
    repeats the call with the digest (PR 11/12's adapters; the presentation leg already retries once,
-   `adapters/confirmation.py:204-217`). A confirmation must also name the digest its own presentation
+   `adapters/confirmation.py:299-330`). A confirmation must also name the digest its own presentation
    recorded — a presentation that recorded none (legacy) confirms only the legacy way. The public `GetRun` run view, `GetArgument` and the evaluation
    results never carry the document: its content is not secret, but its digest and path have no reason to
    become an author-facing contract.
@@ -225,7 +225,7 @@ The order is fixed, and spending follows the successful check, never the reverse
 The forms keep exactly what is being judged: the numbers (budget used and allowed
 (`adapters/governance.py:79-86`)), the amended values with their `(was …)` priors (`:110-115`), the first
 line of the goal, and the evidence quotes (the quote is the fact a human confirms or rejects,
-`adapters/confirmation.py:141-155`). The rationale, the claim text and the "why no deterministic check"
+`adapters/confirmation.py:399-409`). The rationale, the claim text and the "why no deterministic check"
 reason move to the document; the form carries the path and the digest of the one that holds them.
 
 ### Hosts
@@ -294,7 +294,7 @@ beside the private dialog (`application/v2.py:114-122`); for evidence the privat
 `trusted_evidence_presentation` response carries it, with the refusal-carries-document pattern — a call
 whose `document_digest` is absent or wrong is refused with `evidence.document_mismatch`, nothing is spent,
 the refusal's private result carries the pair for the batch named by `key`, and the adapter writes and
-repeats the call (`adapters/confirmation.py:204-217` — the leg already retries once; the fetch–present window
+repeats the call (`adapters/confirmation.py:299-330` — the leg already retries once; the fetch–present window
 cannot drift because the refusal is the fetch). The context ask itself spends nothing and writes no receipt,
 but may commit `governance.context` when the host's ingress or author observation changed
 (`application/governance.py:40-49,103-104`) — a commit that touches no digested content.
@@ -356,7 +356,7 @@ The digest as `sha256:` followed by its first 12 hex characters (the scan length
 identifiers, `short_id`, `ID_SIZE = 12`, `application/observer_index.py:66,75`), and the document's
 **absolute** path on **its own line, exempt from wrapping** — the path is a copy-paste surface, wrapping
 breaks the paste, and a realistic path under `$EMPIRICA_HOME` (roughly 160–200 characters) plainly does not
-fit the wrapped text widths anyway (`adapters/confirmation.py:30-40`, the one owner of the dialog lengths);
+fit the wrapped text widths anyway (`adapters/confirmation.py:48-65`, the one owner of the dialog lengths);
 the digest line and the exempt path line are pinned by the form goldens. The sidecar returns an absolute path
 even under a relative `EMPIRICA_HOME` (the home is made absolute at construction, never resolved — it must
 not follow a symlink). The full digest and the document path are on the decision record; the form's digest
