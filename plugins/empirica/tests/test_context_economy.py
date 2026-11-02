@@ -336,7 +336,8 @@ class AudienceTests(_ServiceHarness):
         g = context["run"]["governance"]
         decision = {"run_id": self.run_id, "receipt_id": "r-" + str(g["plan_revision"]),
                     "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
-                    "approval_kind": "host_ui", "outcome": "present"}
+                    "approval_kind": "host_ui", "outcome": "present",
+                    "document_digest": context["presentation"]["document"]["digest"]}
         presented = self.service.trusted_governance_decision(
             run_id=self.run_id, payload=decision)["result"]
         self.assertIn("presentation", presented)

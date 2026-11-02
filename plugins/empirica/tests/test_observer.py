@@ -367,7 +367,12 @@ class WaitingOwnerTests(unittest.TestCase):
         b.evaluate(run, "report_convergence")
         ids = b.record_ids(run)
         if present:
-            b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1", "key": b.batch_key(run)})
+            # PR 13: the presentation names its batch's document — null fetch, then bound
+            fetch = b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1",
+                                                              "key": b.batch_key(run),
+                                                              "document_digest": None})["result"]
+            b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1", "key": b.batch_key(run),
+                                                     "document_digest": fetch["document"]["digest"]})
         if answer:
             patch = mock.patch.object(governance, "MAX_INTERACTIONS", len(
                 (lambda src: src.read_state(next(iter(src.keys()))))(DriverSource(b.store)).value["governance"]["receipts"]) + 1) if limit else contextlib.nullcontext()

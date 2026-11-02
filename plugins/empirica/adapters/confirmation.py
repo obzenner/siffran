@@ -376,17 +376,16 @@ def submit(profile: str, run_id: str, receipt_id: str, items: Sequence[Mapping[s
            document_digest: str | None = None) -> dict[str, Any] | None:
     """Submit one receipt for the answers; ``None`` when they grant nothing (Later, cancel, malformed).
 
-    ``document_digest`` repeats the digest the presentation's own document recorded — the core
-    requires the confirmation to name it, and refuses (``evidence.document_mismatch``, nothing
-    admitted) a value that is not the one its own presentation recorded. A caller that carries no
-    digest (the Pi transport until PR 12 wires the round-trip) submits the legacy way the core's
-    staging still admits."""
+    ``document_digest`` repeats the digest the presentation's own document recorded — the wire
+    requires the member (PR 13, ADR-0072), and the core refuses (``evidence.document_mismatch``,
+    nothing admitted) a value that is not the one its own presentation recorded: ``None`` here is
+    the fetch, not a silent legacy shape, so a caller that never fetched its document is refused
+    in-domain before anything is admitted."""
     chosen = decisions(items, answers)
     if not chosen:
         return None
-    payload = {"run_id": run_id, "receipt_id": receipt_id, "decisions": chosen}
-    if document_digest is not None:
-        payload["document_digest"] = document_digest
+    payload = {"run_id": run_id, "receipt_id": receipt_id, "decisions": chosen,
+               "document_digest": document_digest}
     return ingress(profile, run_id, payload).get("result", {})
 
 

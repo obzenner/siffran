@@ -433,9 +433,11 @@ class IsolatedHookResolutionTests(unittest.TestCase):
                 "type": "ObserveAction", "run_id": handle, "action": {"kind": "configure_run",
                     "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
                     "rationale": "sized for the model-switch lifecycle regression"}}}, CLAUDE_PROFILE_ID)
-            g = bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, context)["result"]["run"]["governance"]
+            asked = bridge.trusted_governance_context(CLAUDE_PROFILE_ID, handle, context)["result"]
+            g = asked["run"]["governance"]
             decision = {"run_id": handle, "receipt_id": "test-ui", "proposal_digest": g["proposal_digest"],
-                "plan_revision": g["plan_revision"], "approval_kind": "host_ui"}
+                "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
+                "document_digest": asked["presentation"]["document"]["digest"]}
             presented = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, {**decision, "outcome": "present"})
             self.assertEqual(presented["result"]["type"], "Allow")
             approved = bridge.trusted_governance_decision(CLAUDE_PROFILE_ID, handle, {**decision,

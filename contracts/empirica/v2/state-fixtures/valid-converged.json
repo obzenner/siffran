@@ -34,7 +34,7 @@
         "fingerprint": "sha256:4e4f4adc2a56d0a279e2e17dbd474602e88eb9ed77bbf0e0cd5da3f811d5566d",
         "presentation_fingerprint": "sha256:6e543a2078ffcfb5b37eb4818d5559a3fcc4689fe6b2d8e0b8cfbda62e803e8f",
         "outcome": "approve",
-        "document_digest": null,
+        "document_digest": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
         "superseded_budgets": null,
         "plan_revision": 1,
         "proposal_digest": "sha256:5246d5773a2c3c031aac783c8aae5bb72475511259779279493c6e859d7000ea",

@@ -288,20 +288,18 @@ class EvidenceLegBindingTests(unittest.TestCase):
         self.assertEqual(stale["code"], "conflict")
 
     # -- 5. the confirmation names the document its own presentation bound -- #
-    def test_a_confirmation_for_a_legacy_presentation_cannot_claim_a_digest(self):
+    def test_a_confirmation_claiming_another_document_binds_nothing(self):
+        """A bound presentation, then a confirmation whose digest is not the one the
+        presentation recorded: the recorded member must equal the claim — a foreign or
+        cross-presentation digest binds nothing, and nothing is admitted."""
         key, right = self.setUp_documented_batch()
-        self.assertEqual(self.present(key=key, receipt="legacy")["type"], "Allow")  # absent: legacy
-        refused = self.confirm(receipt="legacy", digest=right)
+        self.assertEqual(self.present(key=key, receipt="rebind", digest=right)["type"], "Allow")
+        other = "sha256:" + "0" * 64
+        self.assertNotEqual(other, right)
+        refused = self.confirm(receipt="rebind", digest=other)
         self.assertEqual(refused["type"], "Block")
         self.assertEqual(refused["reasons"][0]["code"], "evidence.document_mismatch")
         self.assertEqual(self.confirmation_bodies(), [])  # nothing admitted
-
-    def test_a_legacy_presentation_and_a_legacy_confirmation_still_admit(self):
-        key, right = self.setUp_documented_batch()
-        self.assertEqual(self.present(key=key, receipt="olde")["type"], "Allow")
-        self.assertEqual(self.confirm(receipt="olde")["type"], "Allow")
-        self.assertIsNone(self.presentation_bodies()["olde"]["document_digest"])
-        self.assertEqual([body["document_digest"] for body in self.confirmation_bodies()], [None])
 
     def test_a_wrong_digest_on_the_confirmation_refuses_every_item(self):
         key, right = self.setUp_documented_batch()
@@ -311,15 +309,16 @@ class EvidenceLegBindingTests(unittest.TestCase):
         self.assertEqual(refused["reasons"][0]["code"], "evidence.document_mismatch")
         self.assertEqual(self.confirmation_bodies(), [])
 
-    # -- 6. absent is today's behaviour byte for byte ------------------------ #
-    def test_an_absent_digest_keeps_the_presentation_body_of_today(self):
-        key, _ = self.setUp_documented_batch()
-        shown = self.present(key=key, receipt="today")
+    # -- 6. the admitted body keeps today's exact shape, bound ----------------- #
+    def test_a_bound_presentation_keeps_the_body_members_of_today(self):
+        key, right = self.setUp_documented_batch()
+        shown = self.present(key=key, receipt="today", digest=right)
         self.assertEqual(shown["type"], "Allow", shown)
         body = self.presentation_bodies()["today"]
         state = self.state_snapshot().state
-        # exactly today's members plus the new binding member, carried on the history row's own
-        # landing shape (its ``kind`` and ``artifact_id`` are the row's, not the body's)
+        # exactly today's members plus the binding member, carried on the history row's own
+        # landing shape (its ``kind`` and ``artifact_id`` are the row's, not the body's) —
+        # only the binding's value changed with the contract step: recorded, never null
         today = {"receipt_id": "today", "key": key,
                  "record_ids": tuple(body["record_ids"]), "claims": tuple(body["claims"]),
                  "approval_kind": "host_ui",
@@ -327,14 +326,14 @@ class EvidenceLegBindingTests(unittest.TestCase):
         self.assertEqual({k: v for k, v in body.items() if k not in ("document_digest", "artifact_id", "kind")},
                          today)
         self.assertEqual(sorted(body), sorted([*today, "document_digest", "artifact_id", "kind"]))
-        self.assertIsNone(body["document_digest"])
+        self.assertEqual(body["document_digest"], right)
 
     # -- 7. the terminal consent binds the same way --------------------------- #
     def test_the_terminal_consent_binds_its_document_with_the_residual_rows(self):
-        key, _ = self.setUp_documented_batch()
-        # a record not confirmed keeps the gate from stopping: answer it the pre-PR-10 way
-        self.assertEqual(self.present(key=key, receipt="legacy")["type"], "Allow")
-        self.assertEqual(self.confirm(receipt="legacy")["type"], "Allow")
+        key, right = self.setUp_documented_batch()
+        # a record not confirmed keeps the gate from stopping: answer it the bound way
+        self.assertEqual(self.present(key=key, receipt="legacy", digest=right)["type"], "Allow")
+        self.assertEqual(self.confirm(receipt="legacy", digest=right)["type"], "Allow")
         stop = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})
         self.assertEqual(stop["type"], "Block")
         self.assertEqual(stop["reasons"][0]["code"], "governance.terminal_stop_pending", stop)
@@ -370,6 +369,73 @@ class EvidenceLegBindingTests(unittest.TestCase):
         ended = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})
         self.assertEqual(ended["type"], "Allow", ended)
         self.assertTrue(ended["run"]["status"].startswith("stopped_"))
+
+    # -- 9. the contract step (PR 13): the member is required ---------------- #
+    def test_the_schema_requires_the_document_member_on_both_evidence_payloads(self):
+        """The wire contract: `document_digest` is a required `string | null` on both evidence
+        payloads — `null` is the fetch, and absent is no longer a shape the schema admits."""
+        presentation = protocol.schema_validator("request", "evidencePresentationPayload")
+        confirmation = protocol.schema_validator("request", "evidenceConfirmationPayload")
+        decision = [{"subject": "research", "artifact_id": "sha256:" + "0" * 64,
+                     "outcome": "confirm"}]
+        for name, validator, extra in ((
+                "presentation", presentation, {"key": "sha256:" + "0" * 64}),
+                ("confirmation", confirmation, {"decisions": decision})):
+            base = {"run_id": self.run_id, "receipt_id": "schema", **extra}
+            with self.subTest(payload=name):
+                self.assertFalse(validator.is_valid(base), f"absent must be refused: {name}")
+                self.assertTrue(validator.is_valid({**base, "document_digest": None}),
+                                f"null is the fetch: {name}")
+                self.assertTrue(validator.is_valid({**base, "document_digest": "sha256:" + "0" * 64}),
+                                f"a named document: {name}")
+
+    def test_an_absent_member_is_refused_by_the_ingress_before_anything_is_spent(self):
+        """The legacy shape is gone on the wire: a presentation or confirmation without
+        `document_digest` is a Fault of the request schema (`invalid_request`) — a refusal the
+        trusted ingress raises before any domain logic runs, so nothing is spent, nothing written,
+        and every item of a digest-less confirmation stays unadmitted."""
+        key, right = self.setUp_documented_batch()
+        before = self.spent()
+        refused = self.present(key=key, receipt="absent-present")
+        self.assertEqual(refused, {"type": "Fault", "code": "invalid_request",
+                                  "fail_direction": "closed"})
+        self.assertEqual(self.spent(), before)
+        self.assertEqual(self.presentation_bodies(), {})
+        self.assertEqual(self.present(key=key, receipt="absent-answer", digest=right)["type"],
+                         "Allow")
+        refused = self.confirm(receipt="absent-answer")
+        self.assertEqual(refused, {"type": "Fault", "code": "invalid_request",
+                                  "fail_direction": "closed"})
+        self.assertEqual(self.confirmation_bodies(), [])
+
+    def test_the_null_fetch_on_a_confirmation_refuses_only_the_items(self):
+        """`null` on a confirmation is the fetch the same way it is on a presentation: the refusal
+        carries the document the receipt's own presentation named, nothing is admitted."""
+        key, right = self.setUp_documented_batch()
+        self.assertEqual(self.present(key=key, receipt="confirm-fetch", digest=right)["type"],
+                         "Allow")
+        refused = self.confirm(receipt="confirm-fetch", digest=None)
+        self.assertEqual(refused["type"], "Block")
+        self.assertEqual(refused["reasons"][0]["code"], "evidence.document_mismatch")
+        pairs = {"text", "digest"}
+        self.assertEqual(set(refused["document"]), pairs)
+        self.assertEqual(refused["document"]["digest"], right)
+        self.assertEqual(self.confirmation_bodies(), [])
+
+    def test_every_admitted_evidence_artifact_carries_a_non_null_document_digest(self):
+        """The contract of the record (PR 13): a human batch's presentation and every
+        confirmation artifact body bind the document the core verified, and `null` is gone from
+        the evidence rows — the only digest a refusal carries is a refusal that admitted nothing.
+        No non-human path writes these rows: the auto lane never confirms evidence, so the null
+        the state still keeps is the governance auto receipt's alone (PR 07)."""
+        key, right = self.setUp_documented_batch()
+        self.assertEqual(self.present(key=key, receipt="contract", digest=right)["type"],
+                         "Allow")
+        self.assertEqual(self.confirm(receipt="contract", digest=right)["type"], "Allow")
+        bonds = [*self.presentation_bodies().values(), *self.confirmation_bodies()]
+        self.assertTrue(bonds, "both rows land")
+        for body in bonds:
+            self.assertEqual(body["document_digest"], right)
 
     # -- 8. the document never reaches a public result ------------------------ #
     def test_public_results_never_carry_the_document(self):

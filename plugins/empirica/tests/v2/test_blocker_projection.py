@@ -415,10 +415,11 @@ class BlockerProjectionTests(ConformanceCase):
             "kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
             "rationale": SIZED_RATIONALE}))
         coordinator = drv._service._coordinator
-        transact(coordinator, run, {"author": AUTHOR, "ingress": "mcp_elicitation"}, context=True)
+        bound = transact(coordinator, run, {"author": AUTHOR, "ingress": "mcp_elicitation"}, context=True)
         governed = fixture.run_view(drv, run)["governance"]
         decision = {"run_id": run, "receipt_id": "config-1", "proposal_digest": governed["proposal_digest"],
-                    "plan_revision": governed["plan_revision"], "approval_kind": "host_ui"}
+                    "plan_revision": governed["plan_revision"], "approval_kind": "host_ui",
+                    "document_digest": bound["result"]["presentation"]["document"]["digest"]}
         unchanged("governance presentation", drv, run,
                   lambda: transact(coordinator, run, {**decision, "outcome": "present"}))
         submitted = {**decision, "submission": {"action": "approve",

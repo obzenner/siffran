@@ -192,16 +192,17 @@ The order is fixed, and spending follows the successful check, never the reverse
    dialog it already carries (`application/v2.py:114-122`, `governancePresentation`,
    `contracts/empirica/v2/shared-defs.json:383-391`). For evidence, the carrier is the private
    `trusted_evidence_presentation` **and** `trusted_evidence_confirmation` responses
-   (`application/v2.py:132-150`, `application/transaction.py:384-390`). At this stage (PR 10, the expand
-   step) the member is staged so today's adapters keep working: **absent** keeps today's behaviour
-   exactly (the legacy adapters of the PRs before the binding, removed by the contract step below);
-   **`null` is the explicit fetch** and **a wrong digest a mismatched call** — both refused with
+   (`application/v2.py:132-150`, `application/transaction.py:384-390`). The member is **required**
+   (`string | null`, the contract step, PR 13): an absent `document_digest` is refused by the request
+   schema itself (`invalid_request`) before any domain logic runs, `null` is the explicit fetch and
+   a wrong digest a mismatched call — both refused with
    `evidence.document_mismatch`, nothing spent, nothing admitted, and the refusal's private result
    carries `document: {text, digest}` for the batch named by `key` (a confirmation's key is its own
    presentation's) — so the refusal **is** the fetch: the adapter writes the document it names and
    repeats the call with the digest (PR 11/12's adapters; the presentation leg already retries once,
    `adapters/confirmation.py:299-330`). A confirmation must also name the digest its own presentation
-   recorded — a presentation that recorded none (legacy) confirms only the legacy way. The public `GetRun` run view, `GetArgument` and the evaluation
+   recorded — every admitted presentation records one, so a receipt that claims another document
+   binds nothing. The public `GetRun` run view, `GetArgument` and the evaluation
    results never carry the document: its content is not secret, but its digest and path have no reason to
    become an author-facing contract.
 2. **Write** — the adapter writes the document bytes to
@@ -261,17 +262,20 @@ classification, `plugins/empirica/application/protocol.py:45`,
 `plugins/empirica/application/run_state.py:71,160`). There is **no backwards compatibility**: run files
 written as `empirica.run/3` classify as corrupt, exactly as `empirica.run/2` does today
 (`plugins/empirica/tests/test_run4_binding.py:300-307`). The public wire keeps its axis `empirica/v2`; the
-requests gain `document_digest` — on the governance decision payload, the evidence presentation payload and
-the evidence confirmation payload (today required: `run_id`, `receipt_id` and `proposal_digest`/`key`/
-`decisions` respectively, `contracts/empirica/v2/request.schema.json:1278,1571,1662`). It is **optional and
-staged** (its value is `null` or `sha256:<64hex>`, PRs 07/10): absent keeps today's behaviour exactly and is
-checked whenever present; `null` is the explicit fetch and a wrong value a mismatch. The contract step
-(PR 13) makes the member required as `string | null`, so "absent" disappears and step 1's fetch sentence
-becomes literally true — and it becomes
-required for every `host_ui` receipt and every human evidence record, absent for `auto` (the same discipline
-`presentation_fingerprint` already has: `None` if and only if `auto`,
-`plugins/empirica/core/governance.py:353-356`). Because the payloads change, the public-tool schemas and the
-vendor copies follow (`make empirica-public-tools-sync`, `make vendor-contracts`).
+requests carry `document_digest` as a **required** member — on the governance decision payload for every
+`approval_kind == "host_ui"` envelope (`present`, the decision, `dismiss`) as a string carrying the digest
+pattern, forbidden for `auto` (PR 07) — and on the evidence presentation and confirmation payloads as
+`string | null`, where `null` is the explicit fetch (the payloads' other required members beside it:
+`run_id`, `receipt_id` and `proposal_digest`/`key`/`decisions` respectively,
+`contracts/empirica/v2/request.schema.json:1278,1612,1716`). The staged, optional window (PRs 07/10) is
+closed: an **absent** member is refused by the wire itself — the request schema's `invalid_request`, raised
+before any domain logic runs — while `null` is the fetch and a wrong value a mismatch. The same discipline
+the recorded receipts follow (the state conditional of `governance.receipts[]`: a `host_ui` receipt names
+its document, an `auto` receipt records `None` exactly — the twins the `core/governance.invariant` keeps,
+beside `presentation_fingerprint`'s):
+required for every `host_ui` receipt and every human evidence record, null for `auto`. Because the
+payloads require it, the public-tool schemas and the vendor copies follow
+(`make empirica-public-tools-sync`, `make vendor-contracts`).
 
 ## Consequences
 
@@ -308,10 +312,12 @@ The document travels as the **rendered pair** `document: {text, digest}` in the 
 never as a dict an adapter renders: for configuration the `governance_context` presentation result carries it
 beside the private dialog (`application/v2.py:114-122`); for evidence the private
 `trusted_evidence_presentation` response carries it, with the refusal-carries-document pattern — a call
-whose `document_digest` is absent or wrong is refused with `evidence.document_mismatch`, nothing is spent,
+whose `document_digest` is wrong (or `null`, the fetch) is refused with `evidence.document_mismatch`,
+nothing is spent,
 the refusal's private result carries the pair for the batch named by `key`, and the adapter writes and
 repeats the call (`adapters/confirmation.py:299-330` — the leg already retries once; the fetch–present window
-cannot drift because the refusal is the fetch). The context ask itself spends nothing and writes no receipt,
+cannot drift because the refusal is the fetch); an absent member never reaches the domain at all — the request
+schema refuses it (`invalid_request`) before any logic runs (PR 13). The context ask itself spends nothing and writes no receipt,
 but may commit `governance.context` when the host's ingress or author observation changed
 (`application/governance.py:40-49,103-104`) — a commit that touches no digested content.
 

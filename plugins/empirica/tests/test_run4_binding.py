@@ -282,6 +282,34 @@ class Run4SchemaTests(unittest.TestCase):
                 self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
                 self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
 
+    def test_the_receipt_document_digest_is_conditioned_on_the_approval_kind(self):
+        """PR 13 (ADR-0072): the recorded binding is required evidence of every host approval —
+        a host_ui receipt without the member, or carrying null, is refused by the state schema and
+        classifies corrupt; an auto receipt must stay free of it (auto answers no human question)."""
+        fixture = self.fixture
+        receipt = fixture["governance"]["receipts"][0]
+        self.assertEqual(receipt["approval_kind"], "host_ui")
+        for label, change in (("a host_ui receipt that carries none",
+                               {"document_digest": None}),
+                              ("a host_ui receipt that omits the member",
+                               {"document_digest": "__absent__"})):
+            candidate = copy.deepcopy(fixture)
+            row = candidate["governance"]["receipts"][0]
+            if change["document_digest"] == "__absent__":
+                row.pop("document_digest", None)
+            else:
+                row.update(change)
+            with self.subTest(case=label):
+                self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
+                self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
+        # the auto control: a receipt that answers no human's question carries no binding at all
+        candidate = copy.deepcopy(fixture)
+        row = candidate["governance"]["receipts"][0]
+        row.update(approval_kind="auto", presentation_fingerprint=None,
+                   document_digest="sha256:" + "c" * 64)
+        self.assertFalse(protocol.schema_validator("state").is_valid(candidate),
+                         "auto may not claim a document")
+
     def test_roundtrip_is_deeply_immutable_and_encoder_is_run4_only(self):
         classified = run_state.classify_and_decode(self.fixture)
         self.assertEqual(classified.kind, "valid")

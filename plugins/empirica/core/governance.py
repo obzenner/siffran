@@ -353,18 +353,19 @@ def invariant(doc: Mapping) -> bool:
                 return False
         elif receipt.get("superseded_budgets") is not None:
             return False
-        # The document binding the decision named (ADR-0072, receipts[].document_digest, PR 07):
-        # the recorded digest is null exactly where no document was verified — an auto receipt
-        # answers no human's question — and a recorded value is a `sha256:`-prefixed SHA-256. The
-        # gate side (the application) refuses a decision whose digest differs from the one its
-        # present receipt recorded, so a finalized receipt keeps the document its present bound;
-        # the member's presence is the state schema's rule, checked at every decode.
+        # The document binding the decision named (ADR-0072, receipts[].document_digest; the
+        # contract step, PR 13): every host_ui receipt names the sha256 of the bytes the core
+        # rendered and verified — a human approval without its document cannot decode — and an
+        # auto receipt records null exactly: auto answers no human's question. The gate side
+        # (the application) refuses a decision whose digest differs from the one its present
+        # receipt recorded, so a finalized receipt keeps the document its present bound; the
+        # member's presence is the state schema's rule, checked at every decode.
         recorded = receipt.get("document_digest")
-        if not (recorded is None
-                or (isinstance(recorded, str)
-                    and _DOCUMENT_DIGEST.fullmatch(recorded) is not None)):
-            return False
-        if recorded is not None and receipt["approval_kind"] == "auto":
+        if receipt["approval_kind"] == "auto":
+            if recorded is not None:
+                return False
+        elif not (isinstance(recorded, str)
+                  and _DOCUMENT_DIGEST.fullmatch(recorded) is not None):
             return False
         # The presentation fingerprint is bound to the immutable receipt kind.
         if ((receipt["presentation_fingerprint"] is None)

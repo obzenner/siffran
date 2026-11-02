@@ -207,9 +207,10 @@ def _human_surface(profile: str, raw: dict, payload: dict):
 
 def _evidence_confirmation(profile: str, raw: dict, payload: dict):
     answers = payload["answers"]
-    # PR 12: the mediator sends its presentation's digest, so a Pi receipt — like a Claude one — names
-    # the document the human was shown. ``submit`` omits the member when it does not carry one (the
-    # core's staging until PR 13); ``None`` would be the fetch, which refuses every item: never send it.
+    # PR 12/13: the mediator sends its presentation's digest, so a Pi receipt — like a Claude one —
+    # names the document the human was shown; the TS transport always sends the digest it validated
+    # with the presentation. A private call that carries none reaches ``submit`` as ``None`` — the
+    # in-domain fetch, which refuses every item before anything is admitted: never a silent shape.
     digest = payload.get("document_digest")
     stored = confirmation.submit(profile, raw["run_id"], payload["receipt_id"], payload["items"],
                                  answers, document_digest=digest if isinstance(digest, str) else None)

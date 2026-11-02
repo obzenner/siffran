@@ -1024,9 +1024,10 @@ def _confirmation_artifact(snapshot: EvaluationSnapshot, receipt_id: str,
                            item: Mapping[str, Any], document_digest: Any = None) -> dict[str, Any] | None:
     """The artifact recording one receipt decision, or ``None`` when it names nothing in this run.
 
-    ``document_digest`` is the rendered HITL document the human was shown against (ADR-0072, PR 10):
-    the digest the presentation verified and this receipt reused, recorded on every confirmation
-    artifact of the receipt — ``None`` for a legacy receipt that carried none at all."""
+    ``document_digest`` is the rendered HITL document the human was shown against (ADR-0072,
+    PR 10; required since PR 13): the digest the presentation verified and this receipt
+    repeats, recorded on every confirmation artifact of the receipt — never ``None`` on an
+    admitted artifact, because the ``None`` case is the fetch, and it admits nothing."""
     stamps = {"route_stamp": snapshot.state.route_stamp,
               "investigation_stamp": snapshot.state.investigation_stamp}
     base = {"receipt_id": receipt_id, "outcome": item["outcome"], "approval_kind": "host_ui",
@@ -1091,20 +1092,19 @@ def plan_evidence_presentation(snapshot: EvaluationSnapshot, payload: Mapping[st
     if governance.interactions_remaining(
             state.governance, confirmation.interactions(snapshot))["total"] == 0:
         return _decision(snapshot, state, "Block", reason="governance.interaction_limit")
-    # ADR-0072 (PR 10, the expand rules): after every existing check — the key the core would
-    # admit, the replay, the staleness, the interaction ceiling — the document the human was shown
-    # is either verified or fetched. An absent ``document_digest`` is today's behaviour exactly
-    # (the legacy adapters of the PRs before the binding; the contract step makes the member
-    # required later); ``None`` is an explicit fetch and a wrong value a mismatched present — both
-    # refused with ``evidence.document_mismatch`` and nothing spent, the refusal's private result
-    # carrying the document for the batch named by ``key`` (the refusal is the fetch); the right
+    # ADR-0072 (PR 10's rules, required since PR 13): after every existing check — the key the
+    # core would admit, the replay, the staleness, the interaction ceiling — the document the
+    # human was shown is either verified or fetched; the wire requires the member, so the absent
+    # shape is refused before the domain logic runs (the request schema's invalid_request).
+    # ``None`` is an explicit fetch and a wrong value a mismatched present — both refused with
+    # ``evidence.document_mismatch`` and nothing spent, the refusal's private result carrying
+    # the document for the batch named by ``key`` (the refusal is the fetch); the right
     # digest is recorded in the presentation artifact body.
-    given = payload.get("document_digest")
-    if "document_digest" in payload:
-        from core import hitl  # imported here: core.hitl imports this module at its own top
-        if given is None or given != hitl.document_digest(
-                hitl.evidence_for(run_id=snapshot.run_id, snapshot=snapshot, key=batch["key"])):
-            return _decision(snapshot, state, "Block", reason="evidence.document_mismatch")
+    from core import hitl  # imported here: core.hitl imports this module at its own top
+    given = payload["document_digest"]
+    if given is None or given != hitl.document_digest(
+            hitl.evidence_for(run_id=snapshot.run_id, snapshot=snapshot, key=batch["key"])):
+        return _decision(snapshot, state, "Block", reason="evidence.document_mismatch")
     return _decision(snapshot, state, artifacts=(artifact(confirmation.PRESENTATION, {
         "receipt_id": payload["receipt_id"], "key": batch["key"], "record_ids": batch["record_ids"],
         "claims": batch["claims"], **({"terminal": batch["terminal"]} if confirmation.is_terminal(batch) else {}),
@@ -1126,7 +1126,7 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
         return blocked
     items = payload["decisions"]
     planned = [_confirmation_artifact(snapshot, payload["receipt_id"], item,
-                                       payload.get("document_digest")) for item in items]
+                                       payload["document_digest"]) for item in items]
     subjects = {(i["subject"], i.get("artifact_id", i.get("claim_id"))) for i in items}
     if None in planned or len(subjects) != len(items):
         return _decision(snapshot, state, "Fault", reason="conflict")
@@ -1145,21 +1145,19 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
                 else ("claim", i["claim_id"], i["claim_digest"]) for i in items}
     if not answered <= asked:
         return _decision(snapshot, state, "Fault", reason="conflict")
-    # ADR-0072 (PR 10, the same expand rules, decided last so every existing refusal and replay
-    # wins first — Q3 ordering): an absent ``document_digest`` is today's legacy receipt; ``None``
-    # is an explicit fetch (refused, nothing admitted, the refusal carrying the document the
-    # receipt's own presentation named); a value must equal the document this state renders AND the
-    # one its own presentation recorded — a presentation without a record (legacy) binds nothing a
-    # confirmation could claim, so claiming one is a mismatch, and a legacy presentation confirms
-    # only the legacy way.
-    if "document_digest" in payload:
-        from core import hitl  # imported here: core.hitl imports this module at its own top
-        given = payload["document_digest"]
-        recorded = shown.get("document_digest")
-        if (given is None or recorded is None or recorded != given
-                or given != hitl.document_digest(
-                    hitl.evidence_for(run_id=snapshot.run_id, snapshot=snapshot, key=shown["key"]))):
-            return _decision(snapshot, state, "Block", reason="evidence.document_mismatch")
+    # ADR-0072 (PR 10's rules, decided last so every existing refusal and replay wins first —
+    # Q3 ordering; required since PR 13: an absent member never reaches here, the request schema
+    # refuses the shape as invalid_request before any domain logic runs). ``None`` is an explicit
+    # fetch (refused, nothing admitted, the refusal carrying the document the receipt's own
+    # presentation named); a value must equal the document this state renders AND the one its
+    # own presentation recorded — every admitted presentation now records a verified one.
+    from core import hitl  # imported here: core.hitl imports this module at its own top
+    given = payload["document_digest"]
+    recorded = shown.get("document_digest")
+    if (given is None or recorded != given
+            or given != hitl.document_digest(
+                hitl.evidence_for(run_id=snapshot.run_id, snapshot=snapshot, key=shown["key"]))):
+        return _decision(snapshot, state, "Block", reason="evidence.document_mismatch")
     return _decision(snapshot, state, artifacts=tuple(planned))
 
 

@@ -115,18 +115,19 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     governed = policy.revise(state.goal, governed, proposal=proposed)
                 if outcome == "reject":
                     governed.update(state="rejected")
-                # ADR-0072 (Q3, PR 07): every existing refusal wins first — replay, staleness,
-                # interaction ceilings, budget and revision errors — and the document check comes
-                # last, spending nothing: a present bound to another state's document never
-                # writes a receipt. The decision names the document its own present recorded;
-                # a digest that disagrees with the state's own recompute is the mismatch, while
-                # a receipt whose payload diverges from its own present — digest included — is
-                # the mixed envelope the decision gate refuses first as governance.receipt_replay
-                # (review-2 7a), so this gate never sees one from a validated caller.
-                given = decision.get("document_digest")
+                # ADR-0072 (Q3, PR 07; the contract step PR 13): every existing refusal wins
+                # first — replay, staleness, interaction ceilings, budget and revision errors —
+                # and the document check comes last, spending nothing: a present bound to another
+                # state's document never writes a receipt, and a decision must name the document
+                # its own present bound. The wire already requires the member for every host_ui
+                # envelope, so the gate reads it unconditionally.
+                # A receipt whose payload diverges from its own present, digest included, is the
+                # mixed envelope the decision gate refuses first as governance.receipt_replay
+                # (review-2 7a), so the prior-digest clause below is defense in depth only.
                 prior = next((r for r in governed["receipts"]
                               if r["id"] == payload["receipt_id"]), None)
-                if given is not None and decision["approval_kind"] == "host_ui":
+                if decision["approval_kind"] == "host_ui":
+                    given = decision["document_digest"]
                     expected = hitl.document_digest(
                         hitl.configuration_for(run_id=run_id, snapshot=snapshot))
                     if (expected != given
@@ -137,9 +138,11 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                             or (prior is not None and prior.get("document_digest") != given)):
                         return c._block_from_snapshot(
                             snapshot, rid, "governance.document_mismatch", presentation=True)
+                else:
+                    given = None
                 fingerprint = policy.canonical_digest(payload)
                 if prior is None:
-                    byte_digest = given if decision["approval_kind"] == "host_ui" else None
+                    byte_digest = given
                     governed["receipts"].append({"id": payload["receipt_id"], "fingerprint": fingerprint,
                         "presentation_fingerprint": fingerprint if outcome == "present" else None,
                         "outcome": outcome, "plan_revision": payload["plan_revision"],

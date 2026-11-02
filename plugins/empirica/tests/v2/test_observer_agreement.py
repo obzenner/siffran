@@ -89,9 +89,10 @@ def _human_owned():
     """The only approved claim is a human's decision: nothing was produced, so nobody is independent of anything."""
     b, run = _begin("human-owned", [("C0", "needs-decision", "Ship the cache")])
     digest = b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"][0]["wording_digest"]
-    b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
+    _, document_digest = b._present(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
     b.drv.trusted_evidence_confirmation(run, {"run_id": run, "receipt_id": "d1", "decisions": [
-        {"subject": "claim", "claim_id": "C0", "claim_digest": digest, "outcome": "approve"}]})
+        {"subject": "claim", "claim_id": "C0", "claim_digest": digest, "outcome": "approve"}],
+        "document_digest": document_digest})
     b.audit(run, "pass")
     return b, run
 

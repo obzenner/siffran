@@ -469,10 +469,12 @@ class _Builder:
             return
         service = self.drv._service
         ingress = host_profile(PROFILE)["approval_ingress"]
-        g = service.trusted_governance_context(run_id=run_id, payload={"author": governance_setup.AUTHOR,
-                                                                        "ingress": ingress})["result"]["run"]["governance"]
+        asked = service.trusted_governance_context(run_id=run_id, payload={"author": governance_setup.AUTHOR,
+                                                                          "ingress": ingress})["result"]
+        g = asked["run"]["governance"]
         envelope = {"run_id": run_id, "receipt_id": receipt, "proposal_digest": g["proposal_digest"],
-                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g)}
+                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g),
+                    "document_digest": asked["presentation"]["document"]["digest"]}
         done = service.trusted_governance_decision(run_id=run_id, payload={**envelope, "outcome": "present"})
         assert done["result"]["type"] == "Allow", done
         if outcome in ("dismiss", "reject"):  # Esc or a timeout closes it; Reject submits the human's no
@@ -481,12 +483,22 @@ class _Builder:
             done = service.trusted_governance_decision(run_id=run_id, payload=payload)
             assert done["result"]["type"] == "Allow", done
 
+    def _fetched_digest(self, run_id: str, batch: dict) -> str:
+        """PR 13: the digest of the batch's core-rendered document, from the null fetch's
+        refusal (the pair rides its private result; nothing is spent)."""
+        fetch = self.drv.trusted_evidence_presentation(
+            run_id, {"run_id": run_id, "receipt_id": "fetch", "key": batch["key"],
+                     "document_digest": None})["result"]
+        return fetch["document"]["digest"]
+
     def ask_to_end(self, run_id: str, receipt: str):
         """A stop the host shows its human, who has not answered yet (``end_run`` without the answer)."""
         self.evaluate_raw(run_id, "stop")
         self.drv.trusted_human_surface(run_id, "human")
         batch = self.evaluate_raw(run_id, "stop")["result"]["run"]["confirmation_batch"]
-        self.drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": receipt, "key": batch["key"]})
+        self.drv.trusted_evidence_presentation(
+            run_id, {"run_id": run_id, "receipt_id": receipt, "key": batch["key"],
+                     "document_digest": self._fetched_digest(run_id, batch)})
 
     def evaluate_raw(self, run_id: str, intent: str):
         return self.a.dispatch(self.drv, evaluate(run_id=run_id, intent=intent))
@@ -516,12 +528,25 @@ class _Builder:
         """The key of the batch the run shows now (a presentation names the batch it shows)."""
         return self.a.dispatch(self.drv, get_run(run_id=run_id))["result"]["run"]["confirmation_batch"]["key"]
 
+    def _present(self, run_id: str, payload: dict):
+        """PR 13: a presentation names its batch's document — null fetch (the refusal carries
+        the pair), then the same presentation bound; the pair's digest is what the answer returns.
+        A refusal that carries no document (the key itself was refused, or nothing is pending)
+        is returned untouched."""
+        fetch = self.drv.trusted_evidence_presentation(run_id, {**payload, "document_digest": None})["result"]
+        if "document" not in fetch:
+            return fetch, None
+        digest = fetch["document"]["digest"]
+        shown = self.drv.trusted_evidence_presentation(
+            run_id, {**payload, "document_digest": digest})["result"]
+        return shown, digest
+
     def present_and_answer(self, run_id: str, receipt: str, decisions: list[dict]):
         """The host shows the waiting set once, then the human answers some of it (the rest is Later)."""
-        self.drv.trusted_evidence_presentation(
-            run_id, {"run_id": run_id, "receipt_id": receipt, "key": self.batch_key(run_id)})
+        _, digest = self._present(run_id, {"run_id": run_id, "receipt_id": receipt, "key": self.batch_key(run_id)})
         self.drv.trusted_evidence_confirmation(
-            run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions})
+            run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions,
+                     "document_digest": digest})
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
         """Seed one generic request/result through the real transaction with a fake harness."""

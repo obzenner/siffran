@@ -127,7 +127,8 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         g = answer["result"]["run"]["governance"]
         envelope = {"run_id": self.run_id, "receipt_id": "r" * 32,
                     "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
-                    "approval_kind": "host_ui"}
+                    "approval_kind": "host_ui",
+                    "document_digest": answer["result"]["presentation"]["document"]["digest"]}
         presented = bridge.trusted_governance_decision(PI_PROFILE, self.run_id,
                                                        {**envelope, "outcome": "present"})
         self.assertEqual(presented["result"]["type"], "Allow", presented["result"])
@@ -283,10 +284,14 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
             self.assertEqual(core_hitl.digest(path.read_bytes()), document["digest"],
                              "exactly one document, the accepted presentation's own")
 
-    def test_a_legacy_confirmation_without_a_digest_still_fits_the_core_staging(self):
-        """The core's staging still admits the legacy confirmation of a bound presentation, so a
-        pre-PR-12 mediator keeps working until PR 13 makes ``document_digest`` required: the
-        presentation row keeps its digest; a legacy confirmation row records none."""
+    def test_a_confirmation_without_a_digest_is_refused_and_admits_nothing(self):
+        """PR 13: the digest is required on the wire, and the same private call PR 12 staged is
+        now refused in-domain — a confirmation payload with no digest reaches the shared
+        ``submit`` as ``document_digest=None`` (the explicit fetch), which refuses every item
+        with ``evidence.document_mismatch`` before anything is admitted, carrying the document
+        the presentation named: the presentation row keeps its digest and no confirmation row
+        is written. The TypeScript mediator never sends this shape (PR 12); the guard is the
+        bridge's own defense against a hand-crafted private call."""
         presented = private_bridge._evidence_presentation(PI_PROFILE, self.raw(), {})
         answer = private_bridge._evidence_confirmation(
             PI_PROFILE, {"operation": "evidence_confirmation", "run_id": self.run_id},
@@ -294,11 +299,12 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
              "answers": [{"subject": "research", "id": presented["items"][0]["id"],
                          "choice": "confirm", "note": None}]})
         self.assertEqual(answer["type"], "evidence_receipt")
-        self.assertEqual(answer["result"]["type"], "Allow")
+        self.assertEqual(answer["result"]["type"], "Block")
+        self.assertEqual(answer["result"]["reasons"][0]["code"], "evidence.document_mismatch")
         self.assertEqual(self._presentation_rows()[0]["receipt_id"], presented["receipt_id"])
         self.assertTrue(self._presentation_rows()[0]["document_digest"],
                         "the bound presentation keeps its digest")
-        self.assertEqual([row["document_digest"] for row in self._confirmation_rows()], [None])
+        self.assertEqual(self._confirmation_rows(), [], "nothing admits without a document")
 
     def test_the_confirmation_round_trips_the_presentations_digest_to_the_core(self):
         """PR 12: the TypeScript mediator sends the presentation's digest — ``document_digest`` on
