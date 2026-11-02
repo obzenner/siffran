@@ -13,14 +13,11 @@ import jsonschema
 
 from adapters import bridge
 from adapters.state.fsio import SymlinkRefused
-from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments
+from adapters.state.hitl import (DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish)
 from application import protocol
-from application.location import decode_handle
 from core import hitl as core_hitl
 from core.governance import expected_approval_kind
 
-#: A document identity in full — the private answer's ``document.digest`` and the sidecar name.
-_FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 #: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's
 #: identifiers already use (``application.observer_index.ID_SIZE``). Kept a local literal so the
 #: host governance runtime does not inherit the observer identity family into the manifest.
@@ -221,37 +218,29 @@ class HostGovernance:
         return _strip_presentation(mediated)
 
     def _bound_document(self, context_result: dict) -> Mapping[str, Any] | None:
-        """Write-first (ADR-0072, PR 08): verify the private answer's rendered ``document`` pair,
-        publish its bytes once through the sidecar store beside the run's own record, and return
-        the shown-document record — the digest, the written file's absolute path, the
+        """Write-first (ADR-0072, PR 08): verify the private answer's rendered ``document`` pair
+        and publish it once through :func:`adapters.state.hitl.publish` — the one bound helper
+        (review-2 m1) that parses and object-checks the pair before the write — then return
+        the shown-document record: the digest, the written file's absolute path, the
         core-owned amendment priors the confirm form reads, and the parsed document's
         ``question`` — the core-derived form discriminator (ADR-0072), so the mediation
         chooses the form from the document it binds, never from an adapter flag.
-        ``None`` means the mediation must refuse (the document impossible to bind): the
-        caller returns unavailable before any present, nothing spent."""
+        ``None`` means the mediation must refuse (the document impossible to bind, or the
+        storage refused the write): the caller returns unavailable before any present,
+        nothing spent."""
         presentation = context_result.get("presentation")
         document = presentation.get("document") if isinstance(presentation, Mapping) else None
-        if not isinstance(document, Mapping):
-            return None
-        text, digest = document.get("text"), document.get("digest")
-        if (not isinstance(text, str) or not isinstance(digest, str)
-                or _FULL_DIGEST.fullmatch(digest) is None):
-            return None
+        run = context_result.get("run") if isinstance(context_result, dict) else None
+        run_id = run.get("id") if isinstance(run, dict) else None
         try:
-            data = text.encode("utf-8")
-            if core_hitl.digest(data) != digest:
-                return None
-            key = decode_handle(context_result["run"]["id"])
-            if key is None:
-                return None
-            path, written = self.documents.write(key, data)
-            if written != digest:
-                return None
-            parsed = json.loads(text)
+            published = publish(self.documents, run_id, document)
         except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
             return None
-        return {"digest": digest, "path": str(path), "amendment": parsed.get("amendment"),
-                "question": parsed.get("question")}
+        if published is None:
+            return None
+        return {"digest": published.digest, "path": str(published.path),
+                "amendment": published.parsed.get("amendment"),
+                "question": published.parsed.get("question")}
 
     def _mediate(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")

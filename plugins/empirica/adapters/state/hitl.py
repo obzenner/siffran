@@ -41,19 +41,26 @@ against the user running the process; see ADR-31's scope). This module deliberat
 dir_fd-relative operations; the write-first flow's guarantees are about the file, its mode and its
 name.
 
-Nothing here is wired into the evidence or residual surfaces yet: this module's writer is
-reached only from the MCP host governance mediation (``adapters.governance``, which publishes
-each configuration document before its form is shown, ADR-0072's Write/Present steps), and
-its readers remain the regression suite and the run's own record.
+The writer reaches both hosts through one bound helper: :func:`publish` verifies, parses and
+object-checks a core-rendered document pair before its one write, and every binding call site
+binds through it — the MCP host's governance mediation and the evidence/consent flows on the
+Claude side (``adapters.governance``, ``adapters.confirmation``), and the Pi bridge's
+document-binding leg (``adapters.pi.private_bridge``) — so no host ever re-implements the pair's
+verification or the publish order (review-2 m1). The readers remain the regression suite and the
+run's own record.
 """
 from __future__ import annotations
 
 import errno
+import json
 import os
 import re
 import stat
 import tempfile
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from core import hitl as core_hitl
 from core.records import RunKey
@@ -96,6 +103,61 @@ class HardLinkUnsupported(OSError):
     impossible here, and the difference from a document condition matters to a host deciding what
     to tell a human. Nothing was written, published or replaced when this is raised.
     """
+
+
+@dataclass(frozen=True)
+class Published:
+    """One core-rendered document pair verified, parsed and published exactly once (review-2 m1,
+    the one bound helper every binding call site shares): ``digest`` is the pair's own document
+    identity, ``path`` the published file's path beside the run's own record, ``parsed`` the
+    verified document itself — the one object every caller reads its members from. Nothing but
+    construction is gated in the helper: it owns no interpretation, and every checkable refusal
+    answers ``None`` with nothing written."""
+
+    digest: str
+    path: Path
+    parsed: Mapping[str, Any]
+
+
+def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published | None:
+    """Verify one core-rendered ``{text, digest}`` pair, publish its bytes exactly once through
+    the write-once store, and give the bound document back (review-2 m1, 7d — the one helper
+    Claude's governance and evidence flows and Pi's bridge leg all bind through).
+
+    The order is the point: everything is checked BEFORE the write — the pair is a mapping whose
+    members are typed, ``digest`` is a full document identity (the naming rule
+    :func:`_name_of` enforces) that names the digested bytes themselves (:func:`core.hitl.digest`,
+    the one definition), ``run_id`` decodes to the run whose sidecar this is, and the text parses
+    as a JSON **object** — so a malformed or digest-inconsistent pair never touches the store.
+    The write is the one write (idempotent on the same bytes; different bytes at a digest's name
+    is :class:`DocumentMismatch`), and its storage failures — :class:`DocumentMismatch`,
+    :class:`fsio.SymlinkRefused`, :class:`HardLinkUnsupported`, any :class:`OSError` — are the
+    caller's to translate: the flows differ in what their host must answer (``None``, an
+    ``unavailable`` result, a typed fault). The published digest equals the pair's own identity,
+    answered and never assumed."""
+    from application.location import decode_handle  # lazy: the caller keeps its import-chain cost
+    if not isinstance(pair, Mapping):
+        return None
+    text, digest = pair.get("text"), pair.get("digest")
+    if not isinstance(text, str) or not isinstance(digest, str):
+        return None
+    try:
+        name = _name_of(digest)  # the identity rule, before any bytes exist under it
+        data = text.encode("utf-8")
+        if core_hitl.digest(data) != digest:
+            return None
+        key = decode_handle(run_id)
+        if key is None:
+            return None
+        parsed = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(parsed, Mapping):
+        return None
+    path, written = store.write(key, data)
+    if written != digest or path.name != f"{name}.json":  # defensive: the write answers its name
+        return None
+    return Published(digest=digest, path=path, parsed=parsed)
 
 
 def _name_of(document_digest: str) -> str:

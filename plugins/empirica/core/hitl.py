@@ -7,29 +7,29 @@ configuration, every quote, class, outcome and why-no-spike reason for evidence,
 residue — moves into a document rendered here and digested by its own bytes. ``hitl.schema.json``
 (``contracts/empirica/v2/hitl.schema.json``, PR 03, review-1 corrected) is the closed shape; the byte
 form below is the one its contract validator pins; the digest is what the decision payloads and the
-write-once sidecar will record (PRs 06–10).
+write-once sidecar record (PRs 06–10).
 
 Review-1 decisions this module implements (ADR-0072, decided sub-decisions Q1–Q4):
 
 - **Nothing volatile is digested**: ``context_when_shown`` carries only the run-fixed invocation
   facts (host, signal, interactive, delegation, audit_retrieval — recorded at StartRun and never
-  rewritten). A present receipt changes the reviews left (``application/governance.py:96-101``,
-  counted at ``core/governance.py:168-177``) and the host's answer rewrites ``human_surface``
-  (``application/transaction.py:417-419``), so neither can be inside the document or the core's
-  recompute at the decision would refuse every one.
+  rewritten). A present receipt changes the reviews left (:func:`core.governance.interactions_remaining`,
+  the one count every path that shows or admits an interaction reads) and the host's own answer
+  rewrites ``human_surface`` (:func:`Coordinator.trusted_human_surface` in the transaction layer), so
+  neither can be inside the document or the core's recompute at the decision would refuse every one.
 - **The question is the form discriminator** (:func:`question_of`), never the adapter's and never the
   state word alone: ``confirm_amendment`` iff some receipt has ``outcome == "amend"`` and its
   ``plan_revision + 1`` is the governed plan revision — a pre-approval amendment still parses
-  ``pending`` (``core/governance.py:137-138``), a later author revision yields ``revision_pending``
-  without a human amendment (``core/evaluation.py:1607-1622``), and ``rejected`` still admits a
-  re-present (``core/governance.py:189``).
+  ``pending`` (:func:`core.governance.revise`, whose fresh-proposal branch), a later author revision
+  yields ``revision_pending`` without a human amendment (the same :func:`core.governance.revise`,
+  its post-approval proposal branch), and ``rejected`` still admits a re-present
+  (:data:`core.governance.HUMAN_WAIT_STATES`), so the receipts are the only witness of an amendment.
 - **A record answers a claim**: it carries the claim's own text (checked against the wording digest
   the record is bound to) and its outcome — a human cannot judge a quote without them.
 - **One escaper**: every free-text value that does not arrive already escaped is display-escaped here
-  with the core's one escaper (``core.projection.safe_text``, core/projection.py:287-293). The
-  dialog's goal, rationale and invocation facts arrive already escaped (``governance_dialog``,
-  core/projection.py:308-338); the raw wording stays bound by its digests, computed before the
-  document is built.
+  with the core's one escaper (:func:`core.projection.safe_text`). The dialog's goal, rationale and
+  invocation facts arrive already escaped (:func:`core.projection.governance_dialog`); the raw wording
+  stays bound by its digests, computed before the document is built.
 
 This module is pure: no I/O, no clock, no adapter or application imports (only ``core``), no
 mutation of its inputs, and — since PR 07 — it is imported by the application's governance
@@ -61,11 +61,9 @@ EVIDENCE = "evidence"
 #: The configuration form's question (ADR-0072's discriminator, the schema's ``question`` enum).
 APPROVE = "approve"
 CONFIRM_AMENDMENT = "confirm_amendment"
-#: The dialog's budget-row keys, copied closed (core/projection.py:312-320 builds every row for
-#: exactly these, from ``core.governance.CEILINGS``, core/governance.py:46-47).
+#: The dialog's budget-row keys, copied closed (``core.projection.governance_dialog`` builds
+#: every row for exactly these, from ``core.governance.CEILINGS``).
 _BUDGET_KEYS = ("key", "label", "short", "help", "value", "used", "minimum", "maximum")
-#: The run-fixed invocation facts the digested context carries (ADR-0072; the five that persist for
-#: the run's lifetime — never ``human_surface``, which the host's own answer rewrites).
 #: The obligation id of the terminal consent itself (public-contract ``bootstrap.stage_obligations.
 #: terminal.obligation_id``) — the row PR 10's residual selection excludes, because the consent asks
 #: about the rest, never about itself (ADR-0072, the terminal-consent paragraph; review-1 finding 7).
@@ -75,7 +73,8 @@ TERMINAL_OBLIGATION_ID = "obligation.terminal"
 #: ObserveAction command), so the run view's own source command is the one accepted shape for the
 #: evidence derivations below (the trusted evidence legs always assemble one of these).
 RUN_VIEW_COMMANDS = frozenset({"GetRun", "RestoreRun", "ResolveRun"})
-
+#: The run-fixed invocation facts the digested context carries (ADR-0072; the five that persist for
+#: the run's lifetime — never ``human_surface``, which the host's own answer rewrites).
 _INVOCATION_KEYS = ("host", "interactive", "signal", "delegation", "audit_retrieval")
 #: The ceilings an amendment names (the decision payload's own budget set,
 #: ``contracts/empirica/v2/request.schema.json`` ``governanceDecisionPayload.amendment``).
@@ -117,10 +116,11 @@ def question_of(governance: Mapping[str, Any]) -> str:
     """Which configuration question the run's governance asks now (ADR-0072's discriminator).
 
     ``confirm_amendment`` iff some receipt has ``outcome == "amend"`` (a human amendment performed
-    on the proposal this revision supersedes, ``application/governance.py:81-90,94-102``) whose
+    on the proposal this revision supersedes, the amend leg of the decision gate) whose
     ``plan_revision + 1`` is the governed plan revision; ``approve`` otherwise. The state word alone
-    cannot tell them apart: a pre-approval amendment leaves ``pending`` (``core/governance.py:137-138``)
-    and a rejected decision re-presents, so the receipts are the only witness of an amendment.
+    cannot tell them apart: a pre-approval amendment leaves ``pending`` and a rejected decision
+    re-presents (:func:`core.governance.revise` and :data:`core.governance.HUMAN_WAIT_STATES`),
+    so the receipts are the only witness of an amendment.
     Malformed input is refused as :class:`ValueError`, never as a stray ``KeyError``.
     """
     try:

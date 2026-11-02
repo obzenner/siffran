@@ -28,8 +28,6 @@ many obligations ending now would leave unresolved.
 """
 from __future__ import annotations
 
-import json
-import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import textwrap
@@ -38,8 +36,6 @@ from uuid import uuid4
 
 from adapters import bridge
 from application import protocol
-from application.location import decode_handle
-from core import hitl as core_hitl
 from core.confirmation import is_terminal, presentable as batch_presentable
 from core.evaluation import TERMINAL_STATUSES, terminal_key
 from core.projection import project_host_failure, project_prompt_error
@@ -61,8 +57,6 @@ NOTE_TITLE = "Note (optional)"
 #: as ``adapters/governance.py``'s: this module must not inherit the observer identity family
 #: into the host-confirmation runtime identity.
 _SHORT_BODY = 12
-#: A document identity in full — the private answer's ``document.digest`` and the sidecar name.
-_FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
 #: The refusal that carries the fetch (PR 10's staging: ``null`` is the explicit fetch).
 _MISMATCH = "evidence.document_mismatch"
 
@@ -228,44 +222,29 @@ def _default_documents():
 
 def _bound_document(run_id: str, refused: Mapping[str, Any], store) -> dict[str, Any] | None:
     """The write-first gate (ADR-0072, PR 11): a fetch refusal must be ``evidence.document_mismatch``
-    carrying exactly the core-rendered ``{text, digest}`` of the batch the fetch named. Verify the pair
-    (``core.hitl.digest`` of the encoded text — one definition, the core's own), publish the bytes
-    **once** through the write-once sidecar beside the run's own record, and return the
-    shown-document record: the full ``digest``, the written file's absolute ``path``, and — a terminal
-    batch only — ``residuals``, the count of obligations ending now would leave unresolved, **read out
-    of the written document itself** and never recomputed (the governance priors' precedent). ``None``
-    means nothing can be shown: the document was absent, malformed, digest-inconsistent, or the
-    storage refused the write — nothing was spent and the second call never happens."""
+    carrying exactly the core-rendered ``{text, digest}`` of the batch the fetch named. Publish
+    the bytes **once** through :func:`adapters.state.hitl.publish` — the one bound helper
+    (review-2 m1) that verifies, parses and object-checks the pair before the write — and return
+    the shown-document record: the full ``digest``, the written file's absolute ``path``, and — a
+    terminal batch only — ``residuals``, the count of obligations ending now would leave
+    unresolved, **read out of the written document itself** (via the helper's parsed document)
+    and never recomputed (the governance priors' precedent). ``None`` means nothing can be shown:
+    the document was absent, malformed, digest-inconsistent, or the storage refused the write —
+    nothing was spent and the second call never happens."""
     from adapters.state.fsio import SymlinkRefused
-    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported  # lazy, as above
+    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, publish  # lazy, as above
     reasons = refused.get("reasons")
     if (refused.get("type") != "Block" or not isinstance(reasons, list) or not reasons
             or reasons[0].get("code") != _MISMATCH):
         return None
-    document = refused.get("document")
-    if not isinstance(document, Mapping):
-        return None
-    text, digest = document.get("text"), document.get("digest")
-    if (not isinstance(text, str) or not isinstance(digest, str)
-            or _FULL_DIGEST.fullmatch(digest) is None):
-        return None
     try:
-        data = text.encode("utf-8")
-        if core_hitl.digest(data) != digest:
-            return None
-        key = decode_handle(run_id)
-        if key is None:
-            return None
-        path, written = store.write(key, data)
-        if written != digest:
-            return None
-        parsed = json.loads(text)
+        published = publish(store, run_id, refused.get("document"))
     except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
         return None
-    if not isinstance(parsed, Mapping):
+    if published is None:
         return None
-    record = {"digest": digest, "path": str(path)}
-    terminal = parsed.get("terminal")
+    record = {"digest": published.digest, "path": str(published.path)}
+    terminal = published.parsed.get("terminal")
     if isinstance(terminal, Mapping) and isinstance(terminal.get("residuals"), list):
         record["residuals"] = len(terminal["residuals"])
     return record

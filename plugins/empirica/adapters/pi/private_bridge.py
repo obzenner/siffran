@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -43,56 +42,42 @@ def _classify(_profile: str, _raw: dict, payload: dict):
                    source=payload.get("source", "pi-model"))
 
 
-#: A document identity in full — the private answer's ``document.digest`` and the sidecar name.
-_FULL_DIGEST = re.compile(r"sha256:[0-9a-f]{64}\Z")
-
-
 def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | None, str] | None:
-    """Write-first (ADR-0072, PR 09): verify the core's rendered ``{text, digest}`` pair, publish
-    its bytes once through the sidecar store beside the run's own record, and return
-    ``(digest, absolute path, priors, question)``. ``priors`` is the document's own amendment
-    block read from the verified bytes — never recomputed — so the confirm form shows the
-    record's ``was`` values, not a host-held dialog. ``question`` is the parsed document's
+    """Write-first (ADR-0072, PR 09 → the one bound helper, review-2 m1): publish the core's
+    rendered ``{text, digest}`` pair once through :func:`adapters.state.hitl.publish` — the
+    shared helper that verifies, parses and object-checks the pair before the write — and
+    return ``(digest, absolute path, priors, question)``. ``priors`` is the document's own
+    amendment block read from the verified bytes — never recomputed — so the confirm form shows
+    the record's ``was`` values, not a host-held dialog. ``question`` is the parsed document's
     core-derived discriminator (M1, review 2) — ``approve`` or ``confirm_amendment`` — the one
     fact the TypeScript mediation chooses which dialog to show from; anything else refuses.
     ``None`` means the mediation must refuse: the pair was absent, malformed, digest-
     inconsistent, its question not one of the two, or the storage refused the write."""
     if not isinstance(document, dict):
         return None
-    text, digest = document.get("text"), document.get("digest")
-    if not isinstance(text, str) or not isinstance(digest, str) or _FULL_DIGEST.fullmatch(digest) is None:
-        return None
-    # Lazy on purpose: the sidecar store chain binds only the mediator's own refresh — the raw
-    # ``bind_document: true`` request (m2, review 2) — so its import cost is paid by the one
-    # operation that writes, never by the plain per-tool_call refreshes or the twelve other
+    # Lazy on purpose: the sidecar-store publish chain binds only the mediator's own refresh —
+    # the raw ``bind_document: true`` request (m2, review 2) — so its import cost is paid by the
+    # one operation that writes, never by the plain per-tool_call refreshes or the twelve other
     # private operations this one-shot process shape also serves, whose startup stays
     # exactly forms-08's (PR 09 measurement: whole-private-bridge import ~95 ms before and
     # after this change).
-    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments
-    from application.location import decode_handle
+    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish
     from core import hitl as core_hitl
     try:
-        data = text.encode("utf-8")
-        if core_hitl.digest(data) != digest:
+        published = publish(HitlDocuments(), run_id, document)
+        if published is None:
             return None
-        key = decode_handle(run_id)
-        if key is None:
-            return None
-        path, written = HitlDocuments().write(key, data)
-        if written != digest:
-            return None
-        parsed = json.loads(text)
-        question = parsed.get("question")
+        question = published.parsed.get("question")
         if question not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT):
             return None
-        amendment = parsed.get("amendment")
+        amendment = published.parsed.get("amendment")
         priors = None
         if isinstance(amendment, dict) and isinstance(amendment.get("budgets"), dict):
             priors = {name: row.get("was") for name, row in amendment["budgets"].items()
                       if isinstance(row, dict) and isinstance(row.get("was"), int)}
     except (DocumentMismatch, HardLinkUnsupported, OSError, ValueError):
         return None
-    return digest, path, priors, question
+    return published.digest, published.path, priors, question
 
 
 def _governance_context(profile: str, raw: dict, payload: dict):

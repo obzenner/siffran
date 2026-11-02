@@ -1021,13 +1021,14 @@ def plan_spike_result(
 
 
 def _confirmation_artifact(snapshot: EvaluationSnapshot, receipt_id: str,
-                           item: Mapping[str, Any], document_digest: Any = None) -> dict[str, Any] | None:
+                           item: Mapping[str, Any], *, document_digest: Any) -> dict[str, Any] | None:
     """The artifact recording one receipt decision, or ``None`` when it names nothing in this run.
 
-    ``document_digest`` is the rendered HITL document the human was shown against (ADR-0072,
-    PR 10; required since PR 13): the digest the presentation verified and this receipt
-    repeats, recorded on every confirmation artifact of the receipt — never ``None`` on an
-    admitted artifact, because the ``None`` case is the fetch, and it admits nothing."""
+    ``document_digest`` is a required keyword argument (review-2 m9, round 13): the rendered HITL
+    document the human was shown against (ADR-0072, PR 10; required since PR 13) — the digest the
+    presentation verified and this receipt repeats, recorded on every confirmation artifact of
+    the receipt — never ``None`` on an admitted artifact, because the ``None`` case is the
+    fetch, and it admits nothing."""
     stamps = {"route_stamp": snapshot.state.route_stamp,
               "investigation_stamp": snapshot.state.investigation_stamp}
     base = {"receipt_id": receipt_id, "outcome": item["outcome"], "approval_kind": "host_ui",
@@ -1126,7 +1127,7 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
         return blocked
     items = payload["decisions"]
     planned = [_confirmation_artifact(snapshot, payload["receipt_id"], item,
-                                       payload["document_digest"]) for item in items]
+                                       document_digest=payload["document_digest"]) for item in items]
     subjects = {(i["subject"], i.get("artifact_id", i.get("claim_id"))) for i in items}
     if None in planned or len(subjects) != len(items):
         return _decision(snapshot, state, "Fault", reason="conflict")

@@ -30,6 +30,7 @@ sys.path.insert(0, str(PLUGIN))
 
 from adapters.state import hitl as hitl_sidecar  # noqa: E402
 from adapters.state import SymlinkRefused  # noqa: E402
+from application.location import encode_handle  # noqa: E402
 from core import hitl  # noqa: E402
 from core.records import RunKey  # noqa: E402
 
@@ -251,6 +252,84 @@ class TestRead(_Isolated):
             self.store.read(self.key, "not-a-digest")
         with self.assertRaises(ValueError):
             self.store.path(self.key, "sha256:short")
+
+class TestPublish(_Isolated):
+    """Review-2 m1 (round 13): `hitl_sidecar.publish`, the one bound helper every host's binding
+    call site uses — it verifies, parses and object-checks a core-rendered document pair BEFORE
+    the write, so a malformed or digest-inconsistent pair never touches the store, and the
+    storage's own failures (`DocumentMismatch`, `SymlinkRefused`, `HardLinkUnsupported`,
+    `OSError`) stay the caller's to translate. `run_id` is the run handle the sidecar decodes; a
+    handle that decodes to nothing refuses like any other malformed input."""
+
+    # One real core-rendered pair: ``hitl.render``/``hitl.document_digest`` — the core's one
+    # definitions — so the helper's verified pair is byte-identical to what the flows bind.
+    DOC = {"schema": "empirica.hitl/1", "kind": "configuration", "decided": "published",
+           "question": "approve"}
+    TEXT = hitl.render(DOC).decode("utf-8")
+    DIGEST = hitl.document_digest(DOC)
+    KEY = RunKey("s256-" + "a" * 64, "s256-" + "b" * 64, 1)
+    HANDLE = encode_handle(KEY)
+
+    def published_file(self) -> list[Path]:
+        return sorted(self.store.dir(self.KEY).glob("*.json"))
+
+    def test_a_malformed_pair_writes_nothing(self):
+        # Everything checked before the write: a pair that is not a mapping, that lacks a member,
+        # whose members are mistyped, whose digest is not a document identity, whose run id
+        # does not decode, whose text is not the digest's bytes — nothing of these writes.
+        not_a_pair = [None, 42, "{}", [], {},
+                      {"digest": self.DIGEST}, {"text": self.TEXT},
+                      {"text": 3, "digest": self.DIGEST},
+                      {"text": self.TEXT, "digest": 4},
+                      {"text": self.TEXT, "digest": "sha256:" + "g" * 64},
+                      {"text": self.TEXT,
+                       "digest": "sha256:" + self.DIGEST[len("sha256:") + 1:]},  # sliced shift
+                      {"text": self.TEXT + " ", "digest": self.DIGEST}]
+        for pair in not_a_pair:
+            with self.subTest(pair=repr(pair)):
+                self.assertIsNone(hitl_sidecar.publish(self.store, self.HANDLE, pair))
+                self.assertEqual(self.published_file(), [], "a malformed pair writes nothing")
+        # An undecodable run id refuses the same way: no write, no exception.
+        self.assertIsNone(hitl_sidecar.publish(self.store, "not-a-handle",
+                                                {"text": self.TEXT, "digest": self.DIGEST}))
+        self.assertEqual(self.published_file(), [])
+        # A pair whose text parses to something that is not a JSON object refuses BEFORE the
+        # write — the object check is part of the gate, not an afterthought (review-2 m1).
+        not_an_object = "[1, 2, 3]"
+        self.assertIsNone(hitl_sidecar.publish(self.store, self.HANDLE,
+                                                {"text": not_an_object,
+                                                 "digest": hitl.digest(not_an_object.encode())}))
+        self.assertEqual(self.published_file(), [])
+
+    def test_a_digest_mismatch_writes_nothing(self):
+        # Well-formed identity, wrong bytes: the text is real JSON, the digest names another
+        # content — the one check a tampering or confused core answer cannot pass.
+        other_digest = "sha256:" + "0" * 64
+        self.assertNotEqual(other_digest, self.DIGEST)
+        self.assertIsNone(hitl_sidecar.publish(
+            self.store, self.HANDLE, {"text": self.TEXT, "digest": other_digest}))
+        self.assertEqual(self.published_file(), [], "a digest mismatch writes nothing")
+
+    def test_a_well_formed_pair_publishes_once_and_is_idempotent(self):
+        published = hitl_sidecar.publish(self.store, self.HANDLE,
+                                         {"text": self.TEXT, "digest": self.DIGEST})
+        self.assertIsNotNone(published)
+        assert published is not None
+        self.assertEqual(published.digest, self.DIGEST)
+        self.assertEqual(published.path, self.store.path(self.KEY, self.DIGEST))
+        self.assertEqual(published.parsed, self.DOC, "the parsed document is the pair's own bytes")
+        files = self.published_file()
+        self.assertEqual(len(files), 1, "one pair publishes exactly one file")
+        self.assertEqual(files[0].read_bytes(), hitl.render(self.DOC))
+        self.assertEqual(stat.S_IMODE(os.stat(files[0]).st_mode), 0o444)
+        again = hitl_sidecar.publish(self.store, self.HANDLE,
+                                     {"text": self.TEXT, "digest": self.DIGEST})
+        self.assertIsNotNone(again)
+        assert again is not None
+        self.assertEqual((again.digest, again.path), (published.digest, published.path),
+                         "the same bytes publish idempotently under the same identity")
+        self.assertEqual(self.published_file(), files, "idempotence writes no second file")
+
 
 class TestDigestNames(_Isolated):
     """Review-1 finding 14: a document's filename is the body of a ``sha256:`` digest — the prefix

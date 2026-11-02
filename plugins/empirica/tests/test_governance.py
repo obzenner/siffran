@@ -924,13 +924,23 @@ class GovernanceServiceTests(unittest.TestCase):
                        "budgets": g["proposal"]["budgets"]}}}
         before = copy.deepcopy(self.runs.data)
         blocked = self.admit(payload)
-        # PR 13: the placeholder state renders no document to name (it has no sized proposal),
-        # so a member-less envelope is refused by the wire itself (invalid_request), still
-        # without mutating anything; the domain's approval_required Block remains the inner
-        # defense — the same unconstructible-input family PR 10 recorded.
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one, so the
+        # member-less envelope is refused by shape (invalid_request) — that cell stays above. A
+        # wrong-but-well-formed digest is constructible and reaches the domain (the placeholder
+        # fetch answers with no presentation to name at all, so no host could honestly learn a
+        # digest; the check is shape-only there): the domain's approval_required outranks
+        # governance.document_mismatch, and nothing is spent or written. The premises PR 10
+        # called "unconstructible" were false — only the member-less envelope was.
         self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
                                   "fail_direction": "closed"})
         self.assertEqual(self.runs.data, before)
+        wrong = {**payload, "document_digest": "sha256:" + "0" * 64}
+        before = copy.deepcopy(self.runs.data)
+        domained = self.admit(wrong)
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "governance.approval_required")
+        self.assertEqual(self.runs.data, before,
+                         "the domain refusal spends nothing and orders the digest check last")
 
     def test_configure_run_schema_rejects_reviewer_field(self):
         before = copy.deepcopy(self.runs.data)
@@ -962,12 +972,24 @@ class GovernanceServiceTests(unittest.TestCase):
                      "outcome": "present"}
         before = copy.deepcopy(self.runs.data)
         blocked = self.admit(presented)
-        # PR 13: a graphless state renders no configuration document, so an honest host has
-        # nothing to name and never sends this envelope — the wire refuses the member-less
-        # shape itself (invalid_request), still spending and writing nothing; the domain's
-        # graphless Block remains the inner defense for unvalidated callers.
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one — the
+        # member-less envelope is a shape refusal (invalid_request), that cell stays; a wrong-but-
+        # well-formed digest is constructible (a graphless state renders no configuration document
+        # to name, and the fetch answers with no presentation at all, so an honest host has nothing
+        # true to say — but the wire check is shape-only): it reaches the domain, whose
+        # graph.missing Block outranks governance.document_mismatch, still spending and writing
+        # nothing. The premises PR 10 called "unconstructible" were false — only the member-less
+        # envelope was.
         self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
                                   "fail_direction": "closed"})
+        self.assertEqual(self.runs.data, before)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"],
+                         {"proposal": 3, "total": 128})
+        before = copy.deepcopy(self.runs.data)
+        domained = self.admit({**presented, "document_digest": "sha256:" + "0" * 64})
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "graph.missing")
+        self.assertEqual(domained["reasons"][0]["next_actions"], ["graph.record"])
         self.assertEqual(self.runs.data, before)
         self.assertEqual(self.view()["governance"]["interactions_remaining"],
                          {"proposal": 3, "total": 128})
@@ -2321,11 +2343,18 @@ class GovernanceServiceTests(unittest.TestCase):
                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
                    "outcome": "present"}
         blocked = self.admit(payload)
-        # PR 13: the unavailable ingress renders no document to name, so the member-less
-        # envelope is refused by the wire itself (invalid_request) — still nothing spent and
-        # nothing approved; the domain's approval_unavailable Block remains the inner defense.
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one — the
+        # member-less envelope is a shape refusal (invalid_request), that cell stays; a wrong-but-
+        # well-formed digest is constructible (when no human can be asked, the fetch answers with
+        # no presentation to name, and the wire check is shape-only): it reaches the domain, whose
+        # approval_unavailable Block outranks governance.document_mismatch, still spending and
+        # approving nothing. The premises PR 10 called "unconstructible" were false.
         self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
                                   "fail_direction": "closed"})
+        self.assertIsNone(self.view()["governance"]["approved_digest"])
+        domained = self.admit({**payload, "document_digest": "sha256:" + "0" * 64})
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "governance.approval_unavailable")
         self.assertIsNone(self.view()["governance"]["approved_digest"])
 
     def test_dismissal_and_rejection_grant_no_consent(self):
@@ -2439,11 +2468,20 @@ class GovernanceServiceTests(unittest.TestCase):
                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
                    "outcome": "present"}
         blocked = self.admit(present)
-        # PR 13: a lost UI renders no document to name, so the member-less envelope is refused
-        # by the wire itself — the human episode cannot reopen, nothing is spent or approved;
-        # the domain's approval_unavailable Block remains the inner defense.
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one — the
+        # member-less envelope is a shape refusal (invalid_request), that cell stays; a wrong-but-
+        # well-formed digest is constructible (a lost UI cannot present the document it re-binds,
+        # and the wire check is shape-only): it reaches the domain, whose approval_unavailable
+        # Block outranks governance.document_mismatch, so the human episode stays closed — nothing
+        # is spent or approved. The premises PR 10 called "unconstructible" were false.
         self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
                                   "fail_direction": "closed"})
+        before = copy.deepcopy(self.runs.data)
+        domained = self.admit({**present, "document_digest": "sha256:" + "0" * 64})
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "governance.approval_unavailable")
+        self.assertEqual(self.runs.data, before,
+                         "nothing is spent or approved by either refusal")
 
     def test_human_amendment_consumes_preapproval_allowance_without_renewal(self):
         interactive = {"host": "test", "interactive": True,
