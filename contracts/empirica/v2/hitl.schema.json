@@ -156,11 +156,43 @@
           "$ref": "#/$defs/configurationAmendment"
         },
         "budgets": {
-          "description": "Every ceiling in the dialog's order; the dialog is built from governance.CEILINGS so the row set is exactly these three (core/projection.py governance_dialog). Each row's used is the same fact the form shows live; the document holds no separate used map (ADR-0072, review-1).",
-          "items": {
-            "$ref": "#/$defs/configurationBudget"
-          },
-          "maxItems": 3,
+          "description": "Every ceiling in the dialog's order, pinned by position (review-2 #44): the dialog is built from governance.CEILINGS, so the rows are exactly max_passes, then max_spawns, then max_audit_spawns — once each, no fourth row. Each row's used is the same fact the form shows live; the document holds no separate used map (ADR-0072, review-1).",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/configurationBudget",
+              "properties": {
+                "key": {
+                  "const": "max_passes"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            },
+            {
+              "$ref": "#/$defs/configurationBudget",
+              "properties": {
+                "key": {
+                  "const": "max_spawns"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            },
+            {
+              "$ref": "#/$defs/configurationBudget",
+              "properties": {
+                "key": {
+                  "const": "max_audit_spawns"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          ],
+          "items": false,
           "minItems": 3,
           "type": "array"
         },

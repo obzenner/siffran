@@ -101,7 +101,7 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         # the file was written exactly once, with the core's own bytes, read-only
         data = Path(document["path"]).read_bytes()
         self.assertEqual(core_hitl.digest(data), document["digest"])
-        self.assertEqual(stat.S_IMODE(os.stat(document["path"]).st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(os.stat(document["path"]).st_mode), 0o400)
         self.assertEqual(len(self._stored_receipts()), 0, "binding a document spends nothing")
 
     def test_a_plain_refresh_carries_no_document_and_writes_nothing(self):
@@ -275,7 +275,7 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
         self.assertTrue(document["path"].startswith(str(self.machine_home)))
         data = Path(document["path"]).read_bytes()
         self.assertEqual(core_hitl.digest(data), document["digest"])
-        self.assertEqual(stat.S_IMODE(os.stat(document["path"]).st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(os.stat(document["path"]).st_mode), 0o400)
         # the core recorded the digested presentation, and the file WAS written before the show
         rows = self._presentation_rows()
         self.assertEqual([row["receipt_id"] for row in rows], [receipt_id])

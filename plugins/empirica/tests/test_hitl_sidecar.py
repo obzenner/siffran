@@ -5,7 +5,7 @@ Run: python3 plugins/empirica/tests/test_hitl_sidecar.py   (stdlib only, no pyte
 Exit 0 = all pass; 1 = at least one failed.
 
 ADR-0072's write-first flow step 2: each human decision's document is written exactly once beside
-the run's state, at ``gen-<n>/hitl/<sha256-prefix-hex>.json``, mode 0444, so a later read can prove
+the run's state, at ``gen-<n>/hitl/<sha256-prefix-hex>.json``, mode 0400 (owner read-only), so a later read can prove
 the bytes the human decided on are the bytes the core rendered. These tests prove the write-once
 and atomic mechanics: one file per digest, same-bytes idempotence, different-bytes refusal,
 symlink refusal at every writable path, crash-temp tolerance, thread concurrency, and the read's
@@ -62,7 +62,7 @@ class TestWriteOnce(_Isolated):
                          / "hitl" / f"{digest[len('sha256:'): ]}.json")
         self.assertEqual(digest, hitl.digest(DATA))
         self.assertEqual(self.store.path(self.key, digest), path)
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o400)
         self.assertEqual(path.read_bytes(), DATA)
 
     def test_same_bytes_twice_is_idempotent(self):
@@ -321,7 +321,7 @@ class TestPublish(_Isolated):
         files = self.published_file()
         self.assertEqual(len(files), 1, "one pair publishes exactly one file")
         self.assertEqual(files[0].read_bytes(), hitl.render(self.DOC))
-        self.assertEqual(stat.S_IMODE(os.stat(files[0]).st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(os.stat(files[0]).st_mode), 0o400)
         again = hitl_sidecar.publish(self.store, self.HANDLE,
                                      {"text": self.TEXT, "digest": self.DIGEST})
         self.assertIsNotNone(again)
@@ -376,7 +376,7 @@ class TestWriteDurability(_Isolated):
         with mock.patch("os.fchmod", side_effect=fchmod), mock.patch("os.fsync", side_effect=fsync):
             path, digest = self.store.write(self.key, DATA)
         self.assertEqual(order[:2], ["fchmod", "fsync"])
-        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o400)
         self.assertEqual(self.store.read(self.key, digest), DATA)
 
     def test_a_first_write_also_flushes_the_generation_directory(self):
@@ -396,6 +396,64 @@ class TestWriteDurability(_Isolated):
         with mock.patch("adapters.state.fsio._fsync_dir",
                         side_effect=lambda directory: flushed.append(Path(directory))):
             self.store.write(self.key, other)
+        self.assertEqual([p.absolute() for p in flushed], [hitl_dir.absolute()])
+
+    def test_a_retry_after_an_interrupted_first_publication_flushes_the_directories(self):
+        """#46: a first publication interrupted between the link and the barriers leaves the
+        document published with its dirents unflushed; the retry — which takes the identical-bytes
+        path — must be the barrier the interrupted call never reached."""
+        def crashing(_directory):
+            raise OSError(5, "the crash between the link and the barriers")
+        with mock.patch("adapters.state.fsio._fsync_dir", side_effect=crashing):
+            with self.assertRaises(OSError):
+                self.store.write(self.key, DATA)
+        digest_name = f"{hitl.digest(DATA)[len('sha256:'): ]}.json"
+        self.assertEqual([p.name for p in self.documents()], [digest_name],
+                         "the interrupted call left the document published (the link won)")
+        flushed: list[Path] = []
+        with mock.patch("adapters.state.fsio._fsync_dir",
+                        side_effect=lambda d: flushed.append(Path(d))):
+            path, _ = self.store.write(self.key, DATA)  # the retry: identical bytes
+        hitl_dir = path.parent
+        self.assertEqual([p.absolute() for p in flushed],
+                         [hitl_dir.absolute(), hitl_dir.parent.absolute()],
+                         "the retry flushes the document's directory and the generation directory")
+
+    def test_the_racing_idempotent_path_flushes_too(self):
+        """#46: the ``os.link`` race that resolves to identical bytes is a success like any other,
+        so it passes the same barriers — counted with the fsync seam, not assumed."""
+        def plant(src, dst, *, dir_fd=None):
+            Path(dst).write_bytes(DATA)  # exactly what a racing writer would leave
+            raise FileExistsError(17, "the name was taken")
+        flushed: list[Path] = []
+        with mock.patch("os.link", side_effect=plant), mock.patch(
+                "adapters.state.fsio._fsync_dir",
+                side_effect=lambda d: flushed.append(Path(d))):
+            path, digest = self.store.write(self.key, DATA)
+        self.assertEqual(self.store.read(self.key, digest), DATA)  # the raced idempotent success
+        hitl_dir = path.parent
+        self.assertEqual([p.absolute() for p in flushed],
+                         [hitl_dir.absolute(), hitl_dir.parent.absolute()],
+                         "the racing idempotent path flushes both directories")
+
+    def test_a_fresh_store_reconfirming_identical_bytes_still_flushes(self):
+        """#46: a fresh store (the bridge's one-shot process shape) has no proof a pre-existing
+        directory was ever flushed, so its identical-bytes success runs the barriers too — the
+        generation directory once, until this store has seen it flushed."""
+        assert self.store.write(self.key, DATA)[1]  # an earlier store published
+        fresh = hitl_sidecar.HitlDocuments(Path(self.home))
+        flushed: list[Path] = []
+        with mock.patch("adapters.state.fsio._fsync_dir",
+                        side_effect=lambda d: flushed.append(Path(d))):
+            path, _ = fresh.write(self.key, DATA)  # identical bytes, pre-existing name
+        hitl_dir = path.parent
+        self.assertEqual([p.absolute() for p in flushed],
+                         [hitl_dir.absolute(), hitl_dir.parent.absolute()],
+                         "a fresh store's first success flushes both directories")
+        flushed.clear()
+        with mock.patch("adapters.state.fsio._fsync_dir",
+                        side_effect=lambda d: flushed.append(Path(d))):
+            fresh.write(self.key, DATA)  # the same store now knows the generation is synced
         self.assertEqual([p.absolute() for p in flushed], [hitl_dir.absolute()])
 
 
@@ -466,28 +524,45 @@ class TestFifoRefusal(_Isolated):
         return outcome["error"]
 
     def _plant_fifo_and_lie_about_lstat(self):
-        """Plant a FIFO at the digest name and make the pre-open checks believe it is a regular
-        file, so only the open itself separates a hardened read from a hang."""
+        """Plant a FIFO at the digest name and make **only the planted path's** ``os.lstat``
+        believe it is a regular file (review-2 #46): ``stat.S_ISREG`` stays the real thing, so the
+        open descriptor's own ``fstat`` — the last guard — must be the one that refuses, and
+        ``os.read`` is never reached. Returns ``(fifo, digest, lstat_lies, read_recording,
+        reads)`` for the caller to enter as context managers."""
         digest = hitl.digest(DATA)
         hitl_dir = self.store.dir(self.key)
         hitl_dir.mkdir(parents=True)
-        fifo = hitl_dir / f"{digest[7:]}.json"
+        fifo = hitl_dir / f"{digest[len('sha256:'): ]}.json"
         os.mkfifo(fifo)
-        return (fifo, digest, mock.patch("stat.S_ISREG", side_effect=lambda mode: True),
-                mock.patch("stat.S_ISLNK", side_effect=lambda mode: False))
+        real_lstat = os.lstat
+        def lying_lstat(path, *args, **kwargs):
+            if Path(str(path)) == fifo:
+                # a plausible regular-file mode, as far as any lstat-based pre-check can tell
+                return mock.Mock(st_mode=stat.S_IFREG | 0o400)
+            return real_lstat(path, *args, **kwargs)
+        reads: list[object] = []
+        def recording_read(fd, size):
+            reads.append((fd, size))
+            return b""
+        return (fifo, digest, mock.patch("os.lstat", side_effect=lying_lstat),
+                mock.patch("os.read", side_effect=recording_read), reads)
 
     def test_read_refuses_a_swapped_fifo_promptly(self):
-        fifo, digest, regular_lies, link_lies = self._plant_fifo_and_lie_about_lstat()
-        with regular_lies, link_lies:
+        fifo, digest, lstat_lies, read_recording, reads = self._plant_fifo_and_lie_about_lstat()
+        with lstat_lies, read_recording:
             error = self._outcomes(lambda: self.store.read(self.key, digest))
         self.assertIsInstance(error, hitl_sidecar.DocumentMismatch)
+        self.assertEqual(reads, [],
+                         "the descriptor's own fstat refused the FIFO before a single read")
         fifo.unlink()
 
     def test_the_existing_document_check_refuses_a_swapped_fifo_promptly(self):
-        fifo, digest, regular_lies, link_lies = self._plant_fifo_and_lie_about_lstat()
-        with regular_lies, link_lies:
+        fifo, digest, lstat_lies, read_recording, reads = self._plant_fifo_and_lie_about_lstat()
+        with lstat_lies, read_recording:
             error = self._outcomes(lambda: self.store.write(self.key, DATA))
         self.assertIsInstance(error, hitl_sidecar.DocumentMismatch)
+        self.assertEqual(reads, [],
+                         "the existing-document check's fstat refused before a single read")
         fifo.unlink()
 
 

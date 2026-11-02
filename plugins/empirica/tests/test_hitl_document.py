@@ -477,6 +477,39 @@ class QuestionTests(unittest.TestCase):
 class FailClosedTests(unittest.TestCase):
     """The builders refuse what the forms would never show; the failure is loud, not silent."""
 
+    def test_a_claim_row_reworded_in_place_cannot_bind_a_record(self):
+        """Review-2 #45: the record's binding digest is re-derived from the claim's id and raw
+        text, never taken from the caller's ``wording_digest``. A claim row whose text changed
+        while it kept its digest — the text-only mutation a lying caller would make — must be
+        refused, because the record's unchanged ``claim_digest`` names different words."""
+        records, claims = _argument_rows(evidence_snapshot())
+        snapshot = evidence_snapshot()
+        batch = confirmation_batch(snapshot, derive_claims(snapshot))
+        record_id = batch["record_ids"][0]
+        claim_id = records[record_id]["claim_id"]
+        lying = copy.deepcopy(claims)
+        lying[claim_id] = {**lying[claim_id],
+                           "text": "Re-worded in place, digest untouched."}
+        # the row keeps its stale wording_digest and the record keeps the digest that still
+        # matches it — only the re-derived digest tells the truth about the new text.
+        with self.assertRaises(ValueError):
+            hitl.evidence_document(run_id=RUN_ID, batch=batch, records=records, claims=lying)
+
+    def test_a_reworded_claim_row_cannot_bind_the_batch_that_asked_the_old_words(self):
+        """Review-2 #45, the claim-only loop: the batch's ``claim_digest`` is compared against the
+        digest re-derived from the claim row's id and text, so a row re-worded under the batch's
+        stale digest is refused — the document shows only what the batch actually asked."""
+        snapshot = evidence_snapshot()
+        records, claims = _argument_rows(snapshot)
+        batch = confirmation_batch(snapshot, derive_claims(snapshot))
+        claim_id = batch["claims"][0]["claim_id"]
+        only_asks = {**copy.deepcopy(batch), "record_ids": []}  # the claim-only loop, alone
+        lying = copy.deepcopy(claims)
+        lying[claim_id] = {**lying[claim_id],
+                           "text": "Re-worded in place, digest untouched."}
+        with self.assertRaises(ValueError):
+            hitl.evidence_document(run_id=RUN_ID, batch=only_asks, records=records, claims=lying)
+
     def test_configuration_state(self):
         governed = approve_governance()
         drifted = copy.deepcopy(governed)
@@ -677,7 +710,10 @@ def _budget_rows(order):
 
 @st.composite
 def _dialog(draw, plan_revision, state):
-    order = draw(st.permutations(["max_passes", "max_spawns", "max_audit_spawns"]))
+    # review-2 #44: the schema pins the budget rows by position, and the real dialog builds
+    # them in governance.CEILINGS' order, so the strategy generates that order — never an
+    # arbitrary permutation of it.
+    order = tuple(core_governance.CEILINGS)
     invocation = draw(st.fixed_dictionaries({
         "host": _TEXT, "interactive": st.one_of(st.none(), st.booleans()), "signal": _TEXT,
         "delegation": st.booleans(),
@@ -842,10 +878,13 @@ class ConfigurationPropertyTests(unittest.TestCase):
 
 
 def _projected_pair(record_id, key, quote):
-    """One asked-about record and its claim: projected rows shaped like ``project_argument``'s."""
-    wording = "sha256:" + key
-    claim = {"claim_id": "G0", "text": "Claim G0", "wording_digest": wording}
-    record = {"artifact_id": record_id, "claim_id": "G0", "claim_digest": wording,
+    """One asked-about record and its claim: projected rows shaped like ``project_argument``'s.
+    Review-2 #45: the wording digests are genuine — the digest of this claim row's own id and
+    text, what ``evidence_document`` re-derives — so the property tests exercise real bindings."""
+    claim = {"claim_id": "G0", "text": "Claim G0",
+             "wording_digest": claim_digest({"id": "G0", "text": "Claim G0"})}
+    record = {"artifact_id": record_id, "claim_id": "G0",
+              "claim_digest": claim["wording_digest"],
               "kind": "research", "outcome": "supporting", "source_kind": "web",
               "source_ref": "https://example.test/source", "citation": quote,
               "verification": {"class": "retrievable", "status": "pending", "retrieve": "web"}}

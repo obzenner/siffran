@@ -131,7 +131,7 @@ test(
         .map(name => join(testHome, name));
       assert.equal(written.length, 2, "the governance document and the evidence document");
       assert.ok(written.includes(pathLine), "the dialog's path names a file the bridge wrote");
-      assert.equal(statSync(pathLine).mode & 0o777, 0o444, "read-only once published");
+      assert.equal(statSync(pathLine).mode & 0o777, 0o400, "read-only once published");
       const digest = `sha256:${createHash("sha256").update(readFileSync(pathLine)).digest("hex")}`;
       assert.equal(`Document: ${digest.slice(0, 19)}`, documentLine, "the dialog showed the file's own digest");
 

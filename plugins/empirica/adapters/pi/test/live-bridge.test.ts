@@ -124,7 +124,7 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     assert.equal(written.length, 2, "the approve and confirm documents are both written");
     for (const file of written) {
       const mode = statSync(file).mode & 0o777;
-      assert.equal(mode, 0o444, `${file} must be read-only once published`);
+      assert.equal(mode, 0o400, `${file} must be read-only once published`);
     }
     // the record that binds the receipt to the document is the run's own state file, not the view
     const stateFiles = readdirSync(testHome, { recursive: true, encoding: "utf8" })

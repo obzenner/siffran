@@ -8,7 +8,8 @@ ADR-0072 — the ``sha256:`` prefix followed by 64 lowercase hex characters; not
 document:)
 
 * **write-once, atomic** — the bytes go to a fresh unique ``O_CREAT|O_EXCL`` temp file (``mkstemp``,
-  never a predictable name), are flushed, set to mode ``0444`` *before* the ``fsync`` — so the
+  never a predictable name), are flushed, set to mode ``0400`` (owner read-only, review-2 #43:
+  documents hold goals, rationale and quoted material) *before* the ``fsync`` — so the
   read-only mode is durable together with the bytes — and are then published with
   :func:`os.link`, the no-replace primitive: ``link`` fails with ``FileExistsError`` when the name
   exists, so no path here can ever overwrite or replace an existing document (the general state
@@ -16,8 +17,9 @@ document:)
   for a different contract). Where the filesystem cannot hard-link at all (``EPERM``, ``EXDEV``,
   ``EMLINK``, ``ENOTSUP``, ``ENOSYS``) the failure is the named :class:`HardLinkUnsupported`, so a
   host can tell "this storage cannot hold the sidecar" from a document condition. The temp is
-  unlinked and the directory fsynced after the link; a first write that created the ``hitl``
-  directory fsyncs the generation directory too, so the new directory entry survives a crash.
+  unlinked and the directory fsynced after the link (every successful outcome, review-2 #46); a
+  first write that created the ``hitl`` directory fsyncs the generation directory too, so the new
+  directory entry survives a crash.
   A crash can leave only a whole temp file (orphaned ``.tmp.*`` files, inert and ignored: reads
   never look at them and the next write of the same digest publishes regardless), never a partial
   or torn final document.
@@ -71,8 +73,11 @@ from .repository import FilesystemRunRepository, empirica_home
 _HEX64 = re.compile(r"\A[0-9a-f]{64}\Z")
 #: The digest prefix of every document identity — part of the name's rule, never decoration.
 _PREFIX = "sha256:"
-#: The mode of every published document: readable by all, writable by none (ADR-0072).
-_MODE = 0o444
+#: The mode of every published document: readable by the owner, writable by none (ADR-0072;
+#: review-2 #43 — documents hold goals, rationale and quoted material, so owner read-only
+#: matches the owner-only state metadata beside them — the generic spike staging's own seal
+#: is a different surface with its own mode).
+_MODE = 0o400
 #: Reading a document never follows a symlink, never blocks on a swapped special file, never
 #: leaks the descriptor into a child: a regular file only, known from its own descriptor.
 _READ_FLAGS = (os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
@@ -206,6 +211,11 @@ class HitlDocuments:
     def __init__(self, home: Path | None = None) -> None:
         base = Path(home) if home is not None else empirica_home()
         self._runs = FilesystemRunRepository(base.absolute())
+        #: Generation directories this store has itself proven synced (review-2 #46): a
+        #: completed write's flush is the proof, so a fresh store — or one whose earlier write
+        #: was interrupted before its barriers — flushes the generation directory again instead
+        #: of trusting a directory entry it has never seen flushed.
+        self._proven_generations: set[Path] = set()
 
     def dir(self, key: RunKey) -> Path:
         """The generation's ``hitl`` directory (built as a path; a read creates nothing)."""
@@ -229,10 +239,11 @@ class HitlDocuments:
             raise TypeError(f"document bytes, not {type(data).__name__}")
         payload = bytes(data)
         document_digest = core_hitl.digest(payload)
-        directory, hitl_created = self._prepare_dir(key)
+        directory = self._prepare_dir(key)
         final = directory / f"{_name_of(document_digest)}.json"
         published = self._published(final, payload, document_digest)
         if published is not None:
+            self._flush_directories(directory)  # the retry and idempotent paths flush too (#46)
             return published
         fd, tmp_name = tempfile.mkstemp(dir=str(directory), prefix=".tmp.", suffix=".json")
         tmp = Path(tmp_name)
@@ -240,7 +251,7 @@ class HitlDocuments:
             with os.fdopen(fd, "wb") as handle:  # fresh + unique: O_CREAT|O_EXCL, mode 0600
                 handle.write(payload)
                 handle.flush()
-                os.fchmod(handle.fileno(), _MODE)  # born 0444: published once, never writable
+                os.fchmod(handle.fileno(), _MODE)  # born 0400: owner-readable, never writable
                 os.fsync(handle.fileno())  # the read-only mode and the bytes reach the disk
                 # together, before the name exists (review-1 finding 17)
             try:
@@ -252,6 +263,7 @@ class HitlDocuments:
                 published = self._published(final, payload, document_digest)
                 if published is None:
                     raise  # vanished between link and read: absurd, refuse the whole write
+                self._flush_directories(directory)  # the racing idempotent path flushes too (#46)
                 return published
             except OSError as exc:
                 if exc.errno in _LINK_UNSUPPORTED:
@@ -260,15 +272,26 @@ class HitlDocuments:
                 raise
         finally:
             tmp.unlink(missing_ok=True)  # the temp's lifetime ends here, success or failure
-        # the new dirent survives a crash: best-effort as everywhere, and the first creation of the
-        # hitl directory must survive too, so its parent — the generation directory — is flushed
-        # alongside. fsio owns the one best-effort directory fsync; this module shares it rather
-        # than forking a second fsync path (fsio.py is inside the manifest closure, its rules
+        # every successful outcome ends here too: the new dirent survives a crash by the same
+        # barrier the idempotent paths use — best-effort as everywhere, and the first creation
+        # of the hitl directory must survive with it, so the generation directory is flushed
+        # alongside until this store has seen it flushed by a completed write (review-2 #46).
+        # fsio owns the one best-effort directory fsync; this module shares it rather than
+        # forking a second fsync path (fsio.py is inside the manifest closure, its rules
         # already apply here unchanged).
-        fsio._fsync_dir(directory)
-        if hitl_created:
-            fsio._fsync_dir(directory.parent)
+        self._flush_directories(directory)
         return (final, document_digest)
+
+    def _flush_directories(self, directory: Path) -> None:
+        """The one exit barrier every successful ``write`` passes through (review-2 #46): the
+        document's directory always — an interrupted earlier publication may have left its
+        dirent unflushed, and an idempotent success is the retry that must complete it — and the
+        generation directory onto which the ``hitl`` entry's own creation may still be riding,
+        proven only once a completed call of this store has flushed it."""
+        fsio._fsync_dir(directory)
+        if directory.parent not in self._proven_generations:
+            fsio._fsync_dir(directory.parent)
+            self._proven_generations.add(directory.parent)
 
     # --- read ------------------------------------------------------------------
 
@@ -294,24 +317,31 @@ class HitlDocuments:
 
     # --- shared internals ------------------------------------------------------
 
-    def _prepare_dir(self, key: RunKey) -> tuple[Path, bool]:
-        """The generation's ``hitl`` directory and whether this call created it. Created with the
-        repository's own directory rules (parents as needed, the process's umask — what
-        ``fsio.atomic_write`` uses), after checking that neither the generation directory nor
-        ``hitl`` is a planted symlink (ADR-31: a symlink at a predictable path is refused, never
-        followed). The scope is the run's own two directories: ancestors follow ``fsio``'s existing
-        rules, and a same-uid racer landing between the check and the ``mkdir`` is outside the
-        threat model (see the module docstring) — deliberately not dir_fd-relative operations."""
+    def _prepare_dir(self, key: RunKey) -> Path:
+        """The generation's ``hitl`` directory, created **owner-only** (mode ``0700``) when this
+        call creates it (review-2 #43): its children are owner-read-only documents and the host's
+        state beside them is owner-only metadata, so the directory names and entries are the
+        owner's too. Ancestors keep the repository's own directory rules (parents as needed by
+        the repository's writer, the process's umask — what ``fsio.atomic_write`` uses), after
+        checking that neither the generation directory nor ``hitl`` is a planted symlink
+        (ADR-31: a symlink at a predictable path is refused, never followed). The scope is the
+        run's own two directories: ancestors follow ``fsio``'s existing rules, and a same-uid
+        racer landing between the check and the ``mkdir`` is outside the threat model (see the
+        module docstring) — deliberately not dir_fd-relative operations."""
         generation = self._runs.generation_dir(key)
         for step in (generation, generation / "hitl"):
             if os.path.lexists(step) and stat.S_ISLNK(os.lstat(step).st_mode):
                 raise fsio.SymlinkRefused(f"refusing symlinked directory: {step}")
         directory = generation / "hitl"
-        hitl_created = not os.path.lexists(directory)
-        directory.mkdir(parents=True, exist_ok=True)
+        if not os.path.lexists(directory):
+            directory.parent.mkdir(parents=True, exist_ok=True)  # ancestors: the repository's rules
+            try:
+                os.mkdir(directory, 0o700)  # the store's own directory, owner-only
+            except FileExistsError:
+                pass  # a sharing thread of the same store won the creation; its entry is ours too
         if stat.S_ISLNK(os.lstat(directory).st_mode):
             raise fsio.SymlinkRefused(f"refusing symlinked directory: {directory}")
-        return directory, hitl_created
+        return directory
 
     def _published(self, final: Path, payload: bytes,
                    document_digest: str) -> tuple[Path, str] | None:

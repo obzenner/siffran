@@ -372,7 +372,7 @@ class GovernanceHostTests(unittest.TestCase):
 
     def test_the_document_is_written_before_the_present_and_binds_the_receipt(self):
         """Write-first order (ADR-0072): the sidecar file already holds exactly the document's
-        bytes, mode 0444, before the present call reaches the service; the present and the
+        bytes, mode 0400 (owner read-only), before the present call reaches the service; the present and the
         decision envelopes both carry the digest, and the stored receipt names it."""
         self.initialize({"elicitation": {"form": {}}})
         order = []
@@ -398,7 +398,7 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(result["run"]["governance"]["state"], "approved")
         self.assertEqual(len(order), 2)
         self.assertEqual([event.get("file-exists-before-present") for event in order], [True, None])
-        self.assertEqual(order[0]["mode"], "0o444")
+        self.assertEqual(order[0]["mode"], "0o400")
         self.assertTrue(order[0]["bytes-are-the-document"])
         self.assertTrue(order[1]["carries-digest"])
         self.assertEqual(order[1]["digest"], order[0]["digest"])

@@ -359,9 +359,9 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
       supporting/refuting verdict, and ``claim_id`` naming the claim row whose text the record
       answers — bound by the record's ``claim_digest``, exactly as the batch's claims are.
     - ``claims``: the batch's claim rows by claim id, the argument's claim rows
-      (core/projection.py:566-573 — ``text`` with ``wording_digest``, the digest of this id+text,
-      core/evaluation.py:277-280 ``claim_digest``); the batch's own ``claim_digest`` must bind
-      exactly that wording or nothing is shown.
+      (core/projection.py:566-573 — ``text`` with ``wording_digest``); the batch's own
+      ``claim_digest`` must bind the digest re-derived from the row's id and raw text
+      (review-2 #45 — a caller's ``wording_digest`` member is never trusted), or nothing is shown.
     - ``residuals``: what ending now would leave unresolved, the run-view obligation rows
       ``{id, required}`` (core/projection.py:139-147 ``_obligation``; report_requirements,
       core/evaluation.py:1408-1480) — the terminal consent's residue (coordinator decision on PR 03).
@@ -425,7 +425,10 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
         text = claim.get("text")
         if not isinstance(text, str) or not text:
             raise ValueError(f"the claim {row['claim_id']!r} the record answers lacks its text")
-        bound = claim.get("wording_digest", claim_digest({"id": row["claim_id"], "text": text}))
+        # Review-2 #45: the binding digest is re-derived from the claim's id and raw text, never
+        # taken from the caller's ``wording_digest`` — a row re-worded under a kept digest is a
+        # lying caller and must not bind.
+        bound = claim_digest({"id": row["claim_id"], "text": text})
         if row.get("claim_digest") != bound:
             raise ValueError(f"record {record_id!r} is not bound to the wording of the claim "
                              f"{row['claim_id']!r} it answers")
@@ -449,7 +452,9 @@ def evidence_document(*, run_id: str, batch: Mapping[str, Any],
         text = claim.get("text")
         if not isinstance(text, str) or not text:
             raise ValueError(f"claim {asked['claim_id']!r} lacks its text")
-        bound = claim.get("wording_digest", claim_digest({"id": asked["claim_id"], "text": text}))
+        # Review-2 #45, the claim-only loop: the same re-derived binding — the digest of this id
+        # and text — never the caller's ``wording_digest``.
+        bound = claim_digest({"id": asked["claim_id"], "text": text})
         if asked.get("claim_digest") != bound:
             raise ValueError(
                 f"the batch and the claim rows disagree on {asked['claim_id']!r}'s wording"

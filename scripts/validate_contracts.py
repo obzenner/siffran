@@ -2925,7 +2925,7 @@ def main() -> int:
         "valid-evidence-batch", "valid-evidence-terminal",
         "invalid-wrong-schema", "invalid-unknown-kind", "invalid-unknown-field",
         "invalid-unknown-nested-field", "invalid-missing-required",
-        "invalid-configuration-on-evidence",
+        "invalid-configuration-on-evidence", "invalid-repeated-budget-rows",
     }
     hitl_names = {p.name.removesuffix(".json") for p in hitl_fixture_paths}
     for name in sorted(REQUIRED_HITL_FIXTURES - hitl_names):
@@ -2946,6 +2946,8 @@ def main() -> int:
         "invalid-unknown-nested-field": "Additional properties",
         "invalid-missing-required": "'goal' is a required property",
         "invalid-configuration-on-evidence": "Additional properties",
+        # review-2 #44: three repeated max_passes rows refused by the per-position key pin
+        "invalid-repeated-budget-rows": "was expected",
     }
     hitl_docs: dict[str, dict] = {}
     for path in hitl_fixture_paths:

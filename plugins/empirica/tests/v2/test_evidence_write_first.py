@@ -144,7 +144,7 @@ class WriteFirstPresentTests(WriteFirstFixture):
         self.assertEqual(written[0].read_bytes(), text.encode("utf-8"))
         self.assertEqual(hitl.digest(written[0].read_bytes()), document["digest"])
         self.assertEqual(written[0].name, document["digest"][_HEXAFTER:] + ".json")
-        self.assertEqual(stat.S_IMODE(os.stat(written[0]).st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(os.stat(written[0]).st_mode), 0o400)
         self.assertTrue(Path(document["path"]).is_absolute())
         self.assertEqual(str(written[0]), document["path"])
         # the presentation artifact records the digest, and exactly one interaction was spent
@@ -331,7 +331,7 @@ class ShortFormsTests(WriteFirstFixture):
         self.assertTrue(path_line.startswith(str(self.empirica_home)), path_line)
         self.assertTrue(path_line.endswith(".json"))
         self.assertTrue(path_line in message.splitlines(), "the path is alone on its own line")
-        self.assertEqual(stat.S_IMODE(os.stat(path_line).st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(os.stat(path_line).st_mode), 0o400)
         for line in message.splitlines():
             if line != path_line:
                 self.assertLessEqual(len(line), 72 + 3, line)  # wrapped; the path alone is exempt
@@ -399,7 +399,7 @@ class OneRunTwoDocumentsTests(WriteFirstFixture):
         self.assertEqual({row["document_digest"] for row in confirmations}, {batch_digest})
         by_digest = {hitl.digest(path.read_bytes()): path for path in self.files()}
         self.assertIn(batch_digest, by_digest, "the batch document was written")
-        self.assertEqual(stat.S_IMODE(os.stat(by_digest[batch_digest]).st_mode), 0o444)
+        self.assertEqual(stat.S_IMODE(os.stat(by_digest[batch_digest]).st_mode), 0o400)
 
         # the same run's terminal consent, through the same shared flow
         approving = Human(accept(d1="approve"))
