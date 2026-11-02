@@ -118,7 +118,11 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 # ADR-0072 (Q3, PR 07): every existing refusal wins first — replay, staleness,
                 # interaction ceilings, budget and revision errors — and the document check comes
                 # last, spending nothing: a present bound to another state's document never
-                # writes a receipt, and a decision must name the document its own present bound.
+                # writes a receipt. The decision names the document its own present recorded;
+                # a digest that disagrees with the state's own recompute is the mismatch, while
+                # a receipt whose payload diverges from its own present — digest included — is
+                # the mixed envelope the decision gate refuses first as governance.receipt_replay
+                # (review-2 7a), so this gate never sees one from a validated caller.
                 given = decision.get("document_digest")
                 prior = next((r for r in governed["receipts"]
                               if r["id"] == payload["receipt_id"]), None)
@@ -126,6 +130,10 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                     expected = hitl.document_digest(
                         hitl.configuration_for(run_id=run_id, snapshot=snapshot))
                     if (expected != given
+                            # defense in depth: the decision gate refuses a digest that
+                            # differs from its present's recorded one first as
+                            # governance.receipt_replay; this clause keeps the recorded binding
+                            # refuse-closed even for an unvalidated direct transact caller
                             or (prior is not None and prior.get("document_digest") != given)):
                         return c._block_from_snapshot(
                             snapshot, rid, "governance.document_mismatch", presentation=True)

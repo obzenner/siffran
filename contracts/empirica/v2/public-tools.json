@@ -339,7 +339,7 @@
       ]
     },
     "governance.document_mismatch": {
-      "message": "The present or decision named a document that does not match the immutable document this state renders: nothing was spent at a refused present, and a refused decision kept its spent presentation. Fetch the document from the governance context answer and present it again (the present costs one review unit, of the 3 per configuration).",
+      "message": "The host's dialog named a configuration document that no longer matches this run's state; a refused present spent nothing, and a refused decision kept its spent presentation. Issue a task-sized configure_run again so the host can show you the current document (the re-present costs one review unit of the 3 per configuration).",
       "sections": [
         "governance"
       ],

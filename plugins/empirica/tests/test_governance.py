@@ -593,6 +593,32 @@ class GovernanceServiceTests(unittest.TestCase):
             payload["document_digest"] = digest
         return payload
 
+    def test_the_placeholder_has_no_document_until_the_author_has_sized_a_proposal(self):
+        """(review-2 m2) The unsized StartRun placeholder's judgment is not a human's: the
+        context ask carries no document until an author-sized proposal exists, so no host writes
+        or shows a document for a form that could never be answered. After a sized proposal the
+        same ask carries the rendered pair."""
+        asked = self.service.trusted_governance_context(run_id=self.run_id,
+                                                        payload=copy.deepcopy(CONTEXT))
+        self.assertIn(asked["result"]["type"], {"Allow", "Inert"}, asked)
+        presentation = asked["result"].get("presentation")
+        placeholder = self.view()["governance"]
+        self.assertFalse(placeholder["display_ready"], "the run is still the unsized placeholder")
+        if presentation is not None:
+            self.assertNotIn("document", presentation,
+                              "the placeholder has no document for a host to fetch")
+        # the same ask over an author-sized proposal carries the rendered pair
+        self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets=SIZED_BUDGETS, rationale=SIZED_RATIONALE))["type"], "Allow")
+        sized = self.service.trusted_governance_context(run_id=self.run_id,
+                                                        payload=copy.deepcopy(CONTEXT))
+        self.assertIn(sized["result"]["type"], {"Allow", "Inert"}, sized)
+        document = (sized["result"].get("presentation") or {}).get("document")
+        self.assertIsNotNone(document, "a sized proposal's ask carries the pair")
+        self.assertEqual(set(document), {"text", "digest"})
+
     def test_context_returns_the_core_rendered_document_pair(self):
         """The context answer's document is exactly what ``core.hitl`` renders: the pair's text
         is the deterministic bytes and its digest names them, so the private answer is the fetch."""
@@ -710,6 +736,34 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(refused["reasons"][0]["code"], "governance.receipt_replay")
         # and a refused decision changes nothing: the present's recorded binding still stands
         self.assertEqual(self._receipts()[-1]["document_digest"], document["digest"])
+
+    def test_a_digest_diverging_from_its_own_present_is_a_plain_replay_that_spends_nothing(self):
+        """(review-2 m3, 7a) A decision naming another document than the one its own present
+        bound is a forged or mixed envelope — the replay gate's own case, refused before the
+        mismatch in Q3 order, leaving the state exactly as it was: no new interaction spent, no
+        receipt written, and the present's recorded binding intact."""
+        self.prepare()
+        document = self._context_document()
+        payload = self._present_payload("replay-pin", digest=document["digest"])
+        self.assertEqual(self.admit(payload)["type"], "Allow")
+        governed = self.view()["governance"]
+        views = governed["interactions_remaining"]
+        receipts = len(self._receipts())
+        wrong = document["digest"][:-1] + ("0" if document["digest"][-1] != "0" else "1")
+        diverged = {"run_id": self.run_id, "receipt_id": payload["receipt_id"],
+                    "proposal_digest": governed["proposal_digest"],
+                    "plan_revision": governed["plan_revision"], "approval_kind": "host_ui",
+                    "document_digest": wrong,
+                    "submission": {"action": "approve", "configuration": {
+                        "budgets": copy.deepcopy(governed["proposal"]["budgets"])}}}
+        refused = self.admit(diverged)
+        self.assertEqual(refused["type"], "Block")
+        self.assertEqual(refused["reasons"][0]["code"], "governance.receipt_replay",
+                         "the replay gate refuses the mixed envelope before any document check")
+        self.assertEqual(self.view()["governance"]["interactions_remaining"], views)
+        self.assertEqual(len(self._receipts()), receipts)
+        self.assertEqual(self._receipts()[-1]["document_digest"], document["digest"],
+                         "the recorded binding stands; the refusal is a replay, not a re-bind")
 
     def test_an_amend_decides_its_confirm_document_through_the_real_flow(self):
         """The pre-approval amend's confirm document (ADR-0072): the context answer after the

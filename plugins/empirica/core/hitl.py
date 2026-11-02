@@ -47,7 +47,7 @@ from typing import Any
 
 from core.canonical import CanonicalJSONError, canonical_json
 from core.evaluation import TERMINAL_STATUSES, claim_digest, terminal_key
-from core.governance import HUMAN_WAIT_STATES
+from core.governance import HUMAN_WAIT_STATES, sized as _proposal_sized
 from core.projection import project_presentation, safe_text
 
 #: The document's protocol identity (the schema's ``schema`` const, ``contracts/empirica/v2/hitl.schema.json``).
@@ -168,15 +168,18 @@ def configuration_pair(*, run_id: str, snapshot: Any) -> dict[str, str] | None:
 
     The exact rendered UTF-8 string plus its digest — the pair the private ``governance_context``
     presentation result carries, so no adapter ever re-renders a dict. ``None`` exactly where no
-    configuration document exists for this state: its judgment is not a human's now (the
-    human-wait states alone have a form to show, ``HUMAN_WAIT_STATES``); a derivation that fails
-    on state that should have one refuses as :class:`ValueError`, never as ``None``.
+    configuration document exists for this state: its judgment is not a human's now — only the
+    human-wait states have a form to show (``HUMAN_WAIT_STATES``), and only once the author has
+    sized the proposal (``core.governance.sized``): the unsized StartRun placeholder is
+    unapprovable, so no document is fetched or written for it (review-2 m2). A derivation that
+    fails on state that should have one refuses as :class:`ValueError`, never as ``None``.
     """
     try:
-        state = snapshot.state.governance["state"]
+        governed = snapshot.state.governance
+        name = governed["state"]
     except (AttributeError, KeyError, TypeError) as missing:
         raise ValueError(f"the snapshot lacks its governance: {missing!r}") from missing
-    if state not in HUMAN_WAIT_STATES:
+    if name not in HUMAN_WAIT_STATES or not _proposal_sized(governed):
         return None
     document = configuration_for(run_id=run_id, snapshot=snapshot)
     data = render(document)
