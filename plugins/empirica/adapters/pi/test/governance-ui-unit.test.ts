@@ -398,23 +398,30 @@ test("the amendment warning is wrapped in full, never truncated, beside the docu
     assert.ok(lines.every(line => visibleWidth(line) <= width));
     const text = lines.map(line => line.trim()).join(" ");
     assert.ok(text.includes(dialog.amendment_warning), `warning truncated at ${width}`);
-    // the document lines: the short digest, then the absolute path, wrapped but never cut
-    const digestLine = lines.findIndex(line => line.startsWith("Document: "));
-    assert.ok(digestLine >= 0, `document digest line missing at ${width}`);
-    assert.match(lines[digestLine]!, /^Document: sha256:[0-9a-f]{12}$/);
-    // M3 (review 2): at every width the path lines break only at "/" boundaries; at widths
-    // where each segment fits (80), joining the fragments rebuilds the exact path and
-    // nothing is cut; below the widest segment (50 cut the 70-column `s256-<64 hex>` also
-    // the file name) the global width rule cuts the oversize line, never the wrap.
-    const pathLines = lines.filter(line => line.startsWith("/"));
-    assert.ok(pathLines.length > 1, `the ~274-character path wraps at ${width}`);
-    if (width >= 70) {
-      assert.equal(pathLines.join(""), DOCUMENT.path, `the whole path survives at ${width}`);
-      assert.ok(!lines.some(line => line.includes("\u2026") && line.startsWith("/")),
-        "a fitting path line is never cut");
-    }
+    // the document lines: the short digest, then the absolute path, wrapped but never cut.
+    // X4 (Copilot #50) makes it a hard rule at every width: a segment wider than the dialog
+    // width is hard-wrapped at the width — no character dropped, no ellipse, `truncate`
+    // never fires — so joining the path lines back gives the exact path, at 80 where every
+    // segment fits and at 50 where the 70-column `s256-<64 hex>` segments do not.
+    const pathLines = joinBackPaysThePath(lines);
+    assert.ok(pathLines.pieces.length > 1, `the ~274-character path wraps at ${width}`);
+    assert.equal(pathLines.joined, DOCUMENT.path, `the whole path survives at ${width}`);
+    assert.ok(!pathLines.pieces.some(line => line.includes("…")), "a path line is never cut");
   }
 });
+
+/** The path lines as they appear between the digest line and the blank line that ends the
+ * document region — hard-wrapped pieces included, which do not start with `/` — and what they
+ * join back to (X4, Copilot #50: the exact path, at every width). */
+function joinBackPaysThePath(lines: string[]): { pieces: string[]; joined: string } {
+  const digestLine = lines.findIndex(line => line.startsWith("Document: "));
+  assert.ok(digestLine >= 0, "document digest line missing");
+  assert.match(lines[digestLine]!, /^Document: sha256:[0-9a-f]{12}$/);
+  let end = digestLine + 1;
+  while (end < lines.length && lines[end] !== "") end += 1;
+  const pieces = lines.slice(digestLine + 1, end);
+  return { pieces, joined: pieces.join("") };
+}
 
 test("the review screen keeps no rationale text and names the document", () => {
   const dialog = fixture.dialogs.review;
@@ -525,13 +532,14 @@ test("the dialog shown follows the bound document's question after a dismissed c
     ["present", "approve", "present", "dismiss", "present", "dismiss"]);
 });
 
-test("the path block wraps only at slash boundaries and gives the file name its own line", () => {
-  // M3 (review 2): the realistic path is ~274 characters and must wrap on every host. The
-  // Pi dialog breaks it only at "/" boundaries — every fragment is a valid path piece, the
-  // 69-character file name owns the last line, and no segment is ever split mid-hex at a
-  // width it fits. At widths below the widest segment ("s256-<64 hex>" is 70 columns, wider
-  // than 50) the chosen rule is the dialog's own: a line that cannot fit the width is cut by
-  // the global truncation, never let overflow — `renderLines` already truncates every line.
+test("the path block wraps at slash boundaries, hard-wrapping only what cannot fit", () => {
+  // M3 (review 2) set the wrap rule; X4 (Copilot #50) completes it: the realistic path is
+  // ~274 characters and must reach the human with NOTHING dropped. The Pi dialog breaks it
+  // at "/" boundaries while the pieces fit, and a single segment wider than the dialog width
+  // (the 70-column `s256-<64 hex>` directories at width 50) is hard-wrapped at the width, so
+  // every piece fits, no piece is cut with an ellipse and joining the lines back rebuilds the
+  // exact path. A hard-wrapped continuation holds no "/": it is the inside of one segment.
+  // The 69-character file name still owns the last line whole wherever it fits.
   const base = { confirmation: false, timeoutMs: 900_000, document: DOCUMENT };
   for (const width of [80, 50]) {
     const lines = renderLines(reviewDialog, initialState(reviewDialog), width, theme, base);
@@ -541,14 +549,15 @@ test("the path block wraps only at slash boundaries and gives the file name its 
     const nextBlank = lines.findIndex((line, index) => index > digestAt && line === "");
     const pathLines = lines.slice(digestAt + 1, nextBlank >= 0 ? nextBlank : lines.length);
     assert.ok(pathLines.length > 1, `the 274-character path wraps at ${width}`);
-    assert.ok(pathLines.every(line => line.startsWith("/")),
-      "every path fragment starts at a segment boundary");
+    assert.ok(pathLines.every(line => line.startsWith("/") || !line.includes("/")),
+      "a piece either starts a segment or is the inside of one — never a splice across two");
+    assert.ok(!pathLines.some(line => line.includes("…")), "a path piece is never cut");
+    assert.equal(pathLines.join(""), DOCUMENT.path,
+      `nothing is lost or split joining the fragments back together at ${width}`);
     const fileName = "/" + (DOCUMENT.path.split("/").pop() ?? "");
     if (width >= visibleWidth(fileName)) {
       assert.equal(pathLines[pathLines.length - 1], fileName,
         "the file name owns the last line, whole");
-      assert.equal(pathLines.join(""), DOCUMENT.path,
-        "nothing is lost or split joining the fragments back together");
     }
   }
 });

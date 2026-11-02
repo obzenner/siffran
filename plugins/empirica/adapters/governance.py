@@ -238,9 +238,19 @@ class HostGovernance:
             return None
         if published is None:
             return None
+        # X3 (Copilot #49), defense in depth beside the shared publish helper: a
+        # digest-matching document whose parsed question is missing or not one of the two the
+        # core derives would choose a form from nothing — the present the core then refuses as a
+        # document mismatch, when nothing was verifiable in the first place. Refuse here: the
+        # mediation answers ``governance.approval_unavailable`` before any present, nothing
+        # spent.
+        question = published.parsed.get("question")
+        if question not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT):
+            return None
         return {"digest": published.digest, "path": str(published.path),
                 "amendment": published.parsed.get("amendment"),
-                "question": published.parsed.get("question")}
+                "question": question}
+
 
     def _mediate(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")

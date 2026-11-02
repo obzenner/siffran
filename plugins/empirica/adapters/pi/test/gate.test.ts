@@ -304,7 +304,7 @@ async function wire(
         items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, record_ids: [`sha256:${"a".repeat(64)}`],
           claims: [{ id: "C1", text: "C" }], source_kind: "web", source_ref: "https://example.test/x", quote: "q",
           class: "retrievable", title: "example.test/x",
-          description: 'For C1 · Quote: "q" · Does the page say this?', note_title: "Note (optional)" }],
+          description: 'C1 · Quote: "q" · Does the page say this?', note_title: "Note (optional)" }],
         document: { digest: `sha256:${"9".repeat(64)}`,
           path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
             + `${"9".repeat(64)}.json` } };

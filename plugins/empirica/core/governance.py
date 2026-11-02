@@ -128,10 +128,29 @@ def _material_revision(goal: str, current: Mapping, proposal: Mapping) -> bool:
     return not _initial_sizing(current, proposal)
 
 
+def _ceilings_as_ints(budgets: Mapping) -> dict:
+    """Every ceiling as the exact ``int`` the HITL document renders (Copilot X2, #48).
+
+    The wire's ``integer`` admits integral floats, so a sized proposal can arrive carrying
+    ``8.0``; run/4 stores each ceiling as the one representation the document's renderer demands
+    (``core.hitl._integer``): before this normalization an admitted ``8.0`` made a context fetch
+    Fault with ``invalid_request`` and a changed-context fetch raise after its own commit.
+    ``revise`` is the one admission point every proposal path flows through — author
+    ``configure_run`` resolutions, human amendments, auto — so state, dialog rows and the
+    document agree. A non-integral float, a bool or a non-number stays exactly as it arrived:
+    the request schema and the renderer refuse it elsewhere, fail closed."""
+    normalized = plain(budgets)
+    for name, value in normalized.items():
+        if type(value) is float and value.is_integer():
+            normalized[name] = int(value)
+    return normalized
+
+
 def revise(goal: str, current: Mapping, *, proposal=None, context=None) -> dict:
     value = plain(current)
     if proposal is not None:
         value["proposal"] = plain(proposal)
+        value["proposal"]["budgets"] = _ceilings_as_ints(value["proposal"]["budgets"])
     if context is not None:
         value["context"] = plain(context)
     observed = proposal_digest(goal, value)
@@ -330,6 +349,20 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping,
         return None if expected == "host_ui" else "governance.approval_unavailable"
     if expected == "host_ui" and prior is None:
         return "governance.receipt_replay"
+    if outcome == "amend" and "amendment" in decision:
+        amendment = decision["amendment"]
+        # Copilot X1 (#47): an explicit amendment that changes no ceiling names numbers the
+        # standing proposal already records — a replay of the standing configuration, so it
+        # must not reopen authority nor write a receipt. Committing it would append an amend
+        # receipt whose revision never advanced (``revise`` refuses a no-op), and run/4's
+        # invariant then classifies the whole run corrupt. A human amendment never reaches this:
+        # ``resolve_submission`` resolves an unchanged human edit to ``approve`` — the no-op
+        # host_ui amend has no refusal reason of its own to mirror — so only an explicit auto
+        # amendment can arrive here; it is refused before any mutation, nothing spent.
+        if (isinstance(amendment, Mapping)
+                and isinstance(amendment.get("budgets"), Mapping)
+                and amendment["budgets"] == governance["proposal"]["budgets"]):
+            return "governance.receipt_replay"
     return None
 
 

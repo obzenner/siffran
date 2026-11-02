@@ -301,6 +301,23 @@ class TestPublish(_Isolated):
                                                  "digest": hitl.digest(not_an_object.encode())}))
         self.assertEqual(self.published_file(), [])
 
+    def test_a_configuration_document_without_a_supported_question_writes_nothing(self):
+        """X3 (Copilot #49): a document claiming the configuration kind must already carry one of
+        the two core-derived questions — the check both governance callers get through this one
+        shared helper, in front of any present. The bytes below are digest-consistent JSON
+        objects, so the object check alone would publish them; the question check refuses before
+        the write, and the callers still refuse a kindless pair their own way (their binding legs
+        check ``question`` unconditionally, the Pi one since PR 13a)."""
+        for document in ({"schema": hitl.SCHEMA_ID, "kind": hitl.CONFIGURATION},
+                         {"schema": hitl.SCHEMA_ID, "kind": hitl.CONFIGURATION,
+                          "question": "other"}):
+            with self.subTest(question=document.get("question", "<missing>")):
+                data = hitl.render(document)
+                self.assertIsNone(hitl_sidecar.publish(
+                    self.store, self.HANDLE,
+                    {"text": data.decode("utf-8"), "digest": hitl.digest(data)}))
+                self.assertEqual(self.published_file(), [], "no question, no write")
+
     def test_a_digest_mismatch_writes_nothing(self):
         # Well-formed identity, wrong bytes: the text is real JSON, the digest names another
         # content — the one check a tampering or confused core answer cannot pass.

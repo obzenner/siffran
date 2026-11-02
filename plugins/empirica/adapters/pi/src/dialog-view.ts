@@ -148,16 +148,15 @@ function pointerLines(dialog: Dialog, width: number): string[] {
   return wrapTextWithAnsi(`${dialog.rationale_label} and full detail: in the document`, Math.max(10, width));
 }
 
-/** ADR-0072 Q4's bound lines: the short digest, then the document's absolute path. Wider than
-the screen the path wraps — never truncated or cut — because a cut path is a corrupted paste.
-M3 (review 2): the realistic sidecar path is ~276 characters (`<home>/projects/s256-<64 hex>/
-runs/s256-<64 hex>/gen-<n>/hitl/<64 hex>.json`), so it wraps at every realistic width, and it
-breaks **only at "/" boundaries**: every rendered fragment is a valid path piece and the joins
-rebuild the path exactly, the 69-character file name owns the last line whole so the digest's
-hex is never split, and no segment is ever cut while it fits the width. A single segment wider
-than the dialog width (the 70-column `s256-<64 hex>` directories below width 70) is cut by
-`renderLines`' global width rule — chosen over overflow, because every rendered line fits the
-width (at the widths the dialog tests pin, 80 and above, nothing is cut at all). */
+/** ADR-0072 Q4's bound lines: the short digest, then the document's absolute path. The path
+ * wraps at every `/` boundary, and a single segment wider than the dialog width is hard-wrapped
+ * at the width, never cut: no character is dropped (X4, Copilot #50 completed the M3 rule —
+ * the path a human copies is the only route to the rationale, and an ellipsized segment made
+ * the file unreachable at narrow widths). Every emitted line fits the width, every piece is a
+ * real consecutive slice of the path, and joining the lines back rebuilds the exact path; the
+ * 69-character file name still owns the last line whole wherever it fits (the realistic path
+ * is ~276 characters, `<home>/projects/s256-<64 hex>/runs/s256-<64 hex>/gen-<n>/hitl/<64
+ * hex>.json`; at widths below 70 the `s256-<64 hex>` directories hard-wrap, mid-hex). */
 function documentLines(document: BoundDocument | undefined, width: number): string[] {
   if (!document) return [];
   const short = `Document: ${document.digest.slice(0, "sha256:".length + SHORT_BODY)}`;
@@ -165,6 +164,21 @@ function documentLines(document: BoundDocument | undefined, width: number): stri
   const segments = document.path.match(/\/[^/]*/g) ?? [];
   const path: string[] = [];
   let line = "";
+  const hardWrap = (segment: string, room: number): string[] => {
+    const pieces: string[] = [];
+    let piece = "", pieceWidth = 0;
+    for (const character of segment) {
+      const columns = visibleWidth(character);
+      if (pieceWidth + columns > room) {
+        pieces.push(piece);
+        piece = "";
+        pieceWidth = 0;
+      }
+      piece += character;
+      pieceWidth += columns;
+    }
+    return [...pieces, piece];
+  };
   for (let index = 0; index < segments.length; index++) {
     const segment = segments[index] as string;
     const isFileName = index === segments.length - 1;
@@ -172,7 +186,15 @@ function documentLines(document: BoundDocument | undefined, width: number): stri
       path.push(line);
       line = "";
     }
-    line += segment;
+    if (visibleWidth(segment) > width) {
+      // X4: an oversized segment hard-wraps at the width instead of being cut by `renderLines`
+      // global width rule. Every piece of it is emitted, so the next segment starts a fresh
+      // line: every line is then either a run of whole segments or the inside of exactly one.
+      path.push(...hardWrap(segment, width));
+      line = "";
+    } else {
+      line += segment;
+    }
   }
   if (line !== "") path.push(line);
   return [...head, ...path];

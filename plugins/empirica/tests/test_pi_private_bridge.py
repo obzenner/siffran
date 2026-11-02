@@ -80,6 +80,12 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         return response["result"]
 
     def _stored_receipts(self):
+        """X5 (Copilot #50): the bridge answers through ``bridge.build_service`` — its own fresh
+        service instance per call — so this class's coordinator snapshot predates the bridge's
+        writes: reload the run from the store before every receipt-count assertion, exactly as
+        the governance suite's ``_receipts`` helper reassembles (``GetRun`` reads the stored
+        bytes, and the assertions face the persisted effects, never a cached setup snapshot)."""
+        self._dispatch({"type": "GetRun", "run_id": self.run_id})
         return self.service._coordinator.last_snapshot.state.governance["receipts"]
 
     def test_the_context_answer_binds_the_written_document_without_its_text(self):
@@ -168,6 +174,31 @@ class PiPrivateBridgeDocumentTests(unittest.TestCase):
         self.assertIs(presentation["document_unavailable"], True)
         self.assertEqual(list(self.machine_home.rglob("hitl/*.json")), [])
         self.assertEqual(len(self._stored_receipts()), 0)
+
+    def test_a_digest_matching_document_without_a_supported_question_is_unbindable(self):
+        """X3 (Copilot #49), the parity pin for the leg that has carried the check since PR 13a:
+        a pair whose bytes are digest-CONSISTENT objects — ``{}`` or ``{"question": "other"}`` —
+        must refuse exactly as a malformed pair does, before any present: the parsed document
+        already carries one of the two core-derived questions, or the adapter is told the document
+        is unavailable and writes nothing."""
+        real_context = bridge.trusted_governance_context
+        for text in ("{}", '{"question": "other"}'):
+            with self.subTest(document=text):
+                def forged(profile, run_id, payload, text=text):
+                    response = real_context(profile, run_id, payload)
+                    data = core_hitl.render(json.loads(text))
+                    response["result"]["presentation"]["document"] = {
+                        "text": data.decode("utf-8"), "digest": core_hitl.digest(data)}
+                    return response
+                with patch.object(bridge, "trusted_governance_context", forged):
+                    response = private_bridge._governance_context(
+                        PI_PROFILE, {"run_id": self.run_id, "bind_document": True},
+                        copy.deepcopy(self.context))
+                presentation = response["result"]["presentation"]
+                self.assertNotIn("document", presentation)
+                self.assertIs(presentation["document_unavailable"], True)
+                self.assertEqual(list(self.machine_home.rglob("hitl/*.json")), [])
+                self.assertEqual(len(self._stored_receipts()), 0)
 
     def test_a_write_failure_also_names_itself_unavailable(self):
         """Storage cannot lie into presenting: the sidecar's own named failures become the same

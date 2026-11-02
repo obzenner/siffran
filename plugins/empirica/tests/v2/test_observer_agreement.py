@@ -166,7 +166,20 @@ def _evidence_waiting(**kw):
 def _evidence_shown_and_left_open():
     b, run = _begin("shown")
     b.cite(run, "C0", "web", "https://example.invalid/spec", "External support")
-    b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "p1", "key": b.batch_key(run)})
+    # X7 (Copilot #54): the presentation names its batch's document — the PR 13 digest flow
+    # via ``_present`` — never the legacy bare payload, which silently faulted with the older
+    # request schema and left the scenario unshown. The call must reach a real state, never a
+    # request fault: shown and left open where interactions remain (and the batch then says it
+    # was already presented), or refused by the exhausted interaction ceiling underneath the
+    # limit variant — whose configuration approval already spent the one mocked interaction.
+    shown, digest = b._present(run, {"run_id": run, "receipt_id": "p1", "key": b.batch_key(run)})
+    if shown["type"] in ("Allow", "Inert"):
+        assert digest is not None, "the shown batch names its bound document"
+        batch = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["confirmation_batch"]
+        assert batch["prompt_error"] == "already_presented", batch
+    else:
+        assert shown["type"] == "Block" and any(
+            reason["code"] == "governance.interaction_limit" for reason in shown.get("reasons", [])), shown
     return b, run
 
 
@@ -379,9 +392,19 @@ def _decision_rejected():
     b, run = _begin("decision-no", [("C0", "ordinary", "Root"), ("C1", "needs-decision", "Ship the cache")], [("C0", "C1")])
     digest = next(c["wording_digest"] for c in b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"]
                   if c["claim_id"] == "C1")
-    b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
-    b.drv.trusted_evidence_confirmation(run, {"run_id": run, "receipt_id": "d1", "decisions": [
-        {"subject": "claim", "claim_id": "C1", "claim_digest": digest, "outcome": "reject"}]})
+    # X7 (Copilot #54): presentation and confirmation both bind the batch's document — the PR 13
+    # digest flow via ``_present`` — never the legacy bare payloads, which silently fault and
+    # record nothing. The scenario's decision must actually be rejected: assert the calls
+    # succeeded and the human's rejection stands in the argument's own rows.
+    presented, document_digest = b._present(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
+    confirmed = b.drv.trusted_evidence_confirmation(run, {"run_id": run, "receipt_id": "d1", "decisions": [
+        {"subject": "claim", "claim_id": "C1", "claim_digest": digest, "outcome": "reject"}],
+        "document_digest": document_digest})["result"]
+    assert presented["type"] in ("Allow", "Inert"), presented
+    assert confirmed["type"] == "Allow", confirmed
+    rows = b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"]
+    decided = next(c for c in rows if c["claim_id"] == "C1")
+    assert decided["state"] == "discarded" and decided["human_decision"]["outcome"] == "reject", decided
     return b, run
 
 

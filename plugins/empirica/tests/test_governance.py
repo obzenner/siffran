@@ -602,6 +602,78 @@ class GovernanceServiceTests(unittest.TestCase):
         receipt = self._receipts()[-1]
         self.assertEqual(receipt["superseded_budgets"], superseded)
 
+    # --- Copilot round on #47..#54: admission and the amendment path ---
+
+    def _float_proposal(self):
+        """A sized proposal whose wire-integer ceilings arrive as integral floats."""
+        self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets={"max_passes": 8.0, "max_spawns": 1, "max_audit_spawns": 2},
+            rationale=SIZED_RATIONALE))["type"], "Allow")
+        return self.service.trusted_governance_context(
+            run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]
+
+    def test_an_auto_amend_that_changes_nothing_is_refused_before_commit(self):
+        """Copilot X1 (#47): a delegated auto amend naming the standing proposal's own ceilings
+        commits an amend receipt whose revision never advanced — ``revise`` refuses a no-op — and
+        run/4's invariant then classifies the whole run corrupt. The decision gate refuses it as
+        ``governance.receipt_replay`` (no refusal reason for a no-op host_ui amend exists to
+        mirror: the human effort resolves an unchanged edit to ``approve`` through
+        ``resolve_submission``), nothing committed, before any mutation. An auto amend that
+        changes a ceiling still commits as a real revision."""
+        self._prepare_auto(DELEGATED_INVOCATION)
+        before = copy.deepcopy(self._receipts())
+        g = self.view()["governance"]
+        payload = {"run_id": self.run_id, "receipt_id": "noop-auto-amend",
+                   "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
+                   "approval_kind": "auto", "outcome": "amend",
+                   "amendment": {"budgets": copy.deepcopy(g["proposal"]["budgets"])}}
+        refused = self.admit(payload)
+        self.assertEqual(refused["type"], "Block", refused)
+        self.assertEqual(refused["reasons"][0]["code"], "governance.receipt_replay")
+        self.assertEqual(self._receipts(), before, "nothing was committed")
+        self.assertEqual(self.view()["governance"]["plan_revision"], g["plan_revision"])
+        key = decode_handle(self.run_id)
+        self.assertEqual(classify_and_decode(self.runs.data[key].value).kind, "valid",
+                         "the no-op amend left a readable run, not a corrupt one")
+        amended = {**g["proposal"]["budgets"],
+                   "max_passes": g["proposal"]["budgets"]["max_passes"] - 1}
+        self.assertEqual(self.admit({**payload, "receipt_id": "real-auto-amend",
+                                     "amendment": {"budgets": amended}})["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["proposal"]["budgets"], amended)
+
+    def test_integral_float_ceilings_admit_as_ints_and_both_context_fetches_answer(self):
+        """Copilot X2 (#48): the wire's ``integer`` admits ``8.0``, but run/4 stores each ceiling
+        as the exact ``int`` the HITL document renders: an admitted ``8.0`` made the unchanged
+        context fetch Fault with ``invalid_request`` and, once the context changed, raised after
+        its own commit. Integral numbers are normalized at admission, so state, dialog rows and
+        the document hold one representation and neither fetch path faults or raises."""
+        self.assertIn(self._float_proposal()["type"], {"Allow", "Inert"})
+        g = self.view()["governance"]
+        self.assertEqual(g["proposal"]["budgets"],
+                         {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                         "integral floats admit as the ints they render as")
+        # the unchanged-context fetch: no revision to commit, the document beside the dialog
+        result = self.service.trusted_governance_context(
+            run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]
+        self.assertIn(result["type"], {"Allow", "Inert"}, result)
+        parsed = json.loads(result["presentation"]["document"]["text"])
+        self.assertEqual([row["value"] for row in parsed["budgets"]], [8, 1, 2])
+        self.assertTrue(all(type(row["value"]) is int for row in parsed["budgets"]))
+        # the changed-context fetch: the observation commits, the answer still carries the pair
+        from adapters.identity import observe
+        changed = copy.deepcopy(CONTEXT)
+        changed["author"] = {**observe("anthropic", "claude-opus-4-6", source="test-host"),
+                             "observed_by": "host"}
+        committed = self.service.trusted_governance_context(run_id=self.run_id, payload=changed)["result"]
+        self.assertIn(committed["type"], {"Allow", "Inert"}, committed)
+        self.assertEqual(self.view()["governance"]["context"]["author"],
+                         changed["author"], "the changed observation committed, nothing raised")
+        # the run is approvable: the document the human is to decide on binds and installs
+        self.assertEqual(self.admit(self.decision("float-ceiling-approve"))["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 8)
+
     # --- the decision binds to its HITL document (ADR-0072, PR 07) ---
 
     def _context_document(self):

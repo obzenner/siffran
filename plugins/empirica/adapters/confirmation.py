@@ -107,11 +107,14 @@ def _claim_list(ids: Sequence[str]) -> str:
 
 
 def _research_titles(item: dict[str, Any]) -> None:
-    """The short field title of a research item (its source) and its description: the claims it is for, a prefix of the
-    quote (the full quote stays in the message) and the question. Both hosts read the same text."""
+    """The short field title of a research item (its source) and its description: the bare
+    claim ids the record was proposed for — only the pointer; the per-claim context itself
+    ("For claim …", the claim texts) lives in the document (ADR-0072, the PR 12 clarification;
+    X6, Copilot #52) — a prefix of the quote (the full quote stays in the message) and the
+    question. Both hosts read the same text."""
     ids = _claim_list([claim["id"] for claim in item["claims"]])
     question = "Is the observation right?" if item["class"] == "observed" else "Does the page say this?"
-    head, tail = f"For {ids} · Quote: \"", f"\" · {question}"
+    head, tail = f"{ids} · Quote: \"", f"\" · {question}"
     item["title"] = _fit(short_ref(item["source_ref"]), TITLE_LIMIT - _PREFIX)
     item["description"] = head + _fit(item["quote"], DESCRIPTION_LIMIT - len(head) - len(tail) - 1).rstrip(" ") + tail
     item["note_title"] = NOTE_TITLE

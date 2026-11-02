@@ -133,7 +133,9 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     members are typed, ``digest`` is a full document identity (the naming rule
     :func:`_name_of` enforces) that names the digested bytes themselves (:func:`core.hitl.digest`,
     the one definition), ``run_id`` decodes to the run whose sidecar this is, and the text parses
-    as a JSON **object** — so a malformed or digest-inconsistent pair never touches the store.
+    as a JSON **object** of a known kind whose configuration kind names one of the two
+    core-derived ``question`` values (X3, Copilot #49) — so a malformed, digest-inconsistent,
+    kindless or question-less configuration pair never touches the store.
     The write is the one write (idempotent on the same bytes; different bytes at a digest's name
     is :class:`DocumentMismatch`), and its storage failures — :class:`DocumentMismatch`,
     :class:`fsio.SymlinkRefused`, :class:`HardLinkUnsupported`, any :class:`OSError` — are the
@@ -158,6 +160,21 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     except ValueError:
         return None
     if not isinstance(parsed, Mapping):
+        return None
+    # X3 (Copilot #49, the one check both governance callers get through this shared helper):
+    # a published document has a known kind, and a configuration kind already carries one of the
+    # two core-derived questions. The bytes below exist in no flow a form can be shown from —
+    # `{}`, a questionless or unknown question, an unknown kind — so refusing them BEFORE the
+    # write leaves no orphan at a digest's name; both governance binding legs additionally check
+    # ``question`` themselves (the Pi one since PR 13a, the Claude one beside it), so a caller
+    # never presents a form chosen from an unverifiable discrimination: the mediation answers
+    # ``governance.approval_unavailable`` before any present, nothing spent, nothing written.
+    # An evidence document carries no ``question`` and keeps publishing unchanged.
+    kind = parsed.get("kind")
+    if kind not in (core_hitl.CONFIGURATION, core_hitl.EVIDENCE):
+        return None
+    if (kind == core_hitl.CONFIGURATION
+            and parsed.get("question") not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT)):
         return None
     path, written = store.write(key, data)
     if written != digest or path.name != f"{name}.json":  # defensive: the write answers its name

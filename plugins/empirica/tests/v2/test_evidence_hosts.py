@@ -349,10 +349,13 @@ class MediatorTests(MediatorFixture):
         for key in ("d1", "d2", "n1", "n2"):
             self.assertLessEqual(len(properties[key]["title"]), TITLE_LIMIT, key)
         description = properties["d1"]["description"]
-        self.assertTrue(description.startswith('For C0 · Quote: "The required name field: xxx'), description)
+        self.assertTrue(description.startswith('C0 · Quote: "The required name field: xxx'), description)
         self.assertTrue(description.endswith("…\" · Does the page say this?"), description)
         self.assertLessEqual(len(description), DESCRIPTION_LIMIT)
-        self.assertIn("For C1", properties["d2"]["description"])
+        self.assertNotIn("For ", description, "X6 (#52): the per-claim context is in the document,")
+        self.assertIn("C1", properties["d2"]["description"])
+        self.assertNotIn("For ", properties["d2"]["description"],
+                         "X6 (#52): only the bare claim ids name the record's claims")
 
     def test_a_decision_field_names_the_claim_it_asks_about(self):
         drv, run_id = self.start(graph=graph_with_decision())

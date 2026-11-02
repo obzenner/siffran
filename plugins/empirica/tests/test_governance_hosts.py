@@ -421,8 +421,20 @@ class GovernanceHostTests(unittest.TestCase):
                     presentation["document"] = {**document, "text": b"not text"}
                 elif kind == "short-digest":
                     presentation["document"] = {**document, "digest": document["digest"][:17]}
+                elif kind == "empty-document":
+                    # X3 (Copilot #49): a digest-CONSISTENT pair whose text parses to {} — the
+                    # object and digest checks pass, and without the question check the
+                    # mediation would present a form chosen from nothing and eat the mismatch.
+                    data = core_hitl.render({})
+                    presentation["document"] = {"text": data.decode("utf-8"),
+                                                "digest": core_hitl.digest(data)}
+                elif kind == "unsupported-question":
+                    data = core_hitl.render({"question": "other"})
+                    presentation["document"] = {"text": data.decode("utf-8"),
+                                                "digest": core_hitl.digest(data)}
             return mutate
-        for kind in ("absent", "digest-mismatch", "text-not-a-string", "short-digest"):
+        for kind in ("absent", "digest-mismatch", "text-not-a-string", "short-digest",
+                     "empty-document", "unsupported-question"):
             with self.subTest(document=kind):
                 self.setUp()
                 self.initialize({"elicitation": {"form": {}}})
