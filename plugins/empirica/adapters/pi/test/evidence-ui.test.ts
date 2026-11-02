@@ -230,13 +230,19 @@ test("Later asks for no note, and an all-Later batch submits no receipt at all",
   assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation"]);
 });
 
-test("a refused presentation or an error is evaluated again; a refused receipt is evaluated again as shown", async () => {
+test("a refused presentation or an error is evaluated again; a refused receipt is the host's failure to record (review-2 m5)", async () => {
   const original = blocked();
   const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
   const refused = async () => ({ type: "evidence_refused", result: { type: "Fault" } });
   assert.equal(await run(ctx, refused, original), refreshed);
   const notAllowed = bridge([RECORD], { type: "evidence_receipt", result: { type: "Fault" } });
-  assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, notAllowed.trusted, original), refreshed);
+  const failures: unknown[] = [];
+  const out = await confirmEvidence(original, "run-1", ctx, notAllowed.trusted as never,
+    (failure) => { failures.push(failure); return Promise.resolve(refreshed); }, Date.now() + 60_000);
+  assert.equal(out.response, refreshed);
+  assert.equal(out.failure, "presentation_failed",
+    "a receipt the core faulted on recorded nobody's answer: the failure to ask, never a decline");
+  assert.deepEqual(failures, ["presentation_failed"]);
   const throwing = async () => { throw new Error("bridge down"); };
   assert.equal(await run(ctxFor({ selects: ["Confirm"], inputs: [""] }).ctx, throwing, original), refreshed);
   // ...and when even the evaluation fails there is nothing fresher than the response in hand.
@@ -452,4 +458,68 @@ test("EHB-TERM-03: without a UI the end is not asked and the failure is the usua
   const confirmed = await confirm(noUi.ctx, trusted, terminalBlock());
   assert.equal(calls.length, 0);
   assert.equal(confirmed.failure, "presentation_failed");
+});
+
+// ---- review-2 m5 (round 12, decision 7c): a refused submit is nobody's recorded answer, never a decline ----------
+
+for (const [label, receipt] of [
+  ["the residuals moved while the dialog was open (evidence.document_mismatch)",
+    { type: "evidence_receipt", result: { type: "Block", reasons: [{ code: "evidence.document_mismatch" }] } }],
+  ["the submit faulted", { type: "evidence_receipt", result: { type: "Fault", code: "conflict", fail_direction: "closed" } }],
+] as Array<[string, unknown]>) {
+  test(`review-2 m5: a refused submit (${label}) reports the host's failure to record, never the human's decline`, async () => {
+    // The round-11 scenario, Pi half: the presentation succeeds, the human approves the end of the
+    // run, and the submit comes back refused — the core recorded nobody's answer, so the adapter
+    // reports its own failure (`presentation_failed`) to re-evaluate with; the fresh evaluation
+    // words the block `host_failed` ("Stop again to try again"), never "You declined ending the run".
+    const live = ctxFor({ selects: ["Approve"], inputs: [""] });
+    const { trusted, calls } = bridge([TERMINAL_ITEM], receipt, { ...DOCUMENT, residuals: 1 });
+    const failures: unknown[] = [];
+    const out = await confirmEvidence(terminalBlock(), "run-1", live.ctx, trusted as never,
+      (failure) => { failures.push(failure); return Promise.resolve(refreshed); }, Date.now() + 60_000);
+    assert.equal(out.response, refreshed, label);
+    assert.equal(out.failure, "presentation_failed", label);
+    assert.deepEqual(failures, ["presentation_failed"], label);
+    assert.deepEqual(calls.map((c) => c.operation),
+      ["evidence_presentation", "evidence_confirmation"],
+      `${label}: the batch was shown and the answer submitted; only the submission was refused`);
+  });
+}
+
+test("review-2 m5: a submit that never answers (the bridge threw) is the same failure to record", async () => {
+  const live = ctxFor({ selects: ["Approve"], inputs: [""] });
+  const calls: PrivateIngressRequest[] = [];
+  const trusted = async (request: PrivateIngressRequest) => {
+    calls.push(request);
+    if (request.operation === "evidence_confirmation") throw new Error("the bridge went down");
+    return { type: "evidence_presentation", receipt_id: "p-1", items: [TERMINAL_ITEM],
+      document: { ...DOCUMENT, residuals: 1 } };
+  };
+  const failures: unknown[] = [];
+  const out = await confirmEvidence(terminalBlock(), "run-1", live.ctx, trusted as never,
+    (failure) => { failures.push(failure); return Promise.resolve(refreshed); }, Date.now() + 60_000);
+  assert.equal(out.response, refreshed);
+  assert.equal(out.failure, "presentation_failed",
+    "a throw between present and confirm left nobody's answer recorded");
+  assert.deepEqual(failures, ["presentation_failed"]);
+  assert.equal(calls.length, 2);
+});
+
+test("review-2 m5: an admitted submit, a left-Later batch and a cancelled dialog stay the human's word", async () => {
+  // The refusal is of the submit, not the dialog: later, cancel and a clean admitted receipt keep
+  // the granted-nothing semantics of a shown batch (evaluated again with no host failure).
+  for (const [label, selects, receipt] of [
+    ["admitted receipt", ["Approve"], { type: "evidence_receipt", result: { type: "Allow" } }],
+    ["all later", ["Later"], { type: "evidence_receipt", result: { type: "Block" } }],
+    ["cancelled dialog", [undefined], { type: "evidence_receipt", result: { type: "Block" } }],
+  ] as Array<[string, Array<string | undefined>, unknown]>) {
+    const live = ctxFor({ selects, inputs: [""] });
+    const failures: unknown[] = [];
+    const out = await confirmEvidence(terminalBlock(), "run-1", live.ctx,
+      bridge([TERMINAL_ITEM], receipt).trusted as never,
+      (failure) => { failures.push(failure); return Promise.resolve(refreshed); }, Date.now() + 60_000);
+    assert.equal(out.response, refreshed, label);
+    assert.deepEqual(failures, [undefined], `${label}: a genuine answer or nothing is never a host failure`);
+    assert.equal(out.failure, undefined, label);
+  }
 });

@@ -5,6 +5,7 @@ host decides no policy: these tests pin that it asks once, maps answers one item
 nothing on cancel, timeout, malformed input or a stale presentation."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest import mock
 
 from adapters import confirmation
@@ -445,6 +446,35 @@ class ClaudeElicitationTests(EvidenceFixture):
                                         "description": "d", "note_title": "n"}], 60,
                                       {"digest": "sha256:" + "a" * 64, "path": "/machine/x.json"})
         self.assertFalse({"max_passes", "max_spawns", "max_audit_spawns"} & set(schema["properties"]))
+
+    def test_the_document_captions_are_one_text_on_both_hosts(self):
+        # Review-2 fix 18 (finding m8): one pin for the captions the two hosts must never allow to drift —
+        # the document lines, the residual lines and the research pointer, plus the heading words the
+        # two forms share. Both hosts render from their own sources (the message in adapters/confirmation.py's
+        # form builders; the dialog titles in adapters/pi/src/evidence-ui.ts), so the pin reads both
+        # sources and asserts every caption appears verbatim in each. (The smaller of the two offered
+        # mechanisms: a shared fixture would re-route both builders' literals through a generated copy
+        # for no added honesty — the captions here are baked literals on both sides, and a drift is one
+        # edited string away on either file.)
+        pi = Path(confirmation.__file__).parent / "pi" / "src" / "evidence-ui.ts"
+        sources = {"claude": Path(confirmation.__file__).read_text(encoding="utf-8"),
+                   "pi": pi.read_text(encoding="utf-8")}
+        for caption in (
+            "Claim texts and their no-deterministic-check reasons: in the document.",
+            "Nothing would stay unresolved; the record is in the document.",
+            " would remain — they are listed in the document.",
+            "Document: ",
+            "end this run without converging?",
+            "evidence that needs you",
+        ):
+            for host, text in sources.items():
+                self.assertIn(caption, text,
+                              f"{host} lost the shared document caption {caption!r} — the hosts drifted")
+        # The short-digest caption is the same length on both hosts: twelve hex after "sha256:"
+        # (19 characters of the identity in all), so one digest line reads identically everywhere.
+        self.assertEqual(confirmation._SHORT_BODY, 12)
+        self.assertIn(".slice(0, 19)", sources["pi"],
+                      "Pi's short-digest line must be Claude's nineteen-character identity")
 
 
 class PiPrivateBridgeTests(EvidenceFixture):

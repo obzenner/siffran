@@ -208,7 +208,10 @@ function presentedDocument(value: unknown): EvidenceDocument | null {
  * ingress faulted, threw, or refused) is evaluated again with `presentation_failed`, so the response says nobody was
  * asked; the core's own refusal (`already_presented`, `interaction_limit`) outranks it. A presentable batch with no
  * dialog to show it in is the same failure to ask: nothing is spent and nothing is evaluated, but `failure` says so,
- * so the gate never settles on a wait nobody was asked about.
+ * so the gate never settles on a wait nobody was asked about. Review-2 m5 (round 12, decision 7c): a submit the core
+ * refused — a Block, a Fault, or one that never answered (the bridge threw between present and confirm) — admitted
+ * nobody's answer, so it is reported and re-evaluated as the same `presentation_failed`: the run reads `host_failed`
+ * (recovered only by showing the batch again), never the human's decline.
  *
  * PR 12 (ADR-0072): a presentation answer also names the document its presentation wrote, and it must
  * be a proven pair before a dialog may show it — an answer without one is "nothing shown" and the
@@ -224,6 +227,7 @@ export async function confirmEvidence(response: Response, runId: string, ctx: Ex
   if (batch === null) return { response };
   if (!canPresent(ctx)) return { response, failure: "presentation_failed" };
   let shown = false;
+  let refused = false;   // review-2 m5 (round 12, decision 7c): the submit admitted nobody's answer
   try {
     // The end of a deliberative run is asked by the evaluation that reaches it: the core's batch travels with the call.
     const presented = await trusted({ operation: "evidence_presentation", run_id: runId,
@@ -235,12 +239,25 @@ export async function confirmEvidence(response: Response, runId: string, ctx: Ex
       shown = true;
       const answers = await askItems(presented.items, ctx, deadline, document);
       // Cancelled, or every item left on Later: nothing to submit, nothing granted.
-      if (answers !== null && !answers.every((answer) => answer.choice === "later"))
-        await trusted({ operation: "evidence_confirmation", run_id: runId,
+      if (answers !== null && !answers.every((answer) => answer.choice === "later")) {
+        const confirmed = await trusted({ operation: "evidence_confirmation", run_id: runId,
           payload: { receipt_id: presented.receipt_id, items: presented.items, answers,
-            document_digest: document.digest } });
+            document_digest: document.digest } }) as
+          { type?: string; result?: { type?: string } };
+        // The submit's outcome decides what was recorded: an admitted receipt (Allow, Inert) or the
+        // genuine human nothing (evidence_none, when the answers derived no decision) recorded the
+        // human's word; a refused one (a Block — the residuals moved while the dialog was open — a
+        // Fault, or anything malformed) admitted nobody's answer, so the run reads host_failed
+        // (recovered only by showing the batch again), never the human's decline.
+        refused = !(confirmed?.type === "evidence_none"
+          || confirmed?.type === "evidence_receipt"
+          && (confirmed.result?.type === "Allow" || confirmed.result?.type === "Inert"));
+      }
     }
-  } catch { /* nothing is granted by a failure; the batch was shown only if `shown` is set */ }
-  const failure: HostFailure | undefined = shown ? undefined : "presentation_failed";
+  } catch {
+    /* nothing is granted by a failure; the batch was shown only if `shown` is set */
+    refused = shown;   // a throw after the showing recorded nobody's answer either
+  }
+  const failure: HostFailure | undefined = !shown || refused ? "presentation_failed" : undefined;
   try { return { response: await reevaluate(failure), failure }; } catch { return { response, failure }; }
 }
