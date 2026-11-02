@@ -223,10 +223,12 @@ class HostGovernance:
     def _bound_document(self, context_result: dict) -> Mapping[str, Any] | None:
         """Write-first (ADR-0072, PR 08): verify the private answer's rendered ``document`` pair,
         publish its bytes once through the sidecar store beside the run's own record, and return
-        the shown-document record — the digest, the written file's absolute path, and the
-        core-owned amendment priors the confirm form reads. ``None`` means the mediation must
-        refuse (the document impossible to bind): the caller returns unavailable before any
-        present, nothing spent."""
+        the shown-document record — the digest, the written file's absolute path, the
+        core-owned amendment priors the confirm form reads, and the parsed document's
+        ``question`` — the core-derived form discriminator (ADR-0072), so the mediation
+        chooses the form from the document it binds, never from an adapter flag.
+        ``None`` means the mediation must refuse (the document impossible to bind): the
+        caller returns unavailable before any present, nothing spent."""
         presentation = context_result.get("presentation")
         document = presentation.get("document") if isinstance(presentation, Mapping) else None
         if not isinstance(document, Mapping):
@@ -248,7 +250,8 @@ class HostGovernance:
             parsed = json.loads(text)
         except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
             return None
-        return {"digest": digest, "path": str(path), "amendment": parsed.get("amendment")}
+        return {"digest": digest, "path": str(path), "amendment": parsed.get("amendment"),
+                "question": parsed.get("question")}
 
     def _mediate(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")
@@ -298,9 +301,17 @@ class HostGovernance:
             if not isinstance(dialog, dict):
                 return dismiss()
             timeout = governance_timeout()
-            message, schema = (confirm_form(dialog, document, timeout) if confirmation
+            # M1 (review 2): the form is chosen by the bound document's core-derived question,
+            # never by the adapter's own recursion flag (ADR-0072 "The question and the
+            # amendment's priors" — ``question`` is derived by the core). The recursion
+            # flag can only agree here (an amend commit always makes the epoch's question
+            # ``confirm_amendment``); where it could disagree, the document wins — the flag
+            # stays only for the re-entry guard (the stale proposal re-check below and the
+            # recursion), no longer for the form choice.
+            confirm = document["question"] == core_hitl.CONFIRM_AMENDMENT
+            message, schema = (confirm_form(dialog, document, timeout) if confirm
                                else review_form(dialog, document, timeout))
-            resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirmation)
+            resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirm)
             if isinstance(resolved, Dismiss):
                 return dismiss()
             action = "reject" if isinstance(resolved, Reject) else "approve"

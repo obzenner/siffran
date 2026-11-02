@@ -534,6 +534,45 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(final["document_digest"], core_hitl.digest(confirm_path.read_bytes()))
         self.assertEqual(result["run"]["governance"]["budgets"]["max_passes"], 6)
 
+    def test_the_form_follows_the_documents_question_after_a_dismissed_confirm(self):
+        """M1 (review 2): the form is chosen by the core-derived document question, never by the
+        adapter's own recursion flag. Amend 8→6, dismiss the confirm form, then re-propose the
+        amended values (a no-op revision): the next mediation must show the CONFIRM form, with
+        its (was 8) priors and the amendment warning, bound to the confirm_amendment document."""
+        self.initialize({"elicitation": {"form": {}}})
+        answers = iter([{"action": "accept", "content": {"max_passes": 6}},
+                        {"action": "cancel"}, {"action": "cancel"}])
+        seen = []
+        self.mediator.elicit = lambda message, schema: (seen.append((message, schema)), next(answers))[1]
+        first = self.propose()["result"]["structuredContent"]
+        self.assertEqual(first["type"], "Block")
+        self.assertEqual(first["run"]["governance"]["state"], "pending")
+        self.assertEqual(first["run"]["governance"]["proposal"]["budgets"]["max_passes"], 6)
+        # the no-op re-proposal of the same values: the epoch's document is a confirm_amendment
+        # document (the amend receipt is the epoch's own), so the next mediation shows the
+        # confirm form the record says the human is answering
+        self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+            "action": {"kind": "configure_run", "budgets": {"max_passes": 6, "max_spawns": 1,
+                           "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})["result"])
+        self.assertEqual(len(seen), 3)
+        confirm, schema = seen[2]
+        self.assertIn("confirm edited configuration", confirm)
+        self.assertIn("passes 6 (was 8)", confirm)
+        self.assertIn("not regenerated for these", confirm)  # the amendment warning
+        self.assertNotIn(SIZED_RATIONALE, confirm)
+        self.assertEqual(schema["properties"], {})  # buttons-only, no editable fields
+        # the form the human saw is the one document the epoch bound: confirm_amendment
+        files = sorted(Path(self.document_home).glob("**/hitl/*.json"))
+        questions = [json.loads(path.read_bytes())["question"] for path in files]
+        self.assertEqual(questions.count("confirm_amendment"), len(questions) - 1)
+        # the re-proposal's confirm document is byte-identical to the first one, so the
+        # write-once publish is idempotent: approve + one confirm document, two files
+        self.assertEqual(len(files), 2)
+        confirm_document = json.loads(next(
+            path.read_bytes() for path in files
+            if json.loads(path.read_bytes())["question"] == "confirm_amendment"))
+        self.assertEqual(confirm_document["amendment"]["budgets"]["max_passes"]["was"], 8)
+
     def test_interactive_auto_dialog_once_then_lower_auto_without_dialog(self):
         auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto task",
                               "invocation": {**TEST_INVOCATION, "delegation": True},
