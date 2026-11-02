@@ -305,6 +305,51 @@ class DemoWindowTests(unittest.TestCase):
                         self.assertEqual(len(listed["rows"]), summary["aggregates"]["facts"]["failed_audits"],
                                          "the strip's failed-audits number and the runs its link lists")
 
+    def test_a_calendar_date_link_lists_only_runs_on_or_after_that_day_as_the_live_index_does(self):
+        """(Copilot review D-1) The only explicit dates a page can ask are the day-start moments the demo itself serves as
+        its calendar's cells (a cell link carries them); those keep the live index's meaning: runs updated on or after
+        the day, with the untimed unreadable run on no day at all. The strip's clock windows are values no cell ever
+        named, and the next test holds those to the fixed window."""
+        import time
+        unreadable = {r["key"] for r in self.demo._rows if r["updated"] is None}
+        calendar = self.demo.summary(since=time.time() - 30 * 86400, tz="UTC")["calendar"]
+        days = sorted({float(t) for t in calendar["start"] if t is not None})
+        self.assertTrue(days, "the fixture calendar names at least one day")
+        for day in days:
+            with self.subTest(day=day):
+                listed = self.demo.runs({"since": str(int(day))}, limit=200)
+                expected = [r["key"] for r in self.demo._rows if index.matches(r, {"since": str(day)})]
+                self.assertEqual([r["key"] for r in listed["rows"]], expected,
+                                 "the same rows the live index itself would list for that day")
+                self.assertTrue(all(r["updated"] is not None and r["updated"] >= day for r in listed["rows"]),
+                                "only runs on or after that day, and never the untimed one")
+                self.assertEqual(set(r["key"] for r in listed["rows"]) & unreadable, set(),
+                                 "the unreadable run has no time, so it is on no day")
+
+    def test_the_strips_run_link_lists_exactly_the_runs_its_total_counts(self):
+        """(Copilot review D-2) The strip's link carries the clock's window (the hour grain the UI computes), not a day
+        the demo named; the fixed demo answers it with the runs its own aggregate counted — the read runs within its
+        window — so the number the strip shows and the row count its link lists are equal, on any date the demo is
+        opened."""
+        import time
+        hour = 3_600
+        clock = (int(time.time()) // hour) * hour
+        total = self.demo.summary()["aggregates"]["total"]
+        for period in (7, 30):
+            with self.subTest(period=period):
+                listed = self.demo.runs({"since": str(clock - period * 86_400)}, limit=200)
+                self.assertEqual(listed["total"], total, "13 shown, 14 listed is the bug")
+                self.assertEqual(len(listed["rows"]), total)
+
+    def test_the_ordinary_all_runs_list_still_lists_the_unreadable_run(self):
+        """The plain work list (no calendar day, no strip window — just the runs) keeps every row, the unreadable one
+        with it: the fixed window narrows the strip's links, never the store's own list."""
+        listed = self.demo.runs({}, limit=200)
+        self.assertEqual(listed["total"], len(self.demo._rows))
+        self.assertTrue(set(r["key"] for r in self.demo._rows if r["updated"] is None)
+                         <= set(r["key"] for r in listed["rows"]),
+                         "the unreadable run stays in the ordinary list")
+
 
 class DroppedClientTests(unittest.TestCase):
     """A client that resets its connection while the server is writing must not take the server down (R3 M1)."""

@@ -25,7 +25,10 @@ written: the observer reads, and the server only reads files from the allowlist.
 
 ``source=demo`` serves the contract fixtures vendored into the plugin
 (``vendor/contracts/empirica-ui-view/v1/fixtures``): real runs the plugin produced, for trying the
-UI and for its checks.
+UI and for its checks. Its run lists narrow by a ``since`` as the live index does when it names a
+day the demo's own calendar served (a cell link's date), and answer the value strip's clock-computed
+window with the fixtures' fixed window, so the demo's numbers and the lists it links to agree on
+any date it is opened.
 """
 from __future__ import annotations
 
@@ -71,9 +74,12 @@ CSP = ("default-src 'self'; img-src 'self' data:; style-src 'self'; font-src 'se
 class Demo:
     """The vendored fixtures, read once: the summary, rows and sheets of a store the real service built, paged and searched
     by the same functions the live index uses (``application.observer_index``). The demo is fixed: its window is the
-    fixtures' own, so a ``since`` the caller asks narrows nothing — not the summary and not the run list — and the numbers
-    the strip shows and the lists it links to them agree on whatever date the demo is opened, never only while the
-    fixtures sit inside the clock's window."""
+    fixtures' own, so a ``since`` the caller asks narrows the summary never — and a run list's ``since`` is two callers
+    in one name (review round D): an explicit calendar date — a day-start moment this demo itself served as a calendar
+    cell, which the live window rules hold (``matches``: runs updated on or after the day; a run with no time is on no
+    day) — or the value strip computes from its clock (the hour grain), which the fixed demo answers with its own
+    window: the read runs its aggregates counted. What a strip number says and the list it links to therefore agree on
+    whatever date the demo is opened, never only while the fixtures sit inside the clock's window."""
 
     def __init__(self, folder: Path = DEMO) -> None:
         self._summary = json.loads((folder / "summary.json").read_text(encoding="utf-8"))
@@ -81,6 +87,15 @@ class Demo:
         self._sheets = json.loads((folder / "runs.json").read_text(encoding="utf-8"))
         self._labels = {p["id"]: p["label"] for p in self._summary["projects"]}
         self._facts = {key: _index.facts(sheet) for key, sheet in self._sheets.items()}
+        #: the day-start moments this demo has served as calendar cells (the only explicit dates a page can ask for:
+        #: a cell link carries the cell's ``start`` from the summary that gave the page its calendar)
+        self._days: set[float] = set()
+        self._remember_days(self._summary)
+
+    def _remember_days(self, summary: dict[str, Any]) -> None:
+        """Collect the calendar-start moments one served summary named, so a later run-list ``since`` can be told the
+        date it names from the clock's hour the value strip derives its window with."""
+        self._days.update(t for t in summary["calendar"]["start"] if t is not None)
 
     def summary(self, since: float | None = None, tz: str = "UTC", **_: Any) -> dict[str, Any]:
         """The fixtures' summary (the demo is fixed: its window is the fixtures' own, whatever ``since`` is asked), its
@@ -88,16 +103,31 @@ class Demo:
         if tz == self._summary["calendar"]["tz"]:
             return self._summary
         ids = [p["id"] for p in self._summary["projects"]]
-        return {**self._summary, "calendar": _index.calendar(self._rows, ids, tz, civil.zone(tz)),
-                "token": _index.token([self._summary["token"], tz])}
+        rebuilt = {**self._summary, "calendar": _index.calendar(self._rows, ids, tz, civil.zone(tz)),
+                   "token": _index.token([self._summary["token"], tz])}
+        self._remember_days(rebuilt)
+        return rebuilt
 
     def runs(self, filters: dict[str, str], cursor: str | None = None, limit: int = _index.PAGE, **_: Any) -> dict:
-        # the demo's window is the fixtures' own (``summary`` answers every period the same), so the ``since`` the caller
-        # asks — the clock's window the UI computes — narrows neither: what a number says and what its list shows agree
+        # ``since`` names two callers (the class docstring): the day the demo named (a cell's ``start`` it served), which
+        # narrows as the live index does, and the value strip's clock window, which the fixed demo answers with its own
+        # window — the read runs its aggregates counted — so strip numbers and strip lists always agree. A ``since`` no
+        # cell named (a bookmark's day after a restart, or a hand-made value) falls to the strip's case: it lists the
+        # fixed window rather than nothing, so the numbers stay whole.
         fixed = {name: value for name, value in filters.items() if name != "since"}
+        asked = _index.since_of(filters["since"]) if "since" in filters else None
+        if "since" not in filters:  # the plain work list, no window at all: every row, the unreadable one with it
+            keep = lambda r: _index.matches(r, fixed, self._facts.get(r["key"]))  # noqa: E731
+        elif asked in self._days:  # a day this demo named: the live window rules, unchanged
+            narrowed = {**fixed, "since": filters["since"]}
+            keep = lambda r: _index.matches(r, narrowed, self._facts.get(r["key"]))  # noqa: E731
+        else:  # the value strip's clock window: the fixed demo's own window, the runs its aggregates counted
+            window = self._summary["aggregates"]["since"]
+            narrowed = dict(fixed) if window is None else {**fixed, "since": str(window)}
+            keep = lambda r: r["diagnostic"] is None and _index.matches(  # noqa: E731
+                r, narrowed, self._facts.get(r["key"]))
         return {"contract": CONTRACT, "pending": 0,
-                **_index.page(self._rows, self._labels, lambda r: _index.matches(r, fixed, self._facts.get(r["key"])),
-                              cursor, limit, self._summary["token"])}
+                **_index.page(self._rows, self._labels, keep, cursor, limit, self._summary["token"])}
 
     def search(self, query: str, cursor: str | None = None, limit: int = _index.PAGE, **_: Any) -> dict:
         wanted = _index.words(query)
