@@ -35,8 +35,8 @@ Deterministic evidence and a distinct, host-observed audit gate convergence; rou
 - [ADR-0052](0052-separate-harness-compatibility-from-receipt-provenance.md) — Separate harness compatibility from receipt provenance
 - [ADR-0056](0056-align-bootstrap-admission-and-agent-guidance.md) — Align bootstrap admission and agent guidance
 - [ADR-0066](0066-check-workspace-citations-verbatim-when-research-is-submitted.md) — Check workspace citations verbatim when research is submitted
-- [ADR-0067](0067-verify-every-research-record-by-its-class-and-surface-every-confirmation-it-still-needs.md) — Verify every research record by its class and surface every confirmation it still needs (proposed)
-- [ADR-0072](0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md) — Bind human decisions to a core-owned immutable HITL document (proposed)
+- [ADR-0067](0067-verify-every-research-record-by-its-class-and-surface-every-confirmation-it-still-needs.md) — Verify every research record by its class and surface every confirmation it still needs
+- [ADR-0072](0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md) — Bind human decisions to a core-owned immutable HITL document
 
 ## Governance and budgets
 

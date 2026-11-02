@@ -1,8 +1,8 @@
 ---
 number: 72
 title: Bind human decisions to a core-owned immutable HITL document
-status: proposed
-date: 2026-10-28
+status: accepted
+date: 2026-11-02
 tags:
 - empirica
 - governance
@@ -19,8 +19,8 @@ links:
 # Bind human decisions to a core-owned immutable HITL document
 
 Amends ADR-0063 (the run-configuration approval and its amendment confirmation) and ADR-0067 (the end-of-pass
-evidence confirmation batch). Status *proposed*: this record governs the forms workstream; it is confirmed
-when its stack ships (the acceptance PR flips it to accepted, as the plan fixes).
+evidence confirmation batch). Status *accepted*: the forms stack ships this record; release acceptance at the stack
+top (Empirica 7.0.0) carries it together with the upgrade guide `doc/upgrading-empirica-7.md`.
 
 ## Context and Problem Statement
 
@@ -439,8 +439,8 @@ description text (a wrapped path is a corrupted paste).
 
 ## Confirmation
 
-Not yet shipped; this is the record of the workstream's decided shape. Its PRs confirm each part as they
-land, red-first: `hitl.schema.json` and its example fixtures with validator checks (schema), the pure
+Shipped with Empirica 7.0.0, the stack's release acceptance. Each part was confirmed red-first as its PR landed:
+`hitl.schema.json` and its example fixtures with validator checks (schema), the pure
 builders and the byte renderer with goldens over schema-valid documents (core), the write-once
 `gen-<n>/hitl/` sidecar — temp-plus-fsync, no-replace hard link, mode `0400`, idempotent identical
 bytes, interrupted publication leaving inert temp siblings, every success flushed through the directory
@@ -449,6 +449,6 @@ state const, the 16 state fixtures and the non-run/4-corrupt classification (sta
 recompute-then-refuse on present and on decision, the reason codes with recovery rows — with replay and
 stale negative controls (core, application), the Claude forms with `test_governance_hosts` and the dialog
 golden, the Pi dialog with its 10 rendered goldens and the bridge check (hosts), the require-digest
-conditionals with negative controls (contracts), and release acceptance at the top of the stack: one native
-requalification of the merged tree, the operator's closeout at each native boundary, then this ADR flips to
-*accepted* with the upgrade guide.
+conditionals with negative controls (contracts), and release acceptance at the top of the stack: this ADR flips
+to *accepted* with the upgrade guide (`doc/upgrading-empirica-7.md`), where the operator records the one native
+requalification of the released tree and the closeout at each native boundary before the stack reaches users.
