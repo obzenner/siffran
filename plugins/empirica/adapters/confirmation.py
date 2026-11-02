@@ -528,7 +528,8 @@ class HostConfirmation:
     def _ask(self, result: dict) -> Outcome | None:
         """Show the core's batch once. ``None`` when there was nothing to ask (no batch the core allows presenting, no
         form, or a surface that was not recorded), ``OK`` once a presentation was admitted (the human may then have
-        answered or not), ``PRESENTATION_FAILED`` when it could not be recorded."""
+        answered or not), ``PRESENTATION_FAILED`` when it could not be recorded or the submission was refused: a Block
+        or Fault admitted no answer, so nobody's answer was recorded (review-2 fix 14, decision 7c)."""
         batch = presentable(result)
         if batch is None or self.elicit is None or self._unrecorded:
             return None
@@ -544,8 +545,14 @@ class HostConfirmation:
         try:
             message, schema = form(items, self._timeout() if self._timeout else 900, document)
             answers = answers_from_form(self.elicit(message, schema), items)
-            submit(self.profile, run_id, receipt_id, items, answers, ingress=self._confirmation,
-                   document_digest=document["digest"])
-        except Exception:  # noqa: BLE001 - shown and spent; nothing is granted by a failure
-            pass
+            stored = submit(self.profile, run_id, receipt_id, items, answers, ingress=self._confirmation,
+                            document_digest=document["digest"])
+        except Exception:  # noqa: BLE001 - shown and spent; nobody's answer was recorded
+            return PRESENTATION_FAILED
+        if isinstance(stored, Mapping) and stored.get("type") in {"Block", "Fault"}:
+            # The submission was refused (a stale receipt, a moved document, a refused transport):
+            # the presentation is shown and spent, but no answer landed, so the fresh evaluation must
+            # surface the host's own failure (`host_failed`, recovered only by showing the batch
+            # again) — never word the refused attempt as the human's decline (review-2 fix 14).
+            return PRESENTATION_FAILED
         return OK

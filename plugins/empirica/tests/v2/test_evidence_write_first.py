@@ -433,6 +433,120 @@ class InjectedStoreTests(WriteFirstFixture):
         accepted = self.artifact_rows(drv, run_id, PRESENTATION)[0]
         self.assertEqual(accepted["document_digest"], hitl.digest(written[0].read_bytes()))
 
+class RefusedConfirmationTests(WriteFirstFixture):
+    """Review-2 fix 14 (finding m5, decision 7c): a Block or Fault from the submit of an
+    accepted form is never the human's decline. The realistic refusal is a consent whose
+    terminal residuals move while the dialog is open (here a mid-dialog audit settles), so
+    the receipt the form re-sends names a document the core no longer renders and the
+    submit is refused with nothing admitted; the fresh evaluation must surface the host's
+    own failure (``host_failed``, fixed only by showing the batch again) and record no
+    confirmation artifact — never "You declined the running question"."""
+
+    def _confirmed_run_with_pending_audit(self):
+        """A run whose research was confirmed by a human and whose audit child sits pending,
+        so the terminal consent resolves and the audit obligation is the one residual."""
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        confirming = Human(accept(d1="confirm"))
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
+                            confirm=self.mediator(drv, confirming))
+        tools.call_internal("report_convergence", {"run_id": run_id})
+        self.assertEqual(self.verification(drv, run_id)["status"], "confirmed_by_human",
+                         "the batch answered on the way in is confirmed (prerequisite)")
+        # The audit child is admitted before any evidence waits on the human again, then
+        # held pending across the consent dialog: settling it through the trusted ingress
+        # mid-dialog is the residual move the consent document reads out.
+        child_id = self.require_pending_audit_child(drv, run_id)
+        residuals = [row["id"] for row in hitl.terminal_residuals(self.run_view(drv, run_id))]
+        self.assertEqual(residuals, ["obligation.audit"],
+                         "the audit obligation is the one residual the consent names (prerequisite)")
+        return drv, run_id, child_id
+
+    def _consent(self, drv, run_id, confirmation_ingress):
+        """Report a stop mediated by the given confirmation ingress; the capture asserts the
+        receipt the form submitted, for the nothing-was-recorded checks."""
+        submitted: list[dict] = []
+
+        def recorded(_profile, run, payload):
+            submitted.append(dict(payload))
+            return confirmation_ingress(_profile, run, payload)
+
+        mediator = HostConfirmation(
+            CLAUDE_PROFILE, elicit=Human(accept(d1="approve")), timeout=lambda: 900,
+            dispatch=lambda req, _p: drv.request(req),
+            presentation_ingress=lambda _p, run, payload: drv.trusted_evidence_presentation(run, payload),
+            confirmation_ingress=recorded,
+            surface_ingress=lambda _p, run, payload: drv.trusted_human_surface(run, payload["surface"]),
+            documents=self.store())
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req), confirm=mediator)
+        ended = tools.call_internal("report_convergence",
+                                    {"run_id": run_id, "intent": "stop"})["structuredContent"]
+        return ended, submitted
+
+    def _terminal_pending_reason(self, ended):
+        candidates = [reason for reason in ended.get("reasons", [])
+                      if reason.get("code") == "governance.terminal_stop_pending"]
+        self.assertEqual(len(candidates), 1, "the consent's refusal is surfaced once")
+        reason = candidates[0]
+        return reason, reason.get("parameters", {}).get("case")
+
+    def test_a_submit_refused_because_the_residuals_moved_is_never_the_humans_decline(self):
+        drv, run_id, child_id = self._confirmed_run_with_pending_audit()
+
+        def settle_mid_dialog(_profile, run, payload):
+            # The residuals move while the consent dialog is open: the audit settles, so the
+            # receipt the form re-sends names a document the core no longer renders.
+            self.require_trusted_audit_attribution(drv, run, child_id, variant="distinct")
+            verdict = self.build_audit_verdict_payload(drv, run, verdict="pass")
+            settled = drv.trusted_audit_verdict(run, child_id, verdict)["result"]
+            self.assertEqual(settled.get("type"), "Allow", "the audit settles mid-dialog (prerequisite)")
+            refused = drv.trusted_evidence_confirmation(run, payload)["result"]
+            self.assertEqual(refused.get("type"), "Block",
+                             "the moved-residuals submit is refused (prerequisite)")
+            return {"result": refused}
+
+        ended, submitted = self._consent(drv, run_id, settle_mid_dialog)
+        reason, case = self._terminal_pending_reason(ended)
+        # The approval was refused, not declined: the fresh evaluation names the host's own
+        # failure, never the human's word, and the recovery is a new showing of the batch.
+        self.assertEqual(case, "host_failed",
+                         "a refused submit is the host's failure to record an answer, not a decline")
+        self.assertIn("Stop again", reason.get("message", ""),
+                      "the refusal is recovered by showing the batch again, never by repeating the confirm")
+        # Nobody's answer was recorded: the run stays active without the consent receipt.
+        self.assertEqual(self.run_view(drv, run_id)["status"], "active",
+                         "no refused approval ended the run")
+        recorded = self.artifact_rows(drv, run_id, KIND)
+        self.assertFalse([row for row in recorded if row["receipt_id"] == submitted[0]["receipt_id"]],
+                         "the refused consent recorded no confirmation artifact")
+        # And the same human, shown the fresh document, still ends the run: the refusal was
+        # of the stale receipt, and only a new presentation carries an answer that counts.
+        settling = self.mediator(drv, Human(accept(d1="approve")))
+        tools = PublicTools(CLAUDE_PROFILE, dispatch=lambda req, _p: drv.request(req),
+                            confirm=settling)
+        ended_again = tools.call_internal("report_convergence",
+                                          {"run_id": run_id, "intent": "stop"})["structuredContent"]
+        if ended_again["run"].get("status") == "active":  # the consent opened again: answer it
+            ended_again = tools.call_internal("report_convergence",
+                                              {"run_id": run_id, "intent": "stop"})["structuredContent"]
+        self.assertEqual(ended_again["run"]["status"], "stopped_residual",
+                         "the fresh showing's approval ends the run")
+
+    def test_a_fault_from_the_submit_records_nothing_and_never_reads_as_a_decline(self):
+        drv, run_id, _child_id = self._confirmed_run_with_pending_audit()
+
+        def faulting(_profile, _run, _payload):
+            return {"result": {"type": "Fault", "code": "conflict"}}
+
+        ended, submitted = self._consent(drv, run_id, faulting)
+        _reason, case = self._terminal_pending_reason(ended)
+        self.assertEqual(case, "host_failed",
+                         "a transport fault while submitting is no human's decline")
+        self.assertEqual(self.run_view(drv, run_id)["status"], "active")
+        recorded = self.artifact_rows(drv, run_id, KIND)
+        self.assertFalse([row for row in recorded if row["receipt_id"] == submitted[0]["receipt_id"]],
+                         "a faulted submit recorded no confirmation artifact")
+
 
 if __name__ == "__main__":
     import unittest
