@@ -266,6 +266,91 @@ class StaticPathTests(unittest.TestCase):
         self.assertIsNone(demo.sheet("nope"))
 
 
+class DemoWindowTests(unittest.TestCase):
+    """The demo is fixed: its window is the fixtures' own, whatever ``since`` this machine's clock makes the UI ask
+    (the strip's window is the clock's last 30 days), so the summary's numbers and the run lists the strip links to them
+    agree on every date the demo is opened, not only while the fixtures sit inside that window. This pins the clock time
+    bomb the browser journey first met: the strip said "1 failed audit" and its list went empty once the fixtures left
+    the clock's window (``ui/tests/browser.journeys.mjs``, the failed-audit strip number)."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.demo = Demo()
+
+    def _fixture_times(self, key: str) -> list[float]:
+        """Every event time the fixtures hold for one run (its audits, dropped claims and decisions, the times the
+        observer windows count by); a run's writes are its row's own ``updated``."""
+        detail = self.demo.sheet(key)
+        events = [*(detail.get("audits") or ()), *(detail.get("dropped") or ()), *(detail.get("decisions") or ())]
+        return [t for t in (e.get("at") for e in events) if t is not None]
+
+    def test_every_window_leaves_the_strip_s_numbers_and_the_lists_they_link_to_agreeing(self):
+        rows = json.loads((DEMO / "rows.json").read_text(encoding="utf-8"))
+        held = [t for r in rows for t in [r["updated"], *self._fixture_times(r["key"])] if t is not None]
+        latest = max(held)
+        hour = 3_600
+        # one window that holds every fixture moment, then clocks the UI could have whenever the demo is opened: the
+        # hour after the last one, the strip's 30 days past that, and years past it. ``since`` the clock asks is still
+        # validated by the server; the demo answers it with the fixtures' own window.
+        for since in (None, 0.0, latest - 30 * 86400, latest + hour, latest + hour + 30 * 86400, latest + hour + 3 * 86400 * 366):
+            with self.subTest(window=since):
+                summary = self.demo.summary(since)
+                filters = {} if since is None else {"since": str(since)}
+                for flag, name in (("failed_audit", "failed_audits"), ("refuted", "refutations"), ("decided", "decisions")):
+                    listed = self.demo.runs({"flag": flag, **filters}, limit=200)
+                    # the runs the aggregates say carry the fact in this window are the runs its strip link lists
+                    self.assertEqual(listed["total"], summary["aggregates"]["runs"][name], name)
+                    # the failed-audits number the journey checks against its list: the fixtures one event in one run
+                    if name == "failed_audits":
+                        self.assertEqual(len(listed["rows"]), summary["aggregates"]["facts"]["failed_audits"],
+                                         "the strip's failed-audits number and the runs its link lists")
+
+    def test_a_calendar_date_link_lists_only_runs_on_or_after_that_day_as_the_live_index_does(self):
+        """(Copilot review D-1) The only explicit dates a page can ask are the day-start moments the demo itself serves as
+        its calendar's cells (a cell link carries them); those keep the live index's meaning: runs updated on or after
+        the day, with the untimed unreadable run on no day at all. The strip's clock windows are values no cell ever
+        named, and the next test holds those to the fixed window."""
+        import time
+        unreadable = {r["key"] for r in self.demo._rows if r["updated"] is None}
+        calendar = self.demo.summary(since=time.time() - 30 * 86400, tz="UTC")["calendar"]
+        days = sorted({float(t) for t in calendar["start"] if t is not None})
+        self.assertTrue(days, "the fixture calendar names at least one day")
+        for day in days:
+            with self.subTest(day=day):
+                listed = self.demo.runs({"since": str(int(day))}, limit=200)
+                expected = [r["key"] for r in self.demo._rows if index.matches(r, {"since": str(day)})]
+                self.assertEqual([r["key"] for r in listed["rows"]], expected,
+                                 "the same rows the live index itself would list for that day")
+                self.assertTrue(all(r["updated"] is not None and r["updated"] >= day for r in listed["rows"]),
+                                "only runs on or after that day, and never the untimed one")
+                self.assertEqual(set(r["key"] for r in listed["rows"]) & unreadable, set(),
+                                 "the unreadable run has no time, so it is on no day")
+
+    def test_the_strips_run_link_lists_exactly_the_runs_its_total_counts(self):
+        """(Copilot review D-2) The strip's link carries the clock's window (the hour grain the UI computes), not a day
+        the demo named; the fixed demo answers it with the runs its own aggregate counted — the read runs within its
+        window — so the number the strip shows and the row count its link lists are equal, on any date the demo is
+        opened."""
+        import time
+        hour = 3_600
+        clock = (int(time.time()) // hour) * hour
+        total = self.demo.summary()["aggregates"]["total"]
+        for period in (7, 30):
+            with self.subTest(period=period):
+                listed = self.demo.runs({"since": str(clock - period * 86_400)}, limit=200)
+                self.assertEqual(listed["total"], total, "13 shown, 14 listed is the bug")
+                self.assertEqual(len(listed["rows"]), total)
+
+    def test_the_ordinary_all_runs_list_still_lists_the_unreadable_run(self):
+        """The plain work list (no calendar day, no strip window — just the runs) keeps every row, the unreadable one
+        with it: the fixed window narrows the strip's links, never the store's own list."""
+        listed = self.demo.runs({}, limit=200)
+        self.assertEqual(listed["total"], len(self.demo._rows))
+        self.assertTrue(set(r["key"] for r in self.demo._rows if r["updated"] is None)
+                         <= set(r["key"] for r in listed["rows"]),
+                         "the unreadable run stays in the ordinary list")
+
+
 class DroppedClientTests(unittest.TestCase):
     """A client that resets its connection while the server is writing must not take the server down (R3 M1)."""
 

@@ -261,6 +261,25 @@ test("WORD BUDGET: the inbox and the sheets at the fixed fixtures hold no more t
 });
 
 const copy = JSON.parse((await import("node:fs")).readFileSync(new URL("../copy/en.json", import.meta.url), "utf8"));
+// I11: a claim that took part in a failed audit must not read as if the claim itself was audited and failed: the per-claim
+// assurance and review labels say so of the run's audit, the run-level verdict keeps its own word.
+test("a claim of a failed-audit run is 'In a failed audit', never 'Audit failed' or 'Failed'; the run's verdict keeps its word (I11)", () => {
+  const claimWord = "In a failed audit";
+  assert.equal(copy["assurance.audit_failed.label"], claimWord, "the claim's assurance label");
+  assert.equal(copy["review.failed.label"], claimWord, "the open claim's review label");
+  const s = sheets[scenarios["audit-failed"]];
+  const sectionText = (html, id, next) => text(html.slice(html.indexOf(`data-section="${id}"`), html.indexOf(`data-section="${next}"`)));
+  for (const c of s.row.claims) {
+    assert.equal(c.review, "failed");
+    assert.equal(c.assurance, "audit_failed");
+    const claims = sectionText(sheetHtml(ctx(s, { claim: c.id })), "claims", "dropped");
+    assert.ok(claims.includes(claimWord), `${c.id}: its assurance and review chips say the run's audit failed`);
+    assert.ok(!claims.includes("Audit failed"), `${c.id}: a claim is never "Audit failed"`);
+    assert.ok(!/(?:^|[^A-Za-z])Failed(?:$|[^A-Za-z])/.test(claims), `${c.id}: a claim is never "Failed"`);
+  }
+  const audit = sectionText(sheetHtml(ctx(s)), "audit", "claims");
+  assert.ok(audit.includes(copy["audit.failed.label"]), "the run-level audit verdict still reads \"Audit failed\"");
+});
 // P3b: the fixtures are the minimal selection, so three facts the journeys read from runs no longer in them are held here,
 // on a fixture sheet changed in that one fact (the real service still produces each: tests/v2/test_observer_stateful.py).
 test("an audit's independence is worded on the sheet, for every value the contract declares", () => {
