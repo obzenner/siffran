@@ -6,7 +6,7 @@ import assert from "node:assert/strict";
 
 import { askItems, confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, itemTitle, observeSurface } from "../src/evidence-ui.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
-import type { EvidenceItem, PrivateIngressRequest } from "../src/private-transport.ts";
+import type { EvidenceDocument, EvidenceItem, PrivateIngressRequest } from "../src/private-transport.ts";
 import type { ExtensionContext } from "../src/pi-types.ts";
 import type { Response } from "../src/contract.ts";
 
@@ -27,6 +27,15 @@ const DECISION: EvidenceItem = { subject: "claim", id: "C1", digest: "sha256:" +
 
 const BATCH = (promptError: string | null = null) => ({ key: "sha256:" + "d".repeat(64), record_ids: [RECORD.id],
   claim_ids: [], prompt_error: promptError });
+// PR 12: the presentation answer names the written document — the same bound identity the Python
+// bridge hands back (the full digest, the file's absolute path, and a terminal batch's residual count);
+// never its text. The short line the dialog renders is the digest's first 12 hex.
+const DOCUMENT: EvidenceDocument = {
+  digest: "sha256:0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789",
+  path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
+    + "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json" };
+const SHORT_DIGEST_LINE = `Document: ${DOCUMENT.digest.slice(0, 19)}`;
+const POINTER = "Claim texts and their no-deterministic-check reasons: in the document.";
 const blocked = (route = "human", promptError: string | null = route === "human" ? null : "unavailable",
                  code = "evidence.confirmation_required"): Response => ({
   protocol: "empirica/v2", request_id: "r",
@@ -49,15 +58,20 @@ function ctxFor(script: Script, options: { hasUI?: boolean; select?: boolean; in
   return { ctx: { ui, hasUI: options.hasUI ?? true, mode: "tui" } as unknown as ExtensionContext, shown };
 }
 
-function bridge(items: EvidenceItem[], receipt: unknown = { type: "evidence_receipt", result: { type: "Allow" } }) {
+function bridge(items: EvidenceItem[], receipt: unknown = { type: "evidence_receipt", result: { type: "Allow" } },
+               document: unknown = DOCUMENT) {
   const calls: PrivateIngressRequest[] = [];
   const trusted = async (request: PrivateIngressRequest) => {
     calls.push(request);
     return request.operation === "evidence_presentation"
-      ? { type: "evidence_presentation", receipt_id: "p-1", items } : receipt;
+      ? (document === NO_DOCUMENT ? { type: "evidence_presentation", receipt_id: "p-1", items }
+        : { type: "evidence_presentation", receipt_id: "p-1", items, document }) : receipt;
   };
   return { trusted, calls };
 }
+
+/** The "member absent" sentinel: a default parameter would swallow an explicit `undefined`. */
+const NO_DOCUMENT = Symbol("no document");
 
 const confirm = (ctx: ExtensionContext, trusted: (r: PrivateIngressRequest) => Promise<unknown>, response = blocked(),
                  deadline = Date.now() + 60_000) =>
@@ -72,8 +86,10 @@ test("TUI: each item gets a select and, for a decision, a note; the answers are 
   assert.equal(await run(live.ctx, trusted), refreshed);
   assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
   assert.deepEqual(calls[0].payload, {}, "the core's batch is presented; the host names nothing");
-  const sent = calls[1].payload as { receipt_id: string; answers: unknown[] };
+  const sent = calls[1].payload as { receipt_id: string; answers: unknown[]; document_digest?: string };
   assert.equal(sent.receipt_id, "p-1");
+  assert.equal(sent.document_digest, DOCUMENT.digest,
+    "PR 12: the confirmation repeats the presentation's digest, so the receipt names the document the human read");
   assert.deepEqual(sent.answers, [
     { subject: "research", id: RECORD.id, choice: "confirm", note: null },
     { subject: "research", id: OBSERVED.id, choice: "reject", note: "Wrong system." },
@@ -82,16 +98,42 @@ test("TUI: each item gets a select and, for a decision, a note; the answers are 
     [["Confirm", "Reject", "Later"], ["Confirm", "Reject", "Later"], ["Approve", "Reject", "Later"]]);
 });
 
-test("the dialog shows the source, the verbatim quote, the claim and the reason no spike could decide it", () => {
-  const title = itemTitle(OBSERVED, 2, 3);
-  for (const text of ["2 of 3", "runtime source: deploy output", 'Quote: "stable since v2"', "For claim C0: The API is stable.",
-    "Why no deterministic check: Needs production credentials."]) assert.ok(title.includes(text), text);
-  const grouped = itemTitle(RECORD, 1, 1);
-  assert.ok(grouped.includes("For claim C0: The API is stable.") && grouped.includes("For claim C2: The API is documented."),
-    "one source quoted for two claims is one item that lists both");
-  assert.ok(itemTitle(DECISION, 1, 1).includes("Ship it?"));
-  const long = itemTitle({ ...RECORD, quote: `${"x".repeat(900)} THE QUALIFICATION AT THE END` }, 1, 1);
+test("PR 12: the research dialog keeps the source and the quote; the claim context and the reason are in the document", () => {
+  const title = itemTitle(OBSERVED, 2, 3, DOCUMENT);
+  for (const text of ["2 of 3", "runtime source: deploy output", 'Quote: "stable since v2"', POINTER,
+    SHORT_DIGEST_LINE, DOCUMENT.path]) assert.ok(title.includes(text), text);
+  for (const gone of ["For claim C0: The API is stable.", "Why no deterministic check: Needs production credentials."])
+    assert.ok(!title.includes(gone), `${gone} moved to the document`);
+  const grouped = itemTitle(RECORD, 1, 1, DOCUMENT);
+  assert.ok(!grouped.includes("For claim C0:") && !grouped.includes("For claim C2:"),
+    "one source quoted for two claims is one item; both claims' texts are in the document");
+  const long = itemTitle({ ...RECORD, quote: `${"x".repeat(900)} THE QUALIFICATION AT THE END` }, 1, 1, DOCUMENT);
   assert.ok(long.includes("THE QUALIFICATION AT THE END") && !long.includes("…"), "the human reads the whole quote");
+  assert.ok(long.endsWith(DOCUMENT.path), "the dialog ends with the document lines");
+});
+
+test("PR 12: the decision dialog shows the full claim text — what is decided — and the terminal dialog the residual count", () => {
+  // The claim text IS what the human decides, exactly like a research item's quote: it stays in full,
+  // on both hosts (the Claude message shows it too — adapters/confirmation.py `_item_text`).
+  const decision = itemTitle(DECISION, 1, 1, DOCUMENT).split("\n");
+  assert.ok(decision.includes("Ship it?"), "the claim text is shown in full");
+  assert.ok(decision.includes(SHORT_DIGEST_LINE) && decision.includes(DOCUMENT.path),
+    "every item dialog ends with the document's short digest and absolute path");
+  assert.ok(!decision.some((line) => line.includes("no-deterministic-check")),
+    "nothing of a decision item moved; the pointer belongs to the research items whose context did");
+  const terminal = itemTitle(TERMINAL_ITEM, 1, 1, { ...DOCUMENT, residuals: 4 }).split("\n");
+  const terminalItem = TERMINAL_ITEM as Extract<EvidenceItem, { subject: "claim" }>;
+  assert.equal(terminal[0], "Empirica · end this run without converging?");
+  assert.ok(terminal.some((line) => line === terminalItem.text), "the decision wording stays in full");
+  assert.ok(terminal.some((line) => line === "4 unresolved obligations would remain — they are listed in the document."),
+    "the count read out of the written document");
+  assert.ok(terminal.includes(SHORT_DIGEST_LINE) && terminal.includes(DOCUMENT.path));
+  assert.ok(!terminal.some((line) => line.includes("no-deterministic-check")), "the terminal dialog has no research pointer");
+  const none = itemTitle(TERMINAL_ITEM, 1, 1, { ...DOCUMENT, residuals: 0 });
+  assert.ok(none.includes("Nothing would stay unresolved; the record is in the document."));
+  assert.ok(!none.includes("unresolved obligations"), "a zero count is worded, never \"0 obligations\"");
+  const unknown = itemTitle(TERMINAL_ITEM, 1, 1, DOCUMENT);
+  assert.ok(!unknown.includes("unresolved "), "no count was read: no sentence is invented");
 });
 
 test("F-Q4-2: the dialog names its subject on the first line, the note dialog names it too, and the end has its own heading", async () => {
@@ -106,7 +148,7 @@ test("F-Q4-2: the dialog names its subject on the first line, the note dialog na
   assert.equal(second.title.split("\n")[1], "Your decision on C1");
   assert.equal(second.title.split("\n")[2], "C1 · Ship it?");
   assert.deepEqual(live.shown.filter((s) => s.kind === "input").map((s) => s.title), ["Note (optional)", "Note (optional)"]);
-  const ending = itemTitle(TERMINAL_ITEM, 1, 1).split("\n");
+  const ending = itemTitle(TERMINAL_ITEM, 1, 1, { ...DOCUMENT, residuals: 3 }).split("\n");
   assert.equal(ending[0], "Empirica · end this run without converging?");
   assert.equal(ending[1], "End the run as stopped_residual?");
   assert.equal(ending[2], TERMINAL_ITEM.subject === "claim" ? TERMINAL_ITEM.description : "");
@@ -174,7 +216,8 @@ test("cancelling any dialog, or running past the deadline, submits nothing and t
 test("the dialogs are given the time that is left, so a stuck dialog times out", async () => {
   const { ctx, shown } = ctxFor({ selects: ["Later"], inputs: [] });
   const deadline = Date.now() + 5_000;
-  assert.deepEqual(await askItems([RECORD], ctx, deadline), [{ subject: "research", id: RECORD.id, choice: "later", note: null }]);
+  assert.deepEqual(await askItems([RECORD], ctx, deadline, DOCUMENT),
+    [{ subject: "research", id: RECORD.id, choice: "later", note: null }]);
   const timeout = (shown[0].opts as { timeout: number }).timeout;
   assert.ok(timeout > 0 && timeout <= 5_000, String(timeout));
 });
@@ -273,6 +316,57 @@ test("a presentation that faults, throws or is refused is evaluated again as pre
   }
 });
 
+test("PR 12: a presentation answer without a valid document pair is nothing shown: no dialog, no confirmation", async () => {
+  const cases: Array<[string, unknown]> = [
+    ["no document member", NO_DOCUMENT],
+    ["not an object", "sha256:nonsense"],
+    ["a short digest", { digest: "sha256:0a1b2c3d4e5f", path: "/var/hitl/d.json" }],
+    ["not a sha256 digest", { digest: "deadbeef".repeat(8), path: "/var/hitl/d.json" }],
+    ["a relative path", { digest: DOCUMENT.digest, path: "empirica-projects/x/hitl/d.json" }],
+    ["no path at all", { digest: DOCUMENT.digest }],
+    ["bytes offered", { digest: DOCUMENT.digest, path: DOCUMENT.path, text: '{"kind": "hitl_document"}' }]];
+  for (const [label, document] of cases) {
+    const { ctx, shown } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+    const { trusted, calls } = bridge([RECORD],
+      { type: "evidence_receipt", result: { type: "Allow" } }, document);
+    const failures: unknown[] = [];
+    const out = await confirmEvidence(blocked(), "run-1", ctx, trusted as never,
+      async (failure) => { failures.push(failure); return refreshed; }, Date.now() + 60_000);
+    assert.equal(out.response, refreshed, label);
+    assert.equal(out.failure, "presentation_failed", label);
+    assert.deepEqual(failures, ["presentation_failed"], label);
+    assert.deepEqual(shown, [], label);
+    assert.ok(!calls.some((call) => call.operation === "evidence_confirmation"),
+      `${label}: nothing was shown, so nothing may be submitted`);
+  }
+});
+
+test("PR 12: only the digest rides the confirmation — the document pair and the path never leave the private lane", async () => {
+  const { ctx } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+  const calls: PrivateIngressRequest[] = [];
+  const trusted = async (request: PrivateIngressRequest) => {
+    calls.push(request);
+    return request.operation === "evidence_presentation"
+      ? { type: "evidence_presentation", receipt_id: "p-1", items: [RECORD], document: DOCUMENT }
+      : { type: "evidence_receipt", result: { type: "Allow" } };
+  };
+  const out = await confirmEvidence(blocked(), "run-1", ctx, trusted as never, async () => refreshed,
+    Date.now() + 60_000);
+  assert.equal(out.response, refreshed);
+  assert.deepEqual(calls[0].payload, {}, "the presentation request carries no document members");
+  assert.ok(!JSON.stringify(out).includes(DOCUMENT.path), "the re-evaluation the model reads carries no path");
+  assert.ok(!JSON.stringify(out).includes(DOCUMENT.digest), "nor the document identity");
+  for (const call of calls) {
+    const payload = JSON.stringify(call.payload ?? {});
+    assert.ok(!payload.includes(DOCUMENT.path), `${call.operation}: the path never crosses a request`);
+    assert.ok(!("document" in (call.payload ?? {})), `${call.operation}: the pair never crosses a request`);
+  }
+  const confirmation = calls.find((call) => call.operation === "evidence_confirmation")?.payload as
+    Record<string, unknown>;
+  assert.equal(confirmation.document_digest, DOCUMENT.digest,
+    "the confirmation names the document the presentation wrote — the only member that ever leaves the pair");
+});
+
 test("a batch that was shown is evaluated again without a failure, whatever the human did (the no-UI case is PI-04)", async () => {
   for (const selects of [["Confirm"], ["Later"], [undefined]]) {
     const { ctx } = ctxFor({ selects, inputs: [""] });
@@ -331,8 +425,10 @@ test("EHB-TERM-01: the terminal batch travels with the presentation, and the hum
   assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
   assert.deepEqual((calls[0].payload as { batch: { terminal: unknown } }).batch.terminal, TERMINAL,
     "the evaluation that reached the end asked it: no later read of the run shows it, so the batch is handed over");
-  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers,
+  assert.deepEqual((calls[1].payload as { answers: unknown[]; document_digest?: string }).answers,
     [{ subject: "claim", id: TERMINAL.status, choice: "approve", note: null }]);
+  assert.equal((calls[1].payload as { document_digest?: string }).document_digest, DOCUMENT.digest,
+    "PR 12: the terminal consent's confirmation too repeats its presentation's digest");
 });
 
 test("EHB-TERM-02: reject, later, cancel and timeout submit nothing that grants the end", async () => {

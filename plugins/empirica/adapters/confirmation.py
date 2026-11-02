@@ -20,9 +20,11 @@ own dialogs.
 
 The forms are short (ADR-0072 "What the forms keep"): each item's source line and its quote (the
 quote is the fact a human judges) stay in the message beside the decision enums and note fields;
-the claim texts and the reasons no deterministic check exists are in the document, as are the
-terminal consent's residuals — the form points at the written file by its short digest and its
-absolute path, and names how many obligations ending now would leave unresolved.
+the research records' per-claim texts and the reasons no deterministic check exists are in the
+document, while a needs-decision claim's own text stays in the message in full — it is what the
+human decides, exactly like a research item's quote — as are the terminal consent's residuals' own
+count; the form points at the written file by its short digest and its absolute path, and names how
+many obligations ending now would leave unresolved.
 """
 from __future__ import annotations
 
@@ -397,14 +399,17 @@ def _lines(text: str, indent: str = "   ") -> list[str]:
 
 
 def _item_text(number: int, item: Mapping[str, Any], document: Mapping[str, Any]) -> list[str]:
-    """What the message shows of one item (ADR-0072 "What the forms keep"): the source line and the
-    quote stay — the quote is the fact judged; the claim text and the reasons no deterministic
-    check exists are in the document. A terminal item keeps its decision fully worded and names how
-    many obligations ending now would leave unresolved, read out of the written document."""
+    """What the message shows of one item (ADR-0072 "What the forms keep"): a research item keeps
+    its source line and its quote — the quote is the fact judged — while its per-item claim context
+    and its reason no deterministic check exists are in the document. A decision claim's own text
+    is what the human decides — exactly like a research item's quote — so it stays in the message
+    in full (only the research records' per-claim context moved); a terminal item keeps its decision
+    fully worded and names how many obligations ending now would leave unresolved, read out of the
+    written document."""
     if item["subject"] == "claim":
         if item.get("terminal"):
             return [f"{number}. Decision needed", *_lines(item["text"]), *_residual_lines(document)]
-        return [f"{number}. Decision needed"]
+        return [f"{number}. Decision needed", *_lines(item["text"])]
     head = [f"{number}. {item['source_kind']} source: {item['source_ref']}"]
     return head + _lines(f'Quote: "{item["quote"]}"')
 

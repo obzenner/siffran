@@ -303,6 +303,8 @@ test("HOST_PROFILE_ID is the contract's pi profile with no default", () => {
 test("assertPrivateResponse accepts the real private shapes and rejects every malformed one", async () => {
   const { assertPrivateResponse } = await import("../src/private-transport.ts");
   const plan = { child_id: "c", role_profile: "empirica.empirica-auditor", operation_id: "o", argument: {} };
+  const presented = (document: unknown, items: unknown[] = [{ subject: "research", id: "sha256:x" }]) =>
+    ({ type: "evidence_presentation", receipt_id: "p-1", items, ...(document === undefined ? {} : { document }) });
   const accepted: Array<[PrivateOperation, unknown]> = [
     ["classify_identity", null],
     ["classify_identity", { identity: "anthropic/claude" }],
@@ -316,6 +318,16 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["audit_reject", { type: "audit_terminal" }],
     ["audit_failure", { type: "audit_terminal" }],
     ["child_event", { protocol: "empirica/v2", request_id: "trusted-child", result: { type: "Allow" } }],
+    // PR 12: a presentation answer names the bound document — a full sha256 digest and an absolute
+    // path, and nothing else crossing the transport (a terminal batch also its residual count).
+    ["evidence_presentation", { type: "evidence_presentation", receipt_id: "p-1",
+      items: [{ subject: "research", id: "sha256:x" }], document: { digest: "sha256:" + "a".repeat(64),
+        path: "/Users/amelia.dvn/empirica-projects/p/r/gen-1/hitl/a.json" } }],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64),
+      path: "/var/empirica/hitl/a.json", residuals: 4 })],
+    ["evidence_presentation", { type: "evidence_refused", result: { failure: "presentation_failed" } }],
+    ["evidence_confirmation", { type: "evidence_receipt", result: { type: "Allow" } }],
+    ["evidence_confirmation", { type: "evidence_none" }],
   ];
   for (const [operation, value] of accepted)
     assert.deepEqual(assertPrivateResponse(operation, value), value, operation);
@@ -331,6 +343,17 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["child_event", { result: { type: "Allow" } }],
     ["child_event", []],
     ["audit_verdict", null],
+    // PR 12: a presentation without a valid document pair is invalid at the boundary — bytes must
+    // never cross the transport, and a digest must be proven before a dialog may show it.
+    ["evidence_presentation", presented({ digest: "sha256:0a1b2c3d4e5f", path: "/var/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "a".repeat(60), path: "/var/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "empirica-projects/r/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64) })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "/var/hitl/a.json",
+      text: '{"kind": "hitl_document"}' })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "/var/hitl/a.json",
+      residuals: "4" })],
+    ["evidence_presentation", presented(undefined)],
   ];
   for (const [operation, value] of rejected)
     assert.throws(() => assertPrivateResponse(operation, value), /response is invalid/, operation);

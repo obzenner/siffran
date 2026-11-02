@@ -67,9 +67,17 @@ export type EvidenceItem =
       title: string; description: string; note_title: string }
   | { subject: "claim"; id: string; digest: string; text: string; terminal?: true; title: string; description: string; note_title: string };
 export interface EvidenceAnswer { subject: "research" | "claim"; id: string; choice: string; note: string | null }
-/** The presentation is recorded (and has spent one interaction) or the core refused it. */
+/** The bound document of the presentation (ADR-0072, PR 11/12): the written file's identity — full
+ * digest, absolute path, and a terminal batch's residual count — never its bytes. The words of the
+ * dialog come from the one shared owner (adapters/confirmation.py); only these values cross. */
+export interface EvidenceDocument {
+  digest: string;
+  path: string;
+  residuals?: number;
+}
+/** The presentation is recorded (and has spent one interaction) — and its document is written — or the core refused it. */
 type EvidencePresentationResponse =
-  | Readonly<{ type: "evidence_presentation"; receipt_id: string; items: EvidenceItem[] }>
+  | Readonly<{ type: "evidence_presentation"; receipt_id: string; items: EvidenceItem[]; document: EvidenceDocument }>
   | Readonly<{ type: "evidence_refused"; result: Record<string, unknown> }>;
 /** The receipt was admitted (`evidence_receipt`), or the answers granted nothing (`evidence_none`). */
 type EvidenceConfirmationResponse =
@@ -161,7 +169,13 @@ const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => b
   evidence_presentation: (value) => object(value) && (
     (value.type === "evidence_presentation" && string(value.receipt_id) && Array.isArray(value.items)
       && value.items.every((item) => object(item) && string(item.id)
-        && (item.subject === "research" || item.subject === "claim")))
+        && (item.subject === "research" || item.subject === "claim"))
+      && object(value.document) && typeof value.document.digest === "string"
+      && GOVERNANCE_DIGEST.test(value.document.digest)
+      && typeof value.document.path === "string" && value.document.path.startsWith("/")
+      && !("text" in value.document)
+      && (value.document.residuals === undefined || typeof value.document.residuals === "number" &&
+        Number.isSafeInteger(value.document.residuals) && value.document.residuals >= 0))
     || (value.type === "evidence_refused" && object(value.result))),
   evidence_confirmation: (value) => object(value)
     && (value.type === "evidence_none" || (value.type === "evidence_receipt" && object(value.result))),

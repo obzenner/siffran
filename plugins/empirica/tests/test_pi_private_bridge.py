@@ -31,7 +31,7 @@ force_absent_sandbox_home()
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "adapters" / "pi"))
 import private_bridge  # noqa: E402
-from adapters import bridge  # noqa: E402
+from adapters import bridge, confirmation  # noqa: E402
 from adapters.state.hitl import DocumentMismatch  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from core import hitl as core_hitl  # noqa: E402
@@ -283,10 +283,10 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
             self.assertEqual(core_hitl.digest(path.read_bytes()), document["digest"],
                              "exactly one document, the accepted presentation's own")
 
-    def test_pi_still_confirms_today_without_the_digest_and_it_is_admitted(self):
-        """PR 12 wires the digest round-trip through the TypeScript mediator; until then the bridge
-        forwards no digest and the core's staging admits the legacy confirmation of the bound
-        presentation. The presentation row keeps its digest; the confirmation row has none yet."""
+    def test_a_legacy_confirmation_without_a_digest_still_fits_the_core_staging(self):
+        """The core's staging still admits the legacy confirmation of a bound presentation, so a
+        pre-PR-12 mediator keeps working until PR 13 makes ``document_digest`` required: the
+        presentation row keeps its digest; a legacy confirmation row records none."""
         presented = private_bridge._evidence_presentation(PI_PROFILE, self.raw(), {})
         answer = private_bridge._evidence_confirmation(
             PI_PROFILE, {"operation": "evidence_confirmation", "run_id": self.run_id},
@@ -296,8 +296,59 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
         self.assertEqual(answer["type"], "evidence_receipt")
         self.assertEqual(answer["result"]["type"], "Allow")
         self.assertEqual(self._presentation_rows()[0]["receipt_id"], presented["receipt_id"])
-        self.assertTrue(self._presentation_rows()[0]["document_digest"])
+        self.assertTrue(self._presentation_rows()[0]["document_digest"],
+                        "the bound presentation keeps its digest")
         self.assertEqual([row["document_digest"] for row in self._confirmation_rows()], [None])
+
+    def test_the_confirmation_round_trips_the_presentations_digest_to_the_core(self):
+        """PR 12: the TypeScript mediator sends the presentation's digest — ``document_digest`` on
+        the private confirmation payload — and the bridge forwards it to the shared ``submit``, so
+        a Pi receipt, like a Claude one, names the document its own presentation wrote on BOTH
+        history rows (the window pr11-report.md left open is closed)."""
+        presented = private_bridge._evidence_presentation(PI_PROFILE, self.raw(), {})
+        digest = presented["document"]["digest"]
+        answer = private_bridge._evidence_confirmation(
+            PI_PROFILE, {"operation": "evidence_confirmation", "run_id": self.run_id},
+            {"receipt_id": presented["receipt_id"], "items": presented["items"],
+             "answers": [{"subject": "research", "id": presented["items"][0]["id"],
+                         "choice": "confirm", "note": None}],
+             "document_digest": digest})
+        self.assertEqual(answer["type"], "evidence_receipt")
+        self.assertEqual(answer["result"]["type"], "Allow", answer["result"])
+        self.assertEqual(self._presentation_rows()[0]["document_digest"], digest)
+        self.assertEqual([row["document_digest"] for row in self._confirmation_rows()], [digest],
+                         "the confirmation artifact carries the digest of the written file")
+        self.assertEqual([row["receipt_id"] for row in self._confirmation_rows()],
+                         [presented["receipt_id"]], "it confirms its own presentation")
+
+    def test_a_terminal_presentation_hands_back_the_residual_count_read_from_the_document(self):
+        """PR 12: a terminal batch's answer also carries ``residuals`` — the count of obligations
+        ending now would leave unresolved, read out of the written document itself — so the dialog
+        names the stakes without opening the file. The count is data read from the record, never
+        recomputed by any host."""
+        presented = private_bridge._evidence_presentation(PI_PROFILE, self.raw(), {})
+        confirmed = private_bridge._evidence_confirmation(
+            PI_PROFILE, {"operation": "evidence_confirmation", "run_id": self.run_id},
+            {"receipt_id": presented["receipt_id"], "items": presented["items"],
+             "answers": [{"subject": "research", "id": presented["items"][0]["id"],
+                         "choice": "confirm", "note": None}],
+             "document_digest": presented["document"]["digest"]})
+        self.assertEqual(confirmed["result"]["type"], "Allow")
+        stopping = self.service.dispatch({**PROTOCOL_REQUEST, "command":
+                                          {"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"}})["result"]
+        self.assertEqual(stopping["type"], "Block", stopping)
+        batch = stopping["run"]["confirmation_batch"]
+        self.assertTrue(confirmation.is_terminal(batch), "a stop of a deliberative run asks its consent")
+        answer = private_bridge._evidence_presentation(
+            PI_PROFILE, self.raw(), {"batch": batch})
+        self.assertEqual(answer["type"], "evidence_presentation")
+        document = answer["document"]
+        written = json.loads(Path(document["path"]).read_bytes())
+        self.assertEqual(sorted(document), ["digest", "path", "residuals"],
+                         "a terminal answer names the document and its residual count")
+        self.assertEqual(document["residuals"], len(written["terminal"]["residuals"]),
+                         "the count is the written document's own, read after the write")
+        self.assertGreater(document["residuals"], 0, "the fixture leaves something unresolved")
 
 
 if __name__ == "__main__":

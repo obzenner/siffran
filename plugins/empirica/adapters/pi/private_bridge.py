@@ -180,20 +180,25 @@ def _audit_verdict(profile: str, raw: dict, payload: dict):
 def _evidence_presentation(profile: str, raw: dict, payload: dict):
     """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py).
 
-    PR 11: the shared ``present`` writes the batch's document first (fetch, verify, publish once,
+    The shared ``present`` writes the batch's document first (fetch, verify, publish once,
     present with the digest), so the sidecar file is written before anything is shown on either
-    host. The screen data the adapter receives is unchanged; the presentation answer now also names
-    the written document's ``{digest, path}`` — never the bytes — which the PR 12 dialog (not this
-    bridge) will render. The digest is not handed back into the confirmation leg yet: the TypeScript
-    mediator does not round-trip it (PR 12 wires it), and the core's staging still admits the
-    legacy confirmation of a bound presentation."""
+    host. The screen data the adapter receives is unchanged; the presentation answer names the
+    written document's ``{digest, path}`` — and, for a terminal batch, ``residuals``, the count of
+    obligations ending now would leave unresolved, read out of the written document itself — never
+    the bytes (PR 12: the dialog renders the identity; the count is data from the record, never
+    recomputed by any host). The confirmation repeat of the digest rides the mediator's
+    ``evidence_confirmation`` payload, so this bridge's confirmation leg forwards it when the
+    adapter sends it."""
     batch = payload.get("batch")
     shown = confirmation.present(profile, raw["run_id"], terminal=batch if confirmation.is_terminal(batch) else None)
     if isinstance(shown, confirmation.Outcome):  # nothing was shown or spent; the host reports presentation_failed
         return {"type": "evidence_refused", "result": {"failure": shown.failure}}
     receipt_id, items, document = shown
+    identity = {"digest": document["digest"], "path": document["path"]}
+    if "residuals" in document:
+        identity["residuals"] = document["residuals"]
     return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items,
-            "document": {"digest": document["digest"], "path": document["path"]}}
+            "document": identity}
 
 
 def _human_surface(profile: str, raw: dict, payload: dict):
@@ -202,9 +207,9 @@ def _human_surface(profile: str, raw: dict, payload: dict):
 
 def _evidence_confirmation(profile: str, raw: dict, payload: dict):
     answers = payload["answers"]
-    # PR 12 wires the digest round-trip through the TypeScript mediator; until then a digest never
-    # reaches here, and ``submit`` omits the member when it does not (``None`` would be the fetch,
-    # which refuses every item — never send it).
+    # PR 12: the mediator sends its presentation's digest, so a Pi receipt — like a Claude one — names
+    # the document the human was shown. ``submit`` omits the member when it does not carry one (the
+    # core's staging until PR 13); ``None`` would be the fetch, which refuses every item: never send it.
     digest = payload.get("document_digest")
     stored = confirmation.submit(profile, raw["run_id"], payload["receipt_id"], payload["items"],
                                  answers, document_digest=digest if isinstance(digest, str) else None)

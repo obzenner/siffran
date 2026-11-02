@@ -23,8 +23,10 @@ refusal — the mismatch that carries the document — is not a conflict: it nei
 triggers the retry and costs nothing.
 
 The short Claude forms keep the quotes (the fact judged), the source lines, the decision enums and
-the note fields; the claim texts and the reasons no deterministic check exists are in the document,
-pointed at by its short digest and its absolute path. The terminal consent keeps its decision fully
+the note fields; the research records' per-claim texts and the reasons no deterministic check
+exists are in the document, pointed at by its short digest and its absolute path, while a decision
+claim's own text stays in the message in full — the claim a human must decide is what is judged,
+exactly like a research item's quote. The terminal consent keeps its decision fully
 worded and shows the count of obligations ending now would leave unresolved, read out of the
 written document itself.
 
@@ -290,7 +292,9 @@ class WriteFirstPresentTests(WriteFirstFixture):
 
 class ShortFormsTests(WriteFirstFixture):
     """ADR-0072 "What the forms keep": the quotes, the source line, the enums and the notes stay;
-    the claim text, the reasons and the residuals are in the document the form points at."""
+    the research records' per-claim texts, the reasons and the residuals are in the document the
+    form points at — a needs-decision claim's own text stays in the message, because it is the
+    thing the human decides."""
 
     def document_lines(self, message: str) -> tuple[str, str]:
         lines = message.splitlines()
@@ -309,9 +313,16 @@ class ShortFormsTests(WriteFirstFixture):
         self.assertIn(f"web source: {URL}", message)
         self.assertIn("runtime source: the deploy pipeline output", message)
         self.assertEqual(message.count("Quote:"), 2, "each grouped item keeps its quote")
-        for gone in ("Needs production credentials.", "For claim C0", "Why no deterministic check"):
+        for gone in ("Needs production credentials.", "For claim C0", "Why no deterministic check",
+                     "The public contract is internally consistent."):
             self.assertNotIn(gone, message, f"{gone!r} moved to the document")
+        # PR 12: a needs-decision claim's own text is the thing the human decides — it stays in
+        # full, wrapped under its decision line, exactly as a research item's quote does.
+        lines = message.splitlines()
         self.assertIn("1. Decision needed", message)
+        decided = lines.index(next(line for line in lines if line == "1. Decision needed")) + 1
+        self.assertEqual(lines[decided].strip(), "Claim C1 supports the root.",
+                         "the claim text renders wrapped under its decision line")
         self.assertIn("no-deterministic-check reasons: in the document", message,
                      "one line says where the moved text lives")
         document_line, path_line = self.document_lines(message)

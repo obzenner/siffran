@@ -224,9 +224,25 @@ The order is fixed, and spending follows the successful check, never the reverse
 
 The forms keep exactly what is being judged: the numbers (budget used and allowed
 (`adapters/governance.py:79-86`)), the amended values with their `(was …)` priors (`:110-115`), the first
-line of the goal, and the evidence quotes (the quote is the fact a human confirms or rejects,
+line of the goal, the evidence quotes (the quote is the fact a human confirms or rejects,
 `adapters/confirmation.py:399-409`). The rationale, the claim text and the "why no deterministic check"
 reason move to the document; the form carries the path and the digest of the one that holds them.
+
+One clarification (PR 12, decided over both hosts at once): the claim text that moves to the
+document is the *research records' per-claim context* — each record's "For claim …" lines, which
+repeat what a quote was proposed for, never what the human is deciding. A needs-decision claim's
+own text is what the human decides, exactly as a research item's quote is the fact a research
+item's dialog exists to judge — so it stays in the form, **in full, on both hosts**, wrapped under
+its decision line (Claude's message shows it; Pi's item dialog renders `item.text`, the same shared
+`build_items` member), and the truncated field description remains only the dialog's subject line,
+never the decided text. Nothing else moves: the source line, the quote, the decision enums and the
+note fields stay, and the terminal consent keeps its decision fully worded beside the residual
+count. The dialogs' shared strings come from one place — `adapters/confirmation.py` builds the item
+titles, descriptions, quotes and claim texts both hosts show (`_research_titles`,
+`build_items`), and the document pointer lines the hosts render are pinned word-identical by both
+hosts' tests (the pointer line, `Document: sha256:<12 hex>`, the path on its own line, and the
+residual-count sentences — `private-transport.ts`'s validator is the shape's authority for Pi,
+`_item_text`/`_residual_lines`/`_document_lines` for Claude).
 
 ### Hosts
 
@@ -356,7 +372,7 @@ The digest as `sha256:` followed by its first 12 hex characters (the scan length
 identifiers, `short_id`, `ID_SIZE = 12`, `application/observer_index.py:66,75`), and the document's
 **absolute** path on **its own line, exempt from wrapping** — the path is a copy-paste surface, wrapping
 breaks the paste, and a realistic path under `$EMPIRICA_HOME` (roughly 160–200 characters) plainly does not
-fit the wrapped text widths anyway (`adapters/confirmation.py:48-65`, the one owner of the dialog lengths);
+fit the wrapped text widths anyway (`adapters/confirmation.py:48-66`, the one owner of the dialog lengths);
 the digest line and the exempt path line are pinned by the form goldens. The sidecar returns an absolute path
 even under a relative `EMPIRICA_HOME` (the home is made absolute at construction, never resolved — it must
 not follow a symlink). The full digest and the document path are on the decision record; the form's digest

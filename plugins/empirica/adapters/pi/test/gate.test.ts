@@ -298,11 +298,16 @@ async function wire(
       if (request.operation === "evidence_presentation" && options.presentation === "throw") throw new Error("the core went away");
       if (request.operation === "evidence_presentation" && options.presentation === "fault")
         return { type: "Fault", code: "conflict", fail_direction: "closed" } as never;
+      // PR 12: the real private bridge always answers with the written document's identity; the
+      // fake mirrors it (the transport validates the pair before any dialog may show it).
       if (request.operation === "evidence_presentation") return { type: "evidence_presentation", receipt_id: "p-1",
         items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, record_ids: [`sha256:${"a".repeat(64)}`],
           claims: [{ id: "C1", text: "C" }], source_kind: "web", source_ref: "https://example.test/x", quote: "q",
           class: "retrievable", title: "example.test/x",
-          description: 'For C1 · Quote: "q" · Does the page say this?', note_title: "Note (optional)" }] };
+          description: 'For C1 · Quote: "q" · Does the page say this?', note_title: "Note (optional)" }],
+        document: { digest: `sha256:${"9".repeat(64)}`,
+          path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
+            + `${"9".repeat(64)}.json` } };
       if (request.operation === "evidence_confirmation") return { type: "evidence_receipt", result: { type: "Allow" } };
       if (request.operation === "audit_verdict")
         return { type: "audit_verdict", admitted: true };
@@ -966,6 +971,35 @@ test("gate: the end of a pass presents the waiting evidence once, then re-evalua
   const ops = w.privateRequests.map((request) => request.operation).filter((op) => op.startsWith("evidence_") || op === "human_surface");
   assert.deepEqual(ops, ["human_surface", "evidence_presentation", "evidence_confirmation"]);
   assert.deepEqual(w.privateRequests.find((r) => r.operation === "human_surface")?.payload, { surface: "human" });
+});
+
+test("gate: the evidence answers' document never reaches a model-facing surface; the confirmation repeats the digest (PR 12)", async () => {
+  // A hostile or buggy private answer may carry the written document's identity; the adapter's
+  // surface facing the model is the tool-call decision — its boundary must be free of the pair.
+  const digest = `sha256:${"9".repeat(64)}`;
+  const path = "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
+    + `${"9".repeat(64)}.json`;
+  let evaluations = 0;
+  const w = await wire((req) => {
+    if (req.command.type === "StartRun") return envelope({ type: "Allow", converged: false, run: run() });
+    evaluations += 1;
+    return envelope(evaluations === 1 ? EVIDENCE_WAITING() as never : { type: "Allow", converged: false, run: run() });
+  });
+  await startRun(w);
+  const decision = await w.pi.toolCall()(toolEvent(REPORT_CONVERGENCE_TOOL), uiCtx(["Confirm"]));
+  const confirmation = w.privateRequests.find((r) => r.operation === "evidence_confirmation")?.payload as
+    Record<string, unknown>;
+  assert.equal(confirmation.document_digest, digest,
+    "the confirmation names the document its presentation wrote");
+  const modelFacing = JSON.stringify(decision ?? {});
+  assert.ok(!modelFacing.includes(path), "the model-facing decision carries no path");
+  assert.ok(!modelFacing.includes("hitl/"), "nor any document location");
+  assert.ok(!/sha256:[0-9a-f]{64}/.test(modelFacing), "nor any document digest");
+  for (const request of w.privateRequests) {
+    const payload = JSON.stringify(request.payload ?? {});
+    assert.ok(!payload.includes(path), `${request.operation}: the path never crosses a request`);
+    assert.ok(!("document" in (request.payload ?? {})), `${request.operation}: the pair never crosses a request`);
+  }
 });
 
 test("gate: Later or a cancelled batch grants nothing, blocks with the real reason, and the next explicit report asks again (G14)", async () => {
