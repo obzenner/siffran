@@ -30,6 +30,7 @@ request never pays for indexing.
 from __future__ import annotations
 
 import re
+import json
 import pickle
 import threading
 import zlib
@@ -89,10 +90,53 @@ class Source(Protocol):
     def workspace(self, key: RunKey) -> Any: ...
     # Optional: ``stamp(key)``, a cheap value that changes whenever anything a run is projected from changes (its state,
     # history or timeline). Without it the observer composes one from the revisions (``Observer._stamp``).
+    # Optional: ``document(key, document_digest)`` (PR 15, operator finding F2): one decision's
+    # HITL document read from the run's own sidecar, bounded by ``HITL_MAX_BYTES``, at most once a
+    # request - a source without it serves the published detail's placeholders unchanged.
 
 
 def run_key(key: RunKey) -> str:
     return f"{key.project_id}/{key.run_id}/{key.generation}"
+
+
+#: The most bytes one decision's HITL document is read with (PR 15, A6): a real rendered
+#: document is a few kilobytes; anything larger is named ``too_large`` without being read, so a
+#: planted huge file can neither slow a read nor widen memory. The cap bounds what is read from
+#: the store - bytes, not characters - so the decoder is already safe when it sees them.
+HITL_MAX_BYTES = 256 * 1024
+#: The statuses a served decision document can bear (contract v1 ``run.schema.json``): both honest
+#: sides of a record that is missing or wrong, and the refusal a damaged one reads as.
+DOCUMENT_STATUSES = ("verified", "missing", "mismatch", "too_large", "unreadable")
+
+
+def parsed_document(data: bytes | bytearray | memoryview | None) -> dict[str, Any] | None:
+    """The bytes as a parsed ``empirica.hitl/1`` document object, or ``None`` when they are not one
+    (PR 15, A6): a decode or parse failure is ``unreadable`` - an over-hasty parse of a foreign file
+    would show whatever the bytes spell, so the schema id must be exactly the core's
+    (``core.hitl.SCHEMA_ID``) before the object is ever shown."""
+    if not isinstance(data, (bytes, bytearray, memoryview)):
+        return None
+    try:
+        parsed = json.loads(bytes(data))
+    except ValueError:  # UnicodeDecodeError is a ValueError: bytes that decode to nothing legible
+        return None
+    if not isinstance(parsed, dict) or parsed.get("schema") != "empirica.hitl/1":
+        return None
+    return parsed
+
+
+def document_entry(document_digest: str, read_status: str, data: bytes | bytearray | memoryview | None,
+                   path: str) -> dict[str, Any]:
+    """One decision row's served ``document`` member (PR 15, A5): the very ``document_digest`` the
+    decision recorded (ADR-0072 - the digest *is* the identity: what the human was shown, and what
+    the store is asked for), the status the store's own bounded read answered, the absolute sidecar
+    path the store read (the one place a reader can see where the document lives), and the parsed
+    body only beside ``status: verified`` - never a body beside any other status (the contract
+    couples them, ``run.schema.json``). ``verified`` bytes that do not parse as an
+    ``empirica.hitl/1`` document read as ``unreadable``."""
+    body = parsed_document(data) if read_status == "verified" else None
+    status = read_status if body is not None or read_status != "verified" else "unreadable"
+    return {"digest": document_digest, "status": status, "path": path, "body": body}
 
 
 def _revision(read: Any) -> str | None:
@@ -593,17 +637,26 @@ class Observer:
         return list(self._view(budget).rows)
 
     def details(self) -> dict[str, dict[str, Any]]:
-        """Every indexed run's contract sheet (``sheet``'s answer), by key."""
+        """Every indexed run's contract sheet (``sheet``'s answer), by key: the rows' ``document``
+        members resolved as ``sheet`` resolves them (this is the test-side read; the server never
+        answers a list, only ``/api/run``)."""
         view = self._view(None)
-        return {key: _index.sheet(o.detail, o.summary, view.attempts(o.summary)) for key, o in view.observed.items()}
+        answer = {key: _index.sheet(o.detail, o.summary, view.attempts(o.summary)) for key, o in view.observed.items()}
+        return {key: self._documented(sheet) for key, sheet in answer.items()}
 
     def sheet(self, key: str) -> dict[str, Any] | None:
-        """``/api/run`` (contract v1): one run's detail with its audits, dropped claims and decisions. Indexed in the
-        background, it is the published detail (a run not read yet has none: it is not listed either)."""
+        """``/api/run`` (contract v1): one run's detail with its audits, dropped claims and decisions,
+        each decision row carrying its HITL document as the store reads it now (PR 15, operator finding
+        F2): indexed in the background, it is the published detail with the rows' ``document`` members
+        resolved - never cached with it, so the answer changes when the store does and no two requests
+        hide a different store state behind one ETag (a run not read yet has no detail: it is not listed
+        either)."""
         if self._indexed:
             view = self._view(None)
             found = _index.resolve(view.observed.items(), key)
-            return None if found is None else _index.sheet(found.detail, found.summary, view.attempts(found.summary))
+            if found is None:
+                return None
+            return self._documented(_index.sheet(found.detail, found.summary, view.attempts(found.summary)))
         with self._lock:
             self._begin()
             keys = frozenset(self._source.keys())
@@ -612,7 +665,34 @@ class Observer:
                 return None
             own = self._run(found, keys)
             family = [self._run(k, keys).summary for k in keys if (k.project_id, k.run_id) == (found.project_id, found.run_id)]
-            return _index.sheet(own.detail, own.summary, _index.attempts_of(family, own.summary))
+            return self._documented(_index.sheet(own.detail, own.summary, _index.attempts_of(family, own.summary)))
+
+    def _documented(self, answer: Mapping[str, Any]) -> Mapping[str, Any]:
+        """``sheet``'s last step (PR 15, A5): replace each decision row's placeholder - the exact
+        ``document_digest`` the core's presentation recorded, kept in the published detail - with
+        the source's own read of that document. No content is cached: the statuses are read at
+        each /api/run, at most once per distinct digest, and the published detail is never mutated
+        (every row is copied; nothing is resolved for /api/runs, /api/search or any summary). A
+        source without the ``document`` read serves the published detail unchanged."""
+        read = getattr(self._source, "document", None)
+        rows = answer.get("decisions")
+        if read is None or not (isinstance(rows, list) and any(
+                isinstance(row, Mapping) and isinstance(row.get("document"), Mapping)
+                and "status" not in row["document"] for row in rows)):
+            return answer
+        key = RunKey(answer["row"]["project"], answer["row"]["run"], answer["row"]["generation"])
+        documents: dict[str, Mapping[str, Any]] = {}
+        resolved = []
+        for row in rows:
+            document = row.get("document") if isinstance(row, Mapping) else None
+            if not (isinstance(document, Mapping) and "status" not in document):
+                resolved.append(row)
+                continue
+            digest = document["digest"]
+            if digest not in documents:
+                documents[digest] = read(key, digest)
+            resolved.append({**row, "document": documents[digest]})
+        return {**answer, "decisions": resolved}
 
 #: How many stale runs a poll asks the source to read together (``Source.prefetch``).
 PREFETCH = 16

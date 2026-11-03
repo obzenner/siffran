@@ -184,6 +184,13 @@
     "run_continued",
     "none"
   ],
+  "document": [
+    "verified",
+    "missing",
+    "mismatch",
+    "too_large",
+    "unreadable"
+  ],
   "profile": [
     "docker-isolated-v1",
     "docker-networked-v1"

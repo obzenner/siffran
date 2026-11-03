@@ -426,8 +426,16 @@ def sheet(detail: Mapping[str, Any], row: Mapping[str, Any], attempts: list[Mapp
 
 
 def sheet_tag(answer: Mapping[str, Any]) -> str:
-    """The ETag of a sheet: the detail's version and each attempt's, equal exactly when nothing it shows has changed."""
-    return token([answer["version"], *(a["version"] for a in answer["attempts"])])
+    """The ETag of a sheet: the detail's version and each attempt's, and each decision row's
+    document with the status this read answered (PR 15, A5) - equal exactly when nothing it shows
+    has changed, and different the moment a sidecar write, tamper or repair changes a document's
+    served status, so no two different answers ever share one ETag."""
+    documents = []
+    for row in answer.get("decisions") or ():
+        document = row.get("document") if isinstance(row, Mapping) else None
+        if isinstance(document, Mapping) and "status" in document:
+            documents.append(f"{document.get('digest')}/{document.get('status')}")
+    return token([answer["version"], *(a["version"] for a in answer["attempts"]), *documents])
 
 
 def haystack(row: Mapping[str, Any], label: str) -> str:

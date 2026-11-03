@@ -411,6 +411,33 @@
       "copy": "answer.later"
     }
   },
+  "document": {
+    "verified": {
+      "tone": "positive",
+      "icon": "verified",
+      "copy": "document.verified"
+    },
+    "missing": {
+      "tone": "neutral",
+      "icon": "file-outside",
+      "copy": "document.missing"
+    },
+    "mismatch": {
+      "tone": "negative",
+      "icon": "integrity-broken",
+      "copy": "document.mismatch"
+    },
+    "too_large": {
+      "tone": "caution",
+      "icon": "file-odd",
+      "copy": "document.too_large"
+    },
+    "unreadable": {
+      "tone": "negative",
+      "icon": "unreadable",
+      "copy": "document.unreadable"
+    }
+  },
   "why": {
     "refuted": {
       "tone": "negative",

@@ -109,15 +109,24 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   beneath it, a claim that supports several named again where it recurs), each one line that opens in place to its sources and
   quotes, the human's answer, and each closed single-container generic `/2` spike request/result pair. A request disclosure shows only sealed artifact and execution identities, requested and sealed local-image identity, raw-to-canonical native platform, exact argv, the fixed numeric user and work directories, environment names only (no value, fingerprint or length; required content-addressed identities can confirm guessed low-entropy values, so authored values must never contain secrets), captured input declarations, paths, counts, sizes and digests (never contents), the selected profile, and all persisted framework limits including the 120-second workload / 210-second operation bounds. Its result disclosure shows the immutable request and operation identities, producer model attribution, realized-image identity, one natural exit and uppercase verdict, independent stdout/stderr byte counts plus digests, verified cleanup and verified postflight. The UI has no legacy `/1` topology or service/container grid and never shows raw output, host paths, credentials, environment values, staging paths, endpoints, attach/inspect facts or destructive runtime identifiers. The rest of a claim shows review and independence, and the decisions made on
   it; **Dropped claims** with the gate's own reason; **Human decisions**, each attached to what it decided (the claim, a link to
-  it; the source; or the plan); **Attempts** side by side; **History** with the files
+  it; the source; or the plan), each row naming its bound HITL document (ADR-0072, PR 15): the status the run's own sidecar
+  answers at each request — `verified` (the exact immutable form the host showed, worded only by the document's own members),
+  `missing`, `mismatch`, `too_large`, `unreadable` — never a body beside any status but `verified`, the digest and the
+  absolute sidecar path copyable, and `later` reading **Not answered** (presented, nothing recorded: still open, dismissed,
+  timed out or superseded — operator finding F3). A configuration its host shows and its human has not answered is a
+  `later` row of its own; **Attempts** side by side; **History** with the files
   that changed since; **Governance and audit**.
 - Unread data is unknown, not zero: "Not read in full: n", "Claims not read", "Claim text of n unread runs was not
   searched". Proposed ceilings show only while a proposal waits on the human.
 
 ## The URL
 
-`?data=store|demo&view=inbox|work&zoom=<project>&hl=<flag>&standing=&ask=&project=&host=&mode=&audit=&flag=&period=7|30|all&since=&q=&run=<id>&claim=<id>&words=1`
-(no `view`: the Universe).
+`?data=store|demo&view=inbox|work&zoom=<project>&hl=<flag>&standing=&ask=&project=&host=&mode=&audit=&flag=&period=7|30|all&since=&q=&run=<id>&claim=<id>&decision=<id>&words=1`
+(no `view`: the Universe). `decision` names a decision row's bound document (the digest's own short
+form or the full id) and opens the sheet's decisions section on that row's "What you were shown"
+disclosure, scroll-bound, marking every row that one document decided (a batch answers several asks
+against one binding); two documents sharing the short form expand none - the section opens and no row
+is claimed; Esc closes it back to the sheet.
 The place is the URL (`app/route.js`): defaults are left out. A person's move adds a history entry; Back, Forward and reload
 restore it. The period is the strip's window only; a list is windowed only by a chosen day (`since`), so the rail and the
 list count the same runs.

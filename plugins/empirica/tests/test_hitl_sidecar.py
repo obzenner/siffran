@@ -253,6 +253,83 @@ class TestRead(_Isolated):
         with self.assertRaises(ValueError):
             self.store.path(self.key, "sha256:short")
 
+
+class TestBoundedRead(_Isolated):
+    """PR 15 (operator finding F2; A6): the bounded, no-follow read the observer reads each
+    decision's document with — the same hostile-input rules as the write path. The read mirrors
+    ``read`` (a digest must be an identity, a tampered file is ``mismatch``, a special file is
+    refused promptly, never blocked on) and adds the size gate: a file whose own ``fstat`` size
+    exceeds the cap is ``too_large`` before one byte is read, and nothing is created."""
+
+    def test_a_published_document_reads_bounded_as_verified_bytes(self):
+        path, digest = self.store.write(self.key, DATA)
+        status, data = self.store.read_bounded(self.key, digest, cap=len(DATA) + 1)
+        self.assertEqual((status, data), ("verified", DATA))
+        self.assertEqual(data, self.store.read(self.key, digest))
+        # a cap that exactly fits the whole file still reads it: the gate is over the size, not under it
+        self.assertEqual(self.store.read_bounded(self.key, digest, cap=len(DATA)), ("verified", DATA))
+
+    def test_an_oversized_file_is_refused_before_it_is_read(self):
+        digest = hitl.digest(DATA)
+        hitl_dir = self.store.dir(self.key)
+        hitl_dir.mkdir(parents=True)
+        # a regular file whose own fstat size exceeds the cap: refused ``too_large``, nothing read
+        big = hitl_dir / f"{digest[len('sha256:'): ]}.json"
+        big.write_bytes(b" " * 64)
+        self.assertEqual(self.store.read_bounded(self.key, digest, cap=1), ("too_large", None))
+        # a file one byte over the cap is refused too; the cap itself is admitted by the test above
+        self.assertEqual(self.store.read_bounded(self.key, digest, cap=63), ("too_large", None))
+        self.assertEqual(self.store.read_bounded(self.key, digest, cap=64), ("mismatch", None),
+                         "the bytes are not the digest's, so they read as a mismatch once they fit")
+
+    def test_absent_and_tampered_are_named_by_status_and_create_nothing(self):
+        self.assertEqual(self.store.read_bounded(self.key, hitl.digest(DATA), cap=64), ("missing", None))
+        self.assertFalse(os.path.exists(self.store.dir(self.key)), "a read creates no directory")
+        digest = hitl.digest(DATA)
+        hitl_dir = self.store.dir(self.key)
+        hitl_dir.mkdir(parents=True)
+        (hitl_dir / f"{digest[len('sha256:'): ]}.json").write_bytes(b"{ tampered }")
+        self.assertEqual(self.store.read_bounded(self.key, digest, cap=64), ("mismatch", None))
+
+    def test_a_non_regular_file_is_refused_promptly(self):
+        digest = hitl.digest(DATA)
+        hitl_dir = self.store.dir(self.key)
+        hitl_dir.mkdir(parents=True)
+        socket = hitl_dir / f"{digest[len('sha256:'): ]}.json"
+        os.mkfifo(socket)
+        try:
+            with self.assertRaises(hitl_sidecar.DocumentMismatch):
+                self.store.read_bounded(self.key, digest, cap=64)
+        finally:
+            socket.unlink()
+
+    def test_a_symlinked_hitl_directory_is_refused_on_the_read_path(self):
+        _, digest = self.store.write(self.key, DATA)
+        hitl_dir = self.store.dir(self.key)
+        generation = hitl_dir.parent
+        moved = generation.parent / "elsewhere"
+        moved.mkdir(parents=True)
+        os.rename(hitl_dir, moved / "hitl")
+        os.symlink(moved / "hitl", hitl_dir)
+        with self.assertRaises(SymlinkRefused):
+            self.store.read_bounded(self.key, digest, cap=len(DATA) + 1)
+
+    def test_a_symlinked_generation_directory_is_refused_on_the_read_path(self):
+        _, digest = self.store.write(self.key, DATA)
+        hitl_dir = self.store.dir(self.key)
+        generation = hitl_dir.parent
+        moved = generation.parent / "gen-elsewhere"
+        os.rename(generation, moved)
+        os.symlink(moved, generation)
+        with self.assertRaises(SymlinkRefused):
+            self.store.read_bounded(self.key, digest, cap=len(DATA) + 1)
+
+    def test_a_malformed_digest_is_rejected_before_anything_is_opened(self):
+        with self.assertRaises(ValueError):
+            self.store.read_bounded(self.key, "not-a-digest", cap=64)
+        self.assertFalse(os.path.exists(self.store.dir(self.key)))
+
+
 class TestPublish(_Isolated):
     """Review-2 m1 (round 13): `hitl_sidecar.publish`, the one bound helper every host's binding
     call site uses — it verifies, parses and object-checks a core-rendered document pair BEFORE

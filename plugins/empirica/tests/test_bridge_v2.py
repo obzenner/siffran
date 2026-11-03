@@ -232,6 +232,7 @@ class BridgeV2Tests(unittest.TestCase):
             _PLUGIN_ROOT / "tests/v2/driver.py",
             _PLUGIN_ROOT / "tests/v2/fs_store.py",
             _PLUGIN_ROOT / "tests/v2/observer_store.py",
+            _PLUGIN_ROOT / "tests/v2/test_observer_fs.py",
             _PLUGIN_ROOT / "tests/v2/test_timeline.py",
             _PLUGIN_ROOT / "adapters/claude/tests/test_claude_adapter.py",
             _PLUGIN_ROOT / "adapters/claude/tests/test_activation_lifecycle.py",

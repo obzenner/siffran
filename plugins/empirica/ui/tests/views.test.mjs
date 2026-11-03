@@ -211,7 +211,8 @@ test("the claims are the support graph: each listed once, under the claim it sup
 test("a decision is attached to what it decides: the claim by its words (a link to it), the source, or the plan; never a bare id", () => {
   const s = sheets[scenarios.verification];
   const html = sheetHtml(ctx(s));
-  const section = /data-section="decisions"[\s\S]*?<\/details>/.exec(html)[0];
+  // the decisions section's rows hold the documents' own nested `<details>`, so the section runs to the next one
+  const section = html.slice(html.indexOf('data-section="decisions"'), html.indexOf('data-section="attempts"'));
   for (const d of s.decisions.filter((x) => x.claim)) {
     const c = s.row.claims.find((x) => x.id === d.claim);
     assert.ok(section.includes(`data-decision-claim="${d.claim}"`) && visible(section).includes(c.text.slice(0, 30)), d.claim);
@@ -280,6 +281,84 @@ test("a claim of a failed-audit run is 'In a failed audit', never 'Audit failed'
   const audit = sectionText(sheetHtml(ctx(s)), "audit", "claims");
   assert.ok(audit.includes(copy["audit.failed.label"]), "the run-level audit verdict still reads \"Audit failed\"");
 });
+// PR 15 (operator findings F2 and F3): every decision row carries its immutable document, and `later` reads "Not answered".
+test("every decision row shows its document's status; a verified one shows the very form the human saw", () => {
+  const verified = [];
+  for (const [key, s] of Object.entries(sheets)) {
+    if (!(s.decisions ?? []).some((d) => d.document)) continue;
+    const html = sheetHtml(ctx(s));
+    const rendered = text(html);
+    assert.ok(rendered.includes("What you were shown"), `${key}: the disclosure label`);
+    for (const d of s.decisions ?? []) {
+      if (d.document === null) continue;
+      assert.ok(rendered.includes(copy[`document.${d.document.status}.label`]), `${key}: ${d.document.status}`);
+      if (d.document.status === "verified") verified.push(s);
+    }
+  }
+  assert.ok(verified.length >= 1, "the fixtures hold a verified document to show");
+  const s = verified.find((x) => (x.decisions ?? []).some((r) => r.document?.body?.kind === "evidence")) ?? verified[0];
+  const d = (s.decisions ?? []).find((x) => x.document?.status === "verified");
+  const rendered = text(sheetHtml(ctx(s)));
+  const body = d.document.body, rows = [...(body.claims ?? []), ...(body.records ?? [])];
+  for (const member of [body.run_id, ...rows.map((c) => c.text ?? c.claim_text).filter(Boolean)]) {
+    assert.ok(rendered.includes(member.slice(0, 30)), `${s.key}: the body words ${member}`);
+  }
+});
+test("a damaged sidecar is worded honestly and shows no body: missing, mismatch, too large, unreadable", () => {
+  const byStatus = {};
+  for (const s of Object.values(sheets)) for (const d of s.decisions ?? []) if (d.document && d.document.status !== "verified") (byStatus[d.document.status] ??= []).push(d);
+  for (const status of ["missing", "mismatch", "too_large", "unreadable"]) assert.ok((byStatus[status] ?? []).length >= 1, status);
+  for (const [key, s] of Object.entries(sheets)) {
+    const rendered = text(sheetHtml(ctx(s)));
+    for (const d of s.decisions ?? []) {
+      if (d.document && d.document.body === null) assert.ok(rendered.includes(copy[`document.${d.document.status}.note`]), `${key}: ${d.document.status}`);
+    }
+  }
+});
+test("Not answered is the word for later, never Deferred (F3)", () => {
+  assert.equal(copy["answer.later.label"], "Not answered");
+  for (const s of Object.values(sheets)) for (const d of s.decisions ?? []) if (d.answer === "later") {
+    assert.ok(text(sheetHtml(ctx(s))).includes("Not answered"), `${s.key}: ${d.asked}`);
+    break;
+  }
+});
+test("a decision link opens its document's disclosure and marks every row that document decided; without one, every disclosure starts closed (A8)", () => {
+  const s = sheets[scenarios.verification];
+  const withDocument = (s.decisions ?? []).find((d) => d.document);
+  const named = withDocument.document.digest.slice(7, 19);
+  const linked = sheetHtml(ctx(s, { decision: named }));
+  assert.match(linked, /data-decision-document[^>]*\bopen\b/, "the named document starts open");
+  const rows = (s.decisions ?? []).filter((d) => d.document?.digest === withDocument.document.digest);
+  assert.equal((linked.match(/data-decision-match/g) ?? []).length, rows.length,
+    "every row the shared document decided is marked for the scroll (a batch answers several asks against one binding)");
+  assert.ok((linked.match(/data-decision-match/g) ?? []).length >= 1, "at least the named row is marked");
+  assert.match(linked, /<details[^>]*\bopen\b[^>]*data-section="decisions"/, "the decisions section opens");
+  assert.doesNotMatch(sheetHtml(ctx(s)), /data-decision-document[^>]*\bopen\b/, "no link, no opened disclosure");
+  assert.ok(!sheetHtml(ctx(s)).includes("data-decision-match"), "no link, no marked row");
+});
+test("two documents sharing a decision link's short form expand none: the section opens and no row is claimed (A8)", () => {
+  const s = structuredClone(sheets[scenarios.verification]);
+  const rows = (s.decisions ?? []).filter((d) => d.document);
+  assert.ok(rows.length >= 2, "the fixture holds more than one documented decision to collide");
+  const shared = "0123456789ab";
+  rows[0].document.digest = `sha256:${shared}${"a".repeat(52)}`;
+  rows[1].document.digest = `sha256:${shared}${"b".repeat(52)}`;
+  for (const r of rows.slice(2)) r.document = null;  // the contract's no-document row
+  const ambiguous = sheetHtml(ctx(s, { decision: shared }));
+  assert.ok(!ambiguous.includes("data-decision-match"), "an ambiguous link names nothing");
+  assert.doesNotMatch(ambiguous, /data-decision-document[^>]*\bopen\b/, "no disclosure opens on an ambiguous link");
+  assert.match(ambiguous, /<details[^>]*\bopen\b[^>]*data-section="decisions"/, "the decisions section still opens");
+  const exact = sheetHtml(ctx(s, { decision: rows[0].document.digest.slice(7) }));
+  assert.ok(exact.includes("data-decision-match"), "the full id of either resolves the ambiguity");
+});
+test("a link that names no document on the sheet opens the section and claims no row (A8)", () => {
+  const s = sheets[scenarios.verification];
+  const marked = sheetHtml(ctx(s, { decision: "ffffffffffff" }));
+  assert.ok(!marked.includes("data-decision-match"), "no row carries that document");
+  assert.match(marked, /<details[^>]*\bopen\b[^>]*data-section="decisions"/, "the decisions section opens");
+  assert.doesNotMatch(marked, /data-decision-document[^>]*\bopen\b/, "no disclosure opens");
+});
+
 // P3b: the fixtures are the minimal selection, so three facts the journeys read from runs no longer in them are held here,
 // on a fixture sheet changed in that one fact (the real service still produces each: tests/v2/test_observer_stateful.py).
 test("an audit's independence is worded on the sheet, for every value the contract declares", () => {

@@ -26,7 +26,8 @@ import governance_setup
 from governance_setup import TEST_INVOCATION, sized_configure_run
 from application import generic_spike
 from application.location import storage_id
-from application.observer import Project, run_key
+from application.observer import Project, document_entry, run_key
+from core import hitl as core_hitl
 from assertions import (ConformanceCase, action_graph, get_argument, get_run, action_investigate, action_research,
                         evaluate, observe_action)
 from core.canonical import canonical_digest
@@ -84,6 +85,13 @@ class Store:
     unmatched: set[str] = field(default_factory=set)           # projects with no repository
     timeline: Any = None
     expect: dict[str, Any] = field(default_factory=dict)       # scenario -> run key
+    # PR 15: the fixture world's HITL sidecar - each run key's published document bytes, keyed by
+    # document digest, matching what the host's binding call writes beside a real run; and the tamper
+    # oracle a test uses to face the observer with a damaged sidecar, where a planted digest reads
+    # only the named status (corrupt bytes are unreachable through a real binding call by
+    # construction, so a test plants them by hand).
+    documents: dict[str, dict[str, bytes]] = field(default_factory=dict)
+    document_corrupt: dict[str, dict[str, str]] = field(default_factory=dict)
 
 
 def view_of(observer) -> dict[str, Any]:
@@ -214,6 +222,26 @@ class DriverSource:
 
     def workspace(self, key):
         return self._workspace
+
+    def document(self, key, document_digest):
+        """PR 15 (operator finding F2): one decision's document, answered from the fixture world's
+        sidecar by the same verdicts :meth:`adapters.observer.source.StoreSource.document` reads on
+        disk - ``verified`` only when the published bytes both hash to the digest and parse as the
+        core's ``empirica.hitl/1`` document, else ``missing`` or ``mismatch`` - with the one
+        extension the tamper oracle gives: a digest ``document_corrupt`` names reads exactly that
+        status, body none, the damaged-sidecar states no real binding could produce."""
+        path = (f"/tmp/empirica-home/projects/{key.project_id}/runs/{key.run_id}/gen-{key.generation}"
+                f"/hitl/{document_digest[len('sha256:'): ]}.json" if document_digest.startswith("sha256:")
+                else "<refused document path>")
+        forced = self._store.document_corrupt.get(run_key(key), {}).get(document_digest)
+        if forced is not None:
+            return document_entry(document_digest, forced, None, path)
+        data = self._store.documents.get(run_key(key), {}).get(document_digest)
+        if data is None:
+            return document_entry(document_digest, "missing", None, path)
+        return document_entry(document_digest,
+                              "verified" if core_hitl.digest(data) == document_digest else "mismatch",
+                              data, path)
 
 
 #: The contract fixtures' runs (P3b): the minimal named selection of the store's scenarios, one per standing and one per
@@ -456,11 +484,13 @@ class _Builder:
         a.dispatch(drv, observe_action(run_id=run_id, action=action_investigate()))
         return run_id
 
-    def ask_configuration(self, run_id: str, receipt: str, *, outcome: str | None = "present"):
+    def ask_configuration(self, run_id: str, receipt: str, *, outcome: str | None = "present",
+                         publish: bool = False):
         """The agent's ``configure_run`` (sized from the placeholder, unless the run already sized it), then its host's
         mediation, as Claude Code's and Pi's do it (``adapters.governance.HostGovernance``, ``governance-ui.ts``): the host
         records its approval ingress and shows its human the dialog (``present``: open, not answered yet), which may be
-        closed without an answer (``dismiss``: Esc, a timeout) or answered no (``reject``). ``outcome=None``: the agent asked and no host mediated."""
+        closed without an answer (``dismiss``: Esc, a timeout) or answered no (``reject``). ``outcome=None``: the agent asked and no host mediated.
+        ``publish=True`` writes the context pair beside the run (PR 15: the host's own binding call)."""
         g = self.a.dispatch(self.drv, get_run(run_id=run_id))["result"]["run"]["governance"]
         if g["proposal"]["rationale"] is None:
             self.a.dispatch(self.drv, observe_action(run_id=run_id, action=sized_configure_run(
@@ -471,6 +501,8 @@ class _Builder:
         ingress = host_profile(PROFILE)["approval_ingress"]
         asked = service.trusted_governance_context(run_id=run_id, payload={"author": governance_setup.AUTHOR,
                                                                           "ingress": ingress})["result"]
+        if publish:
+            self.publish_document(run_id, asked["presentation"]["document"])
         g = asked["run"]["governance"]
         envelope = {"run_id": run_id, "receipt_id": receipt, "proposal_digest": g["proposal_digest"],
                     "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g),
@@ -482,6 +514,42 @@ class _Builder:
                        {**envelope, "submission": {"action": "reject", "configuration": {"budgets": g["proposal"]["budgets"]}}})
             done = service.trusted_governance_decision(run_id=run_id, payload=payload)
             assert done["result"]["type"] == "Allow", done
+
+    def publish_document(self, run_id: str, pair: dict) -> dict:
+        """PR 15 (operator finding F2): the host's binding call as it happens in a real home - the
+        core-rendered pair (``text``/``digest``) the fetch returned is written beside the run, so
+        the observer reads exactly the bytes the human was shown. The parsed-body check is the
+        real pair's own guarantee (``adapters.state.hitl`` verifies it before any write)."""
+        from application.location import decode_handle
+        key = run_key(decode_handle(run_id))
+        published = self.store.documents.setdefault(key, {})
+        published[pair["digest"]] = pair["text"].encode("utf-8")
+        return pair
+
+    def corrupt_document(self, run_id: str, document_digest: str, status: str) -> str:
+        """PR 15 (A6, the tamper oracle): face the observer with a damaged sidecar. ``mismatch``
+        plants foreign bytes at the digest's name (what a tampered file is); ``unreadable`` and
+        ``too_large`` name the status a planted digest reads - damage no real binding could have
+        written, so a test plants the status by hand."""
+        from application.location import decode_handle
+        assert status in ("mismatch", "unreadable", "too_large"), status
+        key = run_key(decode_handle(run_id))
+        if status == "mismatch":
+            published = self.store.documents.setdefault(key, {})
+            published[document_digest] = b'{"schema": "empirica.hitl/1", "tampered": true}'
+        else:
+            self.store.document_corrupt.setdefault(key, {})[document_digest] = status
+        return status
+
+    def corrupt_configuration_document(self, run_id: str, status: str) -> None:
+        """PR 15 (A6, the fixture world's tamper oracle): give the run's first approved configuration
+        the named damaged-sidecar status, so a served sheet can face its reader with each refusal
+        without mixing scenarios (the row stays; only the store's verdict changes)."""
+        from application.location import decode_handle
+        state = self.drv._runs.read(decode_handle(run_id)).value
+        digest = next(r["document_digest"] for r in state["governance"]["receipts"]
+                      if r["approval_kind"] == "host_ui" and r["outcome"] == "approve")
+        self.corrupt_document(run_id, digest, status)
 
     def _fetched_digest(self, run_id: str, batch: dict) -> str:
         """PR 13: the digest of the batch's core-rendered document, from the null fetch's
@@ -541,12 +609,22 @@ class _Builder:
             run_id, {**payload, "document_digest": digest})["result"]
         return shown, digest
 
-    def present_and_answer(self, run_id: str, receipt: str, decisions: list[dict]):
-        """The host shows the waiting set once, then the human answers some of it (the rest is Later)."""
-        _, digest = self._present(run_id, {"run_id": run_id, "receipt_id": receipt, "key": self.batch_key(run_id)})
+    def present_and_answer(self, run_id: str, receipt: str, decisions: list[dict], *, publish: bool = False):
+        """The host shows the waiting set once, then the human answers some of it (the rest is Later).
+        ``publish=True`` writes the batch's core-rendered pair beside the run first (PR 15: the host's
+        own binding call), so the observer reads the exact bytes the human was shown."""
+        payload = {"run_id": run_id, "receipt_id": receipt, "key": self.batch_key(run_id)}
+        fetch = self.drv.trusted_evidence_presentation(run_id, {**payload, "document_digest": None})["result"]
+        if "document" not in fetch:
+            return  # the service refused the presentation (no human to ask): nothing was shown, nothing was answered
+        document = fetch["document"]
+        if publish:
+            self.publish_document(run_id, document)
+        self.drv.trusted_evidence_presentation(
+            run_id, {**payload, "document_digest": document["digest"]})
         self.drv.trusted_evidence_confirmation(
             run_id, {"run_id": run_id, "receipt_id": receipt, "decisions": decisions,
-                     "document_digest": digest})
+                     "document_digest": document["digest"]})
 
     def spike(self, run_id: str, claim: str, command: str, files: dict[str, bytes], exit_code=0):
         """Seed one generic request/result through the real transaction with a fake harness."""
@@ -599,9 +677,13 @@ _BUILT: list[Store] = []
 
 
 def copy_store(store: Store) -> Store:
-    """An independent copy of ``store``: a fresh service over copies of its ports (``driver.clone_driver``)."""
+    """An independent copy of ``store``: a fresh service over copies of its ports (``driver.clone_driver``),
+    carrying its fixture sidecar in full (PR 15: the published documents and the planted tamper oracle)."""
     drv = clone_driver(store.driver)
-    return Store(drv, dict(store.names), dict(store.paths), set(store.unmatched), drv._runs._timeline, dict(store.expect))
+    return Store(drv, timeline=drv._runs._timeline, names=dict(store.names), paths=dict(store.paths),
+                 unmatched=set(store.unmatched), expect=dict(store.expect),
+                 documents={run: dict(by_digest) for run, by_digest in store.documents.items()},
+                 document_corrupt={run: dict(by_digest) for run, by_digest in store.document_corrupt.items()})
 
 
 def build_store(clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> Store:
@@ -673,6 +755,8 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     b.research(run, "C1", result="refutes", ref="jobs/export.py")
     b.evaluate(run, "stop")
     b.stamp("refuted", "atlas", "s-refuted")
+    # PR 15: the fixture answer to a tampered sidecar - other bytes at the approved digest's name
+    b.corrupt_configuration_document(run, "mismatch")
 
     # atlas: audited while one supporter had no support. Afterwards it gained support (so the
     # root, approved now, was never reviewed) and another reviewed claim's evidence grew, so the
@@ -700,6 +784,8 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     b.evaluate(run, "report_convergence")
     b.evaluate(run, "stop")
     b.stamp("budget", "harbor", "s-budget")
+    # PR 15: the fixture answer to a hostile sidecar - the digest reads unreadable
+    b.corrupt_configuration_document(run, "unreadable")
 
     # harbor: frozen scope with a claim added after the freeze.
     run = b.begin("harbor", "s-frozen", "Document the import retry policy.", _graph(
@@ -711,6 +797,8 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
                ("C1", "ordinary", "A failed attempt is logged with its cause.")], [("C0", "C1")]))))
     b.evaluate(run, "stop")
     b.stamp("frozen", "harbor", "s-frozen")
+    # PR 15: the fixture answer to an oversized plant at the digest's name
+    b.corrupt_configuration_document(run, "too_large")
 
     # lumen: a first attempt stops on a human decision; the next generation fails its audit.
     run = b.begin("lumen", "s-retry", "Choose the colour space for exported previews.", _graph(
@@ -761,7 +849,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
         {"subject": "research", "artifact_id": ids["C3"], "outcome": "confirm",
          "note": "Checked the format page myself."},
         {"subject": "research", "artifact_id": ids["C4"], "outcome": "reject",
-         "note": "That log is from a different job."}])
+         "note": "That log is from a different job."}], publish=True)  # PR 15: the pair is written beside the run
     # The agent's work comes first (the report asks the human only when it has none left): it replaces the rejected log
     # with research the workspace holds, and the human's remaining questions are what the run waits on.
     b.research(run, "C4", ref="docs/export-log.md")
@@ -836,7 +924,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     # frozen, audited, that the gate asks its human to end as frozen.
     run = b.begin("quarry", "s-configure", "Choose the gravel grading for the north pit.", _graph(
         "C0", [("C0", "ordinary", "The north pit grading meets the road spec.")], []), approve=False)
-    b.ask_configuration(run, "configure-shown")
+    b.ask_configuration(run, "configure-shown", publish=True)  # PR 15: the pair is written beside the run
     b.stamp("approval-pending", "quarry", "s-configure")
     run = b.begin("quarry", "s-freeze", "Write down the blasting schedule.", _graph(
         "C0", [("C0", "ordinary", "Blasts happen only on weekday mornings.")], []))

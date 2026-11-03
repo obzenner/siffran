@@ -452,3 +452,23 @@ golden, the Pi dialog with its 10 rendered goldens and the bridge check (hosts),
 conditionals with negative controls (contracts), and release acceptance at the top of the stack: this ADR flips
 to *accepted* with the upgrade guide (`doc/upgrading-empirica-7.md`), where the operator records the one native
 requalification of the released tree and the closeout at each native boundary before the stack reaches users.
+
+### PR 15 · The observer shows the bound document beside the decision (2026-10-13)
+
+The read side completes the binding: what a host's form binds and records, an operator reading the run
+sheet can see — `GET /api/run` answers each decision row with its `document` member, resolved from the
+run's own sidecar at each request (`application.observer.Observer._documented`, over the new bounded
+`adapters.state.hitl.HitlDocuments.read_bounded`: no-follow, unblocking, capped at
+`application.observer.HITL_MAX_BYTES`, the digest verified from the bytes, nothing ever written), never
+cached with the published detail and never computed for `/api/runs`, `/api/search` or any summary. The
+statuses are the store's own honest verdicts — `verified` (a parsed body is served), `missing`,
+`mismatch`, `too_large`, `unreadable` — and the wire contract couples the body to `verified` in
+`run.schema.json` (`allOf` guards the generators derive, `scripts/ui_view_strategies.py` and
+`ui/tests/schema-arbitrary.mjs`; the `$defs.hitlDocument` classifier follows the plugin's own member
+set and changes with a plugin version, so a served body's owner stays the plugin, never the schema —
+a bump means the sidecar publications are re-verified against what the released tree can read; `empirica-ui-view/v1` is changed together with the plugin in one version because the observer and the UI ship and are served as one server — a running old observer must be restarted after an upgrade, which is what PR 16's `/api/about` `capabilities` will let the forms check). The
+configuration ask a host presented and its human has not answered is one `answer: later` row of its
+own, superseded presentations are not listed, and `later` reads "not answered" everywhere: an open,
+dismissed, timed-out or superseded dialog is never silently read as a deliberate deferral (operator
+finding F3). The ETag folds each row's digest and status, so answering a request from a changed store
+cannot hide behind a `304`.

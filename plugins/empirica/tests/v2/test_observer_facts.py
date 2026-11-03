@@ -283,7 +283,8 @@ class DecisionShapeTests(unittest.TestCase):
         for key, detail in observer.details().items():
             claims = {c["id"] for c in rows[key]["claims"] or ()} | {d["claim"] for d in detail["dropped"] or ()}
             for d in detail["decisions"] or ():
-                self.assertEqual(set(d), {"asked", "claim", "source", "plan", "answer", "effect", "at"}, key)
+                self.assertEqual(set(d), {"asked", "claim", "source", "plan", "answer", "effect", "at", "document"}, key)
+                self.assertIn("digest", d["document"], key)  # PR 15: the presentation's bound document
                 seen.add(d["asked"])
                 if d["asked"] == "decide_claim":
                     self.assertIn(d["claim"], claims, key)

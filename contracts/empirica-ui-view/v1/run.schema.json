@@ -813,7 +813,8 @@
               "plan",
               "answer",
               "effect",
-              "at"
+              "at",
+              "document"
             ],
             "properties": {
               "asked": {
@@ -853,7 +854,80 @@
                   "approve",
                   "reject",
                   "later"
-                ]
+                ],
+                "description": "The human's recorded answer: `approve` or `reject` decide; `later` reads \"not answered\" - the item was presented but no answer was recorded against it (the dialog is still open, or was dismissed, timed out, or superseded); it decides nothing (PR 15, operator finding F3: never silently a deliberate deferral)."
+              },
+              "document": {
+                "oneOf": [
+                  {
+                    "type": "null",
+                    "description": "The decision records no presentation (an ask that was never shown), so no document is bound (ADR-0072)."
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "digest",
+                      "status",
+                      "path",
+                      "body"
+                    ],
+                    "description": "The immutable document the presentation bound, as the run's own store reads it now (PR 15): statuses fail closed - only `verified` serves a body - and the coupling is checked here, not trusted.",
+                    "properties": {
+                      "digest": {
+                        "$ref": "#/$defs/digest",
+                        "description": "The exact `document_digest` the presentation bound (ADR-0072): the sha256 of the immutable document bytes the host showed the human - the one identity of \"what you were shown\"."
+                      },
+                      "status": {
+                        "enum": [
+                          "verified",
+                          "missing",
+                          "mismatch",
+                          "too_large",
+                          "unreadable"
+                        ],
+                        "description": "What the run's own sidecar read of the document (PR 15, A6): `verified` (the bytes hash to the digest and parse as an `empirica.hitl/1` document), `missing` (nothing is there), `mismatch` (other bytes at the digest's name), `too_large` (over the read cap, refused before reading), `unreadable` (a decode or parse failure, or a hostile or damaged read)."
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "description": "The absolute sidecar path the status was read at."
+                      },
+                      "body": {
+                        "oneOf": [
+                          {
+                            "type": "null"
+                          },
+                          {
+                            "$ref": "#/$defs/hitlDocument"
+                          }
+                        ],
+                        "description": "The parsed `empirica.hitl/1` document itself, only beside `status: verified`."
+                      }
+                    },
+                    "allOf": [
+                      {
+                        "if": {
+                          "properties": {"status": {"const": "verified"}},
+                          "required": ["status"]
+                        },
+                        "then": {
+                          "properties": {"body": {"$ref": "#/$defs/hitlDocument"}}
+                        }
+                      },
+                      {
+                        "if": {
+                          "properties": {"status": {"not": {"const": "verified"}}},
+                          "required": ["status"]
+                        },
+                        "then": {
+                          "properties": {"body": {"const": null}}
+                        }
+                      }
+                    ]
+                  }
+                ],
+                "description": "The HITL document the human was shown against this decision (ADR-0072, PR 15): the same document the hosts' forms bind, resolved by the observer at each /api/run."
               },
               "effect": {
                 "enum": [
@@ -880,7 +954,7 @@
           }
         }
       ],
-      "description": "Every answer a human gave (core.observer.decisions): configuration receipts from a dialog, then confirmations and items left for later in history order. Null when not read."
+      "description": "Every answer a human gave (core.observer.decisions): configuration receipts from a dialog - each naming its plan revision, plus, unless a later answer superseded it, the one ask still presented and unanswered - then confirmations and items shown with no answer recorded, in history order. Every row that records a presentation carries its bound document (ADR-0072, PR 15), and `later` reads \"not answered\" (operator finding F3). Null when not read."
     },
     "row": {
       "$ref": "https://siffran.dev/contracts/empirica-ui-view/v1/row.schema.json#/$defs/row",
@@ -1011,6 +1085,67 @@
     "digest": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "hitlDocument": {
+      "oneOf": [
+        {"type": "object",
+         "required": ["schema", "kind", "run_id", "question", "governance_state", "plan_revision", "proposal_digest", "goal", "rationale", "rationale_source", "control_mode", "budgets", "context_when_shown"],
+         "properties": {
+           "schema": {"const": "empirica.hitl/1"},
+           "kind": {"const": "configuration"},
+           "run_id": {"type": "string", "minLength": 1},
+           "question": {"enum": ["approve", "confirm_amendment"]},
+           "governance_state": {"type": "string", "minLength": 1},
+           "plan_revision": {"type": "integer", "minimum": 1},
+           "proposal_digest": {"$ref": "#/$defs/digest"},
+           "goal": {"type": "string", "minLength": 1},
+           "rationale": {"type": ["string", "null"]},
+           "rationale_source": {"type": "string", "minLength": 1},
+           "control_mode": {"type": "string", "minLength": 1},
+           "budgets": {"type": "array", "minItems": 3, "items": {
+             "type": "object",
+             "required": ["key", "label", "short", "help", "value", "used", "minimum", "maximum"],
+             "properties": {
+               "key": {"type": "string", "minLength": 1},
+               "label": {"type": "string", "minLength": 1},
+               "short": {"type": "string", "minLength": 1},
+               "help": {"type": "string", "minLength": 1},
+               "value": {"type": "integer", "minimum": 0},
+               "used": {"type": "integer", "minimum": 0},
+               "minimum": {"type": "integer", "minimum": 0},
+               "maximum": {"type": "integer", "minimum": 0}}}},
+           "context_when_shown": {"type": "object"}},
+         "description": "The configuration kind (`core.hitl.configuration_document`): the dialog a host UI shows for approve-run-configuration and confirm-edited forms."},
+        {"type": "object",
+         "required": ["schema", "kind", "run_id", "key", "records", "claims"],
+         "properties": {
+           "schema": {"const": "empirica.hitl/1"},
+           "kind": {"const": "evidence"},
+           "run_id": {"type": "string", "minLength": 1},
+           "key": {"$ref": "#/$defs/digest"},
+           "records": {"type": "array", "items": {
+             "type": "object",
+             "required": ["record_id", "claim_id", "claim_text", "outcome", "source_kind", "source_ref", "citation", "verification_class", "claim_digest"],
+             "properties": {
+               "record_id": {"type": "string", "minLength": 1},
+               "claim_id": {"type": "string", "minLength": 1},
+               "claim_text": {"type": "string", "minLength": 1},
+               "outcome": {"enum": ["supporting", "refuting"]},
+               "source_kind": {"type": "string", "minLength": 1},
+               "source_ref": {"type": "string", "minLength": 1},
+               "citation": {"type": "string", "minLength": 1},
+               "verification_class": {"type": "string", "minLength": 1},
+               "claim_digest": {"$ref": "#/$defs/digest"}}}},
+           "claims": {"type": "array", "items": {
+             "type": "object",
+             "required": ["claim_id", "claim_digest", "text"],
+             "properties": {
+               "claim_id": {"type": "string", "minLength": 1},
+               "claim_digest": {"$ref": "#/$defs/digest"},
+               "text": {"type": "string", "minLength": 1}}}}},
+         "description": "The evidence kind (`core.hitl.evidence_document`): the end-of-pass batch or the terminal consent (whose terminal variant carries the `terminal` member beside empty rows)."}
+      ],
+      "description": "A real `empirica.hitl/1` document (ADR-0072, PR 15, A7): each alternative is a complete member set the core renders - so the UI's renderer branches on `kind` without re-deriving anything - while novel members stay allowed, so a plugin bump never stales an old sheet (the served body's owner is the plugin, not this schema)."
     },
     "genericSpikeProof": {
       "type": "object",

@@ -4,7 +4,7 @@
 // and the detail in one /api/run answer) and decides nothing; where the sheet has not arrived it says so instead of showing
 // less as if there were less. The core's sentences and the session's paths appear here and nowhere else.
 import enums from "../../enums.json" with { type: "json" };
-import { ago, clip, count, esc, joined, num, plain, t, when } from "../core/element.js";
+import { ago, clip, count, esc, joined, num, plain, stateHtml, t, when } from "../core/element.js";
 import { claimsHtml, droppedHtml } from "./claims.js";
 import { auditHtml, chip, claimLink, fact, link, list, progress, section, sessionContextHtml, sessionHtml, whoWhere } from "./parts.js";
 import { changedHtml, historyHtml } from "./trail.js";
@@ -97,11 +97,91 @@ function decidedHtml(d, { row, href }) {
   return d.plan === null ? "" : `<span class="text-xs text-muted-foreground">${t("decision.plan", { plan: d.plan })}</span>`;
 }
 
-/** Every answer a human gave: what was asked, the answer and its effect as the core records it, and what it decided. */
+/** Which document a decision link names, resolved over the sheet's own rows (PR 15, amendment A8): the link's id
+ * is the bound document's digest or its own short form - the compact hex a link writes - and every row that shares
+ * that document (a batch answers several asks against one binding) is named by it. Two distinct documents sharing
+ * the short form expand none: the decisions section opens and no row is claimed (an ambiguous link names nothing).
+ * A link that names no document on the sheet does the same. */
+const pointed = (ctx, decisions) => {
+  if (!ctx.decision) return null;
+  const named = /^sha256:[0-9a-f]+$/.test(ctx.decision) ? ctx.decision : `sha256:${ctx.decision}`;
+  if (!/^sha256:[0-9a-f]{12,64}$/.test(named)) return null;
+  const documents = [...new Set(decisions.filter((d) => d.document?.digest?.startsWith(named))
+    .map((d) => d.document.digest))];
+  return documents.length === 1 ? documents[0] : null;
+};
+
+/** The fact rows a document body names: its discriminator, its goal, the plan revision and the proposal it binds. */
+function documentFacts(body) {
+  const parts = [];
+  if (body.question !== undefined) parts.push(fact(t("document.question"), t(`document.question.${body.question}`)));
+  if (body.goal !== undefined) parts.push(fact(t("document.goal"), `<ev-more text="${body.goal}"></ev-more>`));
+  if (body.rationale) parts.push(fact(t("document.rationale"), `<ev-more text="${body.rationale}"></ev-more>`));
+  if (body.plan_revision !== undefined) parts.push(fact(t("document.plan"), num(body.plan_revision)));
+  if (body.proposal_digest !== undefined) parts.push(fact(t("document.proposal"), `<code class="break-all font-mono text-xs">${body.proposal_digest}</code>`));
+  if (body.run_id !== undefined) parts.push(fact(t("document.run_id"), `<code class="break-all font-mono text-xs">${body.run_id}</code>`));
+  if (body.key !== undefined) parts.push(fact(t("document.key"), `<code class="break-all font-mono text-xs">${body.key}</code>`));
+  return parts.join("");
+}
+
+/** The ceilings as the document showed them, with the amendment's was-values when it confirmed one. */
+function budgetRows(body) {
+  const rows = body.budgets ?? [];
+  return `<ul class="flex flex-col gap-3xs">${rows.map((row) => {
+    const was = body.amendment ? body.amendment.budgets[row.key] : null;
+    return `<li class="flex flex-wrap items-baseline gap-xs"><span class="text-s">${row.label}</span><span class="text-xs text-muted-foreground">${joined(num(row.value),
+      was ? t("document.budget.was", { was: num(was.value) }) : "")}</span></li>`;
+  }).join("")}</ul>`;
+}
+
+/** What the human read in the document: only the members the core renders, each with its own label (the core
+ * display-escaped the text at render; no re-escaping here, and nothing derived - ADR-0072's exact bytes). */
+function documentBodyHtml(body) {
+  const common = documentFacts(body);
+  if (body.kind === "configuration")
+    return `<div class="flex flex-col gap-s">${common ? `<dl class="flex flex-col gap-3xs">${common}</dl>` : ""}${body.budgets ? budgetRows(body) : ""}</div>`;
+  const parts = [];
+  if (body.terminal) {
+    parts.push(fact(t("document.terminal"), stateHtml("run", body.terminal.status)));
+    if (body.terminal.residuals?.length) parts.push(fact(t("document.residuals"), list(body.terminal.residuals.map((r) => `<span class="text-s"><ev-more text="${r.required}"></ev-more></span>`))));
+  }
+  if (body.claims?.length) parts.push(fact(t("document.claims"), list(body.claims.map((c) => `<span class="text-s">${c.text}</span>`))));
+  if (body.records?.length) parts.push(fact(t("document.records"), list(body.records.map((r) =>
+    `<span class="flex flex-col gap-3xs"><span class="text-s font-medium">${r.claim_text}</span>`
+    + `<code class="break-all font-mono text-xs">${r.source_ref}</code>`
+    + (r.citation ? `<blockquote class="border-l-2 border-border pl-s"><ev-more text="${r.citation}"></ev-more></blockquote>` : "")
+    + `<span class="text-xs text-muted-foreground">${t("document.record.verified_as", { class: r.verification_class })}</span></span>`))));
+  return `<div class="flex flex-col gap-s">${common ? `<dl class="flex flex-col gap-3-xs">${common}</dl>` : ""}${parts.join("") ? `<dl class="flex flex-col gap-3xs">${parts.join("")}</dl>` : ""}</div>`;
+}
+
+/** The decision's immutable document, as the run's own store reads it now (PR 15, operator finding F2): the honest
+ * status first (a body only beside `verified` - the contract couples them), the digest and the absolute path a reader
+ * can ask for, and - only when the store verified the bytes against the digest - the very form the host showed the
+ * human, worded by the document's own members. A decision link (`?decision=`) naming this digest starts the
+ * disclosure open, so a link finds the form it linked to. */
+function documentHtml(d, ctx, pointed_at) {
+  const doc = d.document;
+  if (doc === null) return "";
+  const open = pointed_at !== null && doc.digest === pointed_at;
+  const contents = doc.body === null
+    ? `<p class="text-s text-muted-foreground">${t(`document.${doc.status}.note`)}</p>`
+    : documentBodyHtml(doc.body);
+  return `<details class="text-xs" data-decision-document ${open ? "open" : ""}>
+    <summary class="cursor-pointer break-all text-muted-foreground">${stateHtml("document", doc.status, "glyph")} <span>${t("decision.document")}</span></summary>
+    <div class="flex min-w-0 flex-col gap-3xs pt-xs">${contents}
+      <div class="pt-3xs text-muted-foreground">${t("decision.document.footer")}</div>
+      <div class="flex flex-wrap gap-s"><ev-copy text="${doc.digest}" label="decision.document.digest"></ev-copy><ev-copy text="${doc.path}" label="decision.document.path"></ev-copy></div>
+    </div>
+  </details>`;
+}
+
+/** Every answer a human gave: what was asked, the answer and its effect as the core records it, what it decided,
+ * and - what the human was shown against it - the decision's immutable document beside the row (PR 15). */
 function decisionsHtml(decisions, ctx) {
   if (decisions === null) return `<p class="text-s text-muted-foreground">${t("decisions.unread")}</p>`;
   if (!decisions.length) return `<p class="text-s text-muted-foreground">${t("decisions.none")}</p>`;
-  return list(decisions.map((d) => `<span class="flex flex-col gap-3xs" data-decision><span class="flex flex-wrap items-center gap-xs"><span class="text-s font-medium">${t(`ask.${d.asked}`)}</span>${chip("answer", d.answer)}<span class="text-xs text-muted-foreground">${joined(t(`effect.${d.effect}`), ago(d.at, ctx.now))}</span></span>${decidedHtml(d, ctx)}</span>`));
+  const pointed_at = pointed(ctx, decisions);
+  return list(decisions.map((d) => `<span class="flex flex-col gap-3xs" data-decision ${pointed_at !== null && d.document?.digest === pointed_at ? "data-decision-match" : ""}><span class="flex flex-wrap items-center gap-xs"><span class="text-s font-medium">${t(`ask.${d.asked}`)}</span>${chip("answer", d.answer)}<span class="text-xs text-muted-foreground">${joined(t(`effect.${d.effect}`), ago(d.at, ctx.now))}</span></span>${decidedHtml(d, ctx)}${documentHtml(d, ctx, pointed_at)}</span>`));
 }
 
 /** The attempts at this run side by side: only published values are set next to each other; whether an attempt is a retry of
@@ -150,7 +230,7 @@ export function sheetHtml(ctx) {
     ${section("audit", t("audit.title"), auditsHtml(ctx), { count: detail?.audits ? num(detail.audits.length) : null })}
     ${section("claims", t("claims.title"), claims, { count: row.claims ? num(row.claims.length) : null })}
     ${section("dropped", t("dropped.title"), dropped === undefined ? loading(ctx) : droppedHtml(dropped, ctx.now), { count: dropped ? num(dropped.length) : null, open: Boolean(dropped?.length) })}
-    ${section("decisions", t("decisions.title"), detail ? decisionsHtml(detail.decisions, ctx) : loading(ctx), { count: detail?.decisions ? num(detail.decisions.length) : null, open: false })}
+    ${section("decisions", t("decisions.title"), detail ? decisionsHtml(detail.decisions, ctx) : loading(ctx), { count: detail?.decisions ? num(detail.decisions.length) : null, open: Boolean(ctx.decision) })}
     ${section("attempts", t("attempts.title"), attemptsHtml(ctx), { count: ctx.attempts.length > 1 ? num(ctx.attempts.length) : null, open: ctx.attempts.length > 1 })}
     ${detail?.steps ? section("history", t("history.title"), `${changed}${historyHtml(ctx)}`, { count: count("history.count", detail.steps.length), open: false }) : ""}
     ${governanceHtml(ctx)}

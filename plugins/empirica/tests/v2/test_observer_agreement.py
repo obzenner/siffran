@@ -501,6 +501,53 @@ UNOBSERVED = {"unobserved_with_dialog", "unobserved_without_dialog", "unobserved
 LIMIT = {"evidence_interaction_limit"}
 
 
+class ServedDocumentAgreementTests(unittest.TestCase):
+    """PR 15 (operator finding F2): the served ``document`` members are the owners' own bindings -
+    every row names the ``document_digest`` the core recorded for that presentation (governance
+    receipts, presentation and confirmation artifacts), and the body served beside a verified
+    document is what the human was shown, pinned byte for byte: re-rendering it gives the exact
+    bound text, and its digest is the digest the row names. A sheet read twice answers the same."""
+
+    def test_the_served_body_re_renders_byte_for_byte_to_its_recorded_digest(self):
+        b = _Builder()
+        run = b.begin("atlas", "s-docs", "Show the document the human decided.", _graph(
+            "C0", [("C0", "ordinary", "The export reads one documented path."),
+                   ("C1", "ordinary", "The nightly log shows no other read.")], [("C0", "C1")]))
+        b.research(run, "C0", ref="docs/path.md")
+        b.cite(run, "C1", "runtime", "nightly log", "0 reads outside the index",
+               spike_unavailable="Only runs nightly.")
+        b.evaluate(run, "report_convergence")
+        batch = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["confirmation_batch"]
+        pair = b.drv.trusted_evidence_presentation(
+            run, {"run_id": run, "receipt_id": "bound-pair", "key": batch["key"],
+                  "document_digest": None})["result"]["document"]
+        b.publish_document(run, pair)
+        b.present_and_answer(run, "pair-answered", [
+            {"subject": "research", "artifact_id": b.record_ids(run)["C1"], "outcome": "confirm"}])
+        from application.location import decode_handle
+        from application.observer import run_key
+        from core import hitl as core_hitl
+        key = run_key(decode_handle(run))
+        observer = Observer(DriverSource(b.store))
+        sheet = observer.sheet(key)
+        row = next(d for d in sheet["decisions"] if d["asked"] == "confirm_source")
+        document = row["document"]
+        self.assertEqual((document["digest"], document["status"]), (pair["digest"], "verified"))
+        self.assertEqual(core_hitl.render(document["body"]).decode("utf-8"), pair["text"],
+                         "the served body re-renders to the exact bytes the host bound")
+        self.assertEqual(core_hitl.document_digest(document["body"]), document["digest"])
+        self.assertEqual(document["body"]["kind"], "evidence", document["body"]["schema"])
+        # each configuration row of the same sheet names the digest its own receipt recorded
+        # (ADR-0072's binding, PR 07) - the reader is never without the identity it can ask for
+        state = b.drv._runs.read(decode_handle(run)).value
+        recorded = {r["document_digest"] for r in state["governance"]["receipts"]}
+        configured = [d for d in sheet["decisions"] if d["plan"] is not None]
+        self.assertTrue(configured)
+        self.assertTrue({d["document"]["digest"] for d in configured} <= recorded)
+        # a sheet read twice answers the same (no read disturbs the store it read)
+        self.assertEqual(observer.sheet(sheet["row"]["key"]), sheet)
+
+
 class ObserverAgreementTests(unittest.TestCase):
     def _read(self, b, run):
         observer = Observer(DriverSource(b.store))

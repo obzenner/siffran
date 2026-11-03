@@ -10,6 +10,7 @@
 //   ?since=EPOCH       runs updated since this moment (the calendar's day)
 //   ?q=TEXT            the server's search (goal, claim text, project, session)
 //   ?run=ID&claim=ID   the open run (its compact id) and the claim opened in it
+//   ?decision=ID       the decision row whose bound document a link names (its digest's short form or full id)
 //   ?words=1           words beside every glyph
 
 import catalogue from "../catalogue.json" with { type: "json" };
@@ -26,9 +27,12 @@ export function parse(params, defaults = { period: catalogue.default_period }) {
   const period = PERIODS.includes(params.get("period")) ? params.get("period") : defaults.period;
   const since = /^\d+$/.test(params.get("since") ?? "") ? Number(params.get("since")) : null;
   const hl = enums.flag.includes(params.get("hl")) ? params.get("hl") : null;
-  const place = { view, period, since, q: (params.get("q") ?? "").trim(), run: params.get("run") || null, claim: null, words: params.get("words") === "1",
-    zoom: params.get("zoom") || null, hl, filters: {} };
-  if (place.run) place.claim = params.get("claim") || null;
+  const place = { view, period, since, q: (params.get("q") ?? "").trim(), run: params.get("run") || null, claim: null, decision: null,
+    words: params.get("words") === "1", zoom: params.get("zoom") || null, hl, filters: {} };
+  if (place.run) {
+    place.claim = params.get("claim") || null;
+    place.decision = params.get("decision") || null;  // a decision link without its run is nothing
+  }
   for (const name of FILTERS) if (params.get(name)) place.filters[name] = params.get(name);
   return place;
 }
@@ -42,6 +46,7 @@ export function write(params, place, defaults = { period: catalogue.default_peri
   set("q", place.q);
   set("run", place.run);
   set("claim", place.run ? place.claim : null);
+  set("decision", place.run ? place.decision : null);
   set("words", place.words ? "1" : null);
   set("zoom", place.zoom);
   set("hl", place.hl);
@@ -52,7 +57,7 @@ export function write(params, place, defaults = { period: catalogue.default_peri
 /** The link to `place` from `base` (the search of the current URL, kept for what the place does not name, such as the data source). */
 export function href(place, base = new URLSearchParams(), defaults) {
   const params = new URLSearchParams(base);
-  for (const k of ["view", "period", "since", "q", "run", "claim", "words", "zoom", "hl", ...FILTERS]) params.delete(k);
+  for (const k of ["view", "period", "since", "q", "run", "claim", "decision", "words", "zoom", "hl", ...FILTERS]) params.delete(k);
   write(params, place, defaults);
   const text = params.toString();
   return text ? `?${text}` : "?";
@@ -61,7 +66,7 @@ export function href(place, base = new URLSearchParams(), defaults) {
 /** `place` with some parts changed. A filter change leaves the open run; a list the person did not ask for is the work view. */
 export const move = (place, changes) => ({ ...place, ...changes, filters: { ...place.filters, ...(changes.filters ?? {}) } });
 /** The work view, filtered by `filters` (the rest of `place` kept), nothing open. */
-export const work = (place, filters = {}) => ({ ...place, view: "work", q: "", run: null, claim: null, filters });
+export const work = (place, filters = {}) => ({ ...place, view: "work", q: "", run: null, claim: null, decision: null, filters });
 
 /** The runs query of `place`: its filters, and `since` when a calendar day was chosen. The period is not here: it is the value
  * strip's window, and a list counted in it would disagree with the rail beside it. */
@@ -79,8 +84,8 @@ export function windowOf(place, nowMs) {
 export const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
 /** Where Esc leads: an open claim to its run, a run to the list (in the Universe, to the island it sits on), an island to the
  * whole store. */
-export const up = (place) => (place.claim ? { ...place, claim: null } : place.run ? { ...place, run: null }
-  : place.view === HOME && place.zoom ? { ...place, zoom: null } : place);
+export const up = (place) => (place.decision ? { ...place, decision: null } : place.claim ? { ...place, claim: null }
+  : place.run ? { ...place, run: null } : place.view === HOME && place.zoom ? { ...place, zoom: null } : place);
 /** The same place on the switch's other side: only the view changes, so the Universe's zoom, its highlight and the open run
  * come back when the person switches back (and Back restores either). */
 export const switchTo = (place, view) => ({ ...place, view });

@@ -6,14 +6,14 @@ import { href, move, parse, query, same, switchTo, up, windowOf, work, write } f
 const P = (s) => new URLSearchParams(s);
 test("a place round-trips through its URL, with defaults left out", () => {
   const place = parse(P("view=work&standing=needs_human&project=p1&period=7&since=100&q=tile%20index&run=abc&claim=C2&words=1"));
-  assert.deepEqual(place, { view: "work", period: "7", since: 100, q: "tile index", run: "abc", claim: "C2", words: true, zoom: null, hl: null, filters: { standing: "needs_human", project: "p1" } });
+  assert.deepEqual(place, { view: "work", period: "7", since: 100, q: "tile index", run: "abc", claim: "C2", decision: null, words: true, zoom: null, hl: null, filters: { standing: "needs_human", project: "p1" } });
   assert.deepEqual(parse(write(new URLSearchParams(), place)), place);
   assert.equal(href(parse(P(""))), "?");
   assert.equal(href(parse(P("")), P("data=demo")), "?data=demo");
 });
 test("nonsense is a default, never an exception; a claim needs a run", () => {
   const place = parse(P("view=zzz&period=9&since=abc&claim=C1&standing="));
-  assert.deepEqual(place, { view: "universe", period: "30", since: null, q: "", run: null, claim: null, words: false, zoom: null, hl: null, filters: {} });
+  assert.deepEqual(place, { view: "universe", period: "30", since: null, q: "", run: null, claim: null, decision: null, words: false, zoom: null, hl: null, filters: {} });
 });
 test("the list's query is its filters and a chosen day; the period is the strip's window only", () => {
   const place = parse(P("view=work&standing=proven&period=7"));
@@ -53,4 +53,22 @@ test("Esc in the Universe steps out: a claim, then the run, then the island, the
   assert.deepEqual([b.claim, b.run, c.run, c.zoom, d.zoom], [null, "r", null, "p", null]);
   assert.ok(same(up(d), d));
   assert.equal(up(parse(P("view=work&zoom=p"))).zoom, "p", "the work view's Esc does not move the Universe it came from");
+});
+
+// PR 15: a decision deep-link opens the document the host bound - the id names the document's digest.
+test("a decision names the document it links to; it never stands without its run", () => {
+  const place = parse(P("run=abc&claim=C2&decision=0123456789ab"));
+  assert.equal(place.decision, "0123456789ab");
+  assert.deepEqual(parse(write(new URLSearchParams(), place)), place, "round-trip");
+  assert.equal(parse(P("decision=0123456789ab")).decision, null, "no run, no decision");
+  assert.equal(href(place).includes("decision=0123456789ab"), true, "the link carries it");
+  assert.equal(href(parse(P("run=abc"))).includes("decision="), false, "defaults stay out of links");
+});
+test("moving, Esc and the work view leave the decision behind with its run", () => {
+  const place = parse(P("run=abc&claim=C2&decision=0123456789ab"));
+  assert.equal(up(place).decision, null, "Esc closes the decision back to its sheet");
+  assert.equal(up(place).claim, "C2");
+  assert.equal(up(place).run, "abc");
+  const w = work(place, { ask: "decide_claim" });
+  assert.equal(w.decision, null, "the work list shows runs, not one decision");
 });

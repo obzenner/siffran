@@ -1,13 +1,13 @@
 {
-  "$description": "How many words a person reads at the fixed fixtures (tests/views.test.mjs, WORD BUDGET): the inbox home (rail, strip, calendar, five rows per group) and every fixture run's sheet, summed. A change may add at most 10% before the guard fails; raise a number only in a reviewed change. `p2` and `p3` are what P2 and P3 said, for the record. G7b re-baselines the sheet for explicit generic request/result labels, full copyable identities, and the multi-container fixture while keeping the total below P3.",
-  "inbox": 328,
-  "sheet": 3500,
-  "p2": {
-    "inbox": 400,
-    "sheet": 8488
-  },
-  "p3": {
-    "inbox": 366,
-    "sheet": 6031
-  }
+ "$description": "How many words a person reads at the fixed fixtures (tests/views.test.mjs, WORD BUDGET): the inbox home (rail, strip, calendar, five rows per group) and every fixture run's sheet, summed. A change may add at most 10% before the guard fails; raise a number only in a reviewed change. `p2` and `p3` are what P2 and P3 said, for the record. G7b re-baselines the sheet for explicit generic request/result labels, full copyable identities, and the multi-container fixture while keeping the total below P3. PR 15 re-baselines `sheet` for the decisions' bound documents (operator finding F2): each row names its HITL document, and a verified one shows the exact form the human saw, statuses honest, bodies only beside verified.",
+ "inbox": 328,
+ "sheet": 4400,
+ "p2": {
+  "inbox": 400,
+  "sheet": 8488
+ },
+ "p3": {
+  "inbox": 366,
+  "sheet": 6031
+ }
 }

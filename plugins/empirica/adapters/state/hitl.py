@@ -100,6 +100,15 @@ class DocumentMismatch(OSError):
     """
 
 
+class DocumentTooLarge(OSError):
+    """A document file whose own ``fstat`` size exceeds the caller's read cap (PR 15, A6).
+
+    The bounded read refuses it before reading a byte: an over-cap document is named ``too_large``
+    to the reader, never truncated and never read whole. The bytes are not trusted for the digest
+    that is asked about until they fit the cap, so the status is honest without reading them.
+    """
+
+
 class HardLinkUnsupported(OSError):
     """This filesystem cannot hard-link a temp file to the document's name.
 
@@ -192,12 +201,17 @@ def _name_of(document_digest: str) -> str:
     raise ValueError(f"not a document_digest: {document_digest!r}")
 
 
-def _read_regular_bytes(path: Path) -> bytes | None:
+def _read_regular_bytes(path: Path, cap: int | None = None) -> bytes | None:
     """The bytes of a regular file at ``path``, opened no-follow and without blocking, ``None``
     when nothing is there. The regular-file requirement is answered by the open descriptor's own
     ``fstat`` — not by a path that a racer could swap — so a symlink is refused
     (:class:`fsio.SymlinkRefused`), and a FIFO or other special file is refused promptly
-    (:class:`DocumentMismatch`), never blocked on (review-1 finding 16)."""
+    (:class:`DocumentMismatch`), never blocked on (review-1 finding 16).
+
+    ``cap`` (PR 15, A6) bounds the read itself: a file whose own ``fstat`` size is over the cap
+    is refused as too large before one byte is read (:class:`DocumentTooLarge`), and the loop
+    then reads at most ``cap + 1`` bytes — the ``+1`` so a file that grew between ``fstat`` and
+    the loop is still bounded, while a file that shrank reads whole with no error."""
     try:
         fd = os.open(str(path), _READ_FLAGS)
     except FileNotFoundError:
@@ -207,14 +221,20 @@ def _read_regular_bytes(path: Path) -> bytes | None:
             raise fsio.SymlinkRefused(f"refusing symlinked document path: {path}") from exc
         raise
     try:
-        if not stat.S_ISREG(os.fstat(fd).st_mode):
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode):
             raise DocumentMismatch(f"not a regular document file: {path}")
+        if cap is not None and info.st_size > cap:
+            raise DocumentTooLarge(f"document file over the read cap: {path}")
+        limit = None if cap is None else cap + 1
         chunks: list[bytes] = []
         while True:  # a regular file: the loop ends at end of file, never a wait
-            chunk = os.read(fd, 1 << 20)
+            chunk = os.read(fd, 1 << 20 if limit is None else min(1 << 20, limit - sum(len(c) for c in chunks)))
             if not chunk:
                 return b"".join(chunks)
             chunks.append(chunk)
+            if limit is not None and sum(len(c) for c in chunks) > limit:
+                raise DocumentTooLarge(f"document file grew over the read cap: {path}")
     finally:
         os.close(fd)
 
@@ -331,6 +351,32 @@ class HitlDocuments:
         if core_hitl.digest(existing) != document_digest:
             raise DocumentMismatch(f"the bytes at {final} do not hash to their own digest")
         return existing
+
+    def read_bounded(self, key: RunKey, document_digest: str, cap: int) -> tuple[str, bytes | None]:
+        """The observer's bounded read of one decision's document (PR 15, operator finding F2;
+        A6): ``(status, bytes)`` — ``missing`` when nothing is there, ``mismatch`` when bytes are
+        there but are not that digest's content, ``too_large`` when the file's own ``fstat``
+        size is over ``cap`` (refused before reading), else ``verified`` with the whole bytes.
+
+        The hostile-input rules are the write path's: no-follow and non-blocking reads only,
+        a regular file by its own descriptor's ``fstat`` (a FIFO or other special file is refused
+        promptly loudly, never blocked on), a symlink at the document path refused, and — the
+        read path's own addition — a symlink planted at the run's ``gen-<n>`` or ``hitl``
+        directory refused with ``lstat`` exactly as :meth:`_prepare_dir` refuses it when writing.
+        A read creates nothing. Malformed input raises as ``read`` does."""
+        for step in (self._runs.generation_dir(key), self.dir(key)):
+            if os.path.lexists(step) and stat.S_ISLNK(os.lstat(step).st_mode):
+                raise fsio.SymlinkRefused(f"refusing symlinked directory: {step}")
+        final = self.path(key, document_digest)  # validates the digest before anything is opened
+        try:
+            existing = _read_regular_bytes(final, cap)  # no-follow, no-block, regular, capped
+        except DocumentTooLarge:
+            return "too_large", None
+        if existing is None:
+            return "missing", None
+        if core_hitl.digest(existing) != document_digest:
+            return "mismatch", None
+        return "verified", existing
 
     # --- shared internals ------------------------------------------------------
 

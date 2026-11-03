@@ -189,6 +189,17 @@ async function sheet(A) {
   check(`sheet ${tag}: Esc closes the claim, then the run`, !afterOne.includes("claim=") && afterOne.includes("run=") && !(await A.url()).includes("run=") && (await A.count("ev-sheet h1")) === 0, [afterOne, await A.url()]);
   await A.go(`&run=${id}&claim=${claim.id}`);
   check(`sheet ${tag}: opening the link restores the run and its claim`, (await E(`document.querySelector('[data-claim-row="${claim.id}"] details').open`)) && (await A.count("ev-sheet h1")) === 1, null);
+  const decided = (detail.decisions ?? []).find((d) => d.document);
+  if (decided) {
+    await A.go(`&run=${id}&decision=${decided.document.digest.slice(7, 19)}`);
+    await P.sleep(350);
+    check(`sheet ${tag}: a decision link opens the decisions section on the exact document the host showed (F2)`,
+      (await A.url()).includes("decision=") && (await E(`(() => { const row = document.querySelector("[data-decision-match]"); return !!row && !!row.querySelector("details[data-decision-document]")?.open; })()`)),
+      await A.url());
+    check(`sheet ${tag}: the document's own words are on the page`, /What you were shown/.test(await A.text("ev-sheet")), null);
+    await P.key("Escape"); await P.sleep(350);
+    check(`sheet ${tag}: Esc closes the opened decision back to its sheet`, !(await A.url()).includes("decision=") && (await A.url()).includes(`run=${id}`), await A.url());
+  }
   P.errors.length = 0;
 }
 

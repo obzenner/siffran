@@ -137,6 +137,12 @@
     "asked": "approve_configuration",
     "at": 1790601960.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:c342c67257003230c925be4d1dd8ed6c820e7fd54511e2c42e1296f33c825d41",
+     "path": "/tmp/empirica-home/projects/s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/runs/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/gen-1/hitl/c342c67257003230c925be4d1dd8ed6c820e7fd54511e2c42e1296f33c825d41.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -432,7 +438,79 @@
    }
   ],
   "contract": "empirica-ui-view/v1",
-  "decisions": [],
+  "decisions": [
+   {
+    "answer": "later",
+    "asked": "approve_configuration",
+    "at": 1790601540.0,
+    "claim": null,
+    "document": {
+     "body": {
+      "budgets": [
+       {
+        "help": "Passes the run may use",
+        "key": "max_passes",
+        "label": "Investigation passes",
+        "maximum": 1024,
+        "minimum": 1,
+        "short": "passes",
+        "used": 0,
+        "value": 8
+       },
+       {
+        "help": "Non-audit child agents",
+        "key": "max_spawns",
+        "label": "Child spawns",
+        "maximum": 128,
+        "minimum": 0,
+        "short": "spawns",
+        "used": 0,
+        "value": 1
+       },
+       {
+        "help": "Independent auditor launches",
+        "key": "max_audit_spawns",
+        "label": "Audit spawns",
+        "maximum": 128,
+        "minimum": 0,
+        "short": "audits",
+        "used": 0,
+        "value": 2
+       }
+      ],
+      "context_when_shown": {
+       "invocation": {
+        "audit_retrieval": [
+         "local",
+         "workspace"
+        ],
+        "delegation": false,
+        "host": "claude",
+        "interactive": true,
+        "signal": "v2 harness"
+       }
+      },
+      "control_mode": "deliberative",
+      "goal": "Choose the gravel grading for the north pit.",
+      "governance_state": "pending",
+      "kind": "configuration",
+      "plan_revision": 1,
+      "proposal_digest": "sha256:6d6615ec3c33346302ea4cf5bd9504ea5dfa6da4826fa617489d701438458776",
+      "question": "approve",
+      "rationale": "sized for the gating claims and one audit retry",
+      "rationale_source": "author_unverified",
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni0wYWU5MGNkYWNkYjQ5MjMwNTUzYTljNjQxMzdjMjJkMWI2MTQxODJhMDQzZmZkYzZhNmFlNjVhZjMwYzllZTE3IiwicyI6InMyNTYtOGEwMjZhMWM3MmNmZWIwZWNmNWQ1MWExN2E1NWU0YTFmMGQyNTBjYTMyNzQyZmVmODZjZDBjMTc4MmQ0ZDAwMyJ9:eEgSWE8U3OHkJqCxAguKMKMISQax8FM98CEt8cV8Z7s",
+      "schema": "empirica.hitl/1"
+     },
+     "digest": "sha256:127e79e70422b368e6705c51f220c1e150677eabc862be7292f7bc74b2e67d23",
+     "path": "/tmp/empirica-home/projects/s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/runs/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/gen-1/hitl/127e79e70422b368e6705c51f220c1e150677eabc862be7292f7bc74b2e67d23.json",
+     "status": "verified"
+    },
+    "effect": "none",
+    "plan": 1,
+    "source": null
+   }
+  ],
   "dropped": [],
   "goal": "Choose the gravel grading for the north pit.",
   "governance": {
@@ -691,6 +769,12 @@
     "asked": "approve_configuration",
     "at": 1790595600.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:993e90782b6a74d1e4d71b3c00c4891ec993aadd0a210e3cf48649ecadfff4e5",
+     "path": "/tmp/empirica-home/projects/s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/runs/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/gen-1/hitl/993e90782b6a74d1e4d71b3c00c4891ec993aadd0a210e3cf48649ecadfff4e5.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -1064,6 +1148,12 @@
     "asked": "approve_configuration",
     "at": 1790591400.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:64789a4c6d4d2d7aacca27ae509b8ad25d06d06c5bde077a470e57e45d30befe",
+     "path": "/tmp/empirica-home/projects/s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/runs/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/gen-1/hitl/64789a4c6d4d2d7aacca27ae509b8ad25d06d06c5bde077a470e57e45d30befe.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -1073,6 +1163,12 @@
     "asked": "consent_stop",
     "at": 1790591700.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:a1c44f03f1e48beb3869ce0588f012d7a34db28282de54a1dc01e7526e943b7f",
+     "path": "/tmp/empirica-home/projects/s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/runs/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/gen-1/hitl/a1c44f03f1e48beb3869ce0588f012d7a34db28282de54a1dc01e7526e943b7f.json",
+     "status": "missing"
+    },
     "effect": "run_ended",
     "plan": null,
     "source": null
@@ -1614,6 +1710,12 @@
     "asked": "approve_configuration",
     "at": 1790592180.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:ac58ba2eeb38e1f48b00d67693643cd84c543f8ad4da576406957fea0927e581",
+     "path": "/tmp/empirica-home/projects/s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/runs/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/gen-2/hitl/ac58ba2eeb38e1f48b00d67693643cd84c543f8ad4da576406957fea0927e581.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -1990,6 +2092,12 @@
     "asked": "approve_configuration",
     "at": 1790596260.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:4453c830a0fea39dde78208f3dd80280447bfd5cc3b714da38f4eaba0900d328",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/gen-1/hitl/4453c830a0fea39dde78208f3dd80280447bfd5cc3b714da38f4eaba0900d328.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -2325,6 +2433,12 @@
     "asked": "approve_configuration",
     "at": 1790587620.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:2b11b04912ccf9b4dacc72cec325976f86f0742576ef3485bdbb71250a880506",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/gen-1/hitl/2b11b04912ccf9b4dacc72cec325976f86f0742576ef3485bdbb71250a880506.json",
+     "status": "mismatch"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -2334,6 +2448,12 @@
     "asked": "consent_stop",
     "at": 1790587920.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:72096ac2edc3dcbd209f6939b0a4cae97d100d7f95a647edbeae6919e3a21c7c",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/gen-1/hitl/72096ac2edc3dcbd209f6939b0a4cae97d100d7f95a647edbeae6919e3a21c7c.json",
+     "status": "missing"
+    },
     "effect": "run_ended",
     "plan": null,
     "source": null
@@ -2871,6 +2991,12 @@
     "asked": "approve_configuration",
     "at": 1790586360.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:fb86c7ad0d228156b5a57d92218933aa8136647728a98e13b1ee6b77277e4673",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/gen-1/hitl/fb86c7ad0d228156b5a57d92218933aa8136647728a98e13b1ee6b77277e4673.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -3293,6 +3419,12 @@
     "asked": "approve_configuration",
     "at": 1790594460.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:64f36d39f1ef2de8d6157b82f7cc4c7a63933cf89664c387a7bec6319ddf4160",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/gen-1/hitl/64f36d39f1ef2de8d6157b82f7cc4c7a63933cf89664c387a7bec6319ddf4160.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -3874,6 +4006,12 @@
     "asked": "approve_configuration",
     "at": 1790593320.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:7ab3c42ff63753ae988b0bf879e5d86d2b14a593363814b5489ae42d92749396",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/gen-1/hitl/7ab3c42ff63753ae988b0bf879e5d86d2b14a593363814b5489ae42d92749396.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -3883,6 +4021,72 @@
     "asked": "decide_claim",
     "at": 1790593920.0,
     "claim": "C7",
+    "document": {
+     "body": {
+      "claims": [
+       {
+        "claim_digest": "sha256:2bcb3e04449c1d0947de67cfec47b9ff9833bccbe225e219f784431bdf8b20d2",
+        "claim_id": "C7",
+        "text": "Keep the old reader for one more release."
+       }
+      ],
+      "key": "sha256:212b0f94dd1622ca728e7572095624a8d934a39cf19104f21cb1801587ee7621",
+      "kind": "evidence",
+      "records": [
+       {
+        "citation": "readers must use the index",
+        "claim_digest": "sha256:c3af7602e8db24f0188613015799c0ff9abb10385192c65523a5abd88ca71fcc",
+        "claim_id": "C3",
+        "claim_text": "The published tile format allows only that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:7411f269f2b7493ab5c99caf2e88287ee6aa2f2126b61cea80284c606f806eaa",
+        "source_kind": "web",
+        "source_ref": "https://tiles.example.org/format#export",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "tile reads: 0 outside the index",
+        "claim_digest": "sha256:759c4fc201d541dbe7f8613502b0ad2811621a28c4223717b30b61de7776faad",
+        "claim_id": "C4",
+        "claim_text": "The nightly export log shows every tile read through it.",
+        "outcome": "supporting",
+        "record_id": "sha256:96a90b4e9001f3eebe0ebddf7df19890a28d87ce85adc68f0d82a4fe19f20be8",
+        "source_kind": "runtime",
+        "source_ref": "nightly export log, 2026-09-27",
+        "spike_unavailable": "The job only runs on the nightly cluster.",
+        "verification_class": "observed"
+       },
+       {
+        "citation": "direct tile reads are not available",
+        "claim_digest": "sha256:5c8990f3b53d3c1c40326c83b8e480efa9ed96032db69e5ae285d315650291c9",
+        "claim_id": "C5",
+        "claim_text": "The hosting provider's limits allow that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:71f8fc4422b89da996921e527dae8975756ce001dbb065690f404ea065f0bca7",
+        "source_kind": "web",
+        "source_ref": "https://provider.example.net/limits",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "no reads outside the index",
+        "claim_digest": "sha256:54c8edc11e620e07ca43fead55d8169811c6e6faf6b0ae87b3ee69242c6dd91e",
+        "claim_id": "C6",
+        "claim_text": "Last week's run reads no tile any other way.",
+        "outcome": "supporting",
+        "record_id": "sha256:0eb6aaf3e27a247c2866b795b7e2ce0b4fee50fbc90b6279de669747544fc552",
+        "source_kind": "runtime",
+        "source_ref": "export log, 2026-09-21",
+        "spike_unavailable": "The run is over and its inputs are gone.",
+        "verification_class": "observed"
+       }
+      ],
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni03YzgyNjAyNTAwODU3YWE2ZWQwY2YzOGM0YzNlNGVjNjQ1YmRjYWE4MmMwMGI5MTU1ZWIwOGJlMTAwYzc3OGE5IiwicyI6InMyNTYtZDlkZmU3ZTUyN2QxZGVjMDNhYmZiM2VlN2I2NTkzY2JlZTlhODVjMWRlOWFkZTg4MWE0Mzg4NTUxOWNhZTIxMSJ9:KkrMQWJ3jUFCtVexKRL1kTXpuotF04jhRGhzgn91ZPM",
+      "schema": "empirica.hitl/1"
+     },
+     "digest": "sha256:bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/gen-1/hitl/bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016.json",
+     "status": "verified"
+    },
     "effect": "none",
     "plan": null,
     "source": null
@@ -3892,6 +4096,72 @@
     "asked": "confirm_source",
     "at": 1790593920.0,
     "claim": "C5",
+    "document": {
+     "body": {
+      "claims": [
+       {
+        "claim_digest": "sha256:2bcb3e04449c1d0947de67cfec47b9ff9833bccbe225e219f784431bdf8b20d2",
+        "claim_id": "C7",
+        "text": "Keep the old reader for one more release."
+       }
+      ],
+      "key": "sha256:212b0f94dd1622ca728e7572095624a8d934a39cf19104f21cb1801587ee7621",
+      "kind": "evidence",
+      "records": [
+       {
+        "citation": "readers must use the index",
+        "claim_digest": "sha256:c3af7602e8db24f0188613015799c0ff9abb10385192c65523a5abd88ca71fcc",
+        "claim_id": "C3",
+        "claim_text": "The published tile format allows only that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:7411f269f2b7493ab5c99caf2e88287ee6aa2f2126b61cea80284c606f806eaa",
+        "source_kind": "web",
+        "source_ref": "https://tiles.example.org/format#export",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "tile reads: 0 outside the index",
+        "claim_digest": "sha256:759c4fc201d541dbe7f8613502b0ad2811621a28c4223717b30b61de7776faad",
+        "claim_id": "C4",
+        "claim_text": "The nightly export log shows every tile read through it.",
+        "outcome": "supporting",
+        "record_id": "sha256:96a90b4e9001f3eebe0ebddf7df19890a28d87ce85adc68f0d82a4fe19f20be8",
+        "source_kind": "runtime",
+        "source_ref": "nightly export log, 2026-09-27",
+        "spike_unavailable": "The job only runs on the nightly cluster.",
+        "verification_class": "observed"
+       },
+       {
+        "citation": "direct tile reads are not available",
+        "claim_digest": "sha256:5c8990f3b53d3c1c40326c83b8e480efa9ed96032db69e5ae285d315650291c9",
+        "claim_id": "C5",
+        "claim_text": "The hosting provider's limits allow that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:71f8fc4422b89da996921e527dae8975756ce001dbb065690f404ea065f0bca7",
+        "source_kind": "web",
+        "source_ref": "https://provider.example.net/limits",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "no reads outside the index",
+        "claim_digest": "sha256:54c8edc11e620e07ca43fead55d8169811c6e6faf6b0ae87b3ee69242c6dd91e",
+        "claim_id": "C6",
+        "claim_text": "Last week's run reads no tile any other way.",
+        "outcome": "supporting",
+        "record_id": "sha256:0eb6aaf3e27a247c2866b795b7e2ce0b4fee50fbc90b6279de669747544fc552",
+        "source_kind": "runtime",
+        "source_ref": "export log, 2026-09-21",
+        "spike_unavailable": "The run is over and its inputs are gone.",
+        "verification_class": "observed"
+       }
+      ],
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni03YzgyNjAyNTAwODU3YWE2ZWQwY2YzOGM0YzNlNGVjNjQ1YmRjYWE4MmMwMGI5MTU1ZWIwOGJlMTAwYzc3OGE5IiwicyI6InMyNTYtZDlkZmU3ZTUyN2QxZGVjMDNhYmZiM2VlN2I2NTkzY2JlZTlhODVjMWRlOWFkZTg4MWE0Mzg4NTUxOWNhZTIxMSJ9:KkrMQWJ3jUFCtVexKRL1kTXpuotF04jhRGhzgn91ZPM",
+      "schema": "empirica.hitl/1"
+     },
+     "digest": "sha256:bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/gen-1/hitl/bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016.json",
+     "status": "verified"
+    },
     "effect": "none",
     "plan": null,
     "source": "https://provider.example.net/limits"
@@ -3901,6 +4171,72 @@
     "asked": "confirm_source",
     "at": 1790593920.0,
     "claim": "C6",
+    "document": {
+     "body": {
+      "claims": [
+       {
+        "claim_digest": "sha256:2bcb3e04449c1d0947de67cfec47b9ff9833bccbe225e219f784431bdf8b20d2",
+        "claim_id": "C7",
+        "text": "Keep the old reader for one more release."
+       }
+      ],
+      "key": "sha256:212b0f94dd1622ca728e7572095624a8d934a39cf19104f21cb1801587ee7621",
+      "kind": "evidence",
+      "records": [
+       {
+        "citation": "readers must use the index",
+        "claim_digest": "sha256:c3af7602e8db24f0188613015799c0ff9abb10385192c65523a5abd88ca71fcc",
+        "claim_id": "C3",
+        "claim_text": "The published tile format allows only that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:7411f269f2b7493ab5c99caf2e88287ee6aa2f2126b61cea80284c606f806eaa",
+        "source_kind": "web",
+        "source_ref": "https://tiles.example.org/format#export",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "tile reads: 0 outside the index",
+        "claim_digest": "sha256:759c4fc201d541dbe7f8613502b0ad2811621a28c4223717b30b61de7776faad",
+        "claim_id": "C4",
+        "claim_text": "The nightly export log shows every tile read through it.",
+        "outcome": "supporting",
+        "record_id": "sha256:96a90b4e9001f3eebe0ebddf7df19890a28d87ce85adc68f0d82a4fe19f20be8",
+        "source_kind": "runtime",
+        "source_ref": "nightly export log, 2026-09-27",
+        "spike_unavailable": "The job only runs on the nightly cluster.",
+        "verification_class": "observed"
+       },
+       {
+        "citation": "direct tile reads are not available",
+        "claim_digest": "sha256:5c8990f3b53d3c1c40326c83b8e480efa9ed96032db69e5ae285d315650291c9",
+        "claim_id": "C5",
+        "claim_text": "The hosting provider's limits allow that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:71f8fc4422b89da996921e527dae8975756ce001dbb065690f404ea065f0bca7",
+        "source_kind": "web",
+        "source_ref": "https://provider.example.net/limits",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "no reads outside the index",
+        "claim_digest": "sha256:54c8edc11e620e07ca43fead55d8169811c6e6faf6b0ae87b3ee69242c6dd91e",
+        "claim_id": "C6",
+        "claim_text": "Last week's run reads no tile any other way.",
+        "outcome": "supporting",
+        "record_id": "sha256:0eb6aaf3e27a247c2866b795b7e2ce0b4fee50fbc90b6279de669747544fc552",
+        "source_kind": "runtime",
+        "source_ref": "export log, 2026-09-21",
+        "spike_unavailable": "The run is over and its inputs are gone.",
+        "verification_class": "observed"
+       }
+      ],
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni03YzgyNjAyNTAwODU3YWE2ZWQwY2YzOGM0YzNlNGVjNjQ1YmRjYWE4MmMwMGI5MTU1ZWIwOGJlMTAwYzc3OGE5IiwicyI6InMyNTYtZDlkZmU3ZTUyN2QxZGVjMDNhYmZiM2VlN2I2NTkzY2JlZTlhODVjMWRlOWFkZTg4MWE0Mzg4NTUxOWNhZTIxMSJ9:KkrMQWJ3jUFCtVexKRL1kTXpuotF04jhRGhzgn91ZPM",
+      "schema": "empirica.hitl/1"
+     },
+     "digest": "sha256:bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/gen-1/hitl/bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016.json",
+     "status": "verified"
+    },
     "effect": "none",
     "plan": null,
     "source": "export log, 2026-09-21"
@@ -3910,6 +4246,72 @@
     "asked": "confirm_source",
     "at": 1790593980.0,
     "claim": "C3",
+    "document": {
+     "body": {
+      "claims": [
+       {
+        "claim_digest": "sha256:2bcb3e04449c1d0947de67cfec47b9ff9833bccbe225e219f784431bdf8b20d2",
+        "claim_id": "C7",
+        "text": "Keep the old reader for one more release."
+       }
+      ],
+      "key": "sha256:212b0f94dd1622ca728e7572095624a8d934a39cf19104f21cb1801587ee7621",
+      "kind": "evidence",
+      "records": [
+       {
+        "citation": "readers must use the index",
+        "claim_digest": "sha256:c3af7602e8db24f0188613015799c0ff9abb10385192c65523a5abd88ca71fcc",
+        "claim_id": "C3",
+        "claim_text": "The published tile format allows only that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:7411f269f2b7493ab5c99caf2e88287ee6aa2f2126b61cea80284c606f806eaa",
+        "source_kind": "web",
+        "source_ref": "https://tiles.example.org/format#export",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "tile reads: 0 outside the index",
+        "claim_digest": "sha256:759c4fc201d541dbe7f8613502b0ad2811621a28c4223717b30b61de7776faad",
+        "claim_id": "C4",
+        "claim_text": "The nightly export log shows every tile read through it.",
+        "outcome": "supporting",
+        "record_id": "sha256:96a90b4e9001f3eebe0ebddf7df19890a28d87ce85adc68f0d82a4fe19f20be8",
+        "source_kind": "runtime",
+        "source_ref": "nightly export log, 2026-09-27",
+        "spike_unavailable": "The job only runs on the nightly cluster.",
+        "verification_class": "observed"
+       },
+       {
+        "citation": "direct tile reads are not available",
+        "claim_digest": "sha256:5c8990f3b53d3c1c40326c83b8e480efa9ed96032db69e5ae285d315650291c9",
+        "claim_id": "C5",
+        "claim_text": "The hosting provider's limits allow that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:71f8fc4422b89da996921e527dae8975756ce001dbb065690f404ea065f0bca7",
+        "source_kind": "web",
+        "source_ref": "https://provider.example.net/limits",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "no reads outside the index",
+        "claim_digest": "sha256:54c8edc11e620e07ca43fead55d8169811c6e6faf6b0ae87b3ee69242c6dd91e",
+        "claim_id": "C6",
+        "claim_text": "Last week's run reads no tile any other way.",
+        "outcome": "supporting",
+        "record_id": "sha256:0eb6aaf3e27a247c2866b795b7e2ce0b4fee50fbc90b6279de669747544fc552",
+        "source_kind": "runtime",
+        "source_ref": "export log, 2026-09-21",
+        "spike_unavailable": "The run is over and its inputs are gone.",
+        "verification_class": "observed"
+       }
+      ],
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni03YzgyNjAyNTAwODU3YWE2ZWQwY2YzOGM0YzNlNGVjNjQ1YmRjYWE4MmMwMGI5MTU1ZWIwOGJlMTAwYzc3OGE5IiwicyI6InMyNTYtZDlkZmU3ZTUyN2QxZGVjMDNhYmZiM2VlN2I2NTkzY2JlZTlhODVjMWRlOWFkZTg4MWE0Mzg4NTUxOWNhZTIxMSJ9:KkrMQWJ3jUFCtVexKRL1kTXpuotF04jhRGhzgn91ZPM",
+      "schema": "empirica.hitl/1"
+     },
+     "digest": "sha256:bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/gen-1/hitl/bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016.json",
+     "status": "verified"
+    },
     "effect": "record_confirmed",
     "plan": null,
     "source": "https://tiles.example.org/format#export"
@@ -3919,6 +4321,72 @@
     "asked": "confirm_source",
     "at": 1790593980.0,
     "claim": "C4",
+    "document": {
+     "body": {
+      "claims": [
+       {
+        "claim_digest": "sha256:2bcb3e04449c1d0947de67cfec47b9ff9833bccbe225e219f784431bdf8b20d2",
+        "claim_id": "C7",
+        "text": "Keep the old reader for one more release."
+       }
+      ],
+      "key": "sha256:212b0f94dd1622ca728e7572095624a8d934a39cf19104f21cb1801587ee7621",
+      "kind": "evidence",
+      "records": [
+       {
+        "citation": "readers must use the index",
+        "claim_digest": "sha256:c3af7602e8db24f0188613015799c0ff9abb10385192c65523a5abd88ca71fcc",
+        "claim_id": "C3",
+        "claim_text": "The published tile format allows only that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:7411f269f2b7493ab5c99caf2e88287ee6aa2f2126b61cea80284c606f806eaa",
+        "source_kind": "web",
+        "source_ref": "https://tiles.example.org/format#export",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "tile reads: 0 outside the index",
+        "claim_digest": "sha256:759c4fc201d541dbe7f8613502b0ad2811621a28c4223717b30b61de7776faad",
+        "claim_id": "C4",
+        "claim_text": "The nightly export log shows every tile read through it.",
+        "outcome": "supporting",
+        "record_id": "sha256:96a90b4e9001f3eebe0ebddf7df19890a28d87ce85adc68f0d82a4fe19f20be8",
+        "source_kind": "runtime",
+        "source_ref": "nightly export log, 2026-09-27",
+        "spike_unavailable": "The job only runs on the nightly cluster.",
+        "verification_class": "observed"
+       },
+       {
+        "citation": "direct tile reads are not available",
+        "claim_digest": "sha256:5c8990f3b53d3c1c40326c83b8e480efa9ed96032db69e5ae285d315650291c9",
+        "claim_id": "C5",
+        "claim_text": "The hosting provider's limits allow that path.",
+        "outcome": "supporting",
+        "record_id": "sha256:71f8fc4422b89da996921e527dae8975756ce001dbb065690f404ea065f0bca7",
+        "source_kind": "web",
+        "source_ref": "https://provider.example.net/limits",
+        "verification_class": "retrievable"
+       },
+       {
+        "citation": "no reads outside the index",
+        "claim_digest": "sha256:54c8edc11e620e07ca43fead55d8169811c6e6faf6b0ae87b3ee69242c6dd91e",
+        "claim_id": "C6",
+        "claim_text": "Last week's run reads no tile any other way.",
+        "outcome": "supporting",
+        "record_id": "sha256:0eb6aaf3e27a247c2866b795b7e2ce0b4fee50fbc90b6279de669747544fc552",
+        "source_kind": "runtime",
+        "source_ref": "export log, 2026-09-21",
+        "spike_unavailable": "The run is over and its inputs are gone.",
+        "verification_class": "observed"
+       }
+      ],
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni03YzgyNjAyNTAwODU3YWE2ZWQwY2YzOGM0YzNlNGVjNjQ1YmRjYWE4MmMwMGI5MTU1ZWIwOGJlMTAwYzc3OGE5IiwicyI6InMyNTYtZDlkZmU3ZTUyN2QxZGVjMDNhYmZiM2VlN2I2NTkzY2JlZTlhODVjMWRlOWFkZTg4MWE0Mzg4NTUxOWNhZTIxMSJ9:KkrMQWJ3jUFCtVexKRL1kTXpuotF04jhRGhzgn91ZPM",
+      "schema": "empirica.hitl/1"
+     },
+     "digest": "sha256:bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/gen-1/hitl/bc148d5c61a29b744b595970282278970222945b3e520234840411f2d0957016.json",
+     "status": "verified"
+    },
     "effect": "record_rejected",
     "plan": null,
     "source": "nightly export log, 2026-09-27"
@@ -4552,6 +5020,12 @@
     "asked": "approve_configuration",
     "at": 1790588400.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:2eecf7834d13ca38bbc3c7996f5861bf33a552fe6d30ed63f305badfc4622841",
+     "path": "/tmp/empirica-home/projects/s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/runs/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/gen-1/hitl/2eecf7834d13ca38bbc3c7996f5861bf33a552fe6d30ed63f305badfc4622841.json",
+     "status": "missing"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -4949,6 +5423,12 @@
     "asked": "approve_configuration",
     "at": 1790590500.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:f8d959293a5507767adb621ece1d8287336d194b4942384e50efccd7b10137e7",
+     "path": "/tmp/empirica-home/projects/s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/runs/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/gen-1/hitl/f8d959293a5507767adb621ece1d8287336d194b4942384e50efccd7b10137e7.json",
+     "status": "too_large"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -4958,6 +5438,12 @@
     "asked": "freeze_scope",
     "at": 1790590920.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:a04a4e32f6347d9f9b216999806a236bf814ab1e7f6b39c028f836c47c1533ad",
+     "path": "/tmp/empirica-home/projects/s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/runs/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/gen-1/hitl/a04a4e32f6347d9f9b216999806a236bf814ab1e7f6b39c028f836c47c1533ad.json",
+     "status": "missing"
+    },
     "effect": "run_ended",
     "plan": null,
     "source": null
@@ -5462,6 +5948,12 @@
     "asked": "approve_configuration",
     "at": 1790589540.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:7887b7347ff545d1604d2224d54b95ef725099324ad591162d3595c8cbb997e2",
+     "path": "/tmp/empirica-home/projects/s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/runs/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/gen-1/hitl/7887b7347ff545d1604d2224d54b95ef725099324ad591162d3595c8cbb997e2.json",
+     "status": "unreadable"
+    },
     "effect": "configuration_approved",
     "plan": 1,
     "source": null
@@ -5471,6 +5963,12 @@
     "asked": "consent_stop",
     "at": 1790590020.0,
     "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:effc7d9694615022ea8a084f9f2df42ca30ca08fcdb275fa082dcae2fbf36fb2",
+     "path": "/tmp/empirica-home/projects/s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/runs/s256-ea2fab75d05920549b4b92798bdf7217fed88df4e0a56de317d1e721524887b2/gen-1/hitl/effc7d9694615022ea8a084f9f2df42ca30ca08fcdb275fa082dcae2fbf36fb2.json",
+     "status": "missing"
+    },
     "effect": "run_ended",
     "plan": null,
     "source": null

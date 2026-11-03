@@ -50,6 +50,9 @@ function families(states, cat, enums) {
     "period.*": of("period", cat.periods),
     "filter.*": of("filter", cat.filters),
     "record.class.*": of("record.class", enums.record_class),
+    // PR 15: the document statuses' refusal notes (verified has no note - its body is shown instead)
+    "document.*.note": ["missing", "mismatch", "too_large", "unreadable"].map((v) => `document.${v}.note`),
+    "document.question.*": of("document.question", ["approve", "confirm_amendment"]),
     "list.empty.*": of("list.empty", cat.data_sources),
     "app.data.*": of("app.data", cat.data_sources),
     "host.*": of("host", cat.hosts),
