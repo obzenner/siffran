@@ -6,6 +6,7 @@ import catalogue from "../../catalogue.json" with { type: "json" };
 import { claimGraph, edgePath, graphBox } from "../../app/geometry.js";
 import { shapePath } from "../../app/universe.js";
 import { TONE, ago, clip, esc, joined, num, plain, stateOf, t } from "../core/element.js";
+import { identifierChip } from "../../app/identifiers.js";
 import { supportTree } from "../core/tree.js";
 import { chip, claimLink, fact, link, list } from "./parts.js";
 
@@ -16,7 +17,7 @@ function recordHtml(r) {
   const standing = r.status === "pending" && r.wait ? joined(t(`who.${r.wait.who}`), t(`where.${r.wait.where}`)) : "";
   return `<article class="flex flex-col gap-xs border-b border-border py-s last:border-b-0">
     <div class="flex flex-wrap items-center gap-xs">${chip("verification", r.status)}${standing ? `<span class="text-xs text-muted-foreground">${esc(standing)}</span>` : ""}${chip("outcome", r.outcome)}</div>
-    <span class="min-w-0 break-all font-mono text-xs text-muted-foreground">${esc(r.source)}</span>
+    <span class="text-xs"><ev-copy text="${esc(r.source)}" quiet=""></ev-copy></span>
     <blockquote class="border-l-2 border-border pl-s"><ev-more text="${esc(r.quote)}"></ev-more></blockquote>
     <p class="text-xs text-muted-foreground">${t(`record.class.${r.class}`)}</p>
     ${r.spike_unavailable ? `<div class="flex flex-col gap-3xs text-xs"><span class="text-muted-foreground">${t("record.spike")}</span><ev-more text="${esc(r.spike_unavailable)}"></ev-more></div>` : ""}
@@ -26,12 +27,12 @@ function recordHtml(r) {
 
 /** One copyable content identity: compact in the disclosure label, exact in its body. */
 function identityHtml(label, value) {
-  const short = `${value.slice(0, 15)}…${value.slice(-8)}`;
-  return `<details class="min-w-0 text-xs"><summary class="cursor-pointer break-all text-muted-foreground">${t(label)} <code class="font-mono">${esc(short)}</code></summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
+  // PR 17 §4: the label is the label, the value the one identifier atom; Copy carries the exact value, shown short.
+  return `<details class="min-w-0 text-xs"><summary class="cursor-pointer text-muted-foreground"><span>${t(label)}</span> ${identifierChip(value)}</summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
 }
 
 function vectorHtml(label, values) {
-  return fact(t(label), `<ol class="flex min-w-0 flex-col gap-3xs">${values.map((value, index) => `<li class="flex min-w-0 gap-xs"><span class="shrink-0 text-muted-foreground">${index}</span><code class="min-w-0 break-all font-mono">${esc(value)}</code></li>`).join("")}</ol>`);
+  return fact(t(label), `<ol class="flex min-w-0 flex-col gap-3xs">${values.map((value, index) => `<li class="flex min-w-0 gap-xs"><span class="shrink-0 text-muted-foreground">${index}</span>${identifierChip(value)}</li>`).join("")}</ol>`);
 }
 
 /** A profile's words: its own copy key, one per value of the contract's list (enums.json; scripts/audit.mjs checks each). */
@@ -75,25 +76,25 @@ function resourcesHtml(resources) {
 }
 
 function requestInputsHtml(request) {
-  const declarations = request.declared_inputs.length ? list(request.declared_inputs.map((path) => `<code class="break-all font-mono">${esc(path)}</code>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
-  const files = request.inputs.length ? list(request.inputs.map((file) => `<span class="flex min-w-0 flex-col"><code class="break-all font-mono">${esc(file.path)}</code><span>${t("spike.bytes", { count: num(file.bytes) })}</span>${identityHtml("spike.file_digest", file.sha256)}</span>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
+  const declarations = request.declared_inputs.length ? list(request.declared_inputs.map((path) => identifierChip(path))) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
+  const files = request.inputs.length ? list(request.inputs.map((file) => `<span class="flex min-w-0 flex-col">${identifierChip(file.path)}<span>${t("spike.bytes", { count: num(file.bytes) })}</span>${identityHtml("spike.file_digest", file.sha256)}</span>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
   return `<details class="rounded-m border border-border p-xs" data-spike-input><summary class="cursor-pointer">${t("spike.input_summary", { files: num(request.input_count), bytes: num(request.input_bytes) })}</summary><dl class="ev-facts pt-xs">${fact(t("spike.input.declared"), declarations)}${fact(t("spike.input.bindings"), files)}</dl></details>`;
 }
 
 function requestHtml(request) {
-  const environment = request.environment_names.length ? list(request.environment_names.map((name) => `<code class="font-mono">${esc(name)}</code>`)) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
+  const environment = request.environment_names.length ? list(request.environment_names.map((name) => identifierChip(name))) : `<span class="text-muted-foreground">${t("spike.none")}</span>`;
   const image = request.image;
   const ids = [["spike.identity.artifact", request.artifact_id], ["spike.identity.harness_request", request.harness_request_id], ...Object.entries(request.identities).map(([key, value]) => [IDENTITY_KEYS[key], value])];
   return `<section class="flex min-w-0 flex-col gap-xs" data-spike-request aria-label="${t("spike.request")}">
     <p class="text-xs text-muted-foreground">${joined(t("spike.read_only"), t("spike.claim", { claim: request.claim_id }), request.draft_schema, t("spike.profile", { profile: profileLabel(request.profile_id) }), t("spike.timeouts", { workload: request.limits.workload_timeout_seconds, operation: request.limits.operation_timeout_seconds }))}</p>
     <dl class="ev-facts">
-      ${fact(t("spike.image.requested"), `<code class="break-all font-mono">${esc(image.requested_reference)}</code>`)}
+      ${fact(t("spike.image.requested"), identifierChip(image.requested_reference))}
       ${identityHtml("spike.image.sealed", image.sealed_id)}
-      ${fact(t("spike.platform"), `<code class="font-mono">${esc(`${image.raw_os}/${image.raw_architecture}`)}</code> → <code class="font-mono">${esc(`${image.os}/${image.architecture}`)}</code>`)}
+      ${fact(t("spike.platform"), `${identifierChip(`${image.raw_os}/${image.raw_architecture}`)} → ${identifierChip(`${image.os}/${image.architecture}`)}`)}
       ${vectorHtml("spike.command", request.argv)}
       ${fact(t("spike.environment"), environment)}
-      ${fact(t("spike.user"), `<code class="font-mono">${num(request.runtime.uid)}:${num(request.runtime.gid)}</code>`)}
-      ${fact(t("spike.workdir"), `<code class="font-mono">${esc(request.runtime.workdir)}</code>`)}
+      ${fact(t("spike.user"), identifierChip(`${num(request.runtime.uid)}:${num(request.runtime.gid)}`))}
+      ${fact(t("spike.workdir"), identifierChip(request.runtime.workdir))}
       ${requestInputsHtml(request)}${resourcesHtml(request.limits)}
     </dl>
     <details class="text-xs"><summary class="cursor-pointer text-muted-foreground">${t("spike.identities.request")}</summary><div class="flex flex-col gap-3xs pt-xs">${ids.map(([label, value]) => identityHtml(label, value)).join("")}</div></details>
@@ -158,7 +159,7 @@ function proofHtml(c, own, ctx) {
 /** The decisions a human made on this claim (or on a source it rests on), each its answer and when. */
 function claimDecisionsHtml(decisions, id, now) {
   const mine = (decisions ?? []).filter((d) => d.claim === id);
-  return mine.length ? `<dl class="ev-facts pt-xs">${fact(t("fact.decisions"), list(mine.map((d) => `<span class="flex flex-wrap items-center gap-xs" data-claim-decision>${t(`ask.${d.asked}`)}${chip("answer", d.answer)}<span class="text-xs text-muted-foreground">${joined(d.source ? esc(d.source) : "", ago(d.at, now))}</span></span>`)))}</dl>` : "";
+  return mine.length ? `<dl class="ev-facts pt-xs">${fact(t("fact.decisions"), list(mine.map((d) => `<span class="flex flex-wrap items-center gap-xs" data-claim-decision>${t(`ask.${d.asked}`)}${chip("answer", d.answer)}<span class="text-xs text-muted-foreground">${joined(esc(ago(d.at, now)))}</span>${d.source ? `<ev-copy text="${esc(d.source)}" quiet=""></ev-copy>` : ""}</span>`)))}</dl>` : "";
 }
 
 /** One claim as a disclosure, its supporters nested beneath it: the support graph is the list (root first, each claim once,
@@ -174,6 +175,7 @@ function claimHtml(n, parent, ctx, byId) {
       <details ${open ? "open" : ""}>
         <summary class="flex cursor-pointer flex-wrap items-center gap-x-xs gap-y-3xs rounded-m px-xs py-2xs text-left hover:bg-muted" data-claim="${esc(c.id)}" data-href="${esc(href({ claim: open ? null : c.id }))}" ${open ? 'aria-current="true"' : ""}>
           <span class="min-w-0 flex-1 text-s font-medium">${esc(clip(c.text, 160))}</span>
+          <ev-copy text="${esc(c.id)}" label="fact.claim_id" quiet=""></ev-copy>
           <span class="text-xs text-muted-foreground">${t(c.gating ? "scope.required" : "scope.deferred")}</span>${chip("claim", c.state)}${c.assurance === "not_approved" ? "" : chip("assurance", c.assurance)}
         </summary>
         <div class="px-xs pb-xs">${open ? `${proofHtml(c, own, ctx)}${claimDecisionsHtml(detail?.decisions, c.id, ctx.now)}` : ""}</div>
@@ -225,8 +227,8 @@ export function droppedHtml(dropped, now) {
   return list(dropped.map((d) => `<span class="flex flex-col gap-3xs" data-dropped="${esc(d.claim)}">
     <span class="flex flex-wrap items-center gap-xs">${chip("why", d.why)}<span class="text-xs text-muted-foreground">${joined(t(`kind.${d.kind}`), d.removed ? t("dropped.regraph") : "", ago(d.at, now))}</span></span>
     <span class="text-s">${esc(clip(d.text, 200))}</span>
-    ${d.source ? `<span class="text-xs text-muted-foreground">${t("dropped.source")} <code class="break-all font-mono">${esc(d.source)}</code></span>` : ""}
+    ${d.source ? `<span class="text-xs text-muted-foreground">${t("dropped.source")}</span><ev-copy text="${esc(d.source)}" quiet=""></ev-copy>` : ""}
     ${d.citation ? `<span class="text-xs text-muted-foreground">${esc(d.citation)}</span>` : ""}
-    ${d.command ? `<code class="break-all font-mono text-xs">${esc(d.command)}</code>` : ""}
+    ${d.command ? identifierChip(d.command) : ""}
   </span>`));
 }

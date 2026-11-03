@@ -95,6 +95,32 @@ body[data-words] .ev-word { position: static; inline-size: auto; block-size: aut
   .ev-facts > div > * { min-inline-size: 0; overflow-wrap: anywhere; }
 }
 
+/* The one identifier atom (PR 17 §4): a machine value - a digest, an er2: handle, a run key, a path, a session id, a
+   source URL - is never prose: mono, one notch smaller, on its own muted chip, with the muted-foreground colour (the
+   contrast check holds that pair on every surface a chip sits on: background, card, muted, sidebar, sheet). The exact value
+   rides in the chip's title and on Copy (ev-copy), never shortened in what is copied. */
+@layer components {
+  code.ev-id {
+    display: inline-block;
+    max-inline-size: 100%;
+    overflow-wrap: anywhere;
+    font-family: var(--font-mono);
+    font-size: var(--text-3xs);
+    padding-inline: var(--spacing-2xs);
+    padding-block: var(--spacing-3xs);
+    border-radius: var(--radius-s);
+    background: var(--muted);
+    color: var(--muted-foreground);
+  }
+}
+/* A quiet Copy (a digest inside prose, a claim's id on its row, a list of identities): the button is there - the tab
+   key reaches it - but it stays unseen until the person means it: the chip hovered, or the button focused. */
+/* A quiet Copy waits hidden, and hidden means gone from the line entirely (review 17-1): out of the flow, so a
+   finding's sentence reads as a sentence - no blank gap after the digest chip, no line-height inflation - and
+   invisible means not clickable either. Hover, or the tab key (focus-within), sets it back in the sentence, seen. */
+[data-copy-quiet] [data-copy] { position: absolute; opacity: 0; pointer-events: none; transition: opacity var(--duration-fast); }
+[data-copy-quiet]:hover [data-copy], [data-copy-quiet]:focus-within [data-copy] { position: static; opacity: 1; pointer-events: auto; }
+
 /* The attempts side by side: Basecoat's table keeps every cell on one line, so a long goal or residual is painted through the
    next attempt's column. Cells wrap (a long word too) and keep room to be read; the wrapper scrolls sideways when the
    attempts do not fit. Outside any layer, so it beats the vendored `nowrap`. */

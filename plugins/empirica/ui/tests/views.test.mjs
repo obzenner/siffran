@@ -361,6 +361,54 @@ test("a link that names no document on the sheet opens the section and claims no
 
 // P3b: the fixtures are the minimal selection, so three facts the journeys read from runs no longer in them are held here,
 // on a fixture sheet changed in that one fact (the real service still produces each: tests/v2/test_observer_stateful.py).
+test("PR 17 §4: every machine value on the sheet is the one identifier atom — label and value separated, the exact value carried by Copy", async () => {
+  const { shortIdentifier } = await import("../app/identifiers.js");
+  const { esc } = await import("../elements/core/element.js");
+  const s = sheets[scenarios.verification];
+  const html = sheetHtml(ctx(s));  // the builders' strings, so an attribute is the fact asserted
+  assert.match(html, new RegExp(`<ev-copy text="${s.row.key}" label="fact.run_key"`), "the run's key in the header, with Copy (PR 17 §4)");
+  assert.ok(!/<code class="break-all font-mono text-xs">${s.row.key}<\/code>/.test(html), "no giant mono block for the key any more");
+  for (const d of s.decisions ?? []) if (d.document) {
+    assert.ok(html.includes(`<ev-copy text="${d.document.digest}" label="decision.document.digest"`),
+      "the decision's document digest copy still carries the exact value (PR 15's footer, PR 17's atom)");
+    assert.ok(html.includes(`<ev-copy text="${d.document.path}" label="decision.document.path"`), "and the path's");
+  }
+  for (const d of s.decisions ?? []) if (d.source)
+    assert.ok(html.includes(`<ev-copy text="${esc(d.source)}" quiet`), "a decision's source URL is a copyable identifier atom");
+  const body = (s.decisions ?? []).find((d) => d.document?.body?.proposal_digest !== undefined)?.document?.body;
+  if (body !== undefined) {
+    assert.ok(html.includes(`<ev-copy text="${body.proposal_digest}"`), "a document's proposal digest is the atom, copyable");
+    assert.ok(html.includes(`<ev-copy text="${body.run_id}"`), "the document's run handle too");
+    assert.ok(html.includes(`<ev-copy text="${body.key}"`), "and its batch key");
+  }
+  for (const c of s.claims ?? []) for (const r of c.records ?? []) {
+    const open = sheetHtml(ctx(s, { claim: c.id }));  // a record renders on its claim, open in place
+    assert.ok(open.includes(`<ev-copy text="${esc(r.source)}" quiet`), "each research source URL is a copyable identifier atom");
+  }
+  const qualified = sheetHtml(ctx(sheets[scenarios.converged]));
+  assert.match(qualified, /Qualification identity<\/span> <code class="ev-id/, "label and value separated (PR 17 §4: 'Qualification identitysha256:' runs together no more)");
+});
+test("PR 17 §4: the claim row names its id as the identifier atom", () => {
+  for (const [key, s] of Object.entries(sheets)) {
+    const html = sheetHtml(ctx(s));
+    for (const c of s.row.claims ?? []) {
+      const row = html.slice(html.indexOf(`data-claim-row="${c.id}"`), html.indexOf("</summary>", html.indexOf(`data-claim-row="${c.id}"`)));
+      assert.ok(row.includes(`<ev-copy text="${c.id}" label="fact.claim_id" quiet`), `${key}: the claim id ${c.id} in its row, with Copy`);
+    }
+  }
+});
+test("PR 17 §4: a sha256 digest inside an audit finding renders as the identifier atom — the sentence unchanged, everything else escaped text", () => {
+  const s = structuredClone(sheets[scenarios.converged]);
+  const digest = `sha256:${"ab".repeat(32)}`;
+  s.audits[0].findings = [`The artifact digest moved: claimed ${digest}; <i>markup</i> stays text.`];
+  const html = sheetHtml(ctx(s));
+  const finding = html.slice(html.indexOf("data-audit"), html.indexOf("data-audit", html.indexOf("data-audit") + 9));
+  assert.ok(html.includes(`<ev-copy text="${digest}" quiet`), "the digest is the copyable atom, exact value carried");
+  assert.ok(html.includes("The artifact digest moved: claimed "), "formatting only: the sentence around the token is unchanged");
+  assert.ok(html.includes("&lt;i&gt;markup&lt;/i&gt; stays text."), "the rest stays escaped text");
+  assert.ok(!html.includes("markup</i>"), "the helper introduced no markup of its own");
+});
+
 test("an audit's independence is worded on the sheet, for every value the contract declares", () => {
   const base = sheets[scenarios.converged];
   for (const independence of ["distinct", "mixed", "same_model", "unverified", "human_owned"]) {

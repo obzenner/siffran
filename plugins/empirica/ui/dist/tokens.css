@@ -19,6 +19,7 @@
   --input: #e5e5e5;
   --ring: #3465a4;
   --sidebar: #fafafa;
+  --sheet: #f5f5f5;
   --sidebar-foreground: #0a0a0a;
   --sidebar-primary: #171717;
   --sidebar-primary-foreground: #fafafa;
@@ -82,6 +83,7 @@
   --input: #262626;
   --ring: #81a2be;
   --sidebar: #171717;
+  --sheet: #0a0a0a;
   --sidebar-foreground: #fafafa;
   --sidebar-primary: #fafafa;
   --sidebar-primary-foreground: #171717;

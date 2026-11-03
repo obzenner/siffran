@@ -120,6 +120,8 @@
   "copy.done": "Copied",
   "copy.failed": "Not copied",
   "fact.session": "Session",
+  "fact.run_key": "Run key",
+  "fact.claim_id": "Claim",
   "fact.control": "Governance",
   "fact.proposed": "Proposed ceilings",
   "fact.interactions": "Questions to a human left",

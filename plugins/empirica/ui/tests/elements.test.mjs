@@ -122,6 +122,32 @@ test("ev-copy shows its value, copies it, says so for copied_ms, and says when t
   } finally { vi.useRealTimers(); }
 });
 
+test("PR 17: ev-copy reads as the one identifier atom - its short form shown, the exact value in its title and on Copy", async () => {
+  const { shortIdentifier } = await import("../app/identifiers.js");
+  const digest = `sha256:${"9".repeat(64)}`;
+  const path = "/home/amelia.dvn/empirica-projects/p-r/gen-1/hitl/0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json";
+  const wrote = [];
+  navigator.clipboard.writeText = async (v) => { wrote.push(v); };
+  const el = mount("ev-copy", undefined, { text: digest, label: "decision.document.digest" });
+  const value = el.querySelector("[data-value]");
+  assert.ok(value.classList.contains("ev-id"), "the value wears the identifier atom class, not the prose colour");
+  assert.equal(value.getAttribute("title"), digest, "the whole value is the hover");
+  assert.equal(value.textContent, shortIdentifier(digest), "the eye reads the short form (PR 17 §4)");
+  el.querySelector("[data-copy]").click(); await Promise.resolve(); await Promise.resolve();
+  assert.deepEqual(wrote, [digest], "Copy still copies the exact whole value");
+  const long = mount("ev-copy", undefined, { text: path, label: "decision.document.path" });
+  assert.equal(long.querySelector("[data-value]").textContent, shortIdentifier(path), "a path too shows head and tail, its middle elided");
+  assert.equal(long.querySelector("[data-value]").getAttribute("title"), path);
+  const quiet = mount("ev-copy", undefined, { text: digest, quiet: "" });
+  assert.ok(quiet.querySelector("[data-copy-quiet]") !== null, "a quiet copy's button waits for hover or focus (PR 17 §4: prose digests)");
+  assert.equal(mount("ev-copy", undefined, { text: digest }).querySelector("[data-copy-quiet]"), null,
+    "without quiet the Copy button is always shown, where the value is its own control");
+  assert.equal(quiet.querySelector("[data-copy]").textContent, plain("copy.button"), "quiet hides nothing it needs - the button is there, it only waits");
+  const short = mount("ev-copy", undefined, { text: "C0", label: "fact.claim_id" });
+  assert.equal(short.querySelector("[data-value]").textContent, "C0", "a short identifier is not shortened again");
+  el.remove(); long.remove(); quiet.remove(); short.remove();
+});
+
 test("ev-more offers Show all only when the text overflows two lines, and opens and folds in place", () => {
   const tall = vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function () { return this.hasAttribute("data-text") ? 80 : 0; });
   const box = Object.getOwnPropertyDescriptor(HTMLElement.prototype, "clientHeight");

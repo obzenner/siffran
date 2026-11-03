@@ -12,7 +12,7 @@ const get = (scheme, key) => {
 };
 
 const TEXT = 4.5, UI = 3;
-const surfaces = ["background", "card", "muted", "sidebar"];
+const surfaces = ["background", "card", "muted", "sidebar", "sheet"];
 const tones = catalogue.tones;
 const rows = [];
 for (const s of ["light", "dark"]) {

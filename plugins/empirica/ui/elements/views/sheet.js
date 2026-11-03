@@ -5,6 +5,7 @@
 // less as if there were less. The core's sentences and the session's paths appear here and nowhere else.
 import enums from "../../enums.json" with { type: "json" };
 import { ago, clip, count, esc, joined, num, plain, stateHtml, t, when } from "../core/element.js";
+import { identifierChip, proseHtml } from "../../app/identifiers.js";
 import { claimsHtml, droppedHtml } from "./claims.js";
 import { auditHtml, chip, claimLink, fact, link, list, progress, section, sessionContextHtml, sessionHtml, whoWhere } from "./parts.js";
 import { changedHtml, historyHtml } from "./trail.js";
@@ -21,10 +22,9 @@ function spikeBackendHtml(backend) {
   if (backend === null) return "";
   if (backend.kind === "spikes_unavailable")
     return `<aside class="alert" role="note" data-spike-backend><strong>${t("spike_backend.unavailable")}</strong><span class="text-xs">${t("spike_backend.read_only")}</span></aside>`;
-  const identity = (value, label) => {
-    const short = `${value.slice(0, 15)}…${value.slice(-8)}`;
-    return `<details class="text-xs"><summary class="cursor-pointer">${t(label)} <code class="font-mono">${esc(short)}</code></summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
-  };
+  // PR 17 §4: the label is the label, the value the one identifier atom - label and value never run together
+  // ("Qualification identitysha256:") - and Copy improves on the old disclosure: the exact value, shown short.
+  const identity = (value, label) => `<details class="text-xs"><summary class="cursor-pointer"><span>${t(label)}</span> ${identifierChip(value)}</summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;
   const profile = t(`spike.profile.${backend.profile_id}`);
   return `<aside class="flex min-w-0 flex-col gap-3xs rounded-m border border-border p-xs text-xs" role="note" data-spike-backend><span>${joined(t("spike_backend.qualified"), profile, t("spike_backend.read_only"), t("spike_backend.not_health"))}</span>${identity(backend.qualification_record_digest, "spike_backend.record")}${identity(backend.execution_binding_digest, "spike_backend.execution")}</aside>`;
 }
@@ -44,6 +44,7 @@ function headerHtml({ row, project, attempts, detail, now }) {
     ${row.goal !== null && row.goal.length > 160 ? `<ev-more text="${esc(row.goal)}"></ev-more>` : ""}
     <p class="text-xs text-muted-foreground" data-where>${where}</p>
     ${detail ? spikeBackendHtml(detail.spike_backend) : ""}
+    <div class="flex flex-col gap-3xs text-xs" data-run-key><ev-copy text="${esc(row.key)}" label="fact.run_key"></ev-copy></div>
     ${row.session ? `<div class="flex flex-col gap-3xs text-xs">${sessionHtml(row.session)}${sessionContextHtml(row.session)}</div>` : ""}
   </header>`;
 }
@@ -86,14 +87,14 @@ function auditsHtml({ row, detail, now }) {
   const same = row.audit?.verdict === verdicts[0].verdict;
   const one = (a, i) => `<span class="flex flex-col gap-3xs" data-audit>
     <span class="flex flex-wrap items-center gap-xs">${chip("audit", a.verdict)}<span class="text-xs text-muted-foreground">${joined(a.auditor ? esc(a.auditor) : t("audits.auditor_unknown"), a.independence ? t(`independence.${a.independence}`) : t("audits.independence_unknown"), ago(a.at, now))}</span>${i === 0 && same ? notes(row.audit) : ""}</span>
-    ${a.findings.length ? list(a.findings.map((f) => `<span class="text-s">${esc(f)}</span>`)) : `<span class="text-xs text-muted-foreground">${t("audits.no_findings")}</span>`}</span>`;
+    ${a.findings.length ? list(a.findings.map((f) => `<span class="text-s">${proseHtml(f)}</span>`)) : `<span class="text-xs text-muted-foreground">${t("audits.no_findings")}</span>`}</span>`;
   return `${same ? "" : lead}${list(verdicts.map(one))}`;
 }
 
 /** What a decision is attached to, in words: the claim (a link to it in this sheet), the source, or the plan. */
 function decidedHtml(d, { row, href }) {
-  if (d.claim) return `<span class="text-xs" data-decision-claim="${esc(d.claim)}">${claimLink(row, d.claim, href) || esc(d.claim)}${d.source ? ` · <code class="break-all font-mono">${esc(d.source)}</code>` : ""}</span>`;
-  if (d.source) return `<code class="break-all font-mono text-xs">${esc(d.source)}</code>`;
+  if (d.claim) return `<span class="text-xs" data-decision-claim="${esc(d.claim)}">${claimLink(row, d.claim, href) || esc(d.claim)}${d.source ? " · " : ""}${d.source ? `<ev-copy text="${esc(d.source)}" quiet=""></ev-copy>` : ""}</span>`;
+  if (d.source) return `<ev-copy text="${esc(d.source)}" quiet=""></ev-copy>`;
   return d.plan === null ? "" : `<span class="text-xs text-muted-foreground">${t("decision.plan", { plan: d.plan })}</span>`;
 }
 
@@ -118,9 +119,9 @@ function documentFacts(body) {
   if (body.goal !== undefined) parts.push(fact(t("document.goal"), `<ev-more text="${body.goal}"></ev-more>`));
   if (body.rationale) parts.push(fact(t("document.rationale"), `<ev-more text="${body.rationale}"></ev-more>`));
   if (body.plan_revision !== undefined) parts.push(fact(t("document.plan"), num(body.plan_revision)));
-  if (body.proposal_digest !== undefined) parts.push(fact(t("document.proposal"), `<code class="break-all font-mono text-xs">${body.proposal_digest}</code>`));
-  if (body.run_id !== undefined) parts.push(fact(t("document.run_id"), `<code class="break-all font-mono text-xs">${body.run_id}</code>`));
-  if (body.key !== undefined) parts.push(fact(t("document.key"), `<code class="break-all font-mono text-xs">${body.key}</code>`));
+  if (body.proposal_digest !== undefined) parts.push(fact(t("document.proposal"), `<ev-copy text="${esc(body.proposal_digest)}" label="document.proposal" quiet=""></ev-copy>`));
+  if (body.run_id !== undefined) parts.push(fact(t("document.run_id"), `<ev-copy text="${esc(body.run_id)}" label="document.run_id" quiet=""></ev-copy>`));
+  if (body.key !== undefined) parts.push(fact(t("document.key"), `<ev-copy text="${esc(body.key)}" label="document.key" quiet=""></ev-copy>`));
   return parts.join("");
 }
 
@@ -148,7 +149,7 @@ function documentBodyHtml(body) {
   if (body.claims?.length) parts.push(fact(t("document.claims"), list(body.claims.map((c) => `<span class="text-s">${c.text}</span>`))));
   if (body.records?.length) parts.push(fact(t("document.records"), list(body.records.map((r) =>
     `<span class="flex flex-col gap-3xs"><span class="text-s font-medium">${r.claim_text}</span>`
-    + `<code class="break-all font-mono text-xs">${r.source_ref}</code>`
+    + `<ev-copy text="${esc(r.source_ref)}" quiet=""></ev-copy>`
     + (r.citation ? `<blockquote class="border-l-2 border-border pl-s"><ev-more text="${r.citation}"></ev-more></blockquote>` : "")
     + `<span class="text-xs text-muted-foreground">${t("document.record.verified_as", { class: r.verification_class })}</span></span>`))));
   return `<div class="flex flex-col gap-s">${common ? `<dl class="flex flex-col gap-3-xs">${common}</dl>` : ""}${parts.join("") ? `<dl class="flex flex-col gap-3xs">${parts.join("")}</dl>` : ""}</div>`;

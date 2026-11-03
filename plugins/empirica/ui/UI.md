@@ -100,8 +100,12 @@ each source as the server says it serves it (`/api/about`: your store, a generat
 - **Sheet** (beside the list or the map, over it below 64 rem; a divider between them, `ev-divider`, drags, moves with the
   arrow, Page and Home/End keys, resets on a double-click and is a separator saying the width; the width is remembered and
   clamped between `width.sheet-min` and what leaves the main area `width.main-min`, below both the sheet is the whole width,
-  and the map refits beside it): one line of where the run is (project, attempt, claims, last
-  change; the repository and the full time on hover), the session to copy, then its immutable read-only spike capability (`unavailable`, which is not a Needs Human item, or
+  and the map refits beside it), on its own surface apart from the page, the semantic `sheet` token (PR 17 §4, review
+  17-1: `bg-sheet` — light `neutral.100`, one step below the page so the white `bg-card` sections stand out; dark
+  `neutral.950` with the cards elevated above it, the light scheme's hierarchy; `make ui-contrast` judges the chip and
+  text pairs on `sheet` like any surface):
+  one line of where the run is (project, attempt, claims, last
+  change; the repository and the full time on hover), the run's key and the session to copy, then its immutable read-only spike capability (`unavailable`, which is not a Needs Human item, or
   `docker-isolated-v1` / `docker-networked-v1` with copyable qualification and execution identities and an explicit "not live health" note), then **Now** or **Outcome** (what is owed, in the order the report asks it,
   or that the run ended, its scope, what it left unresolved *as recorded when it stopped* and, only if the files changed,
   **Unresolved against the workspace now**); **Audit** (every verdict, newest first as the observer serves them, with its auditor and how
@@ -116,6 +120,14 @@ each source as the server says it serves it (`/api/about`: your store, a generat
   timed out or superseded — operator finding F3). A configuration its host shows and its human has not answered is a
   `later` row of its own; **Attempts** side by side; **History** with the files
   that changed since; **Governance and audit**.
+
+  (PR 17 §4: every machine value the sheet shows — a digest, an `er2:` handle, a run key, a path, a session id, a source
+  URL — is the one identifier atom: `.ev-id`, its short form from `app/identifiers.js` (`shortIdentifier`, the caps in
+  `catalogue.json`), mono on a muted chip, one notch smaller, never the prose colour, the exact value in its `title`
+  and on `ev-copy`. A label is never glued to its value; a digest inside prose — an audit finding — becomes the atom with
+  a quiet Copy, revealed on hover or focus, formatting only. Copy sits on the run key in the header, the qualification
+  and execution identities, the session locator, each decision's document digest and path, each research source URL,
+  each spike or artifact digest shown and the claim id in a claim row — never on prose, counts or labels.)
 - Unread data is unknown, not zero: "Not read in full: n", "Claims not read", "Claim text of n unread runs was not
   searched". Proposed ceilings show only while a proposal waits on the human.
 
