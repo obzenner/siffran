@@ -437,6 +437,28 @@ document's content, which cannot contain its own digest); a `~`-relative path (s
 false convenience for a copy-paste surface; an absolute path is pasted as-is); wrapping the path into the
 description text (a wrapped path is a corrupted paste).
 
+**PR 16 amendment (2026-10-28).** The form shows the short digest plus a **verified observer link**
+— `Details: http://127.0.0.1:<port>/app/?run=<compact id>&decision=<12 hex>` — and the exact absolute path
+only as the **fallback** shown when no observer of this machine's home answers: with a verified link the
+path is dropped (decided over the two offered wordings: one short copyable line beats a ~274-character
+paste), and the fallback keeps the exempt `File:` line untouched. The link is **presentation only**: the
+digest stays what every presentation and decision binds, and the core never sees a URL. A link is trusted
+only after discovery proves a live server of this very home: `observe serve` publishes
+`<home>/observer/serve.json` — mode `0600` in a `0700` directory, publication and cleanup serialized with a
+lock file, the exact member set `{schema, port, pid, instance, home_identity, capabilities}` and **never a
+URL** (`instance` a random per-process token, `home_identity` the resolved home's identity, independent of
+`--repo`) — and `/api/about` answers the same three (`home_identity`, `instance`, `capabilities`, which
+include `"hitl/1"`), so a **running old observer must be restarted after upgrade; it is found unusable and
+the form keeps its honest fallback**. The reader (`adapters.observer.discovery.observer_url`) reads the
+file no-follow, non-blocking, regular-file-only, owned-by-current-user, capped at 4 KiB, validates schema,
+positive pid and port, builds `http://127.0.0.1:<port>` itself, then makes one bounded probe (proxies
+disabled, no redirects, at most 16 KiB read, 0.5 s for the whole probe, once per form presentation, not per
+item) requiring `home_identity`, `instance` and `"hitl/1"` to match — otherwise it is `None`, and it never
+raises. The run's compact id is computed from the run's storage key `<project_id>/<run_id>/<generation>`
+beside the bridge (`adapters.observer.discovery.compact_run_id`, the twin of `application.observer_index.short_id`,
+pinned to it by test) and never from the opaque `er2:` handle or by importing the whole observer index into
+a host form process.
+
 ## Confirmation
 
 Shipped with Empirica 7.0.0, the stack's release acceptance. Each part was confirmed red-first as its PR landed:
@@ -472,3 +494,27 @@ own, superseded presentations are not listed, and `later` reads "not answered" e
 dismissed, timed-out or superseded dialog is never silently read as a deliberate deferral (operator
 finding F3). The ETag folds each row's digest and status, so answering a request from a changed store
 cannot hide behind a `304`.
+
+### PR 16 · The forms link the decision in the observer UI, verified or honestly absent (2026-10-28)
+
+Q4's amendment above is the decision; this is the record of shipping it. Every host form — the
+governance ask, the amendment confirm, the evidence item dialogs and the terminal consent — shows the
+written document's `Details`: a live observer's loopback deep link to its decision row plus the short
+digest, with the exact absolute path dropped (O5), or, when no verified observer of this home answers,
+the honest fallback naming the run's compact id and the `File:`-labelled exact absolute path. Discovery is
+hardened end to end (`adapters/observer/discovery.py`, described in the Q4 amendment): the advertise file
+is the server's own credential-free notification (no URL, per-process `instance`, `home_identity`
+independent of `--repo`, `capabilities` including `"hitl/1"`), the reader verifies owner and mode before
+it probes, the probe is one bounded `GET /api/about` that must answer this home and this process, and
+`observe serve` reuses a live advertised server of the same home before binding a port and withdraws its
+own advertise on a clean exit. The link never crosses the talk-down wire as anything but its two fields —
+`url` (null as the honest "no link") and `run12` — carried once per presentation by the same private
+answers that carry the digest (`adapters/pi/private_bridge.py`, `private-transport.ts`; the Pi evidence
+dialog keeps every composed line within 76 columns and ends on the short digest line, so the host's count-
+down lands on a short line — never a path, a quote or a URL). Confirmed red-first as it landed: the
+discovery module's own tests (the advertise file's member set and modes, the probe's bounds and
+refusals — a foreign home, a stale pid, a redirect, a too-old observer answering no `capabilities`), the
+hosts' form tests (the fallback path on its own `File:` line, the path dropped only with a verified link),
+the regenerated form goldens on both hosts (the Claude fixture and the Pi screens, including the linked
+review screen at the narrow width), and the manifest closure of the new bound module
+(`make empirica-manifest-check`).

@@ -292,8 +292,11 @@ class MediatorTests(MediatorFixture):
         self.assertNotIn("For claim C0", message)
         self.assertIn("2. Decision needed", message)
         self.assertIn("Claim texts and their no-deterministic-check reasons: in the document.", message)
-        self.assertIn("Document: sha256:" + "a" * 12, message)
-        self.assertIn(document["path"], message, "the path is pasted as-is")
+        self.assertIn("Document sha256:" + "a" * 12, message)
+        # PR 16 (A11): this hand-built document carries no live observer link, so the form keeps
+        # the honest fallback — the run's exact absolute path on its own ``File:`` line, pasted
+        # as-is (the one line exempt from wrapping and truncation).
+        self.assertIn("File: " + document["path"], message, "the path is pasted as-is on its own line")
         observed = {"subject": "research", "id": "r3", "record_ids": ["r3"], "claims": [{"id": "C0", "text": "C"}],
                     "source_kind": "runtime", "source_ref": "none", "quote": "q", "class": "observed",
                     "reason": "No harness.", "title": "t3", "description": "d3", "note_title": "n3"}
@@ -333,7 +336,9 @@ class MediatorTests(MediatorFixture):
 
     def test_a_field_has_a_short_title_and_its_details_in_the_description(self):
         """F-Q5-1: Claude cuts a field title at about 45 columns and collapses the message, so the title is short and the
-        item (claims, quote prefix, question) is the property's ``description``, which Claude renders under the field."""
+        item (the bare claim ids and the question) is the property's ``description``, which Claude renders under the
+        field — with nothing of the quote (PR 16, A12: the quote is shown once, as the message's
+        own ``Quote:`` line, never also truncated inside the description)."""
         from adapters.confirmation import DESCRIPTION_LIMIT, TITLE_LIMIT
         drv, run_id = self.two_claims()
         long_ref = "https://example.test/" + "a-very-long-path-segment/" * 6 + "spec"
@@ -348,14 +353,23 @@ class MediatorTests(MediatorFixture):
         self.assertNotIn("description", properties["n1"])
         for key in ("d1", "d2", "n1", "n2"):
             self.assertLessEqual(len(properties[key]["title"]), TITLE_LIMIT, key)
+        message = human.shown[0][0]
+        self.assertIn('Quote: "The required name field:', message,
+                      "the quote stays in the message, the fact judged, in full")
+        self.assertEqual(message.count('Quote: "The required name field:'), 1,
+                         "that one quote is shown exactly once (A12), never also inside a description")
+        self.assertEqual(message.count("Quote:"), 2,
+                         "one quote per research item, and only there")
         description = properties["d1"]["description"]
-        self.assertTrue(description.startswith('C0 · Quote: "The required name field: xxx'), description)
-        self.assertTrue(description.endswith("…\" · Does the page say this?"), description)
+        self.assertEqual(description, "C0 · Does the page say this?", description)
         self.assertLessEqual(len(description), DESCRIPTION_LIMIT)
+        self.assertNotIn("Quote", description)
+        self.assertNotIn("The required name field", description,
+                         "nothing of the quote is truncated into the description (A12)")
         self.assertNotIn("For ", description, "X6 (#52): the per-claim context is in the document,")
         self.assertIn("C1", properties["d2"]["description"])
         self.assertNotIn("For ", properties["d2"]["description"],
-                         "X6 (#52): only the bare claim ids name the record's claims")
+                          "X6 (#52): only the bare claim ids name the record's claims")
 
     def test_a_decision_field_names_the_claim_it_asks_about(self):
         drv, run_id = self.start(graph=graph_with_decision())
@@ -466,13 +480,28 @@ class ClaudeElicitationTests(EvidenceFixture):
             "Claim texts and their no-deterministic-check reasons: in the document.",
             "Nothing would stay unresolved; the record is in the document.",
             " would remain — they are listed in the document.",
-            "Document: ",
+            "Details: ",
+            "Document ",
             "end this run without converging?",
             "evidence that needs you",
         ):
             for host, text in sources.items():
                 self.assertIn(caption, text,
                               f"{host} lost the shared document caption {caption!r} — the hosts drifted")
+        # PR 16 (A11) / follow-up review 16-1: each host's fallback Details is one short arrow
+        # line naming only its own host's command — `Details: <command> → run <12 hex> → Human
+        # decisions`. Each file keeps the spelled literal in one place (Claude: `_UI_COMMAND`;
+        # Pi: `UI_COMMAND`) and joins the shared arrow tail beside it, so the two forms keep
+        # their own spelled commands side by side and the drift is one edited string away in
+        # one file only.
+        self.assertIn('_UI_COMMAND = "/empirica:ui"', sources["claude"],
+                      "the Claude form spells Claude Code's own command once, in its one literal")
+        self.assertIn("→ Human decisions", sources["claude"],
+                      "and joins the shared arrow tail (the run id between, review 16-1)")
+        self.assertIn('UI_COMMAND = "/empirica-ui"', sources["pi"],
+                      "Pi's dialog spells Pi's own command, review 16-1")
+        self.assertIn("→ Human decisions", sources["pi"],
+                      "and joins the same shared arrow tail")
         # The short-digest caption is the same length on both hosts: twelve hex after "sha256:"
         # (19 characters of the identity in all), so one digest line reads identically everywhere.
         self.assertEqual(confirmation._SHORT_BODY, 12)
@@ -496,10 +525,14 @@ class PiPrivateBridgeTests(EvidenceFixture):
         from unittest.mock import patch
         items = [{"subject": "claim", "id": "C1", "digest": "d", "text": "T"}]
         document = {"digest": "sha256:" + "a" * 64, "path": "/machine/projects/p/runs/r/gen-0/hitl/" + "a" * 64 + ".json"}
+        # PR 16 (A10/A12): the relay passes the presentation-only link fields through too — the
+        # shared flow computes them once per presentation; a mocked `present` that returns only
+        # the identity still crosses `url: None` (the honest "no link") and `run12: None`.
         with patch.object(confirmation, "present", return_value=("p-1", items, document)):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
                              {"type": "evidence_presentation", "receipt_id": "p-1", "items": items,
-                              "document": {"digest": document["digest"], "path": document["path"]}})
+                              "document": {"digest": document["digest"], "path": document["path"],
+                                           "url": None, "run12": None}})
         with patch.object(confirmation, "present", return_value=confirmation.PRESENTATION_FAILED):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
                              {"type": "evidence_refused", "result": {"failure": "presentation_failed"}})

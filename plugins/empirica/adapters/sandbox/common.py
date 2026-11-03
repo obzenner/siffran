@@ -100,6 +100,8 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "adapters/pi/src/subagent-inventory.ts",
     "adapters/pi/src/translate.ts",
     "adapters/pi/src/turn-end.ts",
+    "adapters/observer/__init__.py",
+    "adapters/observer/discovery.py",
     "adapters/public_tools.py",
     "adapters/sandbox/__init__.py",
     "adapters/sandbox/common.py",

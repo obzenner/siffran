@@ -304,10 +304,12 @@ async function wire(
         items: [{ subject: "research", id: `sha256:${"a".repeat(64)}`, record_ids: [`sha256:${"a".repeat(64)}`],
           claims: [{ id: "C1", text: "C" }], source_kind: "web", source_ref: "https://example.test/x", quote: "q",
           class: "retrievable", title: "example.test/x",
-          description: 'C1 · Quote: "q" · Does the page say this?', note_title: "Note (optional)" }],
+          description: "C1 · Does the page say this?", note_title: "Note (optional)" }],
+        // PR 16 (A10–A12): the link fields the bridge now answers beside the identity — `url:
+        // null` (this fake core serves no observer) and the run's compact id — cross as data.
         document: { digest: `sha256:${"9".repeat(64)}`,
           path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
-            + `${"9".repeat(64)}.json` } };
+            + `${"9".repeat(64)}.json`, url: null, run12: "9".repeat(12) } };
       if (request.operation === "evidence_confirmation") return { type: "evidence_receipt", result: { type: "Allow" } };
       if (request.operation === "audit_verdict")
         return { type: "audit_verdict", admitted: true };

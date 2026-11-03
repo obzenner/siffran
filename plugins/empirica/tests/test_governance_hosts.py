@@ -358,10 +358,19 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertIn('Goal: "supplied task"', lines)
         self.assertNotIn(SIZED_RATIONALE, seen[0])
         self.assertIn("unverified", seen[0])
+        # PR 16 (A11), follow-up review 16-1: the fallback Details is one short arrow line naming
+        # this host's own command and the run (never wrapping mid-phrase), the document's short
+        # digest follows it, and the exact absolute path (the one copy-paste surface, ``File: ``)
+        # is kept only because no observer of this temp home is live.
+        details = next(line for line in lines if line.startswith("Details: "))
+        self.assertRegex(details, r"^Details: /empirica:ui → run [0-9a-f]{12} → Human decisions$")
+        self.assertLessEqual(len(details), 76, "the arrow line never wraps mid-phrase (review 16-1)")
         document_line = next(index for index, line in enumerate(lines)
-                             if line.startswith("Document: "))
-        self.assertIsNotNone(re.fullmatch(r"Document: sha256:[0-9a-f]{12}", lines[document_line]))
-        path = lines[document_line + 1]
+                             if line.startswith("Document sha256:"))
+        self.assertIsNotNone(re.fullmatch(r"Document sha256:[0-9a-f]{12}", lines[document_line]))
+        path_line = lines[document_line + 1]
+        self.assertTrue(path_line.startswith("File: /"), path_line)
+        path = path_line[len("File: "):]
         self.assertTrue(path.startswith("/"), path)
         self.assertTrue(path.endswith(".json"), path)
         self.assertNotIn("…", path)
@@ -369,6 +378,30 @@ class GovernanceHostTests(unittest.TestCase):
         written = Path(path).read_bytes()
         receipt = self._stored_receipts()[-1]
         self.assertEqual(core_hitl.digest(written), receipt["document_digest"])
+
+    def test_host_owned_form_links_the_document_when_an_observer_serves_this_home(self):
+        """PR 16 (A11): with a live observer serving this home, the form shows the deep link to
+        the run's decision row in the UI and drops the document path from the form entirely (O5
+        as decided: the path is dropped only when a verified link is shown); the digest stays
+        the bound identity, and the discovery probe happens once per form presentation."""
+        from adapters.observer import discovery
+        self.initialize({"elicitation": {"form": {}}})
+        seen = []
+        def answer(message, _schema):
+            seen.append(message)
+            return {"action": "accept", "content": {}}
+        self.mediator.elicit = answer
+        with patch.object(discovery, "observer_url", return_value="http://127.0.0.1:18770") as probe:
+            result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["run"]["governance"]["state"], "approved")
+        receipt = self._stored_receipts()[-1]
+        short = receipt["document_digest"][len("sha256:"):len("sha256:") + 12]
+        link = ("Details: http://127.0.0.1:18770/app/?run="
+                + discovery.compact_run_id(self.run) + "&decision=" + short)
+        self.assertIn(link, seen[0])
+        self.assertNotIn("File: ", seen[0], "a verified link replaces the path entirely")
+        self.assertIn(f"Document sha256:{short}", seen[0])
+        self.assertEqual(probe.call_count, 1, "one probe per form presentation, not per item")
 
     def test_the_document_is_written_before_the_present_and_binds_the_receipt(self):
         """Write-first order (ADR-0072): the sidecar file already holds exactly the document's
@@ -526,9 +559,10 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertNotIn(SIZED_RATIONALE, confirm)
         lines = confirm.splitlines()
         document_line = next(index for index, line in enumerate(lines)
-                             if line.startswith("Document: "))
-        self.assertIsNotNone(re.fullmatch(r"Document: sha256:[0-9a-f]{12}", lines[document_line]))
-        self.assertTrue(lines[document_line + 1].startswith("/"))
+                             if line.startswith("Document sha256:"))
+        self.assertIsNotNone(re.fullmatch(r"Document sha256:[0-9a-f]{12}", lines[document_line]))
+        self.assertTrue(lines[document_line + 1].startswith("File: /"),
+                        "the fallback keeps the confirm document's exact absolute path (A11)")
         files = sorted(Path(self.document_home).glob("**/hitl/*.json"))
         self.assertEqual(len(files), 2,
                          "the approve document and the confirm document are both written")

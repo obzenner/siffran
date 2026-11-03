@@ -58,6 +58,7 @@ EMPIRICA_HITL_SIDECAR_TESTS := $(PLUGINS_DIR)/empirica/tests/test_hitl_sidecar.p
 EMPIRICA_PI_PRIVATE_BRIDGE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_pi_private_bridge.py
 EMPIRICA_CITATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_citations.py
 EMPIRICA_OBSERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer.py
+EMPIRICA_OBSERVER_DISCOVERY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_discovery.py
 EMPIRICA_OBSERVER_SERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_server.py
 EMPIRICA_UI := $(PLUGINS_DIR)/empirica/ui
 # The pinned Python dev tools (requirements-dev.txt: Hypothesis, mutmut with whatthepatch, jsonschema), installed by `make dev-install`.
@@ -199,7 +200,8 @@ check-observer: dev-python ## Fast observer store, projection and server tests; 
 		PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_fs test_observer_complexity & fs=$$!; \
 		PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_agreement test_timeline test_observer_facts test_observer_incremental & facts=$$!; \
 		PYTHONPATH=..:../..:../../../../scripts $(DEV_PYTHON) -m unittest -q test_observer_stateful & machine=$$!; \
-		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_TESTS) && $(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_SERVER_TESTS); obs=$$?; \
+		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_TESTS) && $(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_SERVER_TESTS) && \
+		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_DISCOVERY_TESTS); obs=$$?; \
 		wait $$fs; f=$$?; wait $$facts; g=$$?; wait $$machine; m=$$?; \
 		[ $$obs -eq 0 ] && [ $$f -eq 0 ] && [ $$g -eq 0 ] && [ $$m -eq 0 ]; }
 

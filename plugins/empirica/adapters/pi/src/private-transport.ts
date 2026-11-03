@@ -69,12 +69,29 @@ export type EvidenceItem =
 export interface EvidenceAnswer { subject: "research" | "claim"; id: string; choice: string; note: string | null }
 /** The bound document of the presentation (ADR-0072, PR 11/12): the written file's identity — full
  * digest, absolute path, and a terminal batch's residual count — never its bytes. The words of the
- * dialog come from the one shared owner (adapters/confirmation.py); only these values cross. */
+ * dialog come from the one shared owner (adapters/confirmation.py); only these values cross.
+ *
+ * PR 16 (A10–A12) adds the presentation-only link fields, computed by the Python side once per
+ * presentation (a 0.5 s discovery probe, never per item): `url` is the observer UI's deep link
+ * to the run's decision row — `http://127.0.0.1:<port>/app/?run=<12 hex>&decision=<12 hex>` —
+ * or `null` when no live observer of this home answers; `run12` is the run's compact id the
+ * fallback names. `null` is not absence: the transport requires both members, and a host renders
+ * its fallback lines from them. They never cross to the core: the receipt carries the digest. */
 export interface EvidenceDocument {
   digest: string;
   path: string;
+  url: string | null;
+  run12: string | null;
   residuals?: number;
 }
+/** The link a presentation may carry, checked exactly as the private response validator is: a
+ * loopback URL the discovery helper built (never an arbitrary host), or nothing. */
+const OBSERVER_URL = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}([/#?].*)?$/;
+const COMPACT_RUN = /^[0-9a-f]{12}$/;
+const isUrlOrNull = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && OBSERVER_URL.test(value));
+const isRunOrNull = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && COMPACT_RUN.test(value));
 /** The presentation is recorded (and has spent one interaction) — and its document is written — or the core refused it. */
 type EvidencePresentationResponse =
   | Readonly<{ type: "evidence_presentation"; receipt_id: string; items: EvidenceItem[]; document: EvidenceDocument }>
@@ -137,6 +154,7 @@ function governanceEnvelope(value: unknown): boolean {
     || !GOVERNANCE_DIGEST.test(document.digest)
     || typeof document.path !== "string" || !document.path.startsWith("/")
     || (document.question !== "approve" && document.question !== "confirm_amendment")
+    || !isUrlOrNull(document.url) || !isRunOrNull(document.run12)
     || "text" in document)
     return false;
   const priors = document.priors;
@@ -173,9 +191,12 @@ const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => b
       && object(value.document) && typeof value.document.digest === "string"
       && GOVERNANCE_DIGEST.test(value.document.digest)
       && typeof value.document.path === "string" && value.document.path.startsWith("/")
+      && isUrlOrNull((value.document as Record<string, unknown>).url)
+      && isRunOrNull((value.document as Record<string, unknown>).run12)
       && !("text" in value.document)
-      && (value.document.residuals === undefined || typeof value.document.residuals === "number" &&
-        Number.isSafeInteger(value.document.residuals) && value.document.residuals >= 0))
+      && (value.document.residuals === undefined || typeof (value.document as Record<string, unknown>).residuals === "number" &&
+        Number.isSafeInteger((value.document as Record<string, unknown>).residuals as number)
+        && (value.document as Record<string, unknown>).residuals as number >= 0))
     || (value.type === "evidence_refused" && object(value.result))),
   evidence_confirmation: (value) => object(value)
     && (value.type === "evidence_none" || (value.type === "evidence_receipt" && object(value.result))),

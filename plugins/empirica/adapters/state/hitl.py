@@ -248,6 +248,10 @@ class HitlDocuments:
     def __init__(self, home: Path | None = None) -> None:
         base = Path(home) if home is not None else empirica_home()
         self._runs = FilesystemRunRepository(base.absolute())
+        #: The machine home this sidecar store writes under, absolute as the writes see it
+        #: (PR 16: the same home a host form's discovery probe reads an advertise file from —
+        #: one probe per presentation, never a guess at another home's observer).
+        self.home = base.absolute()
         #: Generation directories this store has itself proven synced (review-2 #46): a
         #: completed write's flush is the proof, so a fresh store — or one whose earlier write
         #: was interrupted before its barriers — flushes the generation directory again instead

@@ -12,6 +12,7 @@ import { fakeCtx } from "./fakes.ts";
 const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json", import.meta.url), "utf8")) as {
   dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog; hostile_rationale: Dialog };
   review: { message: string };
+  details?: { run12: string; url: string };
 };
 const reviewDialog = fixture.dialogs.review;
 const theme = { accent: (x: string) => x, muted: (x: string) => x, warning: (x: string) => x };
@@ -27,14 +28,20 @@ const ENTER = "\r", DOWN = "\x1b[B", RIGHT = "\x1b[C", BACKSPACE = "\x7f", ESC =
  * `<home>/projects/s256-<64 hex>/runs/s256-<64 hex>/gen-<n>/hitl/<64 hex>.json` — so the
  * Pi side can never drift back to a made-up layout without this test noticing. */
 const reviewMessage = fixture.review.message;
-const digestAt = reviewMessage.split("\n").findIndex(line => line.startsWith("Document: "));
-assert.ok(digestAt >= 0, "the fixture's review message names its document");
-const REAL_PATH = reviewMessage.split("\n")[digestAt + 1] as string;
+// PR 16 (A11): the fallback form keeps the exact absolute path on its own ``File: `` line, and
+// the fixture's ``details`` block holds the one URL/link constant (never a live server).
+const details = fixture.details as { run12: string; url: string };
+const fileAt = reviewMessage.split("\n").findIndex(line => line.startsWith("File: "));
+assert.ok(fileAt >= 0, "the fixture's review message names its document file");
+const REAL_PATH = (reviewMessage.split("\n")[fileAt] as string).slice("File: ".length);
 assert.ok(REAL_PATH.length > 250, `the fixture path is the real layout, got ${REAL_PATH.length}`);
 /** The path's file name is the document's own full digest, minus the `.json`. */
 const HEX_OF_PATH = (REAL_PATH.split("/").pop() ?? "").replace(/\.json$/, "");
 const DOCUMENT = { digest: `sha256:${HEX_OF_PATH}`, path: REAL_PATH,
-  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 }, question: "approve" } as const;
+  priors: { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 }, question: "approve",
+  url: null, run12: details.run12 } as const;
+/** PR 16: the same document with the shared golden's live-observer link fields. */
+const DOCUMENT_LINKED = { ...DOCUMENT, url: details.url, run12: details.run12 } as const;
 
 function drive(keys: string[], dialog = reviewDialog, confirmation = false): DialogDecision | undefined {
   let state = initialState(dialog, confirmation);
@@ -398,11 +405,12 @@ test("the amendment warning is wrapped in full, never truncated, beside the docu
     assert.ok(lines.every(line => visibleWidth(line) <= width));
     const text = lines.map(line => line.trim()).join(" ");
     assert.ok(text.includes(dialog.amendment_warning), `warning truncated at ${width}`);
-    // the document lines: the short digest, then the absolute path, wrapped but never cut.
-    // X4 (Copilot #50) makes it a hard rule at every width: a segment wider than the dialog
-    // width is hard-wrapped at the width — no character dropped, no ellipse, `truncate`
-    // never fires — so joining the path lines back gives the exact path, at 80 where every
-    // segment fits and at 50 where the 70-column `s256-<64 hex>` segments do not.
+    // the document lines (PR 16, A11): the Details, the short digest, then the `File: `-labelled
+    // path, wrapped but never cut. X4 (Copilot #50) makes it a hard rule at every width: a
+    // segment wider than the dialog width is hard-wrapped at the width — no character dropped,
+    // no ellipse, `truncate` never fires — so joining the path lines back gives the exact
+    // path, at 80 where every segment fits and at 50 where the 70-column `s256-<64 hex>`
+    // segments do not.
     const pathLines = joinBackPaysThePath(lines);
     assert.ok(pathLines.pieces.length > 1, `the ~274-character path wraps at ${width}`);
     assert.equal(pathLines.joined, DOCUMENT.path, `the whole path survives at ${width}`);
@@ -410,16 +418,17 @@ test("the amendment warning is wrapped in full, never truncated, beside the docu
   }
 });
 
-/** The path lines as they appear between the digest line and the blank line that ends the
- * document region — hard-wrapped pieces included, which do not start with `/` — and what they
- * join back to (X4, Copilot #50: the exact path, at every width). */
+/** The path lines as they appear after the digest line — hard-wrapped pieces included, which do
+ * not start with `/` — and what they join back to (X4, Copilot #50: the exact path, at every
+ * width). PR 16 (A11): the digest line now spells `Document sha256:<12>`, and the path region
+ * starts at the ``File: `` labelled first piece line. */
 function joinBackPaysThePath(lines: string[]): { pieces: string[]; joined: string } {
-  const digestLine = lines.findIndex(line => line.startsWith("Document: "));
+  const digestLine = lines.findIndex(line => /^Document sha256:[0-9a-f]{12}$/.test(line));
   assert.ok(digestLine >= 0, "document digest line missing");
-  assert.match(lines[digestLine]!, /^Document: sha256:[0-9a-f]{12}$/);
   let end = digestLine + 1;
   while (end < lines.length && lines[end] !== "") end += 1;
-  const pieces = lines.slice(digestLine + 1, end);
+  const pieces = lines.slice(digestLine + 1, end)
+    .map(line => line.replace(/^File: /, ""));
   return { pieces, joined: pieces.join("") };
 }
 
@@ -544,10 +553,14 @@ test("the path block wraps at slash boundaries, hard-wrapping only what cannot f
   for (const width of [80, 50]) {
     const lines = renderLines(reviewDialog, initialState(reviewDialog), width, theme, base);
     assert.ok(lines.every(line => visibleWidth(line) <= width), `every line fits ${width}`);
-    const digestAt = lines.findIndex(line => line.startsWith("Document: "));
+    // PR 16 (A11): the fallback's path region is `File: `-labelled pieces between the digest
+    // line and the blank that follows the document region.
+    const digestAt = lines.findIndex(line => /^Document sha256:[0-9a-f]{12}$/.test(line));
     assert.ok(digestAt >= 0, "the short digest line");
     const nextBlank = lines.findIndex((line, index) => index > digestAt && line === "");
-    const pathLines = lines.slice(digestAt + 1, nextBlank >= 0 ? nextBlank : lines.length);
+    const pathLines = lines.slice(digestAt + 1, nextBlank >= 0 ? nextBlank : lines.length)
+      .map((line, index) => index === 0 ? line.replace("File: ", "") : line);
+    assert.ok(lines[digestAt + 1].startsWith("File: /"), "the path region opens with its label");
     assert.ok(pathLines.length > 1, `the 274-character path wraps at ${width}`);
     assert.ok(pathLines.every(line => line.startsWith("/") || !line.includes("/")),
       "a piece either starts a segment or is the inside of one — never a splice across two");

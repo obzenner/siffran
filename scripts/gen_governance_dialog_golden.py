@@ -37,12 +37,18 @@ _RUN_ID = "s256-" + "5e0a91c88f2b7d4c6e9a0b1d3f4e5278" * 2  # s256-<64 hex>
 _RUN_GENERATION = 1
 _RUN_KEY = RunKey(_PROJECT_ID, _RUN_ID, _RUN_GENERATION)
 _DOCUMENTS = HitlDocuments(home=Path(_HOME_SAMPLE))
+#: PR 16 (A10/A11): the fallback's run compact id, and the link a live observer binds — one
+#: fixture constant each, so every golden (the Claude message, the Pi screens, their tests)
+#: derives its URL and id from one place, never from a live server or a re-derived spelling.
+_RUN12 = "5dd796e89729"
+_DETAILS_URL = f"http://127.0.0.1:18770/app/?run={_RUN12}&decision=0a1b2c3d4e5f"
 
 
-def _document(hex_identity: str, *, amendment=None) -> dict:
+def _document(hex_identity: str, *, amendment=None, url: str | None = None,
+               run12: str = _RUN12) -> dict:
     digest = "sha256:" + hex_identity
     return {"digest": digest, "path": str(_DOCUMENTS.path(_RUN_KEY, digest)),
-            "amendment": amendment}
+            "amendment": amendment, "url": url, "run12": run12}
 
 
 def dialog(goal: str = "Confirm the exact run configuration", *,
@@ -76,8 +82,12 @@ def generate() -> dict:
     return {
         "dialogs": {"review": base, "confirmation": edited, "hostile": hostile,
                     "hostile_rationale": hostile_rationale},
+        "details": {"run12": _RUN12, "url": _DETAILS_URL,
+                     "command": "/empirica:ui"},
         "review": dict(zip(("message", "schema"),
                             review_form(base, _document(_APPROVE_HEX), 900))),
+        "review_url": dict(zip(("message", "schema"),
+                                review_form(base, _document(_APPROVE_HEX, url=_DETAILS_URL), 900))),
         "confirmation": dict(zip(("message", "schema"), confirm_form(
             edited, _document(_AMEND_HEX, amendment={"budgets": {
                 "max_audit_spawns": {"value": 2, "was": 2},
@@ -90,6 +100,50 @@ def generate() -> dict:
     }
 
 
+def _details_lines(message: str | None) -> list[str]:
+    """The wrapped ``Details:`` lines of a fallback message (the URL form is one line)."""
+    if message is None:
+        return []
+    found = False
+    lines = []
+    for line in message.splitlines():
+        if not found and line.startswith("Details: "):
+            found = True
+            lines.append(line)
+        elif found and not line.startswith(("Document ", "File: ")):
+            lines.append(line)
+        elif found:
+            break
+    return lines
+
+
+def _bounds(message: str, *, path_tokens: bool) -> tuple[bool, str | None]:
+    """Whether one form message keeps the compactness rules: at most 10 lines; exactly one
+    short digest; every line within 72 columns except the unwrappable copy-paste tokens (the
+    ``File:`` path, and a URL line stays within 80 columns — the columns of a real terminal, the
+    bound the spec pins for the link); the ``File:`` path, when present, is the real sidecar
+    layout exactly as ``HitlDocuments.path`` builds it."""
+    lines = message.splitlines()
+    digest_line, file_line = None, None
+    for index, line in enumerate(lines):
+        if re.fullmatch(r"Document sha256:[0-9a-f]{12}", line):
+            digest_line = index
+        if line.startswith("File: "):
+            file_line = index
+    return (
+        len(lines) <= 10
+        and digest_line is not None
+        and message.count("sha256:") == 1
+        and all(len(line) <= 72 for index, line in enumerate(lines)
+                if index != file_line
+                and not line.startswith("Details: http://127.0.0.1:"))
+        and all(len(line) <= 80 for line in lines if line.startswith("Details: http://"))
+        and (file_line is None or re.fullmatch(
+            re.escape("File: " + str(_DOCUMENTS.dir(_RUN_KEY))) + r"/[0-9a-f]{64}\.json",
+            lines[file_line]) is not None)
+    ), (None if digest_line is None else lines[digest_line])
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--check", action="store_true")
@@ -100,30 +154,23 @@ def main() -> int:
         if not OUT.exists() or OUT.read_text() != rendered:
             print(f"stale governance dialog golden: {OUT}", file=sys.stderr)
             return 1
-        for name in ("review", "confirmation", "hostile", "hostile_rationale"):
-            message = generated[name]["message"]
-            lines = message.splitlines()
-            digest_line = next((i for i, line in enumerate(lines)
-                                 if line.startswith("Document: ")), None)
-            # ADR-0072 Q4: the forms stay compact — at most 8 lines, everything within 72 columns
-            # — except the document's absolute path, the one copy-paste surface, on its own line
-            # right after the short-digest line, never truncated or wrapped. The digest appears
-            # once, and only in the short form: the full value is in the document and the record.
-            # M3 (review 2): the path line is the *real* sidecar layout built through the store
-            # — ``<home>/projects/s256-<64 hex>/runs/s256-<64 hex>/gen-<n>/hitl/<64 hex>.json``
-            # (~270 characters here, ~276 under a real macOS $EMPIRICA_HOME) — so the check pins
-            # the layout itself, exactly as ``HitlDocuments.path`` builds it, instead of the
-            # obsolete ≤-200 character bound the made-up short layout used to satisfy.
-            if (digest_line is None or len(lines) > 8
-                    or re.fullmatch(r"Document: sha256:[0-9a-f]{12}", lines[digest_line]) is None
-                    or message.count("sha256:") != 1
-                    or any(len(line) > 72 for index, line in enumerate(lines)
-                           if index != digest_line + 1)
-                    or not lines[digest_line + 1].startswith(str(_DOCUMENTS.dir(_RUN_KEY)) + "/")
-                    or re.fullmatch(re.escape(str(_DOCUMENTS.dir(_RUN_KEY)))
-                                    + r"/[0-9a-f]{64}\.json", lines[digest_line + 1]) is None):
-                print("governance dialog bounds violated", file=sys.stderr)
-                return 1
+        # ADR-0072 Q4, amended by PR 16's A11: the forms keep exactly what is judged, the
+        # document's Details and short digest — a live observer's link or the honest fallback
+        # with the exact absolute path — and remain compact: every line within 72 columns except
+        # the two copy-paste tokens that must never wrap (a URL line, the ``File:`` path). The
+        # digest appears once, and only in the short form; the path appears only when no link.
+        # M3 (review 2) keeps pinning the *real* sidecar layout through the store's own ``path``.
+        # Follow-up review 16-1: the fallback Details is one short arrow line (58 columns),
+        # never a wrapped phrase.
+        fallback_words = f"Details: /empirica:ui → run {_RUN12} → Human decisions"
+        if (not all(_bounds(generated[name]["message"], path_tokens=True)[0] for name in
+                    ("review", "confirmation", "hostile", "hostile_rationale"))
+                or not _bounds(generated["review_url"]["message"], path_tokens=False)[0]
+                or f"Details: {_DETAILS_URL}" not in generated["review_url"]["message"]
+                or "File: " in generated["review_url"]["message"]
+                or " ".join(_details_lines(generated["review"]["message"])) != fallback_words):
+            print("governance dialog bounds violated", file=sys.stderr)
+            return 1
         return 0
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(rendered)

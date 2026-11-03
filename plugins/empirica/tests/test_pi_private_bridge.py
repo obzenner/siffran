@@ -301,7 +301,13 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
                                         "source_ref", "quote", "class", "reason",
                                         "title", "description", "note_title"})
         document = answer["document"]
-        self.assertEqual(set(document), {"digest", "path"}, "no bytes cross the transport")
+        # PR 16 (A10/A12): the bridge's answer also names the presentation-only link fields —
+        # `url` (None here: this machine home serves no observer) and the run's compact id —
+        # beside the identity. Never bytes: the document itself stays in the file.
+        self.assertEqual(set(document), {"digest", "path", "url", "run12"},
+                         "no bytes cross the transport")
+        self.assertIsNone(document["url"])
+        self.assertRegex(document["run12"], r"^[0-9a-f]{12}$")
         self.assertRegex(document["digest"], r"^sha256:[0-9a-f]{64}$")
         self.assertTrue(document["path"].startswith(str(self.machine_home)))
         data = Path(document["path"]).read_bytes()
@@ -381,7 +387,7 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
         self.assertEqual(answer["type"], "evidence_presentation")
         document = answer["document"]
         written = json.loads(Path(document["path"]).read_bytes())
-        self.assertEqual(sorted(document), ["digest", "path", "residuals"],
+        self.assertEqual(sorted(document), ["digest", "path", "residuals", "run12", "url"],
                          "a terminal answer names the document and its residual count")
         self.assertEqual(document["residuals"], len(written["terminal"]["residuals"]),
                          "the count is the written document's own, read after the write")

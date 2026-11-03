@@ -23,7 +23,9 @@ quote is the fact a human judges) stay in the message beside the decision enums 
 the research records' per-claim texts and the reasons no deterministic check exists are in the
 document, while a needs-decision claim's own text stays in the message in full — it is what the
 human decides, exactly like a research item's quote — as are the terminal consent's residuals' own
-count; the form points at the written file by its short digest and its absolute path, and names how
+count; the form points at the written file by its short digest plus a ``Details:`` link to the
+observer UI's decision row (PR 16, A11) — or, when no live observer of this home answers, the
+honest fallback naming the run and the exact absolute path —
 many obligations ending now would leave unresolved.
 """
 from __future__ import annotations
@@ -57,6 +59,10 @@ NOTE_TITLE = "Note (optional)"
 #: as ``adapters/governance.py``'s: this module must not inherit the observer identity family
 #: into the host-confirmation runtime identity.
 _SHORT_BODY = 12
+#: The command that opens this host's observer UI (README.md "Usage"): the fallback Details line
+#: names only this host's command (A11) — Pi names its own (``/empirica-ui``) in its own dialog
+#: sources, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``) holds the words.
+_UI_COMMAND = "/empirica:ui"
 #: The refusal that carries the fetch (PR 10's staging: ``null`` is the explicit fetch).
 _MISMATCH = "evidence.document_mismatch"
 
@@ -108,15 +114,15 @@ def _claim_list(ids: Sequence[str]) -> str:
 
 def _research_titles(item: dict[str, Any]) -> None:
     """The short field title of a research item (its source) and its description: the bare
-    claim ids the record was proposed for — only the pointer; the per-claim context itself
-    ("For claim …", the claim texts) lives in the document (ADR-0072, the PR 12 clarification;
-    X6, Copilot #52) — a prefix of the quote (the full quote stays in the message) and the
-    question. Both hosts read the same text."""
+    claim ids the record was proposed for and the question it is asked — and nothing of the
+    quote (PR 16, A12: the quote is shown once, in the message and in the host dialog, as
+    `Quote: …` — the fact judged — never also truncated inside an item's description). The
+    per-claim context ("For claim …", the claim texts) lives in the document (ADR-0072, the PR
+    12 clarification; X6, Copilot #52). Both hosts read the same text."""
     ids = _claim_list([claim["id"] for claim in item["claims"]])
     question = "Is the observation right?" if item["class"] == "observed" else "Does the page say this?"
-    head, tail = f"{ids} · Quote: \"", f"\" · {question}"
     item["title"] = _fit(short_ref(item["source_ref"]), TITLE_LIMIT - _PREFIX)
-    item["description"] = head + _fit(item["quote"], DESCRIPTION_LIMIT - len(head) - len(tail) - 1).rstrip(" ") + tail
+    item["description"] = f"{ids} · {question}"
     item["note_title"] = NOTE_TITLE
 
 
@@ -288,6 +294,7 @@ def present(profile: str, run_id: str, *, dispatch: Callable[..., dict] = bridge
     if terminal is not None and not (is_terminal(terminal) and genuine_terminal(terminal)):
         return PRESENTATION_FAILED
     store = documents if documents is not None else _default_documents()
+    from adapters.observer.discovery import document_details  # lazy: the presentation pays it, once per presentation
     for _attempt in range(1 if terminal else 2):
         batch = terminal if terminal else presentable(_call(profile, run_id, {"type": "GetRun"}, dispatch))
         argument = _call(profile, run_id, {"type": "GetArgument"}, dispatch).get("argument") if batch else None
@@ -303,6 +310,12 @@ def present(profile: str, run_id: str, *, dispatch: Callable[..., dict] = bridge
         document = _bound_document(run_id, fetched, store)
         if document is None:
             return PRESENTATION_FAILED
+        # PR 16 (A10/A11): the one Details link per presentation — presentation-only fields next
+        # to the digest the receipt binds (the core never sees a URL): a live observer's deep
+        # link to the decision, or the honest fallback (the run's compact id, and the exact
+        # absolute path, which each host's own form builder lines — O5: the path is dropped
+        # only when a verified link is shown).
+        document = {**document, **document_details(getattr(store, "home", None), run_id, document)}
         # the same presentation again, bound to the document the human will read
         stored = ingress(profile, run_id, {"run_id": run_id, "receipt_id": receipt_id,
                                           "key": batch["key"],
@@ -408,10 +421,23 @@ def _residual_lines(document: Mapping[str, Any]) -> list[str]:
 
 
 def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
-    """ADR-0072 Q4's bound lines: the short digest, then the document's absolute path on its own
-    line — the one line exempt from wrapping and truncation, because the path is the copy-paste
-    surface and a wrapped path is a corrupted paste."""
-    return (f"Document: {document['digest'][:7 + _SHORT_BODY]}", f"{document['path']}")
+    """The bound document's Details (PR 16, A11): a live observer's link to the run's decision
+    in the UI — plus the document's short digest — or, when no observer of this home answers, the
+    honest fallback that keeps the exact absolute path (O5: the path is dropped only when a
+    verified link is shown). The ``File:`` line is the one line exempt from wrapping and
+    truncation: the path is the copy-paste surface and a wrapped path is a corrupted paste."""
+    short = f"Document {document['digest'][:7 + _SHORT_BODY]}"
+    url = document.get("url")
+    if isinstance(url, str) and url:
+        return (f"Details: {url}", short)
+    run12 = document.get("run12")
+    # Follow-up (review 16-1): one short arrow line, at most 76 columns, never wrapping
+    # mid-phrase (the old two-line fallback broke after "Human" at the wrap width).
+    where = (f"{_UI_COMMAND} → run {run12} → Human decisions"
+             if run12 else f"{_UI_COMMAND} → Human decisions")
+    return (*textwrap.wrap(f"Details: {where}", width=_WIDTH, break_long_words=False,
+                           break_on_hyphens=False),
+            short, f"File: {document['path']}")
 
 
 def form(items: Sequence[Mapping[str, Any]], timeout: float,

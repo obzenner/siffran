@@ -11,9 +11,11 @@
     GET /api/run?key=KEY                     contract v1: one run's sheet: its detail, its row and every attempt's row
                                              (``key`` may be a run's short ``id``; one several runs share is a 409);
                                              ETag = its versions, 304 when unchanged
-    GET /api/about                           which store this server observes (a digest), so a second
-                                             ``serve`` of the same store on the same port reuses it, and what
-                                             each source is (``sources``: store, generated or fixtures)
+    GET /api/about                           which store this server observes (a digest), which home (independent of --repo), its
+                                             per-process instance token and its capabilities, so a second
+                                             ``serve`` of the same store on the same port reuses it and a host
+                                             form's discovery probe (PR 16: ``hitl/1``, ADR-0072 Q5's links) can tell
+                                             this server, and what each source is (``sources``: store, generated or fixtures)
     GET /app/, /elements/, ...               the UI's files (an allowlist under plugins/empirica/ui)
 
 Security: bound to 127.0.0.1 only. Only GET and HEAD are served. A request whose ``Host`` is not one of this
@@ -34,6 +36,7 @@ from __future__ import annotations
 
 import gzip
 import json
+import secrets
 import socket
 import sys
 import threading
@@ -145,9 +148,18 @@ class Sources:
     across threads)."""
 
     def __init__(self, store: Observer | None, demo: Demo | None = None, identity: str = "demo",
-                 store_kind: str = "store") -> None:
+                 store_kind: str = "store", home_identity: str | None = None,
+                 instance: str | None = None, capabilities: tuple[str, ...] = ("hitl/1",)) -> None:
         self._sources = {"store": store, "demo": demo or Demo()}
         self.identity = identity  # which store is observed (cli.identity): what /api/about answers
+        #: PR 16 (A10): the identity of the resolved home alone (independent of ``--repo``), a
+        #: random per-process ``instance`` token, and the served ``capabilities`` — the three a
+        #: host form's discovery probe reads to tell this server from anything else on the
+        #: machine. A ``Sources`` without a home (the demo) answers ``home_identity`` as ``None``
+        #: and is never published in an advertise file, so no form ever links to fixture data.
+        self.home_identity = home_identity
+        self.instance = instance if isinstance(instance, str) and instance else secrets.token_hex(16)
+        self.capabilities = tuple(capabilities)
         #: What each source serves, so the page names it truly: ``store`` an Empirica store, ``generated`` a store the
         #: real service built for a demo (tests/v2/serve_generated.py), ``fixtures`` the vendored contract fixtures.
         self._kinds = {"store": store_kind, "demo": "fixtures"}
@@ -156,8 +168,11 @@ class Sources:
         self._encoded: dict[tuple[str, bool], bytes] = {}
 
     def about(self) -> dict[str, Any]:
-        """``/api/about``: that this is an Empirica observer, which store it observes, and what each source it serves is."""
+        """``/api/about``: that this is an Empirica observer, which store and which home it observes,
+        its per-process instance token and its capabilities, and what each source it serves is."""
         return {"observer": ABOUT, "identity": self.identity,
+                "home_identity": self.home_identity, "instance": self.instance,
+                "capabilities": list(self.capabilities),
                 "sources": {name: self._kinds[name] for name in self.names()}}
 
     def names(self) -> tuple[str, ...]:

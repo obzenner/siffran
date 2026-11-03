@@ -38,8 +38,12 @@ function presentationOf(response: Response): Presentation | undefined {
 /** Validate the bound document exactly as the private response validator does: a full digest
  * and a nonempty absolute path, with core-owned priors the form must never recompute, and the
  * parsed document's core-derived ``question`` — ``approve`` or ``confirm_amendment`` —
- * which alone chooses which dialog is shown (M1, review 2). Anything else is treated as
- * absent, so a malformed pair refuses exactly like a missing one. */
+ * which alone chooses which dialog is shown (M1, review 2). PR 16 (A10/A11) threads the
+ * presentation-only link fields through: `url` (the observer's deep link, `null` without a
+ * live observer of this home) and `run12` (the run's compact id the fallback names), both
+ * computed by the Python bridge once per presentation; `null` is the honest "no link", never
+ * a missing member. Anything else is treated as absent, so a malformed pair refuses exactly
+ * like a missing one. */
 function boundDocument(presentation: Presentation | undefined): BoundDocument | undefined {
   const document = !presentation || presentation.document_unavailable === true
     ? undefined : presentation.document;
@@ -47,13 +51,19 @@ function boundDocument(presentation: Presentation | undefined): BoundDocument | 
   const path = document?.path;
   if (typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(digest)) return undefined;
   if (typeof path !== "string" || !path.startsWith("/")) return undefined;
+  const url = document?.url;
+  if (url !== null && typeof url !== "string") return undefined;
+  if (typeof url === "string" && !/^http:\/\/127\.0\.0\.1:[0-9]{1,5}(\/.*)?$/.test(url)) return undefined;
+  const run12 = document?.run12;
+  if (run12 !== null && typeof run12 !== "string") return undefined;
+  if (typeof run12 === "string" && !/^[0-9a-f]{12}$/.test(run12)) return undefined;
   const priors = document?.priors;
   if (priors !== null && priors !== undefined
     && (typeof priors !== "object"
       || Object.values(priors).some(prior => typeof prior !== "number"))) return undefined;
   const question = document?.question;
   if (question !== "approve" && question !== "confirm_amendment") return undefined;
-  return { digest, path, priors: priors ?? null, question };
+  return { digest, path, priors: priors ?? null, question, url: url ?? null, run12: run12 ?? null };
 }
 
 function stripPresentation(response: Response): Response {

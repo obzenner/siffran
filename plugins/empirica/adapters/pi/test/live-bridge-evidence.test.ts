@@ -108,8 +108,10 @@ test(
           null,
           "the evidence batch is resolved: no confirmation waits anymore");
 
-      // The dialog the human saw: the source and the quote, the pointer to the moved text, and the
-      // written document's short digest and absolute path — never the research records' claim context.
+      // The dialog the human saw: the source and the quote, the pointer to the moved text, the
+      // document's Details and short digest — never the research records' claim context. This
+      // test's home serves no observer, so the fallback keeps the exact absolute path (A11),
+      // labelled `File: ` and broken at `/`; the digest line is the LAST line (A12).
       assert.equal(shown.length, 1, "one item, one dialog");
       const title = shown[0]!;
       assert.match(title, /web source: https:\/\/example\.test\/spec/);
@@ -117,11 +119,20 @@ test(
       assert.ok(title.includes("Claim texts and their no-deterministic-check reasons: in the document."),
         "the pointer names what moved");
       assert.ok(!title.includes("For claim"), "the per-claim context is in the document");
-      assert.match(title, /Document: sha256:[0-9a-f]{12}(\s|$)/, "the short digest line");
-      const documentLine = title.split("\n").find(line => line.startsWith("Document: sha256:"))!;
-      const pathLine = title.split("\n")[title.split("\n").indexOf(documentLine) + 1];
+      assert.match(title, /Details: \/empirica-ui → run [0-9a-f]{12} → Human decisions/,
+        "the fallback is one short arrow line naming this host's own command (review 16-1)");
+      const titleLines = title.split("\n");
+      assert.match(titleLines[titleLines.length - 1]!, /^Document sha256:[0-9a-f]{12}$/,
+        "the short digest line ends the title (A12)");
+      const titleLines2 = title.split("\n");
+      const documentLine = titleLines2.find(line => /^Document sha256:[0-9a-f]{12}$/.test(line))!;
+      const fileAt = titleLines2.findIndex(line => line.startsWith("File: /"));
+      const pathPieces = titleLines2.slice(fileAt, titleLines2.indexOf(documentLine))
+        .map((line, index) => index === 0 ? line.slice("File: ".length) : line);
+      const pathLine = pathPieces.join("");
+      assert.equal(pathPieces[0]!.startsWith("/"), true, "the path region opens with its `File: ` label");
       assert.ok(pathLine.startsWith(testHome) && pathLine.endsWith(".json"),
-        "the absolute path alone on its own line");
+        `the exact absolute path, broken at \`/\` (A11): the pieces rebuild ${pathLine}`);
 
       // The run's sidecar now holds two documents: the one the governance approval wrote (PR 09)
       // and the one this evidence flow wrote. The dialog named a real file, published read-only —
@@ -133,7 +144,7 @@ test(
       assert.ok(written.includes(pathLine), "the dialog's path names a file the bridge wrote");
       assert.equal(statSync(pathLine).mode & 0o777, 0o400, "read-only once published");
       const digest = `sha256:${createHash("sha256").update(readFileSync(pathLine)).digest("hex")}`;
-      assert.equal(`Document: ${digest.slice(0, 19)}`, documentLine, "the dialog showed the file's own digest");
+      assert.equal(`Document ${digest.slice(0, 19)}`, documentLine, "the dialog showed the file's own digest");
 
       // Both committed rows — read from the run's own artifact repo, not the in-memory view — name
       // the same file: the presentation recorded it before the show, the receipt after the answer.

@@ -60,11 +60,15 @@ The native forms on Claude Code and Pi keep only what is being decided: the budg
 their `(was …)` priors on an amendment), the first line of the goal, and each evidence record's
 source and quote; a needs-decision claim keeps its full text. The sizing rationale, the per-record
 claim context, the no-deterministic-check reasons, and the terminal residual list moved into the
-document. Each form and item dialog carries two bound lines: the document's short digest
-(`Document: sha256:<first 12 hex>`) and its **absolute path**. The path is a copy-paste surface:
-Claude prints it on one unwrapped line, while a Pi dialog too narrow for it wraps only at `/`
-boundaries, never cutting a segment, so the printed pieces join back into the exact path. On
-Claude the form deliberately carries no link, so the document is opened by pasting the path.
+document. Each form and item dialog carries the document's **Details**: when an observer of the
+same home is live, a short one-line link to the decision in the browser UI
+(`http://127.0.0.1:<port>/app/?run=<compact id>&decision=<12 hex>`, verified before it is shown)
+plus the document's short digest (`Document sha256:<first 12 hex>`). Without a live observer the
+form keeps the honest fallback — its own host's command to open the UI, the run's compact id,
+and the exact **absolute path**. The path is a copy-paste surface: Claude prints it on one
+unwrapped `File:` line, while a Pi dialog too narrow for it wraps only at `/` boundaries, never
+cutting a segment, so the printed pieces join back into the exact path; the path is dropped
+only when a verified link is shown in its place.
 
 New refusal reasons bind the document digest, both with `host_recovery`:
 

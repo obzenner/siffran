@@ -111,13 +111,16 @@ test("Pi raw edit and locked approval cross the actual private Python service", 
     assert.equal(dialogs, 2);
     assert.ok(ui.some(line => line.includes("confirm edited configuration")));
 
-    // PR 09 (ADR-0072): the forms are bound to the written document. The private bridge wrote it
-    // once, write-first, under this run's machine home; every decision named it; both form rounds
-    // showed the short digest and the absolute path; and the record's own receipt — not the
-    // adapter's word — is what binds the final approval to the file's exact bytes.
-    const bound = ui.filter(line => line.startsWith("Document: sha256:"));
+    // PR 09 (ADR-0072), PR 16 (A11): the forms are bound to the written document. The private
+    // bridge wrote it once, write-first, under this run's machine home; every decision named
+    // it; both form rounds showed the document's Details (this test's home serves no observer,
+    // so the fallback lines — no live link, the exact path) and the short digest; and the
+    // record's own receipt — not the adapter's word — is what binds the final approval to the
+    // file's exact bytes.
+    const bound = ui.filter(line => /^Document sha256:[0-9a-f]{12}$/.test(line));
     assert.equal(bound.length, 2, "each form names the document");
-    assert.match(bound[0]!, /^Document: sha256:[0-9a-f]{12}$/);
+    assert.ok(ui.some(line => line.startsWith("Details: /empirica-ui → run")),
+      "the fallback Details arrow line names this host's own command (A11, review 16-1)");
     const written = readdirSync(testHome, { recursive: true, encoding: "utf8" })
       .filter(name => name.split("/").includes("hitl") && name.endsWith(".json"))
       .map(name => join(testHome, name));

@@ -16,12 +16,12 @@ const RECORD: EvidenceItem = { subject: "research", id: "sha256:" + "a".repeat(6
   claims: [{ id: "C0", text: "The API is stable." }, { id: "C2", text: "The API is documented." }],
   source_kind: "web", source_ref: "https://example.test/spec", quote: "stable since v2", class: "retrievable",
   title: "example.test/spec", note_title: "Note (optional)",
-  description: 'C0, C2 · Quote: "stable since v2" · Does the page say this?' };
+  description: 'C0, C2 · Does the page say this?' };
 const OBSERVED: EvidenceItem = { ...RECORD, id: "sha256:" + "b".repeat(64), record_ids: ["sha256:" + "b".repeat(64)],
   claims: [{ id: "C0", text: "The API is stable." }], source_kind: "runtime",
   source_ref: "deploy output", class: "observed", reason: "Needs production credentials.",
   title: "deploy output", note_title: "Note (optional)",
-  description: 'C0 · Quote: "stable since v2" · Is the observation right?' };
+  description: 'C0 · Is the observation right?' };
 const DECISION: EvidenceItem = { subject: "claim", id: "C1", digest: "sha256:" + "c".repeat(64), text: "Ship it?",
   title: "Your decision on C1", note_title: "Note (optional)", description: "C1 · Ship it?" };
 
@@ -30,11 +30,25 @@ const BATCH = (promptError: string | null = null) => ({ key: "sha256:" + "d".rep
 // PR 12: the presentation answer names the written document — the same bound identity the Python
 // bridge hands back (the full digest, the file's absolute path, and a terminal batch's residual count);
 // never its text. The short line the dialog renders is the digest's first 12 hex.
-const DOCUMENT: EvidenceDocument = {
+// PR 16 (A10/A12): the fixture document also carries the link fields the Python flow computes
+// once per presentation — `url: null` is the honest fallback most fixtures need (no live
+// observer), and `LINKED` below reuses the shared golden fixture's Details constants
+// (plugins/empirica/tests/fixtures/governance-dialog-golden.json `details`), so the URL a test
+// dialog shows is derived from one fixture constant, as the round-09 goldens derive the path.
+import { readFileSync } from "node:fs";
+const GOLDEN = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json",
+  import.meta.url), "utf8")) as { details: { run12: string; url: string } };
+const LINKED: EvidenceDocument = {
   digest: "sha256:0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789",
   path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
-    + "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json" };
-const SHORT_DIGEST_LINE = `Document: ${DOCUMENT.digest.slice(0, 19)}`;
+    + "0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789abcdef0123456789.json",
+  url: GOLDEN.details.url, run12: GOLDEN.details.run12 };
+const DOCUMENT: EvidenceDocument = { ...LINKED, url: null };
+const SHORT_DIGEST_LINE = `Document ${DOCUMENT.digest.slice(0, 19)}`;
+/** The exact path a title's broken pieces encode: the `File: ` label opens the first piece line. */
+const pathOfTitle = (title: string): string =>
+  title.split("\n").filter(line => line === "File: " || /^File: \/|^\//.test(line))
+    .map(line => line.replace(/^File: /, "")).join("");
 const POINTER = "Claim texts and their no-deterministic-check reasons: in the document.";
 const blocked = (route = "human", promptError: string | null = route === "human" ? null : "unavailable",
                  code = "evidence.confirmation_required"): Response => ({
@@ -101,7 +115,7 @@ test("TUI: each item gets a select and, for a decision, a note; the answers are 
 test("PR 12: the research dialog keeps the source and the quote; the claim context and the reason are in the document", () => {
   const title = itemTitle(OBSERVED, 2, 3, DOCUMENT);
   for (const text of ["2 of 3", "runtime source: deploy output", 'Quote: "stable since v2"', POINTER,
-    SHORT_DIGEST_LINE, DOCUMENT.path]) assert.ok(title.includes(text), text);
+    SHORT_DIGEST_LINE]) assert.ok(title.includes(text), text);
   for (const gone of ["For claim C0: The API is stable.", "Why no deterministic check: Needs production credentials."])
     assert.ok(!title.includes(gone), `${gone} moved to the document`);
   const grouped = itemTitle(RECORD, 1, 1, DOCUMENT);
@@ -109,7 +123,21 @@ test("PR 12: the research dialog keeps the source and the quote; the claim conte
     "one source quoted for two claims is one item; both claims' texts are in the document");
   const long = itemTitle({ ...RECORD, quote: `${"x".repeat(900)} THE QUALIFICATION AT THE END` }, 1, 1, DOCUMENT);
   assert.ok(long.includes("THE QUALIFICATION AT THE END") && !long.includes("…"), "the human reads the whole quote");
-  assert.ok(long.endsWith(DOCUMENT.path), "the dialog ends with the document lines");
+  assert.ok(long.endsWith(SHORT_DIGEST_LINE),
+    "the dialog ends with the short digest: ui.select's countdown attaches to the LAST line (A12)");
+  assert.equal(pathOfTitle(long), DOCUMENT.path,
+    "the fallback path is broken at `/` and nothing else: the pieces rebuild the exact record");
+  const longDetails = long.slice(long.indexOf("Details: ")).split("\n");
+  assert.ok(longDetails.every(line => line.length <= 76),
+    "the composed Details lines fit A12's 76 columns (the item's own quote stays full, never wrapped)");
+  // PR 16 (A11): with a live observer the dialog shows the deep link and no path at all
+  const linked = itemTitle(OBSERVED, 1, 1, LINKED);
+  assert.ok(linked.includes(`Details: ${GOLDEN.details.url}`), "the link is one whole line");
+  const linkedDetails = linked.slice(linked.indexOf("Details: ")).split("\n");
+  assert.ok(linkedDetails.every(line => line.length <= 76),
+    "the URL line (about 64 characters with a five-digit port) fits the 76-column bound");
+  assert.ok(!pathOfTitle(linked), "a verified link drops the path entirely (O5)");
+  assert.ok(linked.endsWith(SHORT_DIGEST_LINE), "the LAST line stays the short digest (A12)");
 });
 
 test("PR 12: the decision dialog shows the full claim text — what is decided — and the terminal dialog the residual count", () => {
@@ -117,8 +145,9 @@ test("PR 12: the decision dialog shows the full claim text — what is decided �
   // on both hosts (the Claude message shows it too — adapters/confirmation.py `_item_text`).
   const decision = itemTitle(DECISION, 1, 1, DOCUMENT).split("\n");
   assert.ok(decision.includes("Ship it?"), "the claim text is shown in full");
-  assert.ok(decision.includes(SHORT_DIGEST_LINE) && decision.includes(DOCUMENT.path),
-    "every item dialog ends with the document's short digest and absolute path");
+  assert.ok(decision.includes(SHORT_DIGEST_LINE)
+    && pathOfTitle(decision.join("\n")) === DOCUMENT.path,
+    "every item dialog ends with the document's Details and short digest, the digest last");
   assert.ok(!decision.some((line) => line.includes("no-deterministic-check")),
     "nothing of a decision item moved; the pointer belongs to the research items whose context did");
   const terminal = itemTitle(TERMINAL_ITEM, 1, 1, { ...DOCUMENT, residuals: 4 }).split("\n");
@@ -127,7 +156,8 @@ test("PR 12: the decision dialog shows the full claim text — what is decided �
   assert.ok(terminal.some((line) => line === terminalItem.text), "the decision wording stays in full");
   assert.ok(terminal.some((line) => line === "4 unresolved obligations would remain — they are listed in the document."),
     "the count read out of the written document");
-  assert.ok(terminal.includes(SHORT_DIGEST_LINE) && terminal.includes(DOCUMENT.path));
+  assert.ok(terminal.includes(SHORT_DIGEST_LINE)
+    && pathOfTitle(terminal.join("\n")) === DOCUMENT.path);
   assert.ok(!terminal.some((line) => line.includes("no-deterministic-check")), "the terminal dialog has no research pointer");
   const none = itemTitle(TERMINAL_ITEM, 1, 1, { ...DOCUMENT, residuals: 0 });
   assert.ok(none.includes("Nothing would stay unresolved; the record is in the document."));
@@ -143,8 +173,8 @@ test("F-Q4-2: the dialog names its subject on the first line, the note dialog na
   const [first, second] = live.shown.filter((s) => s.kind === "select");
   assert.equal(first.title.split("\n")[0], "Empirica · evidence that needs you (1 of 2)");
   assert.equal(first.title.split("\n")[1], "example.test/spec");
-  assert.equal(first.title.split("\n")[2], 'C0, C2 · Quote: "stable since v2" · Does the page say this?',
-    "the description is the third line: the same text Claude shows under the field");
+  assert.equal(first.title.split("\n")[2], "C0, C2 · Does the page say this?",
+    "the description is the third line: the same text Claude shows under the field — and PR 16 (A12) keeps the quote out of it, shown once as `Quote: …`");
   assert.equal(second.title.split("\n")[1], "Your decision on C1");
   assert.equal(second.title.split("\n")[2], "C1 · Ship it?");
   assert.deepEqual(live.shown.filter((s) => s.kind === "input").map((s) => s.title), ["Note (optional)", "Note (optional)"]);
@@ -330,7 +360,12 @@ test("PR 12: a presentation answer without a valid document pair is nothing show
     ["not a sha256 digest", { digest: "deadbeef".repeat(8), path: "/var/hitl/d.json" }],
     ["a relative path", { digest: DOCUMENT.digest, path: "empirica-projects/x/hitl/d.json" }],
     ["no path at all", { digest: DOCUMENT.digest }],
-    ["bytes offered", { digest: DOCUMENT.digest, path: DOCUMENT.path, text: '{"kind": "hitl_document"}' }]];
+    ["bytes offered", { digest: DOCUMENT.digest, path: DOCUMENT.path, url: null, run12: null,
+      text: '{"kind": "hitl_document"}' }],
+    ["a foreign url", { digest: DOCUMENT.digest, path: DOCUMENT.path,
+      url: "http://evil.example:18770/app/", run12: null }],
+    ["an invented run id", { digest: DOCUMENT.digest, path: DOCUMENT.path, url: null,
+      run12: "not-twelve-hex" }]];
   for (const [label, document] of cases) {
     const { ctx, shown } = ctxFor({ selects: ["Confirm"], inputs: [""] });
     const { trusted, calls } = bridge([RECORD],

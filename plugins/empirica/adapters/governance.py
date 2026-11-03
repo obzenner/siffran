@@ -22,6 +22,11 @@ from core.governance import expected_approval_kind
 #: identifiers already use (``application.observer_index.ID_SIZE``). Kept a local literal so the
 #: host governance runtime does not inherit the observer identity family into the manifest.
 _SHORT_BODY = 12
+#: The command that opens this host's observer UI (README.md "Usage"): the fallback Details
+#: line names only this host's command (A11) — Pi names its own (``/empirica-ui``) in its own
+#: dialog sources, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``) holds
+#: the words both sides.
+_UI_COMMAND = "/empirica:ui"
 
 
 @dataclass(frozen=True)
@@ -100,10 +105,26 @@ def _rationale_lines(dialog: Mapping[str, Any]) -> tuple[str, ...]:
                                                        break_on_hyphens=False))
 
 def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
-    """ADR-0072 Q4's bound lines: the short digest, then the document's absolute path on its own
-    line — the one line exempt from truncation and wrapping, because the path is the copy-paste
-    surface and a wrapped path is a corrupted paste."""
-    return (f"Document: {document['digest'][:7 + _SHORT_BODY]}", f"{document['path']}")
+    """The bound document's Details (PR 16, ADR-0072 Q5's amendment): a live observer's link to
+    the decision's row in the UI — plus the document's own short digest — or, when no observer of
+    this home answers, the honest fallback that keeps the document's exact absolute path (O5,
+    as decided: the path is dropped only when a verified link is shown). Presentation only: the
+    URL is built by the discovery helper beside the store, once per presentation, and the core
+    never sees it. The ``File:`` line keeps its copy-paste guarantee: never shortened,
+    never ``~-``shortened, never wrapped (Q4's one exempt line, new spelling)."""
+    short = f"Document {document['digest'][:7 + _SHORT_BODY]}"
+    url = document.get("url")
+    if isinstance(url, str) and url:
+        return (f"Details: {url}", short)
+    run12 = document.get("run12")
+    # Follow-up (review 16-1): one short arrow line, at most 76 columns, never wrapping mid-phrase
+    # (the old two-line fallback broke after "Human" at the wrap width). The arrows read as one
+    # path to the human decisions: the host command, the run's compact id.
+    where = (f"{_UI_COMMAND} → run {run12} → Human decisions"
+             if run12 else f"{_UI_COMMAND} → Human decisions")
+    return (*textwrap.wrap(f"Details: {where}", width=72, break_long_words=False,
+                           break_on_hyphens=False),
+            short, f"File: {document['path']}")
 
 def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map a validated dialog and its written document to Claude's editable elicitation form.
@@ -283,6 +304,12 @@ class HostGovernance:
             if document is None:
                 return unavailable(result)
             envelope["document_digest"] = document["digest"]
+            # PR 16 (A10/A11): the one Details link per presentation — a live observer of this
+            # home's link to the decision row beside the short digest, else the honest fallback
+            # keeping the path. Presentation only: it never enters the decision envelope.
+            from adapters.observer.discovery import document_details  # lazy: a no-document refresh never pays it
+            document = {**document, **document_details(getattr(self.documents, "home", None),
+                                                        run["id"], document)}
 
         def dismiss(message=None):
             stored = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "dismiss"})["result"]

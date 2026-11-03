@@ -9,6 +9,7 @@
 
 import type { ExtensionContext } from "./pi-types.ts";
 import type { EvidenceAnswer, EvidenceDocument, EvidenceItem, PrivateIngress } from "./private-transport.ts";
+import { hardWrapLines } from "./dialog-view.ts";
 import { isTerminalBatch, type ConfirmationBatch, type HostFailure, type Response } from "./contract.ts";
 import { hostFailureNotice } from "./author-view.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
@@ -99,10 +100,11 @@ export function evidenceHostFailure(result: Response["result"], reported?: HostF
  * decides — the research records' per-claim context moved, decided claims did not; its dialog has
  * no pointer, because nothing of it moved. The terminal item keeps the full decision wording and
  * names the residual count read out of the written document itself. Every dialog ends with the
- * document's short digest and its absolute path on its own line: no Empirica code shortens,
- * wraps, or re-derives that line — the title string carries the whole raw path (the same
- * whole-string guarantee today's full-quote dialogs rely on), and whatever the terminal wraps
- * around its width, the human copies the complete path from the record as written. */
+ * document's Details (PR 16, A11/A12): a live observer's link or the honest fallback with the
+ * path broken at every `/` (no Empirica code shortens or re-derives a path — every piece is a
+ * real slice, and the joined lines rebuild the exact record), and the LAST title line is the
+ * short digest `Document sha256:<12>`, so Pi's countdown — which `ui.select` attaches to the
+ * title's last line — never lands on a path, a quote or a URL (A12). */
 export function itemTitle(item: EvidenceItem, number: number, count: number,
                           document: EvidenceDocument): string {
   const head = item.subject === "claim" && item.terminal
@@ -122,11 +124,35 @@ export function itemTitle(item: EvidenceItem, number: number, count: number,
 
 /** The pointer of a research item's dialog (mirrors `adapters/confirmation.py`'s form pointer, `_item_text`). */
 const POINTER = "Claim texts and their no-deterministic-check reasons: in the document.";
-/** The short digest and the path of the written document, last lines of every dialog — the same
- * bound lines Claude's form shows (`adapters/confirmation.py` `_document_lines`: twelve hex, the
- * absolute path alone on its own line, never truncated). */
-const documentLines = (document: EvidenceDocument): readonly string[] =>
-  [`Document: ${document.digest.slice(0, 19)}`, document.path];
+/** The widest line the dialog composes itself (A12): the Details fallback lines are shorter than
+ * this, and a five-digit port's URL line is about 74 columns, so every composed line fits
+ * without any renderer's help — nothing in the dialog waits on a wrap it never gets. */
+const TITLE_WIDTH = 76;
+/** This host's observer-UI command (README.md "Usage"), the one its fallback Details names (A11)
+ * — Claude's form names its own, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``)
+ * holds the words. */
+const UI_COMMAND = "/empirica-ui";
+/** PR 16 (A11): the bound document's Details. A live observer's deep link —
+ * ``http://127.0.0.1:<port>/app/?run=<compact id>&decision=<12 hex>`` — plus the short digest;
+ * or, without one, the honest fallback: this host's own command and the run's compact id, the
+ * exact path broken at every ``/`` (explicit newlines — the ``File: `` label opens the first
+ * piece), and the short digest **last** (A12: ``ui.select`` owns the countdown and attaches it
+ * to the title's last line, so it lands on ``Document sha256:<12>``, a short line, never on a
+ * path, a quote or a URL). O5, decided: with a verified link the path is dropped entirely. */
+const documentLines = (document: EvidenceDocument): readonly string[] => {
+  const short = `Document ${document.digest.slice(0, 19)}`;
+  if (document.url !== null) return [`Details: ${document.url}`, short];
+  // Follow-up review 16-1: one short arrow line (58 columns with the 12-hex run), never the
+  // old two-line fallback that broke after "Human" at the wrap width; `hardWrapLines` labels
+  // the first piece `Details: ` (the one `/` is the command's own, so the line never splits).
+  const details = UI_COMMAND
+    + (document.run12 === null ? "" : ` → run ${document.run12}`) + " → Human decisions";
+  return [
+    ...hardWrapLines(details, TITLE_WIDTH, "Details: "),
+    ...hardWrapLines(document.path, TITLE_WIDTH, "File: "),
+    short,
+  ];
+};
 /** The terminal dialog's count line, the same sentences `adapters/confirmation.py`
  * `_residual_lines` renders — shown only when the presentation read a count out of the document. */
 const residualLines = (document: EvidenceDocument): readonly string[] =>
@@ -185,17 +211,23 @@ export async function observeSurface(runId: string, ctx: ExtensionContext, trust
 /** The document pair of a presentation answer, checked before anything may be shown: the same
  * shape `private-transport.ts` holds the sole transport validator for (defense in depth — a
  * hostile or buggy ingress cannot make a dialog out of an unproven document, so "nothing shown"`)
- * and never its bytes. */
+ * and never its bytes. PR 16 (A10–A12): the pair also carries the presentation-only link fields
+ * — `url` (the observer's deep link, `null` without a live observer of this home) and `run12`
+ * (the run's compact id) — which this validator dropped with every extra field; they now cross,
+ * as data for the dialog's Details lines, and never reach any receipt. */
 function presentedDocument(value: unknown): EvidenceDocument | null {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
-  const { digest, path, ...rest } = value as Record<string, unknown>;
+  const { digest, path, url, run12, ...rest } = value as Record<string, unknown>;
   if (typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(digest)) return null;
   if (typeof path !== "string" || !path.startsWith("/")) return null;
+  if (url !== null && (typeof url !== "string"
+    || !/^http:\/\/127\.0\.0\.1:[0-9]{1,5}(\/.*)?$/.test(url))) return null;
+  if (run12 !== null && (typeof run12 !== "string" || !/^[0-9a-f]{12}$/.test(run12))) return null;
   const residuals = (value as Record<string, unknown>).residuals;
   if (residuals !== undefined && (typeof residuals !== "number" || !Number.isSafeInteger(residuals) || residuals < 0))
     return null;
   if ("text" in rest) return null;   // bytes never cross the transport at all
-  return { digest, path, ...(residuals === undefined ? {} : { residuals }) };
+  return { digest, path, url, run12, ...(residuals === undefined ? {} : { residuals }) };
 }
 
 /**
@@ -215,8 +247,10 @@ function presentedDocument(value: unknown): EvidenceDocument | null {
  *
  * PR 12 (ADR-0072): a presentation answer also names the document its presentation wrote, and it must
  * be a proven pair before a dialog may show it — an answer without one is "nothing shown" and the
- * same `presentation_failed` as any refusal. Every item dialog ends with the document's short digest
- * and its absolute path, and the receipt repeats the presentation's digest (`document_digest`), so
+ * same `presentation_failed` as any refusal. Every item dialog ends with the document's Details
+ * and its short digest (PR 16: a live observer's link, or this host's command with the exact
+ * path — the path is dropped only when a verified link is shown), and the receipt repeats the
+ * presentation's digest (`document_digest`), so
  * the core records that what was submitted was decided against the document the human was shown;
  * the pair itself, its path included, never leaves the private lane.
  */

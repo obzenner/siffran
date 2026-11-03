@@ -297,10 +297,13 @@ class ShortFormsTests(WriteFirstFixture):
     thing the human decides."""
 
     def document_lines(self, message: str) -> tuple[str, str]:
+        """The form's short-digest line and the exact absolute path it points at — the fallback's
+        ``File:`` line (A11: with a live observer link the path is dropped, which no test here has
+        without a live server)."""
         lines = message.splitlines()
-        document_line = next(line for line in lines if line.startswith("Document: sha256:"))
+        document_line = next(line for line in lines if line.startswith("Document sha256:"))
         index = lines.index(document_line)
-        return document_line, lines[index + 1]
+        return document_line, lines[index + 1][len("File: "):]
 
     def test_the_evidence_form_keeps_the_quotes_and_moves_the_rest_to_the_document(self):
         drv, run_id = self.start(graph=graph_with_decision())
@@ -326,14 +329,17 @@ class ShortFormsTests(WriteFirstFixture):
         self.assertIn("no-deterministic-check reasons: in the document", message,
                      "one line says where the moved text lives")
         document_line, path_line = self.document_lines(message)
-        self.assertRegex(document_line, r"\ADocument: sha256:[0-9a-f]{12}\Z")
+        self.assertRegex(document_line, r"\ADocument sha256:[0-9a-f]{12}\Z")
+        self.assertTrue(lines.index(document_line) + 1 < len(lines))
+        file_line = lines[lines.index(document_line) + 1]
+        self.assertTrue(file_line.startswith(f"File: {path_line}"),
+                        "the path is pasted as-is on its own ``File:`` line")
         self.assertTrue(Path(path_line).is_absolute(), "the path is pasted as-is")
         self.assertTrue(path_line.startswith(str(self.empirica_home)), path_line)
         self.assertTrue(path_line.endswith(".json"))
-        self.assertTrue(path_line in message.splitlines(), "the path is alone on its own line")
         self.assertEqual(stat.S_IMODE(os.stat(path_line).st_mode), 0o400)
         for line in message.splitlines():
-            if line != path_line:
+            if line != file_line:
                 self.assertLessEqual(len(line), 72 + 3, line)  # wrapped; the path alone is exempt
         self.assertEqual(set(schema["properties"]), {f"{prefix}{n}" for n in (1, 2, 3) for prefix in "dn"})
         self.assertEqual(schema["properties"]["d1"]["enum"], ["later", "approve", "reject"])  # the claim
@@ -366,7 +372,7 @@ class ShortFormsTests(WriteFirstFixture):
         self.assertEqual([row["id"] for row in residual_rows],
                          [row["id"] for row in residual_rows if row["id"] != "obligation.terminal"])
         document_line, path_line = self.document_lines(message)
-        self.assertRegex(document_line, r"\ADocument: sha256:[0-9a-f]{12}\Z")
+        self.assertRegex(document_line, r"\ADocument sha256:[0-9a-f]{12}\Z")
         self.assertTrue(path_line.startswith(str(self.empirica_home)) and path_line.endswith(".json"))
         self.assertEqual(schema["properties"]["d1"]["enum"], ["later", "approve", "reject"])
 

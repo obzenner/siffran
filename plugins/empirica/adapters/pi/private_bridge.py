@@ -42,15 +42,23 @@ def _classify(_profile: str, _raw: dict, payload: dict):
                    source=payload.get("source", "pi-model"))
 
 
-def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | None, str] | None:
+def _bind_document(run_id: object, document: object) -> dict | None:
     """Write-first (ADR-0072, PR 09 → the one bound helper, review-2 m1): publish the core's
     rendered ``{text, digest}`` pair once through :func:`adapters.state.hitl.publish` — the
     shared helper that verifies, parses and object-checks the pair before the write — and
-    return ``(digest, absolute path, priors, question)``. ``priors`` is the document's own
-    amendment block read from the verified bytes — never recomputed — so the confirm form shows
-    the record's ``was`` values, not a host-held dialog. ``question`` is the parsed document's
-    core-derived discriminator (M1, review 2) — ``approve`` or ``confirm_amendment`` — the one
-    fact the TypeScript mediation chooses which dialog to show from; anything else refuses.
+    return the shown-document record: ``digest``, the written file's absolute ``path``, ``priors``
+    — the document's own amendment block read from the verified bytes, never recomputed, so the
+    confirm form shows the record's ``was`` values, not a host-held dialog — and
+    ``question``, the parsed document's core-derived discriminator (M1, review 2) — ``approve``
+    or ``confirm_amendment`` — the one fact the TypeScript mediation chooses which dialog to
+    show from.
+
+    PR 16 (A10/A11) adds the record's presentation-only link members — ``url``, a live
+    observer's deep link to the run's decision (one hardened discovery probe of this home,
+    ``adapters.observer.discovery.document_details``, 0.5 s budget, once per mediation), or
+    ``None`` as the honest "no link", and ``run12``, the run's compact id the fallback names —
+    beside the digest; they never reach any present or decision envelope, and the path stays
+    what it was.
     ``None`` means the mediation must refuse: the pair was absent, malformed, digest-
     inconsistent, its question not one of the two, or the storage refused the write."""
     if not isinstance(document, dict):
@@ -61,10 +69,12 @@ def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | 
     # private operations this one-shot process shape also serves, whose startup stays
     # exactly forms-08's (PR 09 measurement: whole-private-bridge import ~95 ms before and
     # after this change).
+    from adapters.observer.discovery import document_details
     from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish
     from core import hitl as core_hitl
     try:
-        published = publish(HitlDocuments(), run_id, document)
+        store = HitlDocuments()
+        published = publish(store, run_id, document)
         if published is None:
             return None
         question = published.parsed.get("question")
@@ -75,9 +85,11 @@ def _bind_document(run_id: object, document: object) -> tuple[str, Path, dict | 
         if isinstance(amendment, dict) and isinstance(amendment.get("budgets"), dict):
             priors = {name: row.get("was") for name, row in amendment["budgets"].items()
                       if isinstance(row, dict) and isinstance(row.get("was"), int)}
+        details = document_details(store.home, run_id, {"digest": published.digest})
     except (DocumentMismatch, HardLinkUnsupported, OSError, ValueError):
         return None
-    return published.digest, published.path, priors, question
+    return {"digest": published.digest, "path": str(published.path), "priors": priors,
+            "question": question, "url": details["url"], "run12": details["run12"]}
 
 
 def _governance_context(profile: str, raw: dict, payload: dict):
@@ -106,9 +118,9 @@ def _governance_context(profile: str, raw: dict, payload: dict):
         presentation["document_unavailable"] = True
         presentation.pop("document", None)
         return response
-    digest, path, priors, question = bound
-    presentation["document"] = {"digest": digest, "path": str(path), "priors": priors,
-                                 "question": question}
+    presentation["document"] = {"digest": bound["digest"], "path": bound["path"],
+                                 "priors": bound["priors"], "question": bound["question"],
+                                 "url": bound["url"], "run12": bound["run12"]}
     return response
 
 
@@ -182,6 +194,12 @@ def _evidence_presentation(profile: str, raw: dict, payload: dict):
     identity = {"digest": document["digest"], "path": document["path"]}
     if "residuals" in document:
         identity["residuals"] = document["residuals"]
+    # PR 16 (A10–A12): the presentation-only link fields the shared flow computed once for this
+    # presentation — a live observer's deep link to the run's decision, `None` as the honest
+    # "no link", and the run's compact id the fallback names. They cross to the dialog only;
+    # the receipt binds the digest alone.
+    identity["url"] = document.get("url")
+    identity["run12"] = document.get("run12")
     return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items,
             "document": identity}
 

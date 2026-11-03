@@ -3,8 +3,11 @@ epoch 2 · 2 reviews left · 15 min
 Goal  "Confirm the exact run configuration"
 Agent sizing rationale — unverified and full
 detail: in the document
-Document: sha256:0a1b2c3d4e5f
-/Users/amelia.dvn/.local/share/empirica/projects
+Details: /empirica-ui → run 5dd796e89729
+Human decisions
+Document sha256:0a1b2c3d4e5f
+File: /Users/amelia.dvn/.local/share/empirica
+/projects
 /s256-3f9c2a81b7d45e6c9f0a1b2c3d4e5f673f9c2a81b7d4
 5e6c9f0a1b2c3d4e5f67
 /runs
