@@ -116,6 +116,16 @@ test(
       const title = shown[0]!;
       assert.match(title, /web source: https:\/\/example\.test\/spec/);
       assert.ok(title.includes('Quote: "seen directly on the page"'));
+      // PR 16 (A12) / PR 19: the quote is shown exactly once per research item — in the
+      // dialog's own `Quote: ` line, never also in the description (Pi keeps PR 19's Claude-only
+      // full-quote description out of its shared items, so the real bridge proves the count —
+      // an `includes` would not).
+      assert.equal((title.match(/Quote: /g) ?? []).length, 1,
+        "exactly one `Quote: ` per research item (A12), through the real bridge");
+      assert.equal((title.match(/seen directly on the page/g) ?? []).length, 1,
+        "the quoted passage itself appears once; the description stays quote-free");
+      assert.ok(title.includes("C0 · Does the page say this?"),
+        "Pi's shared description stays the bare ids and question");
       assert.ok(title.includes("Claim texts and their no-deterministic-check reasons: in the document."),
         "the pointer names what moved");
       assert.ok(!title.includes("For claim"), "the per-claim context is in the document");

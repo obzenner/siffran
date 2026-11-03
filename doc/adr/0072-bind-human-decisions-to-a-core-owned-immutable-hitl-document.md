@@ -270,6 +270,15 @@ hosts' tests (the pointer line, `Document: sha256:<12 hex>`, the path on its own
 residual-count sentences — `private-transport.ts`'s validator is the shape's authority for Pi,
 `_item_text`/`_residual_lines`/`_document_lines` for Claude).
 
+One amendment (PR 19, below): that truncated *shared* description is what Pi reads, and on Claude
+the form builder composes an additional **host-only** description beside it — never into the
+items — that repeats, in full, what the human decides (the research quote and, when the short title
+cut it, the full source; the decision claim's whole text; the terminal consent's residual count).
+Claude Code 2.1.304 was observed to fold the message after three lines while rendering property
+descriptions in full, so on Claude the visible form carries the whole content while the message
+keeps the transcript record; the items every host relays are composed, never edited, so Pi's
+output stays byte-identical.
+
 ### Hosts
 
 * **Pi**: the Python private bridge binds the document through the same one bound helper
@@ -560,3 +569,51 @@ no-approval cases, the title width and placement pins), and one real-bridge flow
 (`live-bridge-evidence-partial.test.ts`) where a two-item batch cancelled at item 2 admits exactly
 one confirmation for item 1 while the observer reads item 2 as `later` — "Not answered", still open —
 through `core.observer.decisions`.
+
+### PR 19 · Claude shows three lines of a form's message (2026-10-28)
+
+The Lima qualification of `ac401739` (finding N7) observed Claude Code 2.1.304 rendering only
+the **first three lines** of an MCP elicitation `message`, folding the rest as `… (+N more lines)`
+with nothing expanding it in place (`ctrl+o` opens the transcript instead), while the fields —
+title plus the description rendered under it — render in full. The consent was still informed
+(Binding P: the message and the document carry everything), but on three forms the human had
+confirmed things they could not see in the form: the configuration review's Details link and
+document line were folded, the evidence form's quotes were folded (the description showed only
+`C2 · Does the page say this?`), and so was the terminal consent's residual count. The rule
+(`adapters/confirmation.py`, the one owner of the constant; `adapters/governance.py` composes its
+forms against it):
+
+* Every Claude form's first `CLAUDE_VISIBLE_LINES` lines carry **no blank line**, and stay the
+  heading (its countdown riding it), the bound document's `Details:` line, and the copy surface —
+  the `Document sha256:<12>` short digest beside a live observer's verified link, or the exact
+  absolute `File:` path in the fallback (the copy surface when there is nothing to click, the
+  short digest staying below the items) — for the evidence and terminal forms. The review's third
+  line is the goal it is judged by; the confirm's visible lines are its budgets line with the
+  complete `(was …)` priors and the compact cue `Rationale not regenerated for these values ·
+  details below` — the line judged with the numbers — with only then its `Details:` line (the
+  one form the amendment grants a fourth visible line: the confirm has no field descriptions to
+  carry anything else, and the full contract-owned amendment warning stays below it, whole).
+  Every line in the visible window is at most 72 columns, except the URL and `File:` lines,
+  which are never wrapped, as before.
+* What the human decides per item rides the field **description, in full, on Claude only**:
+  a research item's entire quote and — when the field's short title cut it — its whole
+  `Source:` reference; a needs-decision claim's entire text; the terminal consent's sentence
+  plus the residual count read out of the written document (`… · 3 unresolved obligations would
+  remain`). These descriptions are composed in Claude's own `form()` beside the items — the
+  items themselves are never edited, so what the bridge relays and **Pi reads is unchanged and
+  byte-identical** (PR 16 A12's "quote once" held: each host's own surface shows the quote once —
+  Pi's dialog renders it, Claude's composed description carries it — while the shared item
+  description stays quote-free).
+* The message still carries the whole record below the visible lines, for transcripts, logs and
+  hosts that do not fold, so a quote may appear twice in message plus description; on Claude
+  only the description copy is visible.
+
+Confirmed red-first as it landed: the evidence and terminal form tests (the visible window with
+a live link and in the fallback, the full 500-character quote and the full cut source in the
+description, the 300-character claim text, the residual counts of 0, 1, many and unknown, the
+grouped-record description, the items left unchanged for Pi), the review and confirm form tests
+(both documents, the complete budget priors, the cue and the kept record below the fold), the
+regenerated governance goldens with the linked-confirmation case on both `--check` paths, and
+the Pi quote-occurrence count through the real bridge (`make check-pi` byte-identical, the
+review note that `evidence-ui.ts:120–133` reads every `item.description` and forbids changing
+the shared items held exactly).

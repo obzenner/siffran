@@ -70,6 +70,11 @@ unwrapped `File:` line, while a Pi dialog too narrow for it wraps only at `/` bo
 cutting a segment, so the printed pieces join back into the exact path; the path is dropped
 only when a verified link is shown in its place.
 
+Claude Code 2.1.304 shows only the first three lines of a form's message and renders field
+descriptions in full, so the Claude forms open with the heading, the document's `Details:` line
+and its copy surface, and each field's description carries what is being decided in full —
+the research quote, the decision claim's text, the terminal consent's residual count (PR 19).
+
 New refusal reasons bind the document digest, both with `host_recovery`:
 
 * `governance.document_mismatch` — the configuration dialog named a document that no longer

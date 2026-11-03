@@ -299,11 +299,13 @@ class ShortFormsTests(WriteFirstFixture):
     def document_lines(self, message: str) -> tuple[str, str]:
         """The form's short-digest line and the exact absolute path it points at — the fallback's
         ``File:`` line (A11: with a live observer link the path is dropped, which no test here has
-        without a live server)."""
+        without a live server). PR 19: the fallback's ``File:`` line now opens the form (within
+        the lines Claude Code 2.1.304 shows) while the short digest stays past the items, so each
+        line is found by its caption, never by its position."""
         lines = message.splitlines()
         document_line = next(line for line in lines if line.startswith("Document sha256:"))
-        index = lines.index(document_line)
-        return document_line, lines[index + 1][len("File: "):]
+        file_line = next(line for line in lines if line.startswith("File: "))
+        return document_line, file_line[len("File: "):]
 
     def test_the_evidence_form_keeps_the_quotes_and_moves_the_rest_to_the_document(self):
         drv, run_id = self.start(graph=graph_with_decision())
@@ -330,10 +332,9 @@ class ShortFormsTests(WriteFirstFixture):
                      "one line says where the moved text lives")
         document_line, path_line = self.document_lines(message)
         self.assertRegex(document_line, r"\ADocument sha256:[0-9a-f]{12}\Z")
-        self.assertTrue(lines.index(document_line) + 1 < len(lines))
-        file_line = lines[lines.index(document_line) + 1]
-        self.assertTrue(file_line.startswith(f"File: {path_line}"),
-                        "the path is pasted as-is on its own ``File:`` line")
+        file_line = next(line for line in message.splitlines() if line.startswith("File: "))
+        self.assertEqual(file_line, f"File: {path_line}",
+                         "the path is pasted as-is on its own line — PR 19's opening copy surface")
         self.assertTrue(Path(path_line).is_absolute(), "the path is pasted as-is")
         self.assertTrue(path_line.startswith(str(self.empirica_home)), path_line)
         self.assertTrue(path_line.endswith(".json"))

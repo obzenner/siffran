@@ -25,8 +25,10 @@ document, while a needs-decision claim's own text stays in the message in full �
 human decides, exactly like a research item's quote — as are the terminal consent's residuals' own
 count; the form points at the written file by its short digest plus a ``Details:`` link to the
 observer UI's decision row (PR 16, A11) — or, when no live observer of this home answers, the
-honest fallback naming the run and the exact absolute path —
-many obligations ending now would leave unresolved.
+honest fallback naming the run and the exact absolute path — and Claude Code 2.1.304, which
+shows only the first ``CLAUDE_VISIBLE_LINES`` lines of the message, finds them opened by exactly
+those (PR 19, the Lima qualification of ``ac401739``, finding N7), with what each item decides
+riding the full field description; many obligations ending now would leave unresolved.
 """
 from __future__ import annotations
 
@@ -46,11 +48,24 @@ from core.projection import project_host_failure, project_prompt_error
 _ANSWER_LIMIT = 2000
 _NOTE_LIMIT = 2048
 #: The one owner of the dialog's lengths (Pi renders what is built here). Claude cuts an elicitation field ``title`` at about
-#: 45 visible columns and collapses the long ``message``, but renders a property's ``description`` under the
-#: field: so a title is at most ``TITLE_LIMIT`` columns with its "n. " prefix, the item is the description (at most
-#: ``DESCRIPTION_LIMIT``, its quote shortened with "…"), and the message keeps the full record, wrapped at ``_WIDTH``.
+#: 45 visible columns and folds the long ``message`` after ``CLAUDE_VISIBLE_LINES`` lines, but renders a property's
+#: ``description`` under the field in full: a title is at most ``TITLE_LIMIT`` columns with its "n. " prefix, and the item is
+#: the description — the shared one here is at most ``DESCRIPTION_LIMIT`` and carries nothing of the quote (Pi's own dialog
+#: renders the quote itself); Claude's :func:`form` additionally composes a host-only description beside it that repeats what
+#: the human decides **whole** (the full quote and, when the title cut it, the full source; a decision claim's full text; the
+#: terminal consent's residual count), without editing the items. The message keeps the full record, wrapped at ``_WIDTH``.
 TITLE_LIMIT = 40
 DESCRIPTION_LIMIT = 200
+#: Claude Code 2.1.304 shows only this many lines of an elicitation ``message`` and folds the
+#: rest as ``… (+N more lines)`` — nothing expands it in place (``ctrl+o`` opens the transcript
+#: instead) — while a property's ``description`` renders under the field in full (Lima
+#: qualification of ``ac401739``, finding N7). So every Claude form keeps exactly these first
+#: lines to the heading, the bound document's ``Details:`` line and its copy surface (the short
+#: digest beside a live observer's verified link, or the fallback's exact absolute ``File:`` path)
+#: with no blank line among them; what the human decides per item rides the description
+#: :func:`form` composes beside the items; and the message still keeps the full record below,
+#: for transcripts, logs and hosts that do not fold.
+CLAUDE_VISIBLE_LINES = 3
 _WIDTH = 72
 _PREFIX = 4  # "64. ": a batch holds at most 64 items
 NOTE_TITLE = "Note (optional)"
@@ -113,12 +128,15 @@ def _claim_list(ids: Sequence[str]) -> str:
 
 
 def _research_titles(item: dict[str, Any]) -> None:
-    """The short field title of a research item (its source) and its description: the bare
+    """The short field title of a research item (its source) and its shared description: the bare
     claim ids the record was proposed for and the question it is asked — and nothing of the
-    quote (PR 16, A12: the quote is shown once, in the message and in the host dialog, as
-    `Quote: …` — the fact judged — never also truncated inside an item's description). The
+    quote (PR 16, A12: the quote is shown once, as `Quote: …` — the fact judged). The
     per-claim context ("For claim …", the claim texts) lives in the document (ADR-0072, the PR
-    12 clarification; X6, Copilot #52). Both hosts read the same text."""
+    12 clarification; X6, Copilot #52). Both hosts read the same text — Pi keeps exactly this
+    description (its own dialog renders the quote itself); the PR-19 amendment (finding N7 of
+    the Lima qualification of ``ac401739``) makes Claude's :func:`form` compose the whole quote —
+    and the whole source when this title cut it — into a host-only description beside this text,
+    so the quote still shows exactly once per host and the shared items stay untouched."""
     ids = _claim_list([claim["id"] for claim in item["claims"]])
     question = "Is the observation right?" if item["class"] == "observed" else "Does the page say this?"
     item["title"] = _fit(short_ref(item["source_ref"]), TITLE_LIMIT - _PREFIX)
@@ -440,27 +458,75 @@ def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
             short, f"File: {document['path']}")
 
 
+def _field_description(item: Mapping[str, Any], document: Mapping[str, Any]) -> str:
+    """Claude's own field description (PR 19, finding N7 of the Lima qualification of
+    ``ac401739``): Claude Code 2.1.304 folds the message after ``CLAUDE_VISIBLE_LINES``
+    lines but renders a property's description under the field in full, so what the human
+    decides rides it **whole** — a research item's entire quote and, when the field's short
+    title cut it, its entire ``Source:`` reference; a decision claim's entire text; the terminal
+    consent's sentence plus the residual count read out of the written document. Composed
+    beside the items, never into them: the shared items every host relays (and Pi's dialogs
+    read) keep the shared, truncated description, so Pi's output stays byte-identical; the
+    message still carries the full record below the visible lines, so a quote may appear twice
+    — on Claude only this description copy is visible."""
+    if item["subject"] == "claim":
+        if not item.get("terminal"):
+            return f"{item['id']} · {item['text']}"
+        left = document.get("residuals")
+        if not isinstance(left, int) or isinstance(left, bool):
+            return item["description"]  # no count was read: no suffix is invented
+        suffix = ("Nothing would stay unresolved" if not left else
+                  f"{left} unresolved {'obligation' if left == 1 else 'obligations'} would remain")
+        return f"{item['description']} · {suffix}"
+    description = item["description"]
+    if len(short_ref(item["source_ref"])) > TITLE_LIMIT - _PREFIX:
+        description += f" Source: {item['source_ref']}"  # the full reference the title folded away
+    return f'{description} Quote: "{item["quote"]}"'
+
+
 def form(items: Sequence[Mapping[str, Any]], timeout: float,
          document: Mapping[str, Any]) -> tuple[str, dict[str, Any]]:
     """Map the batch and its written document to one flat MCP form: per item an enum decision and
-    an optional note or answer, plus the document's short digest and absolute path."""
+    an optional note or answer, plus the document's short digest and absolute path.
+
+    PR 19 (finding N7 of the Lima qualification of ``ac401739``): Claude Code 2.1.304 shows
+    only the first ``CLAUDE_VISIBLE_LINES`` lines of the message and folds the rest, so the
+    form opens with the heading, the document's ``Details:`` line and its copy surface — the
+    short digest beside a live observer's verified link (the path dropped, O5), or the
+    fallback's exact absolute ``File:`` path (the copy surface when there is nothing to click,
+    the digest staying below the items) — with no blank line among them; the items, the
+    document's remaining line and the legend follow below, the message keeping the full record
+    (items first: whatever is folded away still carries the content, never the instructions
+    the visible window would otherwise spend itself on). The fields' descriptions, rendered in
+    full by Claude, carry what the human decides per item, composed without editing them."""
     minutes = f"{timeout / 60:g} min" if timeout >= 60 else f"{timeout:g} sec"
     ending = len(items) == 1 and bool(items[0].get("terminal"))
     heading = "end this run without converging?" if ending else "evidence that needs you"
-    message = [f"Empirica · {heading}  (" + minutes + ")", ""]
+    detail_lines = list(_document_lines(document))
+    if isinstance(document.get("url"), str) and document["url"]:
+        # linked: the visible window closes on the short digest; nothing remains below
+        visible_details, below_details = (detail_lines[:CLAUDE_VISIBLE_LINES - 1],
+                                         detail_lines[CLAUDE_VISIBLE_LINES - 1:])
+    else:
+        # fallback: the exact absolute path is the copy surface (the one line exempt from
+        # wrapping); the short digest stays below the items, by caption, never by position
+        visible_details, below_details = detail_lines[:1] + detail_lines[-1:], detail_lines[1:-1]
+    message = [f"Empirica · {heading}  (" + minutes + ")", *visible_details]
     properties: dict[str, Any] = {}
     for number, item in enumerate(items, 1):
         message += _item_text(number, item, document)
         properties[f"d{number}"] = {
-            "type": "string", "title": f"{number}. {item['title']}", "description": item["description"],
+            "type": "string", "title": f"{number}. {item['title']}",
+            "description": _field_description(item, document),
             "enum": list(CHOICES[item["subject"]]), "default": "later"}
         properties[f"n{number}"] = {
             "type": "string", "title": f"{number}. {item['note_title']}", "maxLength": _limit(item["subject"])}
-    # The items come first: a host that collapses the message shows its first lines, which should carry the content.
+    # The items come first: a host that folds the message shows its first lines, which carry the content, not the instructions.
     message += [""]
     if not ending:
         message += ["Claim texts and their no-deterministic-check reasons: in the document."]
-    message += [*_document_lines(document), "",
+    message += [*below_details,
+                "",
                 "Decide each item. Leave it on Later to decide another time.",
                 "Accept = send these decisions · Decline/Esc = send none"]
     return "\n".join(message), {"type": "object", "properties": properties, "required": []}

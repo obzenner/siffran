@@ -12,6 +12,7 @@ from uuid import uuid4
 import jsonschema
 
 from adapters import bridge
+from adapters.confirmation import CLAUDE_VISIBLE_LINES
 from adapters.state.fsio import SymlinkRefused
 from adapters.state.hitl import (DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish)
 from application import protocol
@@ -104,6 +105,25 @@ def _rationale_lines(dialog: Mapping[str, Any]) -> tuple[str, ...]:
                                                        break_long_words=True,
                                                        break_on_hyphens=False))
 
+#: The compact cue of the amended-configuration confirm (PR 19, finding B4): the human judges
+#: the budgets and this cue, so it rides the visible lines while the full contract-owned
+#: amendment warning stays below, whole.
+_RATIONALE_CUE = "Rationale not regenerated for these values · details below"
+
+
+def _visible(*lines: str) -> tuple[str, ...]:
+    """The opening of a Claude governance form (PR 19, finding N7 of the Lima qualification of
+    ``ac401739``): Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines of an
+    elicitation message and folds the rest — nothing expands it in place — so each form composes
+    its opening through here: the heading (its countdown riding it), the bound document's
+    ``Details:`` line and the line the human judges the form by — the review's goal; the
+    confirm's budgets line with its cue, the cue being judged with the numbers so the confirm
+    alone carries its ``Details:`` line one line under the fold (B4). No blank line may open a
+    form, and everything each line says must fit what the window actually shows."""
+    assert "" not in lines[:CLAUDE_VISIBLE_LINES], "a Claude form opened with a blank line (PR 19)"
+    return tuple(lines)
+
+
 def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
     """The bound document's Details (PR 16, ADR-0072 Q5's amendment): a live observer's link to
     the decision's row in the UI — plus the document's own short digest — or, when no observer of
@@ -131,14 +151,20 @@ def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout:
 
     The form keeps exactly what the human judges (ADR-0072 "What the forms keep"): the numbers
     and the goal's first line; the rationale text lives in the document, pointed at by one line
-    under the contract-owned unverified label."""
+    under the contract-owned unverified label. PR 19 (finding N7 of the Lima qualification of
+    ``ac401739``): Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines, so
+    the heading, the document's ``Details:`` and the goal open the form — never a blank line —
+    while the rationale pointer, the document's remaining lines and the legend stay below, whole."""
     reviews = dialog["reviews_left"]["proposal"]
     count = f"{reviews} {'review' if reviews == 1 else 'reviews'} left"
+    details, *document_tail = _document_lines(document)
     message = "\n".join((
-        _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
-        _line(f'Goal: "{dialog["goal"]}"', closing='"'),
+        *(_visible(
+            _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
+            details,
+            _line(f'Goal: "{dialog["goal"]}"', closing='"'))),
         _line(f"{dialog['rationale_label']} and full detail: in the document"),
-        *_document_lines(document),
+        *document_tail,
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
@@ -161,15 +187,25 @@ def _part(row: Mapping[str, Any], document: Mapping[str, Any]) -> str:
     return f"{row['short']} {value}{suffix}"
 
 def confirm_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
-    """Map an amended dialog and its written document to a buttons-only confirmation."""
+    """Map an amended dialog and its written document to a buttons-only confirmation.
+
+    PR 19 (finding N7 of the Lima qualification of ``ac401739``), with the finding-B4 grace:
+    Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines, and the confirm has
+    no field descriptions to carry more — so its opening is the heading, the budgets line with
+    its complete ``(was …)`` priors, the compact cue that the rationale was not regenerated for
+    these values (the line judged with the numbers), and only then the ``Details:`` line; the
+    full contract-owned amendment warning and the document stay below, whole."""
     budget_parts = [_part(row, document) for row in dialog["budgets"]]
+    details, *document_tail = _document_lines(document)
     message = "\n".join((
-        _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
-        _line(" · ".join(budget_parts)),
-        _line(f"{dialog['rationale_label']} and full detail: in the document"),
+        *(_visible(
+            _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
+            _line(" · ".join(budget_parts)),
+            _RATIONALE_CUE,
+            details)),
         *textwrap.wrap(dialog["amendment_warning"], width=72,
                        break_long_words=False, break_on_hyphens=False),
-        *_document_lines(document),
+        *document_tail,
         "Accept = approve exactly this · Decline/Esc = keep edits pending",
     ))
     return message, {"type": "object", "properties": {}}

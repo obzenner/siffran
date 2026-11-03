@@ -93,6 +93,11 @@ def generate() -> dict:
                 "max_audit_spawns": {"value": 2, "was": 2},
                 "max_passes": {"value": 6, "was": 8},
                 "max_spawns": {"value": 1, "was": 1}}}), 900))),
+        "confirmation_url": dict(zip(("message", "schema"), confirm_form(
+            edited, _document(_AMEND_HEX, url=_DETAILS_URL, amendment={"budgets": {
+                "max_audit_spawns": {"value": 2, "was": 2},
+                "max_passes": {"value": 6, "was": 8},
+                "max_spawns": {"value": 1, "was": 1}}}), 900))),
         "hostile": dict(zip(("message", "schema"),
                              review_form(hostile, _document(_APPROVE_HEX), 900))),
         "hostile_rationale": dict(zip(("message", "schema"),
@@ -101,20 +106,15 @@ def generate() -> dict:
 
 
 def _details_lines(message: str | None) -> list[str]:
-    """The wrapped ``Details:`` lines of a fallback message (the URL form is one line)."""
+    """The single ``Details:`` line of a message, wherever in it (PR 19 moved the goal and the
+    budgets lines around the document's lines, so the line is extracted by its caption alone,
+    never by what follows it; the fallback's is one short arrow line by construction)."""
     if message is None:
         return []
-    found = False
-    lines = []
     for line in message.splitlines():
-        if not found and line.startswith("Details: "):
-            found = True
-            lines.append(line)
-        elif found and not line.startswith(("Document ", "File: ")):
-            lines.append(line)
-        elif found:
-            break
-    return lines
+        if line.startswith("Details: "):
+            return [line]
+    return []
 
 
 def _bounds(message: str, *, path_tokens: bool) -> tuple[bool, str | None]:
@@ -166,8 +166,11 @@ def main() -> int:
         if (not all(_bounds(generated[name]["message"], path_tokens=True)[0] for name in
                     ("review", "confirmation", "hostile", "hostile_rationale"))
                 or not _bounds(generated["review_url"]["message"], path_tokens=False)[0]
+                or not _bounds(generated["confirmation_url"]["message"], path_tokens=False)[0]
                 or f"Details: {_DETAILS_URL}" not in generated["review_url"]["message"]
+                or f"Details: {_DETAILS_URL}" not in generated["confirmation_url"]["message"]
                 or "File: " in generated["review_url"]["message"]
+                or "File: " in generated["confirmation_url"]["message"]
                 or " ".join(_details_lines(generated["review"]["message"])) != fallback_words):
             print("governance dialog bounds violated", file=sys.stderr)
             return 1

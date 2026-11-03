@@ -140,6 +140,87 @@ class GovernanceHostTests(unittest.TestCase):
             self.assertIsInstance(decision(answer, dialog, confirm_schema,
                                            confirmation=True), Dismiss)
 
+    def governance_dialog(self):
+        return self.service.trusted_governance_context(
+            run_id=self.run, payload=copy.deepcopy(CONTEXT))["result"]["presentation"]["dialog"]
+
+    def test_the_review_form_opens_with_the_lines_claude_code_shows(self):
+        """PR 19 (finding N7 of the Lima qualification of ac401739): Claude Code 2.1.304 shows
+        only the first ``CLAUDE_VISIBLE_LINES`` lines of a form's message and folds the rest,
+        so the review opens with the heading (countdown riding it), the bound document's
+        ``Details:`` and the goal the human judges the configuration by — never a blank line
+        among them. The rationale pointer, the document's remaining lines and the legend stay
+        below the fold in full, both with a live observer's link and in the fallback."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        dialog = self.governance_dialog()
+        linked = {**TEST_DOCUMENT,
+                 "url": "http://127.0.0.1:18770/app/?run=aaaabbbbcccc&decision=" + "0" * 12}
+        for document in (TEST_DOCUMENT, linked):
+            with self.subTest(linked="url" in document):
+                message, _schema = review_form(dialog, document, 900)
+                lines = message.splitlines()
+                window = lines[:CLAUDE_VISIBLE_LINES]
+                self.assertNotIn("", window, "no blank line in what Claude Code shows")
+                self.assertTrue(window[0].startswith("Empirica · approve run configuration (epoch "), window[0])
+                self.assertIn("reviews left", window[0], "the countdown rides the heading")
+                self.assertTrue(window[1].startswith("Details: "), window[1])
+                self.assertEqual(window[2], 'Goal: "supplied task"',
+                                 "the goal is the line the form is judged by")
+                # the folded tail keeps the whole record
+                self.assertIn(f"{dialog['rationale_label']} and full detail: in the document", message)
+                document_line = next(index for index, line in enumerate(lines)
+                                     if line.startswith("Document sha256:"))
+                self.assertGreater(document_line, CLAUDE_VISIBLE_LINES - 1,
+                                  "the digest stays below the visible lines")
+                if "url" in document:
+                    self.assertNotIn("File: ", message, "a verified link replaces the path entirely (O5)")
+                else:
+                    self.assertTrue(lines[document_line + 1].startswith("File: /"),
+                                   "the fallback keeps the exact absolute path")
+                self.assertIn("Accept = approve as shown · edit values → confirm again", message)
+                self.assertIn("Decline = reject · Esc = decide later", message)
+                for line in lines:
+                    if not line.startswith(("Details: http://", "File: ")):
+                        self.assertLessEqual(len(line), 72, line)
+
+    def test_the_confirm_form_opens_with_its_budgets_and_rationale_cue(self):
+        """PR 19 (finding N7) with the B4 amendment: the confirm's visible lines carry what the
+        human judges — the heading, the budgets line complete with its ``(was …)`` priors, and
+        the compact cue that the rationale was not regenerated — and only then the ``Details:``
+        line. The contract-owned amendment warning and the bound document stay below, whole."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        dialog = copy.deepcopy(self.governance_dialog())
+        dialog["epoch"] = 1
+        dialog["budgets"][0]["value"] = 6
+        linked = {**TEST_DOCUMENT,
+                 "url": "http://127.0.0.1:18770/app/?run=aaaabbbbcccc&decision=" + "0" * 12}
+        for document in (TEST_DOCUMENT, linked):
+            with self.subTest(linked="url" in document):
+                message, _schema = confirm_form(dialog, document, 900)
+                lines = message.splitlines()
+                window = lines[:CLAUDE_VISIBLE_LINES]
+                self.assertNotIn("", window, "no blank line in what Claude Code shows")
+                self.assertTrue(lines[0].startswith("Empirica · confirm edited configuration (epoch "), lines[0])
+                budgets = window[1]
+                self.assertTrue(budgets.startswith("passes 6 (was 8)"), budgets)
+                for short in ("passes", "spawns", "audits"):
+                    self.assertIn(short + " ", budgets + " ",
+                                  f"every budget of the proposal rides the line: {budgets}")
+                self.assertEqual(window[2], "Rationale not regenerated for these values · details below",
+                                 "the compact cue names what the full warning below explains")
+                self.assertTrue(lines[3].startswith("Details: "), lines[3])
+                self.assertIn("not regenerated for these", " ".join(message.split()),
+                              "the contract-owned amendment warning stays below, whole")
+                self.assertIn("human-edited values", " ".join(message.split()))
+                document_line = next(index for index, line in enumerate(lines)
+                                     if line.startswith("Document sha256:"))
+                self.assertGreater(document_line, 3, "the document's digest stays below the cue")
+                self.assertIn("Accept = approve exactly this · Decline/Esc = keep edits pending", message
+                             .splitlines()[-1])
+                for line in lines:
+                    if not line.startswith(("Details: http://", "File: ")):
+                        self.assertLessEqual(len(line), 72, line)
+
     def test_host_owned_approval_views_do_not_offer_feedback_input(self):
         """The native incident must be impossible through the offered form fields."""
         self.initialize({"elicitation": {"form": {}}})
