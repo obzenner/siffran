@@ -518,3 +518,45 @@ hosts' form tests (the fallback path on its own `File:` line, the path dropped o
 the regenerated form goldens on both hosts (the Claude fixture and the Pi screens, including the linked
 review screen at the narrow width), and the manifest closure of the new bound module
 (`make empirica-manifest-check`).
+
+### PR 18 · Per-item fail-closed: a cancel or timeout mid-batch keeps the answers already given (2026-10-28)
+
+The Lima qualification of `73119e13` (finding N1) showed the batch-level reading of fail-closed
+eating a careful answer: the human approved an item, a stray Esc at the *optional* note ended the
+whole batch, and nothing was recorded — one of the run's scarce human interactions spent on an
+answer that vanished. The amended rule keeps ADR-0067's fail-closed core — no answer is invented,
+`later` decides nothing — and makes it apply **per item**, never per batch:
+
+* An answer the human completed — a select ended by choice **and** its note step ended with Enter —
+  is kept. A cancel, a label that was not offered, or a timeout at item *k* stops the asking there:
+  items 1..k−1 keep their answers, item *k* and every later item are sent as `later`, and the batch
+  is submitted once unless nothing was decided — exactly as an all-`later` batch submits nothing today.
+  The shared mediator already omits `later` items from the receipt (`adapters.confirmation.decisions`)
+  and the core admits a receipt whose items are a subset of the presentation's (`answered <= asked`,
+  `core.evaluation.plan_evidence_confirmation`); both are unchanged.
+* **Esc at the optional note is never consent and never a cancel** (decided over Lima itself): the
+  same item's select is shown again under the same deadline, the human picks again, and nothing is
+  lost. An item is only answered when its note step ends with Enter; a *timeout* at the note stops
+  the asking there, the item staying `later` — its chosen answer without its note is never recorded
+  (O1, decided). An empty note submitted with Enter stays the choice with no note, as before.
+* **There is no receipt TTL** (A1, per review 18-astra): admission checks presentation and
+  current-batch identity, subjects and the document digest — not elapsed time
+  (`core.evaluation.py:1116–1165`). The deadline is host-local: after it passes, the completed
+  earlier answers are submitted once and admitted if their binding is still current.
+* **The terminal consent shares the dialog**: Esc at its note goes back to the select; Esc at the
+  select, or a timeout anywhere, records no approval and the run stays active. There is never an
+  earlier answer to keep — the core constructs exactly one terminal item.
+* **Claude is unchanged**: its evidence elicitation is one form for the whole batch, and decline or
+  cancel there is one action for that batch — so the shared `NOTE_TITLE`
+  (`adapters/confirmation.py`) is untouched and the Pi-only wording (the select's promise line
+  "Esc or timeout keeps completed answers; this and the rest stay for later." from a second item on
+  with an earlier completed answer, and the note prompt's own "· Enter finishes this item · Esc goes
+  back") is composed in the Pi dialog source alone. Both lines obey the 76-column rule (PR 16, A12).
+
+Confirmed red-first as it landed: the Pi unit dialog tests (the Lima sequence itself — Approve, Esc at
+the note, the select again), the Esc/timeout/invalid-label keeps-earlier-answers cases for every
+item position, the note-timeout stop, the terminal `consent_stop`/`freeze_scope` go-back and
+no-approval cases, the title width and placement pins), and one real-bridge flow
+(`live-bridge-evidence-partial.test.ts`) where a two-item batch cancelled at item 2 admits exactly
+one confirmation for item 1 while the observer reads item 2 as `later` — "Not answered", still open —
+through `core.observer.decisions`.

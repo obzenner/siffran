@@ -4,9 +4,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { askItems, confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, itemTitle, observeSurface } from "../src/evidence-ui.ts";
+import { askItems, confirmEvidence, evidenceConfirmationWait, evidenceHostFailure, itemTitle, KEEP_COMPLETED,
+  notePrompt, observeSurface } from "../src/evidence-ui.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
-import type { EvidenceDocument, EvidenceItem, PrivateIngressRequest } from "../src/private-transport.ts";
+import type { EvidenceAnswer, EvidenceDocument, EvidenceItem, PrivateIngressRequest } from "../src/private-transport.ts";
 import type { ExtensionContext } from "../src/pi-types.ts";
 import type { Response } from "../src/contract.ts";
 
@@ -177,7 +178,9 @@ test("F-Q4-2: the dialog names its subject on the first line, the note dialog na
     "the description is the third line: the same text Claude shows under the field — and PR 16 (A12) keeps the quote out of it, shown once as `Quote: …`");
   assert.equal(second.title.split("\n")[1], "Your decision on C1");
   assert.equal(second.title.split("\n")[2], "C1 · Ship it?");
-  assert.deepEqual(live.shown.filter((s) => s.kind === "input").map((s) => s.title), ["Note (optional)", "Note (optional)"]);
+  assert.deepEqual(live.shown.filter((s) => s.kind === "input").map((s) => s.title),
+    [notePrompt("Note (optional)"), notePrompt("Note (optional)")],
+    "PR 18 (A4): the note prompt says what Enter finishes and that Esc goes back (composed in TS, not in the shared NOTE_TITLE)");
   const ending = itemTitle(TERMINAL_ITEM, 1, 1, { ...DOCUMENT, residuals: 3 }).split("\n");
   assert.equal(ending[0], "Empirica · end this run without converging?");
   assert.equal(ending[1], "End the run as stopped_residual?");
@@ -228,11 +231,9 @@ test("nothing is presented without a batch the core says can be shown; another b
   assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
 });
 
-test("cancelling any dialog, or running past the deadline, submits nothing and the batch is evaluated again", async () => {
+test("PR 18 (§1): a cancel, a wrong label or a past deadline at the FIRST item submits nothing — there is no earlier answer to keep", async () => {
   const cases: Array<[string, Script, number]> = [
-    ["cancel first select", { selects: [undefined], inputs: [] }, 60_000],
-    ["cancel second select", { selects: ["Confirm", undefined], inputs: [""] }, 60_000],
-    ["cancel the note", { selects: ["Confirm"], inputs: [undefined] }, 60_000],
+    ["cancel the first select", { selects: [undefined], inputs: [] }, 60_000],
     ["a label that was not offered", { selects: ["Approve"], inputs: [""] }, 60_000],
     ["deadline already past", { selects: ["Confirm"], inputs: [""] }, -1]];
   for (const [label, script, ms] of cases) {
@@ -241,6 +242,112 @@ test("cancelling any dialog, or running past the deadline, submits nothing and t
     assert.equal(await run(ctx, trusted, blocked(), Date.now() + ms), refreshed, label);  // the shown batch is spent
     assert.ok(!calls.some((c) => c.operation === "evidence_confirmation"), label);
   }
+});
+
+test("PR 18 (§1, §4-1): Esc at item 2's select keeps item 1's answer — item 2 and the rest are sent as Later", async () => {
+  const script = { selects: ["Approve", undefined] as Array<string | undefined>, inputs: ["Ship it."] as Array<string | undefined> };
+  const live = ctxFor(script);
+  const { trusted, calls } = bridge([DECISION, OBSERVED]);
+  assert.equal(await run(live.ctx, trusted), refreshed);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"],
+    "the completed answer is submitted once: one presentation, one confirmation (A5d)");
+  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers, [
+    { subject: "claim", id: "C1", choice: "approve", note: "Ship it." },
+    { subject: "research", id: OBSERVED.id, choice: "later", note: null }]);
+  const second = live.shown.filter((s) => s.kind === "select")[1]!.title;
+  const lines = second.split("\n");
+  assert.ok(lines.includes(KEEP_COMPLETED), "the select says what Esc does before the human presses it (A4)");
+  assert.ok(lines.indexOf(KEEP_COMPLETED) < lines.findIndex((line) => line.startsWith("Details: ")),
+    "the promise line comes before the Details lines");
+  assert.equal(lines[lines.length - 1], SHORT_DIGEST_LINE, "the Document sha256 line stays last");
+});
+
+test("PR 18 (A3, §4-2, the Lima sequence): Esc at the optional note goes back to the same item's choice", async () => {
+  // The qualification's own case: Approve item 1, a stray Esc at the note, and the careful answer must not be lost.
+  // The select is shown again under the same deadline; Approve again, Enter on the empty note (§4-6: an empty note
+  // submitted with Enter stays the choice with no note), then item 2 answered normally.
+  const live = ctxFor({ selects: ["Approve", "Approve", "Confirm"], inputs: [undefined, "", "fine"] });
+  const { trusted, calls } = bridge([DECISION, RECORD]);
+  assert.equal(await run(live.ctx, trusted), refreshed);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"],
+    "one presentation, one confirmation: the go-back reshow submits nothing by itself (A5d)");
+  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers, [
+    { subject: "claim", id: "C1", choice: "approve", note: null },
+    { subject: "research", id: RECORD.id, choice: "confirm", note: "fine" }]);
+  const selects = live.shown.filter((s) => s.kind === "select");
+  assert.equal(selects.length, 3, "item 1: select, note Esc, select again; then item 2's select");
+  assert.equal(selects[0]!.title, selects[1]!.title,
+    "the reshowed select is the same item's dialog, under the same deadline");
+  assert.ok(!selects[1]!.title.includes(KEEP_COMPLETED),
+    "item 1 of 2 has no earlier answer: no promise line (§4-7a)");
+  assert.ok(selects[2]!.title.includes(KEEP_COMPLETED),
+    "item 2 of 2 is asked after a completed answer (§4-7a)");
+});
+
+test("PR 18 (§4-3): Esc at the asked-again select stops there; earlier answers are kept, the rest are Later", async () => {
+  const live = ctxFor({ selects: ["Confirm", "Confirm", undefined], inputs: ["one.", undefined] });
+  const { trusted, calls } = bridge([RECORD, OBSERVED, DECISION]);
+  assert.equal(await run(live.ctx, trusted), refreshed);
+  assert.deepEqual(calls.map((c) => c.operation), ["evidence_presentation", "evidence_confirmation"]);
+  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers, [
+    { subject: "research", id: RECORD.id, choice: "confirm", note: "one." },
+    { subject: "research", id: OBSERVED.id, choice: "later", note: null },
+    { subject: "claim", id: "C1", choice: "later", note: null }]);
+});
+
+test("PR 18 (§4-4): a timeout at item 2's select keeps the earlier answer", async () => {
+  const { ctx, shown } = ctxFor({ selects: ["Confirm"], inputs: [""] });
+  const realSelect = ctx.ui.select!.bind(ctx.ui) as
+    (title: string, options: string[], opts?: { timeout?: number }) => Promise<string | undefined>;
+  let asked = 0;
+  ctx.ui.select = async (title: string, options: string[], opts?: { timeout?: number }) => {
+    if (++asked > 1) { await new Promise((resolve) => setTimeout(resolve, 60)); return undefined; }
+    return realSelect(title, options, opts);
+  };
+  const { trusted, calls } = bridge([RECORD, OBSERVED]);
+  const deadline = Date.now() + 30;
+  assert.equal(await run(ctx, trusted, blocked(), deadline), refreshed);
+  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers, [
+    { subject: "research", id: RECORD.id, choice: "confirm", note: null },
+    { subject: "research", id: OBSERVED.id, choice: "later", note: null }]);
+  assert.equal(asked, 2, "item 2's select was asked and timed out");
+});
+
+test("PR 18 (A5b): a timeout at item 2's note keeps the earlier answer; the item stays Later", async () => {
+  const { ctx } = ctxFor({ selects: ["Confirm", "Approve"], inputs: ["one."] });
+  const realInput = ctx.ui.input!.bind(ctx.ui);
+  let asked = 0;
+  ctx.ui.input = async (title: string, placeholder?: string, opts?: unknown) => {
+    if (++asked > 1) { await new Promise((resolve) => setTimeout(resolve, 60)); return undefined; }
+    return realInput(title, placeholder, opts as { timeout?: number });
+  };
+  const { trusted, calls } = bridge([RECORD, DECISION]);
+  const deadline = Date.now() + 30;
+  assert.equal(await run(ctx, trusted, blocked(), deadline), refreshed);
+  assert.deepEqual((calls[1].payload as { answers: unknown[] }).answers, [
+    { subject: "research", id: RECORD.id, choice: "confirm", note: "one." },
+    { subject: "claim", id: "C1", choice: "later", note: null }],
+    "the item whose note timed out is never its chosen answer without its note (O1, decided): it stays Later");
+});
+
+test("PR 18 (§4-7, A4): the promise lines fit 76 columns; the keep line needs an earlier completed answer", () => {
+  assert.ok(KEEP_COMPLETED.length <= 76, KEEP_COMPLETED);
+  const earlier: EvidenceAnswer = { subject: "claim", id: "C1", choice: "approve", note: null };
+  const shown = itemTitle(DECISION, 2, 2, DOCUMENT, [earlier]).split("\n");
+  assert.ok(shown.includes(KEEP_COMPLETED), "k > 1 with an earlier completed answer: the line is shown");
+  const keepAt = shown.indexOf(KEEP_COMPLETED);
+  assert.ok(keepAt < shown.findIndex((line) => line.startsWith("Details: ")), "it comes before the Details lines");
+  assert.equal(shown[shown.length - 1], SHORT_DIGEST_LINE, "the Document sha256 line stays last");
+  const deferred: EvidenceAnswer = { subject: "claim", id: "C1", choice: "later", note: null };
+  for (const [number, history] of [[1, [earlier]], [2, []], [2, [deferred]]] as Array<[number, EvidenceAnswer[]]>)
+    assert.ok(!itemTitle(DECISION, number, 2, DOCUMENT, history).includes(KEEP_COMPLETED),
+      `number ${number} with ${history.length} earlier answers: no keep line`);
+  // A4: the note prompt line is at most 76 columns even when the shared note title is long
+  assert.ok(notePrompt("Note (optional)").length <= 76, notePrompt("Note (optional)"));
+  const long = notePrompt("Note (optional, the reason a deterministic check cannot exist today)");
+  assert.ok(long.length <= 76, long);
+  assert.ok(long.endsWith(" · Enter finishes this item · Esc goes back"),
+    "the shared title is shortened, never the instructions");
 });
 
 test("the dialogs are given the time that is left, so a stuck dialog times out", async () => {
@@ -493,6 +600,44 @@ test("EHB-TERM-03: without a UI the end is not asked and the failure is the usua
   const confirmed = await confirm(noUi.ctx, trusted, terminalBlock());
   assert.equal(calls.length, 0);
   assert.equal(confirmed.failure, "presentation_failed");
+});
+
+test("PR 18 (A3/A5c): Esc at the terminal note goes back to the select; Esc there or a timeout records no approval", async () => {
+  // Terminal consent (`consent_stop`, `freeze_scope`) shares the evidence dialog; its batch has one item,
+  // so there is never an earlier answer to keep — what must not happen is an approval recorded off an Esc.
+  for (const [name, status] of [["consent_stop", "stopped_residual"], ["freeze_scope", "stopped_frozen"]] as const) {
+    const item: EvidenceItem = { ...TERMINAL_ITEM, id: status,
+      text: `End this run as ${status}, without converging? Approve to end it now; Reject or Later keeps it active.`,
+      title: status === "stopped_residual" ? TERMINAL_ITEM.title : "End the run as stopped_frozen?",
+      description: `Not converged. Approve ends the run now as ${status}; Reject or Later keeps it active.` };
+    const termination = { status, digest: TERMINAL.digest };
+    const terminal = (): Response => {
+      const block = terminalBlock();
+      const batch = (block.result as unknown as { run: { confirmation_batch: Record<string, unknown> } })
+        .run.confirmation_batch;
+      batch.claim_ids = [status]; batch.terminal = termination;
+      return block;
+    };
+    for (const [label, script, delay] of [
+      ["Esc at the note, asked again, Esc at the select", { selects: ["Approve", undefined], inputs: [undefined] }, 0],
+      ["a timeout at the note", { selects: ["Approve"], inputs: [] }, 1]] as Array<[string, Script, number]>) {
+      const live = ctxFor(script);
+      const realInput = live.ctx.ui.input!.bind(live.ctx.ui) as
+        (title: string, placeholder?: string, opts?: { timeout?: number }) => Promise<string | undefined>;
+      let notes = 0;
+      if (delay > 0) live.ctx.ui.input = async (title: string, placeholder?: string, opts?: { timeout?: number }) => {
+        if (++notes > 0) { await new Promise((resolve) => setTimeout(resolve, 60)); return undefined; }
+        return realInput(title, placeholder, opts);
+      };
+      const { trusted, calls } = bridge([item]);
+      const deadline = Date.now() + 30;
+      const out = await confirmEvidence(terminal(), "run-1", live.ctx, trusted as never,
+        async () => refreshed, deadline);
+      assert.equal(out.response, refreshed, `${name}: ${label}`);
+      assert.equal(out.failure, undefined, `${name}: ${label}: a shown batch spent as the human's own nothing`);
+      assert.ok(!calls.some((call) => call.operation === "evidence_confirmation"), `${name}: ${label}: no approval receipt`);
+    }
+  }
 });
 
 // ---- review-2 m5 (round 12, decision 7c): a refused submit is nobody's recorded answer, never a decline ----------

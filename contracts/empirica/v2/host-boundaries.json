@@ -1698,11 +1698,13 @@
       ],
       "setup": "evidence batch",
       "action": "cancel / timeout / MCP `decline` / malformed / dialog raises",
-      "expected": "`no-decision`, nothing granted. A form-level `decline` is `no-decision` by ruling (live: `form_level_decline`): the form says \"Decline/Esc = send none\" and the explicit per-item decision is Reject",
+      "expected": "`no-decision` for the item(s) not decided, nothing granted for them. A form-level `decline` is `no-decision` by ruling (live: `form_level_decline`): the form says \"Decline/Esc = send none\" and the explicit per-item decision is Reject. PR 18 (Pi, one item at a time, per item): a cancel, a timeout or a not-offered label at item k keeps the answers completed before it, sends item k and the rest as `later` and submits the completed subset once; Esc at an item's optional note is neither consent nor cancel — the item's choice is asked again — while a batch with nothing decided submits nothing; Claude's single form for the batch is unchanged",
       "covered_by": [
         "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing",
         "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_a_dialog_that_raises_grants_nothing",
-        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::cancelling any dialog, or running past the deadline, submits nothing"
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::PR 18 (\u00a71): a cancel, a wrong label or a past deadline at the FIRST item submits nothing — there is no earlier answer to keep",
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::PR 18 (\u00a71, \u00a74-1): Esc at item 2's select keeps item 1's answer — item 2 and the rest are sent as Later",
+        "plugins/empirica/adapters/pi/test/live-bridge-evidence-partial.test.ts::live bridge: a cancelled second item submits the first — the observer reads item 2 as Not answered (PR 18)"
       ],
       "live_only": "form_level_decline",
       "ledger_rows": [

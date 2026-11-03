@@ -86,6 +86,11 @@ A confirmation the service refused — a Block, a Fault, or a submit that never 
 nobody's answer: the run reads `host_failed` and the recovery is to show the batch again. It is
 never recorded as the human's decline.
 
+On Pi, the end-of-pass evidence dialog fails closed **per item** (PR 18): a cancel or timeout at
+item k keeps every answer completed before it, sends that item and the rest as `later`, and submits
+what was completed once; Esc at an item's optional note never cancels — the same item's choice is
+offered again — while Claude's one shared form is unchanged.
+
 ## Qualified hosts
 
 The host versions 7.0.0 was qualified on are recorded here after the operator's native
