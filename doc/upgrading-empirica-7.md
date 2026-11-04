@@ -102,4 +102,15 @@ The host versions 7.0.0 was qualified on are recorded here after the operator's 
 requalification of this release tree completes, together with the exact Docker profile
 qualification records.
 
-QUALIFIED-ON: pending operator requalification
+QUALIFIED-ON: 2026-11-04, operator-led native qualification on Linux arm64 (Lima VM, rootless Docker, `alpine:3`):
+
+| Host | Version | Candidate | Docker `docker-isolated-v1` qualification record / execution binding | Result |
+|---|---|---|---|---|
+| Pi | 1.4.0, pi-subagents 0.76.1 | `ac401739` | `sha256:950f32ff4bf2bc72e24d32236cfd02bfa0efb25cf72cbc64e80cbc716937b079` / `sha256:4f7d57caf288bd9ee655b513cd41e91a34bd4ca468f91ac883370bf0bbd9d885` | converged; per-item fail-closed evidence dialog, terminal decline/later/accept (`73119e13`) |
+| Claude Code | 2.1.304 | `fd5aee74` | `sha256:aa8d4436b7828c79ad742f14c03ebb69d5328c7158454ed121044fb9728a655f` / `sha256:458ff794f025b3991634a756bcd3b4d3798b3c6e9913091b213950c3825ee081` | converged; review, amendment confirm, evidence and terminal forms with visible `Details:` links |
+
+The change after `ac401739` (`fd5aee74`) alters only Claude's form messages and field descriptions; Pi's
+dialogs are byte-identical, pinned by the Pi suite. Not reached: the reviewer preflight refusal (cannot be
+induced on Claude without changing user settings) and a refused confirmation on Pi (the dialog opens only after
+the turn settles). pi-subagents 0.83.x is not yet supported (#61); author identities outside the Anthropic,
+OpenAI and xAI vendors are refused (#62).
