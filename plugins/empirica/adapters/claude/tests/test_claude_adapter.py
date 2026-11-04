@@ -30,7 +30,6 @@ import jsonschema  # noqa: E402
 
 from adapters import bridge  # noqa: E402
 from adapters.audit import child_event  # noqa: E402
-from adapters.audit_protocol import AuditProtocolError  # noqa: E402
 from core import spike_plan  # noqa: E402
 from adapters.claude import (  # noqa: E402
     CLAUDE_PROFILE_ID,
@@ -2205,28 +2204,23 @@ class AutoModeAuditLaunchTests(unittest.TestCase):
         (hook,) = groups[0]["hooks"]
         self.assertEqual(hook["args"], ["${CLAUDE_PLUGIN_ROOT}/hooks/permission_denied.py"])
 
-    # ---- 3. a stale reservation is released before a new one --------------------------------------
-    def test_a_stale_reserved_audit_is_released_and_a_fresh_one_follows(self):
-        run = _AuditedRun(self)
-        run.launch()  # never reached SubagentStart, and no failure event ever fired
-        (stale,) = run.audits()
+    # ---- 3. overlapping auditor launches stay refused (7.0.1 behaviour) -----------------------------
+    # A ``reserved`` child cannot be told apart from an allowed launch still waiting for
+    # ``SubagentStart`` (its payload has no ``tool_use_id`` and the core child has no launch owner), so a
+    # second launch never releases it: only the owner's denial, a failure or ``/compact`` does.
+    def _assert_refused_with_audit_pending(self, run, states):
+        before = run.snapshot_bytes()
         code, stdout, stderr = run.launch()
-        self.assertEqual((code, stderr), (0, ""))
-        self.assertEqual(json.loads(stdout)["hookSpecificOutput"]["permissionDecision"], "allow")
-        first, fresh = run.audits()
-        self.assertEqual(first["child_id"], stale["child_id"])
-        self.assertEqual((first["state"], fresh["state"]), ("launch_rejected", "reserved"))
-        self.assertNotEqual(first["child_id"], fresh["child_id"])
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertIn("Audit child is pending", stderr)
+        self.assertEqual(run.snapshot_bytes(), before)
+        self.assertEqual(run.states(), states)
 
-    def test_a_rejected_reservation_does_not_spend_the_audit_budget(self):
-        """Core semantics (unchanged): ``launch_rejected`` refunds the spawn, so releasing never exhausts the ceiling."""
-        run = _AuditedRun(self, max_audit_spawns=1)
-        for _ in range(4):
-            self.assertEqual(run.launch()[0], 0)
-        self.assertEqual(run.state().budgets["audit_spawns_used"], 1)
-        self.assertEqual(run.state().budgets["max_audit_spawns"], 1)
-        self.assertEqual(run.states().count("reserved"), 1)
-        self.assertEqual(run.states().count("launch_rejected"), 3)
+    def test_a_second_launch_while_a_child_is_reserved_is_refused_with_audit_pending(self):
+        run = _AuditedRun(self)
+        run.launch()
+        self.assertEqual(run.states(), ["reserved"])
+        self._assert_refused_with_audit_pending(run, ["reserved"])
 
     def test_a_launching_audit_still_refuses_with_audit_pending(self):
         run = _AuditedRun(self)
@@ -2235,94 +2229,70 @@ class AutoModeAuditLaunchTests(unittest.TestCase):
         run.coordinator.trusted_child_event(
             run.run_id, child["child_id"], child_event("launching", "native-1"))
         self.assertEqual(run.states(), ["launching"])
-        before = run.snapshot_bytes()
-        code, stdout, stderr = run.launch()
-        self.assertEqual((code, stdout), (2, ""))
-        self.assertIn("Audit child is pending", stderr)
-        self.assertEqual(run.snapshot_bytes(), before)
+        self._assert_refused_with_audit_pending(run, ["launching"])
 
     def test_a_pending_audit_still_refuses_with_audit_pending(self):
         run = _AuditedRun(self)
         run.launch()
         run.started("native-1")
         self.assertEqual(run.states(), ["pending"])
-        before = run.snapshot_bytes()
-        code, stdout, stderr = run.launch()
-        self.assertEqual((code, stdout), (2, ""))
-        self.assertIn("Audit child is pending", stderr)
-        self.assertEqual(run.snapshot_bytes(), before)
-        self.assertEqual(run.states(), ["pending"])
+        self._assert_refused_with_audit_pending(run, ["pending"])
 
-    def test_release_does_not_hide_a_reservation_failure(self):
-        """The release is best effort for the stale child only: a refused reservation still denies."""
-        run = _AuditedRun(self)
-        run.launch()
-        with patch.object(run.protocols, "prepare", side_effect=AuditProtocolError("denied now")):
-            code, stdout, stderr = run.launch()
-        self.assertEqual((code, stdout), (2, ""))
-        self.assertIn("denied now", stderr)
-
-    # ---- 3. two auditor launches in one response --------------------------------------------------
-    def _two_launches(self):
+    def test_two_launches_in_one_response_the_second_is_refused_and_one_verdict_is_admitted(self):
         run = _AuditedRun(self)
         self.assertEqual(run.launch()[0], 0)
-        first = run.audits()[0]["child_id"]
-        self.assertEqual(run.launch()[0], 0)  # the second launch of the same response
-        stale, surviving = run.audits()
-        self.assertEqual((stale["child_id"], stale["state"]), (first, "launch_rejected"))
-        self.assertEqual(surviving["state"], "reserved")
-        return run, stale, surviving
-
-    def test_two_launches_in_one_response_second_started_first_the_first_is_inert(self):
-        run, stale, surviving = self._two_launches()
-        # The second call's subagent starts first and takes the surviving reservation.
-        self.assertEqual(run.started("native-second"), (0, "", ""))
-        # The first call's subagent finds no reserved plan: inert.
-        before = run.snapshot_bytes()
-        self.assertEqual(run.started("native-first"), (0, "", ""))
-        self.assertEqual(run.snapshot_bytes(), before)
-        # ...and its stop admits nothing.
-        self.assertEqual(run.stopped("native-first"), (0, "", ""))
-        self.assertEqual(run.snapshot_bytes(), before)
-        self.assertEqual(run.verdicts(), [])
-        # The bound execution is the only one that can admit a verdict.
-        self.assertEqual(run.stopped("native-second"), (0, "", ""))
-        self.assertEqual(len(run.verdicts()), 1)
-        self.assertEqual({c["child_id"]: c["state"] for c in run.audits()},
-                         {stale["child_id"]: "launch_rejected",
-                          surviving["child_id"]: "completed"})
-
-    def test_two_launches_in_one_response_first_started_first_one_verdict_for_the_live_reservation(self):
-        run, stale, surviving = self._two_launches()
-        self.assertEqual(run.started("native-first"), (0, "", ""))
-        self.assertEqual(run.started("native-second"), (0, "", ""))  # inert: nothing reserved
-        self.assertEqual({c["child_id"]: c.get("native_id") for c in run.audits()
-                          if c["state"] == "pending"}, {surviving["child_id"]: "native-first"})
-        before = run.snapshot_bytes()
-        self.assertEqual(run.stopped("native-second"), (0, "", ""))  # bound to nothing
-        self.assertEqual(run.snapshot_bytes(), before)
+        (first,) = run.audits()
+        self._assert_refused_with_audit_pending(run, ["reserved"])  # the second launch of the response
+        self.assertEqual(run.started("native-first"), (0, "", ""))  # binds the only reservation
+        (bound,) = run.audits()
+        self.assertEqual((bound["child_id"], bound["state"], bound["native_id"]),
+                         (first["child_id"], "pending", "native-first"))
         self.assertEqual(run.verdicts(), [])
         self.assertEqual(run.stopped("native-first"), (0, "", ""))
-        self.assertEqual(len(run.verdicts()), 1)
-        self.assertEqual(run.verdicts()[0]["child_id"], surviving["child_id"])
+        self.assertEqual([v["child_id"] for v in run.verdicts()], [first["child_id"]])
+        self.assertEqual(run.states(), ["completed"])
 
-    def test_a_verdict_for_the_released_reservation_is_refused_by_the_core(self):
-        run, stale, surviving = self._two_launches()
-        run.started("native-second")
-        self.coordinator_verdict_refused(run, stale["child_id"])
-        self.coordinator_verdict_refused(run, surviving["child_id"], expect="Allow")
+    def test_the_first_launchs_denial_releases_its_own_reservation_and_a_fresh_launch_follows(self):
+        run = _AuditedRun(self)
+        run.launch()
+        (first,) = run.audits()
+        self._assert_refused_with_audit_pending(run, ["reserved"])
+        self.assertEqual(run.denied(), (0, "", ""))  # auto mode denied the first launch
+        self.assertEqual(run.states(), ["launch_rejected"])
+        self.assertEqual(run.state().budgets["audit_spawns_used"], 0)  # refunded
+        code, stdout, stderr = run.launch()
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["hookSpecificOutput"]["permissionDecision"], "allow")
+        released, fresh = run.audits()
+        self.assertEqual((released["child_id"], released["state"]), (first["child_id"], "launch_rejected"))
+        self.assertEqual(fresh["state"], "reserved")
 
-    def coordinator_verdict_refused(self, run, child_id, expect="Fault"):
-        from core.evaluation import audit_binding
-        run.coordinator.handle({"type": "GetArgument", "run_id": run.run_id}, "argument")
-        verdict = {"verdict": "pass", "findings": [],
-                   **audit_binding(run.coordinator.last_snapshot)}
-        before = run.snapshot_bytes()
-        result = run.coordinator.trusted_audit_verdict(run.run_id, child_id, verdict)["result"]
-        self.assertEqual(result["type"], expect if expect == "Fault" else "Allow")
-        if expect == "Fault":
-            self.assertEqual(run.snapshot_bytes(), before)
-            self.assertEqual(run.verdicts(), [])
+    def test_a_denial_refunds_the_audit_spawn_so_the_ceiling_is_never_spent_by_it(self):
+        """Core semantics (unchanged): ``launch_rejected`` refunds, so repeated denied launches never exhaust the ceiling."""
+        run = _AuditedRun(self, max_audit_spawns=1)
+        for _ in range(3):
+            self.assertEqual(run.launch()[0], 0)
+            self.assertEqual(run.state().budgets["audit_spawns_used"], 1)
+            self.assertEqual(run.denied(), (0, "", ""))
+            self.assertEqual(run.state().budgets["audit_spawns_used"], 0)
+        self.assertEqual(run.state().budgets["max_audit_spawns"], 1)
+        self.assertEqual(run.states(), ["launch_rejected"] * 3)
+
+    def test_a_reserved_child_stuck_before_the_fix_is_released_by_compact(self):
+        """The 7.0.0/7.0.1 workaround: ``SessionStart`` ``compact`` orphans a ``reserved`` child, then a launch works."""
+        run = _AuditedRun(self)
+        run.launch()  # the denial of an old build left this child behind
+        self._assert_refused_with_audit_pending(run, ["reserved"])
+        with patch.object(lifecycle, "dispatch_restore",
+                          return_value=_typed(_active_result(), "restore")):
+            code, _, stderr = run._run("restore_main", {"hook_event_name": "SessionStart"})
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(run.states(), ["orphaned"])
+        code, stdout, stderr = run.launch()
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(run.states(), ["orphaned", "reserved"])
+        # An orphaned child is not refunded: the workaround costs the audit spawn it held.
+        self.assertEqual(run.state().budgets["audit_spawns_used"], 2)
 
 
 if __name__ == "__main__":

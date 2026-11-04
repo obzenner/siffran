@@ -326,20 +326,6 @@ def run_start_main() -> int:
 _AUDIT_LAUNCH_REASON = "Empirica host-bound audit launch"
 
 
-def _release_stale_reservation(protocol: AuditProtocol, payload: Mapping[str, object]) -> None:
-    """Reject the one audit child that is still ``reserved`` (it never reached ``SubagentStart``).
-
-    A reservation only survives its launch when the host never ran the call and fired no failure event.
-    ``launching`` and ``pending`` children are left alone, so a running audit still refuses a second one
-    with the core's ``audit.pending``. A rejected reservation is refunded by the core.
-    """
-    handle, result = _resolve(payload, strict=True)
-    if handle is None or result is None:
-        return
-    if (stale := _reserved_plan(handle, result)) is not None:
-        protocol.reject(stale)
-
-
 def spawn_main() -> int:
     """PreToolUse:Agent: reserve a real launch via ``child_reserve``, else inert.
 
@@ -386,10 +372,8 @@ def spawn_main() -> int:
         alias = _auditor_alias(payload, os.environ, excluded)
         override = os.environ.get("CLAUDE_CODE_SUBAGENT_MODEL")
         target = alias or override  # exactly one of them is set: an override disables the pick
-        identity = _effective_identity(target, os.environ, excluded) if target else None
-        _release_stale_reservation(audit_protocol, payload)
         plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor",
-                                      auditor_identity=identity)
+                                      auditor_identity=_effective_identity(target, os.environ, excluded) if target else None)
         # No ``max_turns``: it is not an Agent-tool input, and Claude Code drops unknown ``updatedInput`` keys.
         updated = {
             "subagent_type": "empirica:empirica-auditor",
@@ -512,7 +496,7 @@ def _parse_durable_plan(handle: str, child_id: str) -> AuditLaunchPlan | None:
 
 
 def _reserved_plan(handle: str, result: Result) -> AuditLaunchPlan | None:
-    run = getattr(result, "run", None)
+    run = result.run
     children = run.children if run is not None else ()
     reserved = [child for child in children
                 if child.resource_class == "audit" and child.state == "reserved"]

@@ -636,7 +636,7 @@
         "EHB-AUDLAUNCH-07",
         "EHB-AUDLAUNCH-08"
       ],
-      "sources": "ADR-51, ADR-52 (explicit read-only acceptance exemption), ADR-49, D1H §3–4, PROGRESS \"S5\" (S5-R3, S5-R2), G1 B2/B3, `P/adapters/pi/src/audit-launch.ts:32-42`, `P/adapters/claude/lifecycle.py:343-416`; tests `CT/test_claude_adapter.py::test_auditor_reservation_replaces_author_prompt_and_defers_lifecycle`, `::test_auditor_preflight_failure_does_not_reserve`, `PT/gate.test.ts` (\"subagent: canonical auditor is reserved, bound, attributed, and prompt-injected\"), `PT/preflight-seam.test.ts` (\"the seam refuses forced-async, non-foreground, and non-inline launch requests\")."
+      "sources": "ADR-51, ADR-52 (explicit read-only acceptance exemption), ADR-49, D1H §3–4, PROGRESS \"S5\" (S5-R3, S5-R2), G1 B2/B3, `P/adapters/pi/src/audit-launch.ts:32-42`, `P/adapters/claude/lifecycle.py:329-400`; tests `CT/test_claude_adapter.py::test_auditor_reservation_replaces_author_prompt_and_defers_lifecycle`, `::test_auditor_preflight_failure_does_not_reserve`, `PT/gate.test.ts` (\"subagent: canonical auditor is reserved, bound, attributed, and prompt-injected\"), `PT/preflight-seam.test.ts` (\"the seam refuses forced-async, non-foreground, and non-inline launch requests\")."
     },
     {
       "id": "HX-AUDRES-01",
@@ -2067,15 +2067,16 @@
       "control_modes": [
         "any"
       ],
-      "setup": "Claude Code auto mode (server-side classifier active); the run holds a `reserved` audit child that never reached `SubagentStart`, or two auditor launches in one response",
-      "action": "canonical audit launch (`PreToolUse` for `Agent`)",
-      "expected": "C: the host-built input is returned with `permissionDecision: allow` and a reason (no `max_turns`; the Agent tool has no such input); a stale `reserved` child is rejected and refunded before the new reservation, a `launching` or `pending` one still refuses with `audit.pending`; of two launches in one response only the surviving reservation can admit a verdict",
+      "setup": "Claude Code auto mode (server-side classifier active); a canonical audit launch, then a second one while an audit child is `reserved`, `launching` or `pending` (including two auditor launches in one response)",
+      "action": "canonical audit launch (`PreToolUse` for `Agent`), and `PermissionDenied` for a launch auto mode denied",
+      "expected": "C: the host-built input is returned with `permissionDecision: allow` and a reason (no `max_turns`; the Agent tool has no such input); a second launch while an audit child is `reserved`, `launching` or `pending` is refused with `audit.pending`, state unchanged (a `reserved` child cannot be told apart from an allowed launch still starting, so it is never released by another launch); the first launch's `SubagentStart` binds the only reservation and exactly one verdict is admitted; a denied launch's `PermissionDenied` rejects and refunds its own reservation, then a fresh launch reserves",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_the_auditor_launch_allows_explicitly_with_a_reason_and_the_host_built_input",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_a_stale_reserved_audit_is_released_and_a_fresh_one_follows",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_a_second_launch_while_a_child_is_reserved_is_refused_with_audit_pending",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_a_launching_audit_still_refuses_with_audit_pending",
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_a_pending_audit_still_refuses_with_audit_pending",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_two_launches_in_one_response_second_started_first_the_first_is_inert",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_two_launches_in_one_response_first_started_first_one_verdict_for_the_live_reservation"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_two_launches_in_one_response_the_second_is_refused_and_one_verdict_is_admitted",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::AutoModeAuditLaunchTests::test_the_first_launchs_denial_releases_its_own_reservation_and_a_fresh_launch_follows"
       ],
       "ledger_rows": []
     },

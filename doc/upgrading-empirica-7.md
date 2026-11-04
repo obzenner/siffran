@@ -143,9 +143,10 @@ and the run stayed in `audit: reserved`. 7.0.2 fixes it:
   against that input. Non-auditor launches are unchanged.
 - **A denied launch releases its reservation.** `PermissionDenied` for `Agent` is registered and rejects a
   `reserved`, unstarted audit child (the core refunds the audit spawn). It never asks the model to retry.
-- **A stale reservation is released before a new one.** If the run holds exactly one audit child still `reserved`,
-  the next audit launch rejects it first and then reserves. A `launching` or `pending` audit is untouched and still
-  refuses with `audit.pending`. Runs already stuck by the defect recover on their next audit launch.
+- **Overlapping audit launches are still refused.** While an audit child is `reserved`, `launching` or `pending`, a
+  second audit launch is refused with `audit.pending`, as in 7.0.1. A reserved child cannot be told apart from a
+  launch that is allowed and still starting, so a later launch never releases it; only its own denial or failure does.
+  A run already stuck in `audit: reserved` by 7.0.0 or 7.0.1 does not recover by itself (see the workaround below).
 - **The unused `max_turns` key is removed.** The Agent tool has no `max_turns` input (Claude Code 2.1.300 drops unknown
   `updatedInput` keys), so the old key never applied and is removed. The auditor's turns stay uncapped, as in every
   qualified run; a cap is a separate decision.
@@ -153,8 +154,9 @@ and the run stayed in `audit: reserved`. 7.0.2 fixes it:
 If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
 
 - **New runs:** switch to Manual mode (not auto) before the audit launch.
-- **A run already stuck in `audit: reserved`:** run `/compact`. The `SessionStart` hook for `compact` reconciles
-  orphans and releases a `reserved` audit child.
+- **A run already stuck in `audit: reserved`:** run `/compact`, then launch the audit again. The `SessionStart` hook
+  for `compact` reconciles orphans and releases a `reserved` audit child (it is closed as `orphaned`, so the audit
+  spawn it held is not refunded). 7.0.2 does not need this: its own denial releases and refunds the reservation.
 
 ## Qualified hosts
 
