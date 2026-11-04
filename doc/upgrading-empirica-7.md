@@ -96,6 +96,38 @@ item k keeps every answer completed before it, sends that item and the rest as `
 what was completed once; Esc at an item's optional note never cancels — the same item's choice is
 offered again — while Claude's one shared form is unchanged.
 
+## pi-subagents 0.77.0 through 0.84.0 (7.0.1)
+
+**The supported range is now `>=0.74.0,<1.0.0`.** Empirica 7.0.1 raises the minimum from 0.50.0. If you run
+a `pi-subagents` older than 0.74.0 (0.50.0 through 0.73.x), upgrade it, for example
+`pi install npm:pi-subagents@0.84.0`, and start a new `/empirica` run: `/empirica` and `configure_run` refuse an
+older release with `host.subagents_version_unsupported` (`version-unsupported: pi-subagents <version> is outside the
+supported range >=0.74.0 <1.0.0`). 0.74.0 is where pi-subagents' launch contract changed from v2 to v3 (the preflight
+no longer carries `modelCandidates`; `disabledFeatures` and the boolean `workflow` exist), and the adapter accepts
+launch contract v3 only; the compat records and captured preflights for 0.50.0 and 0.64.0 are removed. Pi's own range
+(`>=1.0.0,<2.0.0`) is unchanged.
+
+Empirica on Pi used to refuse every pi-subagents release after 0.76.1 at `/empirica` start
+(`version-unsupported: ... the subagent tool's schema does not declare agentScope`, #61). 0.77.0 publishes a
+compact `subagent` schema (`agent, task, workflow, args, async, model, cwd, worktree, output, action, id, message`
+at the top level, every other field inside one `options` object), and the adapter now reads that shape.
+
+- **Reviewed.** Every release 0.77.0, 0.78.0, 0.79.0, 0.79.1, 0.79.2, 0.80.0, 0.81.0, 0.82.0, 0.82.1, 0.83.0, 0.83.1 and
+  0.84.0 has a compat record and a captured launch preflight, alongside 0.74.0, 0.75.0 and 0.76.1.
+  Pi 1.2.0 or later is needed from 0.80.0 (its declared `pi-ai` peer); `doc/hosts.md` has the table.
+- **Not reviewed.** A release in `>=0.74.0,<1.0.0` with no record (for example a future 0.85.0) is admitted by
+  observation, as before, now also when it publishes the compact schema. A shape that is neither the flat schema nor
+  the compact one is refused, naming the missing parameter or the shape.
+- **The launch.** On a compact package the audit launch carries `task`, `model` and `async` at the top level and
+  `agentScope`, `context`, `acceptance`, `timeoutMs` and `toolBudget` once, inside `options`; 0.74.0 to 0.76.1 send the
+  same flat payload as before. During a run, an `options` object on a `subagent` call that holds a launch form or a
+  `script` is refused, and the auditor accepts no `options` from the author.
+- **Long reports.** From 0.77.0 a long child report arrives as a preview plus a file path in the tool result's
+  `content`. The audit verdict is read from the whole `finalOutput` of the result row only; a preview, or a result
+  with no row, is never read for a verdict and the file it names is never opened.
+- **Matrix.** `make empirica-subagents-matrix` now masks `definitionDigest` with the other path-bearing digests, so it
+  no longer depends on the directory the repository is checked out in.
+
 ## Qualified hosts
 
 The host versions 7.0.0 was qualified on are recorded here after the operator's native
@@ -112,5 +144,5 @@ QUALIFIED-ON: 2026-11-04, operator-led native qualification on Linux arm64 (Lima
 The change after `ac401739` (`fd5aee74`) alters only Claude's form messages and field descriptions; Pi's
 dialogs are byte-identical, pinned by the Pi suite. Not reached: the reviewer preflight refusal (cannot be
 induced on Claude without changing user settings) and a refused confirmation on Pi (the dialog opens only after
-the turn settles). pi-subagents 0.83.x is not yet supported (#61); author identities outside the Anthropic,
+the turn settles). pi-subagents 0.77.0 through 0.84.0 were not yet supported at that qualification and are reviewed from 7.0.1 (#61); author identities outside the Anthropic,
 OpenAI and xAI vendors are refused (#62).

@@ -104,7 +104,7 @@ runtime first, then the repository (which carries Empirica, the Methodologist, a
 role):
 
 ```sh
-pi install npm:pi-subagents@0.76.1
+pi install npm:pi-subagents@0.84.0
 pi install git:github.com/obzenner/siffran
 ```
 
@@ -115,11 +115,11 @@ tool, when the session's slash commands show more than one loaded `pi-subagents`
 only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
 or when the owner's package or version cannot be verified. A second copy is detected only while its
 extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
-Supported `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
+Supported `pi-subagents` versions are a range, `>=0.74.0,<1.0.0`, under the policy
 `pi-subagents-foreground-audit-v1` (Pi `>=1.0.0,<2.0.0`). A version outside the supported range fails closed:
 `/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
 created. Inside the range a version is admitted by what the adapter observes of it, not by a list: its own
-parameter schema must declare every field the audit launch sends, and its live launch preflight must resolve
+parameter schema must declare every field the audit launch sends (flat, as before 0.77.0; or compact, as from 0.77.0: `agent`, `task`, `model` and `async` at the top level and an `options` object that carries the rest), and its live launch preflight must resolve
 the packaged auditor, the configured model and a fresh context, and its tool allowlist may hold only the tools the profile's `audit_child_tools` allows. A version in the table below has a checked-in
 compat record and is *reviewed*. Any other version in the range is admitted by observation, recorded as `reviewed: false`
 and shown on every run view while it stays unreviewed (`host: pi-subagents <version> (not reviewed; preflight passed)`);
@@ -127,13 +127,29 @@ because nobody has reviewed its actions, a `subagent` action runs during a run o
 name and the classifier calls it read-only (`list`, `status`, `models`, ...); launches are classified as usual. `make empirica-subagents-matrix-update` lists releases newer than the newest
 reviewed one; reviewing one means adding its compat record, preflight fixture and classifier cases.
 
+From 0.77.0 `pi-subagents` publishes the compact `subagent` schema: `agent, task, workflow, args, async, model, cwd, worktree, output, action, id, message`
+at the top level and every other field inside one `options` object. For a package that does, the record names where each audit-launch parameter is declared
+(`launch_parameter_placement`, read from the package's own `SUBAGENT_OPTION_KEYS`), and the audit launch writes each parameter in that one place and never
+in both: `task`, `model`, `async` at the top level, `agentScope`, `context`, `acceptance`, `timeoutMs` and `toolBudget` inside `options`. An author-supplied
+`options`, or a launch form hidden in `options` (`script`, `workflowScript`, `resume`, ...), is refused during a run. Versions `0.74.0`-`0.76.1` are unchanged.
+
 | `pi-subagents` | Pi floor (supported) | Status |
 |---|---|---|
-| `0.50.0` | `>=1.0.0` | reviewed |
-| `0.64.0` | `>=1.0.0` | reviewed |
 | `0.74.0` | `>=1.0.0` | reviewed |
 | `0.75.0` | `>=1.0.0` | reviewed |
 | `0.76.1` | `>=1.0.0` | reviewed; the repository's development pin |
+| `0.77.0` | `>=1.0.0` | reviewed |
+| `0.78.0` | `>=1.0.0` | reviewed |
+| `0.79.0` | `>=1.0.0` | reviewed |
+| `0.79.1` | `>=1.0.0` | reviewed |
+| `0.79.2` | `>=1.0.0` | reviewed |
+| `0.80.0` | `>=1.2.0` | reviewed |
+| `0.81.0` | `>=1.2.0` | reviewed |
+| `0.82.0` | `>=1.2.0` | reviewed |
+| `0.82.1` | `>=1.2.0` | reviewed |
+| `0.83.0` | `>=1.2.0` | reviewed |
+| `0.83.1` | `>=1.2.0` | reviewed |
+| `0.84.0` | `>=1.2.0` | reviewed |
 
 "Requires Pi" is each release's own declared `@earendil-works/pi-ai` peer, raised to the floor of the supported Pi interval (1.0.0, which every reviewed release's peer is below). It is
 recorded in [`plugins/empirica/adapters/pi/compat/`](../plugins/empirica/adapters/pi/compat/) and checked against this table.

@@ -1,5 +1,5 @@
 {
-  "version": "0.64.0",
+  "version": "0.81.0",
   "note": "Captured by scripts/capture_pi_preflight_fixture.mjs from the package's public pi-subagents/preflight export; {{NAME}} marks a machine-specific root.",
   "cases": {
     "canonical_auditor": {
@@ -20,7 +20,7 @@
       "response": {
         "ok": true,
         "contract": {
-          "version": 2,
+          "version": 3,
           "runId": "preflight",
           "agent": {
             "name": "empirica.empirica-auditor",
@@ -28,15 +28,12 @@
             "packageName": "empirica",
             "source": "package",
             "filePath": "{{AUDITOR_FILE}}",
-            "definitionProjectionVersion": 1,
-            "definitionDigest": "20b6595d3ebc454a60dd6c95afdda59b9bc97d5db800e0d3ea5961626b66ce9e",
+            "definitionProjectionVersion": 2,
+            "definitionDigest": "32767019d3090dc27ab2cca6df04fa45943c78ce9d46f8b3c84186cf65171332",
             "shadowedCandidates": []
           },
           "context": "fresh",
           "model": "audit/reviewer:high",
-          "modelCandidates": [
-            "audit/reviewer:high"
-          ],
           "thinking": "high",
           "systemPromptMode": "replace",
           "inheritProjectContext": true,
@@ -52,19 +49,22 @@
               "read",
               "grep",
               "find",
-              "ls"
+              "ls",
+              "contact_supervisor"
             ],
             "declaredBuiltin": [
               "read",
               "grep",
               "find",
-              "ls"
+              "ls",
+              "contact_supervisor"
             ],
             "effectiveAllowlist": [
               "read",
               "grep",
               "find",
-              "ls"
+              "ls",
+              "contact_supervisor"
             ],
             "explicitAllowlist": true,
             "requiredChildTools": [
@@ -78,14 +78,19 @@
             "effectiveMcpTools": [],
             "toolExtensionPaths": [],
             "runtimeExtensions": [
-              "{{PACKAGE_ROOT}}/src/runs/shared/subagent-prompt-runtime.ts"
+              "{{PACKAGE_ROOT}}/src/runs/shared/subagent-prompt-runtime.js"
             ],
             "configuredExtensions": [],
+            "requiredExtensionIds": [],
             "extensionArgs": [
-              "{{PACKAGE_ROOT}}/src/runs/shared/subagent-prompt-runtime.ts"
+              "{{PACKAGE_ROOT}}/src/runs/shared/subagent-prompt-runtime.js"
             ],
             "disableAmbientExtensions": false,
             "fanoutAuthorized": false
+          },
+          "intercomBridge": {
+            "active": true,
+            "mode": "always"
           },
           "roots": {
             "cwd": "{{PROJECT}}",
@@ -108,7 +113,7 @@
           },
           "protocol": {
             "lifecycleArtifactVersion": 3,
-            "packageVersion": "0.64.0"
+            "packageVersion": "0.81.0"
           },
           "diagnostics": [
             {
@@ -117,8 +122,8 @@
               "message": "No sessionRoot/sessionDir was supplied; exact child session paths require the Pi host session-root policy."
             }
           ],
-          "launchContractDigest": "f2396d5de6ff154a0859999900d77698b9cce0cf95612253bb5a71ba37eba5fe",
-          "digest": "b7cb5d7a1112f12c20bdc700ad5c6d462911af929a8b7439f78330be614fa622"
+          "launchContractDigest": "c7b669e2f7a40961f6bc12e5200c8561ea82e2c0524d1cf683cda8a55af51b76",
+          "digest": "c3eafb53546396adc045648d8e0f266f6b2b3597830d3e39cf1dfefd8ea0f6fd"
         }
       }
     },
@@ -140,7 +145,7 @@
       "response": {
         "ok": false,
         "code": "missing_agent",
-        "message": "Unknown agent: empirica.empirica-auditor\nEffective cwd: {{BARE}}\nConsulted agent-definition directories:\n- builtin: {{PACKAGE_ROOT}}/agents (12 candidates)\nDiscovered agents:\n- claude-code (builtin)\n- claude-code-writer (builtin)\n- codex-exec (builtin)\n- codex-exec-writer (builtin)\n- cursor-agent (builtin)\n- cursor-agent-writer (builtin)\n- delegate (builtin)\n- oracle (builtin)\n- researcher (builtin)\n- reviewer (builtin)\n- scout (builtin)\n- worker (builtin)",
+        "message": "Unknown agent: empirica.empirica-auditor\nEffective cwd: {{BARE}}\nConsulted agent-definition directories:\n- builtin: {{PACKAGE_ROOT}}/agents (13 candidates)\nAvailable agents:\n- claude-code (builtin) — Read-only Claude Code CLI analysis; requires local authentication and trusted u…\n- claude-code-writer (builtin) — Explicit file-writing Claude Code CLI mode; requires local authentication and t…\n- codex-exec (builtin) — Read-only one-shot analysis through the installed Codex CLI\n- codex-exec-writer (builtin) — Explicit workspace-writing one-shot execution through the installed Codex CLI\n- cursor-agent (builtin) — Read-only one-shot analysis through the installed Cursor CLI\n- cursor-agent-writer (builtin) — Explicit workspace-writing one-shot execution through the installed Cursor CLI\n- delegate (builtin) — Lightweight subagent that inherits the parent model with no default reads\n- evidence-auditor (builtin) — Independent evidence reviewer for checking whether important research claims ar…\n- oracle (builtin) — High-context decision-consistency oracle that protects inherited state and prev…\n- researcher (builtin) — Autonomous web researcher — searches, evaluates, and synthesizes a focused rese…\n- reviewer (builtin) — Versatile review specialist for code diffs, plans, proposed solutions, codebase…\n- scout (builtin) — Fast codebase recon that returns compressed context for handoff\n- worker (builtin) — Implementation agent for normal tasks and approved oracle handoffs",
         "diagnostics": []
       }
     },

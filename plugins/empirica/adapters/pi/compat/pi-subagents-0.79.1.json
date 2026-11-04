@@ -1,13 +1,22 @@
 {
-  "version": "0.64.0",
-  "peer_pi_ai": ">=0.80.0",
-  "launch_contract_version": 2,
+  "version": "0.79.1",
+  "peer_pi_ai": ">=0.86.1",
+  "launch_contract_version": 3,
   "launch_forms": [
     "agent",
-    "workflowScript",
-    "workflowScriptPath",
     "workflow"
   ],
+  "launch_parameter_placement": {
+    "agent": "top-level",
+    "task": "top-level",
+    "model": "top-level",
+    "agentScope": "options",
+    "async": "top-level",
+    "context": "options",
+    "acceptance": "options",
+    "timeoutMs": "options",
+    "toolBudget": "options"
+  },
   "actions": [
     "list",
     "get",
@@ -38,6 +47,7 @@
     "refine.show",
     "refine.rollback",
     "inspector.open",
+    "inspector.command",
     "inspector.status",
     "inspector.close",
     "project.open",
@@ -50,6 +60,9 @@
     "resume",
     "steer",
     "stop",
+    "command.status",
+    "command.yield",
+    "command.cancel",
     "dismiss",
     "doctor",
     "watchdog.status",
@@ -70,8 +83,8 @@
     "turnBudget": false,
     "toolBudget": true,
     "timeoutMs": true,
-    "workflow": "string",
-    "disabledFeatures": false,
+    "workflow": "boolean|string",
+    "disabledFeatures": true,
     "validateOffline": true
   }
 }

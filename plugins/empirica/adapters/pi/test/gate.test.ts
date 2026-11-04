@@ -19,7 +19,7 @@ import {
   resolvePiAuditorModel,
 } from "../src/index.ts";
 import { AUDIT_LAUNCH_PARAMETERS, loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
-import { bound, FIXTURES, fixtureFor } from "./preflight-fixtures.ts";
+import { bound, FIXTURES, fixtureFor, schemaCopy } from "./preflight-fixtures.ts";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isDeepStrictEqual } from "node:util";
@@ -696,7 +696,7 @@ test("/empirica refuses to start when the pi-subagents tool is not active (P1b)"
 
 // --- active owner (Empirica 4.1): refusal before any run exists ---------------------------------
 
-const otherOwner = (version = "0.64.0", sentinel = "other"): ToolInfo =>
+const otherOwner = (version = "0.75.0", sentinel = "other"): ToolInfo =>
   makeSubagentsPackage(tempParent(), { version, sentinel }).tool();
 
 const OWNER_REFUSALS: Array<[string, () => WireOptions, string]> = [
@@ -746,7 +746,7 @@ for (const [name, options, reason] of OWNER_REFUSALS) {
 
 test("the fake host is faithful to Pi: two loaded copies yield one subagent tool but two package commands", () => {
   const pi = new FakePi();
-  pi.subagentOwners = [otherOwner("0.64.0", "first"), otherOwner("0.74.0", "second")];
+  pi.subagentOwners = [otherOwner("0.75.0", "first"), otherOwner("0.74.0", "second")];
   assert.equal(pi.getAllTools().filter((tool) => tool.name === SUBAGENT_TOOL).length, 1, "first registrant wins");
   assert.equal(pi.getAllTools().find((tool) => tool.name === SUBAGENT_TOOL)?.sourceInfo.path,
     pi.subagentOwners[0].sourceInfo.path);
@@ -757,7 +757,7 @@ test("the fake host is faithful to Pi: two loaded copies yield one subagent tool
 
 test("a second copy visible only through commands refuses /empirica and configure_run as a duplicate owner", async () => {
   const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
-    { owners: [otherOwner("0.64.0", "first"), otherOwner("0.74.0", "second")] });
+    { owners: [otherOwner("0.75.0", "first"), otherOwner("0.74.0", "second")] });
   assert.equal(w.pi.getAllTools().filter((tool) => tool.name === SUBAGENT_TOOL).length, 1);
   const ui = new FakeUi();
   await w.pi.command("empirica").handler("goal", { ui });
@@ -850,11 +850,11 @@ test("an owner that changes after the snapshot refuses the audit before any rese
   const w = await wire(auditResponder, true, undefined, { owners: [original] });
   await startRun(w);
   const before = w.requests.length;
-  w.pi.subagentOwners = [otherOwner("0.64.0", "replacement")];
+  w.pi.subagentOwners = [otherOwner("0.75.0", "replacement")];
   const decision = await launchAuditor(w, "tc-changed");
   assert.equal(decision?.block, true);
   assert.ok(decision?.reason?.includes(reasonMessage("host.subagents_owner_unverified")), decision?.reason);
-  assert.match(decision?.reason ?? "", /owner changed from .*@0\.74\.0 to .*@0\.64\.0/);
+  assert.match(decision?.reason ?? "", /owner changed from .*@0\.74\.0 to .*@0\.75\.0/);
   assert.equal(w.auditResolutions.length, 0, "the replacement's preflight must never be consulted");
   assert.deepEqual(w.privateRequests, [], "no audit plan, identity, or start may be requested");
   // Refused at classification: not even the investigation witness is recorded, let alone a reservation.
@@ -1393,6 +1393,46 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
     ["classify_identity", "classify_identity", "audit_prepare"]);
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
 });
+
+async function compactLaunch(version: string) {
+  const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
+  const owner = makeSubagentsPackage(tempParent(), { version, parameters: schemaCopy(version) }).tool();
+  const w = await wire((req) => req.command.type === "ObserveAction"
+    ? envelope({ type: "Allow", converged: false, run: { ...run(), children: [child] } as never })
+    : req.command.type === "GetArgument"
+      ? envelope({ type: "Allow", converged: false, run: run(), argument: { artifacts: [] } } as never)
+      : envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { owners: [owner] });
+  await startRun(w);
+  const input: Record<string, unknown> = { agent: "empirica.empirica-auditor", task: "AUTHOR_TASK_IS_NOT_AUTHORITY" };
+  assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-compact", input }, fakeCtx()), undefined);
+  assert.deepEqual(Object.keys(input).sort(), ["agent", "async", "model", "options", "task"]);
+  assert.equal(input.async, false);
+  assert.equal(input.model, "bedrock/auditor-model");
+  assert.match(String(input.task), /AUDIT DOSSIER/);
+  assert.deepEqual(input.options, {
+    agentScope: "project", context: "fresh",
+    acceptance: { level: "none", reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." },
+    timeoutMs: 900_000, toolBudget: { soft: 20, hard: 30, block: ["read", "grep", "find", "ls"] } });
+  assert.equal(w.auditResolutions[0].inventoryVersion, version);
+  assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
+}
+
+async function compactAuthorOptionsRefused(version: string) {
+  const owner = makeSubagentsPackage(tempParent(), { version, parameters: schemaCopy(version) }).tool();
+  const w = await wire(auditResponder, true, undefined, { owners: [owner] });
+  await startRun(w);
+  for (const extra of [{ options: { context: "fork" } }, { options: {} }, { options: { script: "x" } }]) {
+    const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-opt",
+      input: { agent: "empirica.empirica-auditor", task: "audit", ...extra } }, fakeCtx());
+    assert.equal(decision?.block, true, JSON.stringify(extra));
+  }
+  assert.equal(w.auditResolutions.length, 0);
+}
+
+test("subagent: on pi-subagents 0.84.0 (compact schema) the bound fields travel under options, once, and nowhere else", () => compactLaunch("0.84.0"));
+test("subagent: on pi-subagents 0.77.0 (compact schema) the bound fields travel under options, once, and nowhere else", () => compactLaunch("0.77.0"));
+test("subagent: on pi-subagents 0.84.0 an author-supplied options object (or any extra key) is refused before admission", () => compactAuthorOptionsRefused("0.84.0"));
+test("subagent: on pi-subagents 0.77.0 an author-supplied options object (or any extra key) is refused before admission", () => compactAuthorOptionsRefused("0.77.0"));
 
 test("canonical auditor blocks equal normalized identity classes", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
@@ -2160,17 +2200,20 @@ test("subagent: without a run, an unsupported call is not refused (nothing to pr
 });
 
 test("subagent: the classification uses the inventory of the owner's exact version", async () => {
-  // 0.64.0: workflowScriptPath is a launch form (executable); at the 0.74.0 default it is refused.
-  const w = await wire(allowWithChild, true, undefined, { owners: [otherOwner("0.64.0")] });
+  // A version with a record is classified by that record: 0.74.0 removed workflowScriptPath, so it is not a launch form there
+  // and the call is refused as malformed before anything is reserved.
+  const w = await wire(allowWithChild, true, undefined, { owners: [otherOwner("0.74.0")] });
   await startRun(w);
   const before = w.requests.length;
-  assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-064",
-    input: { workflowScriptPath: "w.js" } }, fakeCtx()), undefined);
-  assert.equal(w.requests.length, before + 2, "investigate + child_reserve");
+  const refused = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-074",
+    input: { workflowScriptPath: "w.js" } }, fakeCtx());
+  assert.equal(refused?.block, true);
+  assert.match(String(refused?.reason), /malformed|not a recognised|launch/i);
+  assert.equal(w.requests.length, before, "nothing is investigated or reserved for a refused call");
 });
 
 test("subagent: an owner version outside the supported range is refused at binding (host.subagents_version_unsupported)", async () => {
-  for (const version of ["9.9.9", "1.0.0"]) {
+  for (const version of ["9.9.9", "1.0.0", "0.73.9", "0.64.0", "0.50.0"]) {
     const w = await wire(allowRun, true, undefined,
       { owners: [makeSubagentsPackage(tempParent(), { version }).tool()] });
     const ui = new FakeUi();
@@ -2178,8 +2221,23 @@ test("subagent: an owner version outside the supported range is refused at bindi
     assert.equal(w.requests.length, 0);
     assert.ok(ui.notifications[0].message.includes(reasonMessage("host.subagents_version_unsupported")), ui.notifications[0].message);
     assert.match(ui.notifications[0].message,
-      new RegExp(`version-unsupported: pi-subagents ${version.replaceAll(".", "\\.")} is outside the supported range >=0\\.50\\.0 <1\\.0\\.0`));
+      new RegExp(`version-unsupported: pi-subagents ${version.replaceAll(".", "\\.")} is outside the supported range >=0\\.74\\.0 <1\\.0\\.0`));
   }
+});
+
+test("subagent: 0.74.0, the lowest supported pi-subagents, is admitted at binding; 0.73.x is not", async () => {
+  const admitted = await wire(allowRun, true, undefined,
+    { owners: [makeSubagentsPackage(tempParent(), { version: "0.74.0" }).tool()] });
+  const ui = new FakeUi();
+  await admitted.pi.command("empirica").handler("goal", { ui });
+  assert.ok(admitted.requests.length > 0, "a run starts on 0.74.0");
+  assert.ok(!ui.notifications.some((n) => n.message.includes(reasonMessage("host.subagents_version_unsupported"))));
+  const refused = await wire(allowRun, true, undefined,
+    { owners: [makeSubagentsPackage(tempParent(), { version: "0.73.0" }).tool()] });
+  const refusedUi = new FakeUi();
+  await refused.pi.command("empirica").handler("goal", { ui: refusedUi });
+  assert.equal(refused.requests.length, 0);
+  assert.match(refusedUi.notifications[0].message, /version-unsupported: pi-subagents 0\.73\.0 is outside the supported range >=0\.74\.0 <1\.0\.0/);
 });
 
 test("subagent: a version in range with no compat record is refused unless its own schema declares the audit launch (ADR-0069)", async () => {

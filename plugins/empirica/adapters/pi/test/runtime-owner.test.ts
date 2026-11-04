@@ -78,7 +78,7 @@ test("no subagent tool, or only other tools, is missing-tool", () => {
 test("two subagent tool registrations are refused whether distinct packages or the same package and version", () => {
   // Pi itself never reports two (getAllTools is first-wins); the check is defensive for other hosts.
   const a = makeSubagentsPackage(tempParent(), { version: "0.74.0" });
-  const b = makeSubagentsPackage(tempParent(), { version: "0.64.0" });
+  const b = makeSubagentsPackage(tempParent(), { version: "0.75.0" });
   assert.equal(refusal(resolve([a.tool(), b.tool()], nodeOwnerIo, NO_ENV)), "multiple-owners");
   const twin = makeSubagentsPackage(tempParent(), { version: "0.74.0" });
   assert.equal(refusal(resolve([a.tool(), twin.tool()], nodeOwnerIo, NO_ENV)), "multiple-owners");
@@ -87,7 +87,7 @@ test("two subagent tool registrations are refused whether distinct packages or t
 
 test("a second loaded pi-subagents copy is seen through its commands although one subagent tool is reported", () => {
   const a = makeSubagentsPackage(tempParent(), { version: "0.74.0" });
-  const b = makeSubagentsPackage(tempParent(), { version: "0.64.0" });
+  const b = makeSubagentsPackage(tempParent(), { version: "0.75.0" });
   const twin = makeSubagentsPackage(tempParent(), { version: "0.74.0" });
   for (const second of [b, twin]) {
     const refused = resolve([a.tool()], nodeOwnerIo, NO_ENV, [doctorCommand(a.tool()), doctorCommand(second.tool())]);
@@ -112,7 +112,7 @@ test("commands from the owner's own package, however many or reached by symlink,
 
 test("only extension commands demonstrably inside a pi-subagents package count toward the owner census", () => {
   const a = makeSubagentsPackage(tempParent(), { version: "0.74.0" });
-  const b = makeSubagentsPackage(tempParent(), { version: "0.64.0" });
+  const b = makeSubagentsPackage(tempParent(), { version: "0.75.0" });
   const unrelated = makeSubagentsPackage(tempParent(), { name: "some-other-extension" });
   const broken = makeSubagentsPackage(tempParent());
   writeFileSync(path.join(broken.root, "package.json"), "{ not json");

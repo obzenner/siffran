@@ -1,18 +1,29 @@
 {
-  "version": "0.50.0",
-  "peer_pi_ai": ">=0.80.0",
-  "launch_contract_version": 2,
+  "version": "0.83.1",
+  "peer_pi_ai": ">=1.2.0",
+  "launch_contract_version": 3,
   "launch_forms": [
     "agent",
-    "workflowScript",
-    "resume"
+    "workflow"
   ],
+  "launch_parameter_placement": {
+    "agent": "top-level",
+    "task": "top-level",
+    "model": "top-level",
+    "agentScope": "options",
+    "async": "top-level",
+    "context": "options",
+    "acceptance": "options",
+    "timeoutMs": "options",
+    "toolBudget": "options"
+  },
   "actions": [
     "list",
     "get",
     "models",
     "children.list",
     "guide",
+    "validate",
     "create",
     "update",
     "delete",
@@ -28,10 +39,15 @@
     "mission.attach-run",
     "mission.close",
     "worktree.discard",
+    "worktree.cleanup",
+    "lane.status",
+    "lane.recordMerge",
+    "lane.recordSupersession",
     "refine",
     "refine.show",
     "refine.rollback",
     "inspector.open",
+    "inspector.command",
     "inspector.status",
     "inspector.close",
     "project.open",
@@ -44,10 +60,10 @@
     "resume",
     "steer",
     "stop",
+    "command.status",
+    "command.yield",
+    "command.cancel",
     "dismiss",
-    "append-step",
-    "approve-checkpoint",
-    "reject-checkpoint",
     "doctor",
     "watchdog.status",
     "watchdog.check",
@@ -64,11 +80,11 @@
     "schedule.delete"
   ],
   "supports": {
-    "turnBudget": true,
+    "turnBudget": false,
     "toolBudget": true,
     "timeoutMs": true,
-    "workflow": "absent",
-    "disabledFeatures": false,
-    "validateOffline": false
+    "workflow": "boolean|string",
+    "disabledFeatures": true,
+    "validateOffline": true
   }
 }

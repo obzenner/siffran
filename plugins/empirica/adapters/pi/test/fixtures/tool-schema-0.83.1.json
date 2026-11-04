@@ -1,0 +1,150 @@
+{
+  "version": "0.83.1",
+  "note": "Captured by scripts/capture_pi_preflight_fixture.mjs: createSubagentParamsSchema() as the package registers it, and its own SUBAGENT_OPTION_KEYS.",
+  "option_keys": [
+    "extensionBindings",
+    "capabilities",
+    "name",
+    "dir",
+    "handoffPath",
+    "repo",
+    "planId",
+    "laneId",
+    "merge",
+    "supersession",
+    "index",
+    "childId",
+    "toolCallId",
+    "view",
+    "lines",
+    "topic",
+    "mode",
+    "steeringRecovery",
+    "additional",
+    "scope",
+    "target",
+    "focus",
+    "thinking",
+    "at",
+    "every",
+    "sessionOnly",
+    "quiet",
+    "on",
+    "timezone",
+    "overlap",
+    "catchUp",
+    "missionId",
+    "mission",
+    "missionUpdate",
+    "missionStatus",
+    "missionScope",
+    "runMode",
+    "runStatus",
+    "summary",
+    "config",
+    "reuseFrom",
+    "globalConcurrencyLimit",
+    "maxSubagentSpawnsPerRun",
+    "preflight",
+    "chatProgress",
+    "baseRef",
+    "lane",
+    "context",
+    "timeoutMs",
+    "checkpointBeforeDeadlineMs",
+    "toolTimeoutMs",
+    "toolBudget",
+    "usageBudget",
+    "agentScope",
+    "machine",
+    "artifacts",
+    "includeProgress",
+    "share",
+    "sessionDir",
+    "control",
+    "outputMode",
+    "maxOutput",
+    "skill",
+    "fast",
+    "outputSchema",
+    "agentContract",
+    "acceptance",
+    "gate"
+  ],
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "agent": {
+        "type": "string",
+        "description": "One-child agent or management target."
+      },
+      "task": {
+        "type": "string",
+        "description": "One-child task; requires agent."
+      },
+      "workflow": {
+        "anyOf": [
+          {
+            "type": "boolean"
+          },
+          {
+            "type": "string",
+            "minLength": 1
+          }
+        ],
+        "description": "true: run the one ```js workflow block written in this same reply (false invalid). String with '/': script file read from request cwd. Other string: named workflow resource. Raw scripts (true or path) have no runs.host."
+      },
+      "args": {
+        "type": "object",
+        "maxProperties": 16,
+        "additionalProperties": true,
+        "description": "Plain-JSON args for workflow; 16 fields/object, 64 items/array, depth 8, 16 KiB total; raw-script args are exposed deeply frozen and persisted, so do not include secrets."
+      },
+      "async": {
+        "type": "boolean",
+        "description": "Background; default asyncByDefault. false only to block parent."
+      },
+      "model": {
+        "type": "string",
+        "description": "Child model provider/id; bare id only if unique. Suffix :off/minimal/low/medium/high/xhigh/max overrides agent thinking default."
+      },
+      "cwd": {
+        "type": "string",
+        "description": "Execution/project-pane directory."
+      },
+      "worktree": {
+        "type": "boolean",
+        "description": "Isolate each workflow child in a managed git worktree; child worktree:false overrides default."
+      },
+      "output": {
+        "anyOf": [
+          {
+            "type": "string"
+          },
+          {
+            "type": "boolean"
+          }
+        ],
+        "description": "Child output path or false; relative workflow paths use managed artifact routing. Bind durable output here, not task prose; return outputReference/outputPathMapping/artifactPaths."
+      },
+      "action": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Management/control only; omit for execution. validate accepts workflow: true or a script path. Discover actions with {action:\"guide\",options:{topic:\"tool-reference\"}}."
+      },
+      "id": {
+        "type": "string",
+        "description": "Run id/prefix for status/control."
+      },
+      "message": {
+        "type": "string",
+        "description": "resume/steer guidance or project.open prompt."
+      },
+      "options": {
+        "type": "object",
+        "additionalProperties": true,
+        "description": "Every field not listed here, such as acceptance, timeoutMs, context, view and index; guide tool-reference/parameter-reference."
+      }
+    }
+  }
+}

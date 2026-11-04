@@ -19,7 +19,7 @@ import {
   type SpikeProfile,
 } from "./contract.ts";
 import { REQUEST_DEFS, schemaValues } from "./public-tools.ts";
-import type { SubagentInventory } from "./subagent-inventory.ts";
+import { LAUNCH_FORMS, usesOptions, type SubagentInventory } from "./subagent-inventory.ts";
 
 // The convergence gate's intent and the tool/command name it guards. A run may
 // report convergence only through EvaluateRun(report_convergence) (ADR-32).
@@ -325,6 +325,19 @@ export const MANAGEMENT_ACTIONS: ReadonlyMap<string, { readonly agentTarget: boo
 const VALIDATE_WORKFLOW_FORMS: readonly string[] = ["workflow", "workflowScript", "workflowScriptPath"];
 
 /**
+ * pi-subagents 0.77.0 and later lower a call's `options` object into the flat parameters (`flattenSubagentToolOptions`),
+ * and `options.script` is the workflow script's source: a launch form that the top-level parameters do not show. A package
+ * that carries parameters in `options` therefore has them inspected: `options` must be an object (or absent), and it may
+ * not hold a launch form or a script, so a call is never classified from its top level while `options` starts something else.
+ */
+function launchFormInOptions(options: unknown): string | undefined {
+  if (options == null) return undefined;
+  if (typeof options !== "object" || Array.isArray(options)) return "options must be an object";
+  const hidden = Object.keys(options).filter((key) => key === "script" || (LAUNCH_FORMS as readonly string[]).includes(key));
+  return hidden.length === 0 ? undefined : `launch form ${hidden.join(", ")} inside options`;
+}
+
+/**
  * Classify a `subagent` call's input against the owner version's inventory.
  *
  * A launch form counts when present and non-null. With no `action`, exactly one launch form is an
@@ -337,6 +350,8 @@ export function classifySubagentCall(input: unknown, inventory: SubagentInventor
   if (input === null || typeof input !== "object" || Array.isArray(input))
     return { kind: "malformed", detail: "the call input is not an object" };
   const record = input as Record<string, unknown>;
+  const hidden = usesOptions(inventory) ? launchFormInOptions(record.options) : undefined;
+  if (hidden !== undefined) return { kind: "malformed", detail: hidden };
   const present = inventory.launch_forms.filter((form) => record[form] != null);
   const action = record.action;
   if (action == null) {

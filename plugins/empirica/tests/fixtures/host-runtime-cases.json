@@ -1,5 +1,5 @@
 {
-  "description": "Shared accept/reject cases for the host-recorded runtime provenance of a StartRun (invocation.host_runtime). Consumed by the Pi adapter (host-runtime.test.ts, hostRuntimeRejection) and by the Python application (test_host_runtime.py, application.host_runtime.rejection). profile 'external' = a profile whose subagents_compatibility is the Pi profile's real policy (its range is [0.50.0, 1.0.0); 0.50.0 and 0.75.0 have compat records); profile 'none' = a profile with no external runtime. expect is the stable rejection code or null for accepted.",
+  "description": "Shared accept/reject cases for the host-recorded runtime provenance of a StartRun (invocation.host_runtime). Consumed by the Pi adapter (host-runtime.test.ts, hostRuntimeRejection) and by the Python application (test_host_runtime.py, application.host_runtime.rejection). profile 'external' = a profile whose subagents_compatibility is the Pi profile's real policy (its range is [0.74.0, 1.0.0); 0.74.0 and 0.75.0 have compat records); profile 'none' = a profile with no external runtime. expect is the stable rejection code or null for accepted.",
   "cases": [
     {
       "id": "a-reviewed-version",
@@ -26,7 +26,7 @@
         "policy_id": "pi-subagents-foreground-audit-v1",
         "subagents": {
           "package": "pi-subagents",
-          "version": "0.50.0",
+          "version": "0.74.0",
           "reviewed": true,
           "owner_path": "/opt/pi-subagents/src/extension/index.js",
           "package_root": "/opt/pi-subagents",
@@ -87,7 +87,7 @@
         "policy_id": "pi-subagents-foreground-audit-v1",
         "subagents": {
           "package": "pi-subagents",
-          "version": "0.49.9",
+          "version": "0.73.9",
           "reviewed": false,
           "owner_path": "/opt/pi-subagents/src/extension/index.js",
           "package_root": "/opt/pi-subagents",
@@ -97,6 +97,24 @@
       },
       "expect": "version",
       "why": "below the minimum"
+    },
+    {
+      "id": "former-minimum",
+      "profile": "external",
+      "host_runtime": {
+        "policy_id": "pi-subagents-foreground-audit-v1",
+        "subagents": {
+          "package": "pi-subagents",
+          "version": "0.50.0",
+          "reviewed": false,
+          "owner_path": "/opt/pi-subagents/src/extension/index.js",
+          "package_root": "/opt/pi-subagents",
+          "preflight_path": "/opt/pi-subagents/src/api/preflight.js",
+          "source": "/opt/pi-subagents/index.js"
+        }
+      },
+      "expect": "version",
+      "why": "the minimum before 0.74.0 (launch contract v2) is no longer supported"
     },
     {
       "id": "numeric-not-lexical",
