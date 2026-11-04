@@ -44,7 +44,7 @@ EMPIRICA_RUN_CENSUS_TESTS := $(SCRIPTS)/tests/test_empirica_run_census.py
 EMPIRICA_CONTEXT_ECONOMY_TESTS := $(SCRIPTS)/tests/test_empirica_context_economy.py
 CLAUDE_SUBAGENT_MODEL_TESTS := $(SCRIPTS)/tests/test_claude_subagent_models.py
 PI_CANARY_TESTS := $(SCRIPTS)/tests/test_pi_canary.py
-EMPIRICA_RUN3_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run3_binding.py
+EMPIRICA_RUN4_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run4_binding.py
 EMPIRICA_D6_STRICT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d6_strict_v2.py
 EMPIRICA_LOCATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_location.py
 EMPIRICA_TRANSACTION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_d7_transactions.py
@@ -54,8 +54,11 @@ EMPIRICA_TEST_SANDBOX_HOME := $(CURDIR)/.empirica-test-sandbox-authority-must-re
 EMPIRICA_PUBLIC_TOOLS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_public_tools.py
 EMPIRICA_AUDIT_PROTOCOL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_audit_protocol.py
 EMPIRICA_STATE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_state_adapter.py
+EMPIRICA_HITL_SIDECAR_TESTS := $(PLUGINS_DIR)/empirica/tests/test_hitl_sidecar.py
+EMPIRICA_PI_PRIVATE_BRIDGE_TESTS := $(PLUGINS_DIR)/empirica/tests/test_pi_private_bridge.py
 EMPIRICA_CITATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_citations.py
 EMPIRICA_OBSERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer.py
+EMPIRICA_OBSERVER_DISCOVERY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_discovery.py
 EMPIRICA_OBSERVER_SERVER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observer_server.py
 EMPIRICA_UI := $(PLUGINS_DIR)/empirica/ui
 # The pinned Python dev tools (requirements-dev.txt: Hypothesis, mutmut with whatthepatch, jsonschema), installed by `make dev-install`.
@@ -138,7 +141,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check lifecycle-gates-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
-check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run3-check ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
+check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run4-check dev-python ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
 	@printf '$(BOLD)==> core suite$(RESET)\n'
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
@@ -149,10 +152,13 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PUBLIC_TOOLS_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_author_view
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_hitl_document
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_evidence_document_binding
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_HOST_RUNTIME_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_STATE_TESTS)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_HITL_SIDECAR_TESTS)
 	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_activation_route_graph test_async_children test_audit test_blocker_projection test_budget_freeze_terminal
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_stale_audit_retry.py
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_audit_retrieval
@@ -185,7 +191,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 check-evidence: ## Fast evidence rules: citations, confirmation, scenarios, A1 boundaries, home isolation, host adapter contracts
 	@printf '$(BOLD)==> evidence suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CITATION_TESTS)
-	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_evidence_confirmation test_evidence_freshness test_evidence_hosts test_evidence_scenarios test_a1_boundaries test_home_isolation test_public_host_path
+	@cd $(PLUGINS_DIR)/empirica/tests/v2 && PYTHONPATH=..:../.. $(PYTHON) -m unittest -q test_evidence_confirmation test_evidence_freshness test_evidence_hosts test_evidence_scenarios test_evidence_write_first test_a1_boundaries test_home_isolation test_public_host_path
 
 check-observer: dev-python ## Fast observer store, projection and server tests; its cost by operation counts at n and 2n; the stateful observer = core machine (Hypothesis, fixed seed)
 	@printf '$(BOLD)==> observer suite$(RESET)\n'
@@ -194,7 +200,8 @@ check-observer: dev-python ## Fast observer store, projection and server tests; 
 		PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_fs test_observer_complexity & fs=$$!; \
 		PYTHONPATH=..:../..:../../../../scripts $(PYTHON) -m unittest -q test_observer_agreement test_timeline test_observer_facts test_observer_incremental & facts=$$!; \
 		PYTHONPATH=..:../..:../../../../scripts $(DEV_PYTHON) -m unittest -q test_observer_stateful & machine=$$!; \
-		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_TESTS) && $(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_SERVER_TESTS); obs=$$?; \
+		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_TESTS) && $(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_SERVER_TESTS) && \
+		$(PYTHON) $(CURDIR)/$(EMPIRICA_OBSERVER_DISCOVERY_TESTS); obs=$$?; \
 		wait $$fs; f=$$?; wait $$facts; g=$$?; wait $$machine; m=$$?; \
 		[ $$obs -eq 0 ] && [ $$f -eq 0 ] && [ $$g -eq 0 ] && [ $$m -eq 0 ]; }
 
@@ -229,7 +236,7 @@ check-codex: methodologist-codex-check empirica-codex-check ## Fast Codex packag
 		test_codex_adapter.StoreIsolationTests
 	@printf '$(BOLD)==> codex suite ok$(RESET)\n'
 
-check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
+check-pi: pi-governance-dialog-golden pi-bundle-check methodologist-pi-check empirica-pi-check pi-auditor-resolution-unit-check empirica-identity-pi-levels-check empirica-pi-private-bridge-check ## Fast Pi package, type, unit, guard, and bounded bridge tests — needs Node
 	@printf '$(BOLD)==> pi suite ok$(RESET)\n'
 
 check-ui: ui-deps ## Fast observer-UI checks: every Vitest unit test (client, filters, layout, conventions, the elements and the page in happy-dom, properties over schema-derived rows and sheets, fixed fast-check seed; no watch, no coverage) and the audit — needs Node and make ui-install
@@ -256,12 +263,12 @@ empirica-governance-check: ## Diagnose full real-service governance CAS, replay,
 	@$(PYTHON) $(EMPIRICA_GOVERNANCE_TESTS)
 	@$(PYTHON) $(PLUGINS_DIR)/empirica/tests/test_governance_hosts.py
 
-.PHONY: empirica-transaction-check empirica-git-check empirica-run3-check empirica-bridge-composition-check
+.PHONY: empirica-transaction-check empirica-git-check empirica-run4-check empirica-bridge-composition-check
 empirica-bridge-composition-check: ## Check shared production Docker composition and fail-closed authority degradation without Docker
 	@$(PYTHON) $(EMPIRICA_BRIDGE_V2_TESTS)
 
-empirica-run3-check: ## Check exact run/3 binding, v6 closed public backend projection, and non-run/3 rejection
-	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run3_binding test_d6_strict_v2
+empirica-run4-check: ## Check exact run/4 binding, v6 closed public backend projection, and non-run/4 rejection
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_run4_binding test_d6_strict_v2
 
 empirica-git-check: ## Check Git artifact integrity, concurrency, and bounded bootstrap process counts
 	@$(PYTHON) $(EMPIRICA_GIT_ADAPTER_TESTS)
@@ -442,7 +449,11 @@ pi-bundle-check: node_modules ## Validate repository-root Pi package composition
 	@printf '$(BOLD)==> Pi bundle$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py . --package-only
 
-.PHONY: empirica-pi-check empirica-author-view-golden empirica-governance-dialog-golden
+.PHONY: empirica-pi-check empirica-author-view-golden empirica-governance-dialog-golden empirica-pi-private-bridge-check
+
+empirica-pi-private-bridge-check: ## Check the Pi private bridge binds the written configuration document (write-first, one writer, no text across the transport)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PI_PRIVATE_BRIDGE_TESTS)
+
 empirica-pi-check: node_modules empirica-author-view-golden ## Validate the Empirica Pi adapter package (static + bridge smoke always; typecheck + tests if node present)
 	@printf '$(BOLD)==> empirica Pi adapter$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/validate_pi_adapter.py plugins/empirica/adapters/pi

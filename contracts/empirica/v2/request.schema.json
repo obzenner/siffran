@@ -1319,6 +1319,11 @@
             "present"
           ]
         },
+        "document_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The digest of the immutable HITL document this decision or present was shown (ADR-0072): required on every host_ui envelope (present, the decision, dismiss) and forbidden for auto — the core recomputes the document from the state it is given and refuses governance.document_mismatch on anything but an exact match. Auto never answers a human's question, so an auto decision carries none. The wire rejects a host_ui envelope without it (invalid_request) before any domain logic runs."
+        },
         "amendment": {
           "type": "object",
           "additionalProperties": false,
@@ -1376,6 +1381,42 @@
         }
       },
       "allOf": [
+        {
+          "if": {
+            "properties": {
+              "approval_kind": {
+                "const": "auto"
+              }
+            },
+            "required": [
+              "approval_kind"
+            ]
+          },
+          "then": {
+            "not": {
+              "required": [
+                "document_digest"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "approval_kind": {
+                "const": "host_ui"
+              }
+            },
+            "required": [
+              "approval_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "document_digest"
+            ]
+          }
+        },
         {
           "if": {
             "properties": {
@@ -1575,7 +1616,8 @@
       "required": [
         "run_id",
         "receipt_id",
-        "decisions"
+        "decisions",
+        "document_digest"
       ],
       "properties": {
         "run_id": {
@@ -1656,6 +1698,18 @@
               }
             ]
           }
+        },
+        "document_digest": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          ],
+          "description": "The digest of the immutable HITL evidence document the human was shown (ADR-0072, PR 10; required since PR 13 — an absent member is refused by the wire itself, invalid_request, before any domain logic). null is an explicit fetch: refused with evidence.document_mismatch, nothing admitted, the refusal's private result carrying document {text, digest} for the batch this receipt's own presentation named. A value must equal the document this state renders AND the one the presentation recorded; on acceptance it is recorded on every artifact of the receipt."
         }
       }
     },
@@ -1666,7 +1720,8 @@
       "required": [
         "run_id",
         "receipt_id",
-        "key"
+        "key",
+        "document_digest"
       ],
       "properties": {
         "run_id": {
@@ -1681,6 +1736,18 @@
         },
         "key": {
           "$ref": "#/$defs/digest256"
+        },
+        "document_digest": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          ],
+          "description": "The digest of the immutable HITL evidence document the human was shown (ADR-0072, PR 10; required since PR 13 — an absent member is refused by the wire itself, invalid_request, before any domain logic). null is an explicit fetch: refused with evidence.document_mismatch, nothing spent, the refusal's private result carrying document {text, digest} for the batch named by key — the refusal is the fetch; write the bytes and repeat the call. A value is checked: it must equal the document this state renders, and a confirmation's must also equal the digest its own presentation recorded; on acceptance it is recorded in the artifact body."
         }
       }
     },

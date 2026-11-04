@@ -550,13 +550,23 @@ class ConformanceCase(unittest.TestCase):
             return response
         drv.trusted_human_surface(run_id, "human")
         batch = self.dispatch(drv, evaluate(run_id=run_id, intent=intent))["result"]["run"]["confirmation_batch"]
+        # PR 13: the consent names its batch's core-rendered document — the null fetch
+        # refusal carries the pair, then the same presentation bound (the byte-write is
+        # the adapters' own surface; this drive stands in for a host's confirmation).
+        fetch = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
+                                                          "key": batch["key"],
+                                                          "document_digest": None})["result"]
+        assert fetch["type"] == "Block", fetch
+        digest = fetch["document"]["digest"]
         shown = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
-                                                           "key": batch["key"]})["result"]
+                                                           "key": batch["key"],
+                                                           "document_digest": digest})["result"]
         assert shown["type"] == "Allow", shown
         decision = {"subject": "claim", "claim_id": batch["terminal"]["status"],
                     "claim_digest": batch["terminal"]["digest"], "outcome": "approve"}
         answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "terminal-presented",
-                                                              "decisions": [decision]})["result"]
+                                                              "decisions": [decision],
+                                                              "document_digest": digest})["result"]
         assert answered["type"] == "Allow", answered
         return self.dispatch(drv, evaluate(run_id=run_id, intent=intent, **extra))
 

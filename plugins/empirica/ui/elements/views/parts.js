@@ -48,7 +48,9 @@ export function claimLink(row, id, href) {
 export const list = (items, cls = "") => `<ul class="flex flex-col gap-xs ${cls}">${items.map((i) => `<li>${i}</li>`).join("")}</ul>`;
 /** A labelled fact: a term (copy) and its definition (html). */
 export const fact = (label, html) => `<div><dt class="text-xs text-muted-foreground">${label}</dt><dd class="text-s">${html}</dd></div>`;
-/** A collapsible section of the sheet: its title (with the count when it has one), open or closed. */
-export const section = (id, title, body, { open = true, count: n = null } = {}) => `<details class="border-t border-border py-s" ${open ? "open" : ""} data-section="${id}">
+/** A collapsible section of the sheet: its title (with the count when it has one), open or closed. PR 17 §4: a
+ * section is a block - a bordered card on its own surface - so the sections read apart from one another and from the
+ * sheet around them, in both schemes (`make ui-contrast` holds the pairs the card's surface enters). */
+export const section = (id, title, body, { open = true, count: n = null } = {}) => `<details class="rounded-m border border-border bg-card p-xs" ${open ? "open" : ""} data-section="${id}">
   <summary class="flex cursor-pointer items-baseline gap-xs text-m font-semibold" id="${id}">${title}${n === null ? "" : `<span class="text-xs font-normal text-muted-foreground">${n}</span>`}</summary>
-  <div class="flex flex-col gap-s pt-s">${body}</div></details>`;
+  <div class="flex flex-col gap-s pt-xs">${body}</div></details>`;

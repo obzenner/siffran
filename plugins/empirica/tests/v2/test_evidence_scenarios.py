@@ -345,7 +345,8 @@ class BatchSizeCells(ScenarioFixture):
         long_answer = [{"subject": "claim", "id": "C1", "choice": "approve", "note": "x" * 2001}]
         self.assertEqual(confirmation.decisions(items, long_answer), [])
         self.assertEqual(len(confirmation.decisions(items, [{**long_answer[0], "note": "x" * 2000}])), 1)
-        _, schema = confirmation.form(items, 60)
+        _, schema = confirmation.form(items, 60,
+                                      {"digest": "sha256:" + "a" * 64, "path": "/machine/x.json"})
         self.assertEqual(schema["properties"]["n1"]["maxLength"], 2000)
 
 

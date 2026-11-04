@@ -1,0 +1,618 @@
+{
+  "$defs": {
+    "amendedBudget": {
+      "additionalProperties": false,
+      "properties": {
+        "value": {
+          "description": "The amended ceiling in the pending proposal.",
+          "type": "integer"
+        },
+        "was": {
+          "description": "The prior value the confirmation shows as \"(was …)\" (adapters/governance.py:110-115). Recorded on the receipt the amendment finalises (receipts[].superseded_budgets, ADR-0072).",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "value",
+        "was"
+      ],
+      "type": "object"
+    },
+    "claimId": {
+      "description": "A claim identifier, the one claim-id pattern (shared-defs claimId); the terminal consent names a status the same way (core/evaluation.py:495-501).",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])",
+      "type": "string"
+    },
+    "configurationAmendment": {
+      "additionalProperties": false,
+      "description": "The human amendment the confirm_amendment form confirms: ceilings only, the decision payload's own amendment shape (empirica/v2 request.schema.json governanceDecisionPayload.amendment) with each ceiling's prior value (the \"(was …)\" the form renders; run/4 records it as receipts[].superseded_budgets, ADR-0072).",
+      "properties": {
+        "budgets": {
+          "additionalProperties": false,
+          "properties": {
+            "max_audit_spawns": {
+              "$ref": "#/$defs/amendedBudget"
+            },
+            "max_passes": {
+              "$ref": "#/$defs/amendedBudget"
+            },
+            "max_spawns": {
+              "$ref": "#/$defs/amendedBudget"
+            }
+          },
+          "required": [
+            "max_passes",
+            "max_spawns",
+            "max_audit_spawns"
+          ],
+          "type": "object"
+        }
+      },
+      "required": [
+        "budgets"
+      ],
+      "type": "object"
+    },
+    "configurationBudget": {
+      "additionalProperties": false,
+      "description": "One budget row exactly as the dialog builds it (core/projection.py governance_dialog, budgets from governance.CEILINGS, core/governance.py:46-47; the shared dialog shape empirica/v2 shared-defs governancePresentation.dialog.budgets).",
+      "properties": {
+        "help": {
+          "description": "One of the core's help strings, display-escaped (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "key": {
+          "description": "governance.CEILINGS' keys (core/governance.py:46-47).",
+          "enum": [
+            "max_passes",
+            "max_spawns",
+            "max_audit_spawns"
+          ]
+        },
+        "label": {
+          "description": "One of the core's label strings, display-escaped (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "maximum": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "minimum": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "short": {
+          "description": "One of the core's short strings, display-escaped (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "used": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "value": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "key",
+        "label",
+        "short",
+        "help",
+        "value",
+        "used",
+        "minimum",
+        "maximum"
+      ],
+      "type": "object"
+    },
+    "configurationDocument": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "question": {
+                "const": "confirm_amendment"
+              }
+            },
+            "required": [
+              "question"
+            ]
+          },
+          "then": {
+            "description": "A confirm_amendment document names the amendment it confirms; nothing else can answer it.",
+            "required": [
+              "amendment"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "question": {
+                "const": "approve"
+              }
+            },
+            "required": [
+              "question"
+            ]
+          },
+          "then": {
+            "description": "An approve document confirms the proposal as it stands, so it carries no amendment.",
+            "not": {
+              "required": [
+                "amendment"
+              ]
+            }
+          }
+        }
+      ],
+      "description": "What the \"approve run configuration\" and \"confirm_amendment\" forms ask (ADR-0063, ADR-0072): the whole sizing case — the explicit question, the goal, the unverified rationale, every budget with used and bounds, and on a confirm_amendment document the amendment with its priors.",
+      "properties": {
+        "amendment": {
+          "$ref": "#/$defs/configurationAmendment"
+        },
+        "budgets": {
+          "description": "Every ceiling in the dialog's order, pinned by position (review-2 #44): the dialog is built from governance.CEILINGS, so the rows are exactly max_passes, then max_spawns, then max_audit_spawns — once each, no fourth row. Each row's used is the same fact the form shows live; the document holds no separate used map (ADR-0072, review-1).",
+          "prefixItems": [
+            {
+              "$ref": "#/$defs/configurationBudget",
+              "properties": {
+                "key": {
+                  "const": "max_passes"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            },
+            {
+              "$ref": "#/$defs/configurationBudget",
+              "properties": {
+                "key": {
+                  "const": "max_spawns"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            },
+            {
+              "$ref": "#/$defs/configurationBudget",
+              "properties": {
+                "key": {
+                  "const": "max_audit_spawns"
+                }
+              },
+              "required": [
+                "key"
+              ]
+            }
+          ],
+          "items": false,
+          "minItems": 3,
+          "type": "array"
+        },
+        "context_when_shown": {
+          "$ref": "#/$defs/contextWhenShown"
+        },
+        "control_mode": {
+          "description": "The mode the decision authorises (the state schema's own control_mode, empirica/v2 state.schema.json:222-226): inside the proposal_digest the decision binds (core/governance.py:70-76) and later automatic acceptances depend on (ADR-0072).",
+          "enum": [
+            "deliberative",
+            "auto"
+          ]
+        },
+        "goal": {
+          "description": "The run's goal in full, display-escaped (the schema's top note) — the form's first line, the document's whole text (the dialog goal, shared-defs governancePresentation.dialog.goal).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "governance_state": {
+          "description": "The core's state word, carried as information beside the question (ADR-0072): pending on the approve form, revision_pending when a proposal was revised, rejected when a previous decision was refused and a re-present is admitted (HUMAN_WAIT_STATES, core/governance.py:189). It is not the form discriminator.",
+          "enum": [
+            "pending",
+            "revision_pending",
+            "rejected"
+          ]
+        },
+        "kind": {
+          "const": "configuration"
+        },
+        "plan_revision": {
+          "description": "The dialog's epoch (the core's plan_revision, core/projection.py governance_dialog; each amendment bumps it, core/governance.py revise:128-146).",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "proposal_digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "The proposal the decision binds (governance proposal_digest, bound again by the governance decision payload)."
+        },
+        "question": {
+          "description": "The form's question, derived by the core, never the adapter (ADR-0072): confirm_amendment iff some receipt has outcome amend and plan_revision + 1 == governance.plan_revision, approve otherwise. The state word is not the discriminator: an amendment before the first approval parses governance_state pending (revise, core/governance.py:137-138), a later author revision yields revision_pending without a human amendment (core/evaluation.py:1607-1622), and rejected still admits a re-present (core/governance.py:189).",
+          "enum": [
+            "approve",
+            "confirm_amendment"
+          ]
+        },
+        "rationale": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "maxLength": 3600,
+              "minLength": 1,
+              "pattern": "\\S",
+              "type": "string"
+            }
+          ],
+          "description": "The sizing rationale moved here wholesale (the form renders all of it today, adapters/governance.py:88-93), display-escaped (the schema's top note); null when the proposal carries none. Shape copied from the dialog's rationale (shared-defs governancePresentation.dialog.rationale)."
+        },
+        "rationale_source": {
+          "const": "author_unverified",
+          "description": "The rationale is the author's own sizing case, unverified wording (ADR-0063's unverified label, the one the forms render under today): the document says so, so untrusted text cannot read as a core statement."
+        },
+        "run_id": {
+          "description": "The run the decisions name (the decision payloads' run_id).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "schema": {
+          "const": "empirica.hitl/1"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "run_id",
+        "question",
+        "governance_state",
+        "plan_revision",
+        "proposal_digest",
+        "goal",
+        "rationale",
+        "rationale_source",
+        "control_mode",
+        "budgets",
+        "context_when_shown"
+      ],
+      "type": "object"
+    },
+    "contextWhenShown": {
+      "additionalProperties": false,
+      "description": "Context when the document is shown, NOT part of the decision (ADR-0072): it explains what the dialog stood beside. It is inside the digested document only because the invocation facts are fixed for the run's lifetime — recorded at StartRun and never rewritten afterwards — so the digest cannot change between the fetch, present and the decision. Nothing volatile is here: a present receipt changes the reviews left (application/governance.py:96-101, counted at core/governance.py:168-177), the host's answer rewrites human_surface (application/transaction.py:417-419), and each budget's used count is already on its budget row (the form shows the numbers live instead).",
+      "properties": {
+        "invocation": {
+          "$ref": "#/$defs/invocationFacts"
+        }
+      },
+      "required": [
+        "invocation"
+      ],
+      "type": "object"
+    },
+    "digest256": {
+      "description": "A sha256 content digest, the same pattern every other empirica/v2 schema uses (shared-defs digest256; core/canonical.py:34-37).",
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "evidenceClaim": {
+      "additionalProperties": false,
+      "description": "One claim of the batch with its text, display-escaped (the schema's top note) — the item text that moves out of the form (adapters/confirmation.py:131-134); id, wording digest and text from the argument view's claim row (core/projection.py:566-573).",
+      "properties": {
+        "claim_digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "The claim's wording digest, binding id and text (core/evaluation.py claim_digest:277-280)."
+        },
+        "claim_id": {
+          "$ref": "#/$defs/claimId"
+        },
+        "text": {
+          "description": "The claim's full text, display-escaped (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "claim_id",
+        "claim_digest",
+        "text"
+      ],
+      "type": "object"
+    },
+    "evidenceDocument": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "required": [
+              "terminal"
+            ]
+          },
+          "then": {
+            "description": "The terminal consent is one decision on one item: it holds nothing else (core/evaluation.py terminal_batch:495-501).",
+            "properties": {
+              "claims": {
+                "maxItems": 0
+              },
+              "records": {
+                "maxItems": 0
+              }
+            }
+          }
+        }
+      ],
+      "description": "What the end-of-pass evidence batch asks, and the terminal \"end this run without converging\" consent: every record with its claim text, quote, class, outcome and why-no-spike reason, and every claim with its text (ADR-0067, ADR-0072).",
+      "properties": {
+        "claims": {
+          "description": "The batch's waiting decisions first, in graph order (core/evaluation.py confirmation_batch).",
+          "items": {
+            "$ref": "#/$defs/evidenceClaim"
+          },
+          "type": "array"
+        },
+        "key": {
+          "$ref": "#/$defs/digest256",
+          "description": "The batch's key — derivations and exactly the shown items (core/evaluation.py confirmation_batch:549-561; the terminal batch's own key, terminal_key:486-492) — the value the evidence presentation payload carries."
+        },
+        "kind": {
+          "const": "evidence"
+        },
+        "records": {
+          "description": "The batch's records, in their claim's graph order then submission (core/evaluation.py confirmation_batch).",
+          "items": {
+            "$ref": "#/$defs/evidenceRecord"
+          },
+          "type": "array"
+        },
+        "run_id": {
+          "description": "The run the presentation and the confirmation name (the evidence payloads' run_id).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "schema": {
+          "const": "empirica.hitl/1"
+        },
+        "terminal": {
+          "$ref": "#/$defs/terminalConsent"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "run_id",
+        "key",
+        "records",
+        "claims"
+      ],
+      "type": "object"
+    },
+    "evidenceRecord": {
+      "additionalProperties": false,
+      "description": "One research record of the batch, from the argument view's research artifacts (core/projection.py:576-591) as the items builder reads them (adapters/confirmation.py build_items:136-155); the confirmation artifact body's own record_id word (core/evaluation.py:1029-1035). Review-1: a human cannot judge a quote without the claim it answers and whether the record claims to support or refute it, so the claim text and outcome ride with the record.",
+      "properties": {
+        "citation": {
+          "description": "The quote a human confirms or rejects, display-escaped (the schema's top note) — the research payload's citation; the only record fact the form keeps.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "claim_digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "The claim wording the record is bound to (the argument artifact's claim_digest), binding the claim_text's id and text (core/evaluation.py:277-280)."
+        },
+        "claim_id": {
+          "$ref": "#/$defs/claimId"
+        },
+        "claim_text": {
+          "description": "The claim's own text the record answers, display-escaped (the schema's top note) — the content a human must read to judge the quote against what it claims to establish (ADR-0072, review-1); its id and text are the claim_digest the record carries.",
+          "minLength": 1,
+          "type": "string"
+        },
+        "outcome": {
+          "description": "The record's own outcome: supporting when the research action's result was supports, refuting otherwise (core/evaluation.py:1590; the action vocabulary, empirica/v2 request.schema.json:713-717; public-contract artifact_outcomes' research pair).",
+          "enum": [
+            "supporting",
+            "refuting"
+          ]
+        },
+        "record_id": {
+          "$ref": "#/$defs/digest256",
+          "description": "The record's artifact id (the argument artifact_id; the batch's record_ids)."
+        },
+        "source_kind": {
+          "description": "The record's immutable source kind (the research payload's source_kind, empirica/v2 public-contract.json:584-590).",
+          "enum": [
+            "docs",
+            "code",
+            "runtime",
+            "web"
+          ]
+        },
+        "source_ref": {
+          "description": "Where the record's fact comes from (the research payload's source_ref), display-escaped as free text (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "spike_unavailable": {
+          "description": "Why no deterministic check can establish the record (the research payload's spike_unavailable; empirica/v2 public-contract.json:618-620), display-escaped (the schema's top note) — the \"why no spike\" reason that moves out of the form (adapters/confirmation.py:153-155).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "verification_class": {
+          "anyOf": [
+            {
+              "enum": [
+                "verbatim",
+                "retrievable",
+                "observed"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the record is verified, derived from source_ref (core/citations.py verification_class:66-73): null when no class can be derived."
+        }
+      },
+      "required": [
+        "record_id",
+        "claim_id",
+        "source_kind",
+        "source_ref",
+        "citation",
+        "outcome",
+        "verification_class",
+        "claim_digest",
+        "claim_text"
+      ],
+      "type": "object"
+    },
+    "invocationFacts": {
+      "additionalProperties": false,
+      "description": "The run-fixed invocation facts, the five the ADR keeps in the digested document (ADR-0072; the shown facts are INVOCATION_FACTS, core/projection.py:299-305; types copied from the state schema's invocation, empirica/v2 state.schema.json:755-877). human_surface is deliberately absent: the host's own answer rewrites it between calls (application/transaction.py:417-419), and nothing that can change is digested — the document is a pure function of run state.",
+      "properties": {
+        "audit_retrieval": {
+          "items": {
+            "enum": [
+              "local",
+              "web",
+              "workspace"
+            ]
+          },
+          "type": "array",
+          "uniqueItems": true
+        },
+        "delegation": {
+          "type": "boolean"
+        },
+        "host": {
+          "description": "The executing host's name, display-escaped as free text (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "interactive": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "signal": {
+          "description": "What started the run, display-escaped as free text (the schema's top note).",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "interactive",
+        "signal",
+        "delegation",
+        "audit_retrieval"
+      ],
+      "type": "object"
+    },
+    "terminalConsent": {
+      "additionalProperties": false,
+      "description": "The terminal \"end this run without converging\" consent (ADR-0063's amendment, ADR-0072): the batch terminal member (core/evaluation.py terminal_batch:495-501) with what ending now would leave unresolved.",
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/digest256",
+          "description": "The consent's wording digest (the terminal batch's terminal.digest, core/evaluation.py terminal_batch)."
+        },
+        "residuals": {
+          "description": "What ending now leaves unresolved: the run's active obligation rows, excluding the terminal consent row itself, selected by one core function from a GetRun-shaped snapshot (ADR-0072; core/projection.py _obligation:139-147).",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "id": {
+                "minLength": 1,
+                "type": "string"
+              },
+              "required": {
+                "description": "The obligation row's required line, display-escaped (the schema's top note).",
+                "minLength": 1,
+                "type": "string"
+              }
+            },
+            "required": [
+              "id",
+              "required"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "status": {
+          "description": "The status the run would end as (TERMINAL_STATUSES, core/evaluation.py:456).",
+          "enum": [
+            "stopped_residual",
+            "stopped_budget",
+            "stopped_frozen"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "digest",
+        "residuals"
+      ],
+      "type": "object"
+    }
+  },
+  "$id": "https://siffran.dev/contracts/empirica/v2/hitl.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "configuration"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/configurationDocument"
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "evidence"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/evidenceDocument"
+      }
+    }
+  ],
+  "description": "Source-tree schema (not vendored into the plugin; ADR-0072) of the core-owned immutable JSON document a human decides on: what the native forms moved out and the record binds by its digest. The bytes are pinned by the contract validator: json.dumps(doc, sort_keys=True, indent=2, ensure_ascii=False) plus one trailing newline, UTF-8; the document_digest is the SHA-256 of exactly those bytes. Field names and types are derived from the builders that render this content today, cited per field. Every free-text value is display-escaped by the core's one escaper (safe_text, core/projection.py:287-293) — a backslash doubled, bidi and zero-width characters turned into \\uXXXX — so a text-direction override can never reach the file a human opens; the raw wording stays bound by its digests, which are computed before the document is built. The document is a pure function of run state: no wall-clock times and nothing the adapter chooses (a receipt id the host generates is never here), and no value the human's own answer or the host's surface observation can change — nothing volatile is digested, or the core's recompute at the decision would refuse every decision.",
+  "properties": {
+    "kind": {
+      "enum": [
+        "configuration",
+        "evidence"
+      ]
+    },
+    "schema": {
+      "const": "empirica.hitl/1"
+    }
+  },
+  "required": [
+    "schema",
+    "kind"
+  ],
+  "title": "Empirica v2 human-in-the-loop document (empirica.hitl/1)",
+  "type": "object"
+}

@@ -246,6 +246,17 @@
         "graph.record"
       ]
     },
+    "evidence.document_mismatch": {
+      "message": "The named document no longer matches this batch; report again to have the batch shown again, or stop with the residual.",
+      "sections": [
+        "evidence/research",
+        "terminal"
+      ],
+      "next_actions": [
+        "convergence.report",
+        "residual.accept"
+      ]
+    },
     "host.subagents_missing": {
       "message": "No external pi-subagents `subagent` tool is active, so no independent audit can launch. Install one supported pi-subagents runtime and restart the host, or accept the residual.",
       "sections": [
@@ -330,6 +341,16 @@
     },
     "governance.stale_proposal": {
       "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.document_mismatch": {
+      "message": "The host's dialog named a configuration document that no longer matches this run's state; a refused present spent nothing, and a refused decision kept its spent presentation. Issue a task-sized configure_run again so the host can show you the current document (the re-present costs one review unit of the 3 per configuration).",
       "sections": [
         "governance"
       ],

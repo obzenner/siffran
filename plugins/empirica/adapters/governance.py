@@ -12,8 +12,22 @@ from uuid import uuid4
 import jsonschema
 
 from adapters import bridge
+from adapters.confirmation import CLAUDE_VISIBLE_LINES
+from adapters.state.fsio import SymlinkRefused
+from adapters.state.hitl import (DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish)
 from application import protocol
+from core import hitl as core_hitl
 from core.governance import expected_approval_kind
+
+#: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's
+#: identifiers already use (``application.observer_index.ID_SIZE``). Kept a local literal so the
+#: host governance runtime does not inherit the observer identity family into the manifest.
+_SHORT_BODY = 12
+#: The command that opens this host's observer UI (README.md "Usage"): the fallback Details
+#: line names only this host's command (A11) — Pi names its own (``/empirica-ui``) in its own
+#: dialog sources, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``) holds
+#: the words both sides.
+_UI_COMMAND = "/empirica:ui"
 
 
 @dataclass(frozen=True)
@@ -91,15 +105,66 @@ def _rationale_lines(dialog: Mapping[str, Any]) -> tuple[str, ...]:
                                                        break_long_words=True,
                                                        break_on_hyphens=False))
 
+#: The compact cue of the amended-configuration confirm (PR 19, finding B4): the human judges
+#: the budgets and this cue, so it rides the visible lines while the full contract-owned
+#: amendment warning stays below, whole.
+_RATIONALE_CUE = "Rationale not regenerated for these values · details below"
 
-def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
-    """Map a validated dialog model to Claude's editable elicitation form."""
+
+def _visible(*lines: str) -> tuple[str, ...]:
+    """The opening of a Claude governance form (PR 19, finding N7 of the Lima qualification of
+    ``ac401739``): Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines of an
+    elicitation message and folds the rest — nothing expands it in place — so each form composes
+    its opening through here: the heading (its countdown riding it), the bound document's
+    ``Details:`` line and the line the human judges the form by — the review's goal; the
+    confirm's budgets line with its cue, the cue being judged with the numbers so the confirm
+    alone carries its ``Details:`` line one line under the fold (B4). No blank line may open a
+    form, and everything each line says must fit what the window actually shows."""
+    assert "" not in lines[:CLAUDE_VISIBLE_LINES], "a Claude form opened with a blank line (PR 19)"
+    return tuple(lines)
+
+
+def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
+    """The bound document's Details (PR 16, ADR-0072 Q5's amendment): a live observer's link to
+    the decision's row in the UI — plus the document's own short digest — or, when no observer of
+    this home answers, the honest fallback that keeps the document's exact absolute path (O5,
+    as decided: the path is dropped only when a verified link is shown). Presentation only: the
+    URL is built by the discovery helper beside the store, once per presentation, and the core
+    never sees it. The ``File:`` line keeps its copy-paste guarantee: never shortened,
+    never ``~-``shortened, never wrapped (Q4's one exempt line, new spelling)."""
+    short = f"Document {document['digest'][:7 + _SHORT_BODY]}"
+    url = document.get("url")
+    if isinstance(url, str) and url:
+        return (f"Details: {url}", short)
+    run12 = document.get("run12")
+    # Follow-up (review 16-1): one short arrow line, at most 76 columns, never wrapping mid-phrase
+    # (the old two-line fallback broke after "Human" at the wrap width). The arrows read as one
+    # path to the human decisions: the host command, the run's compact id.
+    where = (f"{_UI_COMMAND} → run {run12} → Human decisions"
+             if run12 else f"{_UI_COMMAND} → Human decisions")
+    return (*textwrap.wrap(f"Details: {where}", width=72, break_long_words=False,
+                           break_on_hyphens=False),
+            short, f"File: {document['path']}")
+
+def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+    """Map a validated dialog and its written document to Claude's editable elicitation form.
+
+    The form keeps exactly what the human judges (ADR-0072 "What the forms keep"): the numbers
+    and the goal's first line; the rationale text lives in the document, pointed at by one line
+    under the contract-owned unverified label. PR 19 (finding N7 of the Lima qualification of
+    ``ac401739``): Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines, so
+    the heading, the document's ``Details:`` and the goal open the form — never a blank line —
+    while the rationale pointer, the document's remaining lines and the legend stay below, whole."""
     reviews = dialog["reviews_left"]["proposal"]
     count = f"{reviews} {'review' if reviews == 1 else 'reviews'} left"
+    details, *document_tail = _document_lines(document)
     message = "\n".join((
-        _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
-        _line(f'Goal: "{dialog["goal"]}"', closing='"'),
-        *_rationale_lines(dialog),
+        *(_visible(
+            _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
+            details,
+            _line(f'Goal: "{dialog["goal"]}"', closing='"'))),
+        _line(f"{dialog['rationale_label']} and full detail: in the document"),
+        *document_tail,
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
@@ -107,24 +172,40 @@ def review_form(dialog: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     return message, {"type": "object", "properties": properties, "required": []}
 
 
-def _part(row: Mapping[str, Any], old: object) -> str:
-    """Render one compact confirmation value and its prior value when changed."""
+def _part(row: Mapping[str, Any], document: Mapping[str, Any]) -> str:
+    """Render one compact confirmation value and its prior when changed.
+
+    The ``(was …)`` priors are the document's own amendment values — the core-owned run/4
+    ``superseded_budgets`` reached through the rendered document, never a host-held dialog
+    snapshot (the host-held ``before`` dialog of the pre-PR-08 forms is gone: a host cannot be
+    trusted to hold what the record must prove)."""
     show = (lambda value: "on" if value else "off") if isinstance(row["value"], bool) else str
-    value, previous = show(row["value"]), show(old)
-    suffix = f" (was {previous})" if old != row["value"] else ""
+    value = show(row["value"])
+    priors = (document.get("amendment") or {}).get("budgets", {}) if isinstance(document, Mapping) else {}
+    old = priors[row["key"]]["was"] if row["key"] in priors else row["value"]
+    suffix = f" (was {show(old)})" if old != row["value"] else ""
     return f"{row['short']} {value}{suffix}"
 
+def confirm_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+    """Map an amended dialog and its written document to a buttons-only confirmation.
 
-def confirm_form(dialog: Mapping[str, Any], before: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
-    """Map an amended dialog and its prior display to a buttons-only confirmation."""
-    old = {row["key"]: row["value"] for row in before["budgets"]}
-    budget_parts = [_part(row, old[row["key"]]) for row in dialog["budgets"]]
+    PR 19 (finding N7 of the Lima qualification of ``ac401739``), with the finding-B4 grace:
+    Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines, and the confirm has
+    no field descriptions to carry more — so its opening is the heading, the budgets line with
+    its complete ``(was …)`` priors, the compact cue that the rationale was not regenerated for
+    these values (the line judged with the numbers), and only then the ``Details:`` line; the
+    full contract-owned amendment warning and the document stay below, whole."""
+    budget_parts = [_part(row, document) for row in dialog["budgets"]]
+    details, *document_tail = _document_lines(document)
     message = "\n".join((
-        _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
-        _line(" · ".join(budget_parts)),
-        *_rationale_lines(dialog),
+        *(_visible(
+            _line(f"Empirica · confirm edited configuration (epoch {dialog['epoch']} · {_duration(timeout)})"),
+            _line(" · ".join(budget_parts)),
+            _RATIONALE_CUE,
+            details)),
         *textwrap.wrap(dialog["amendment_warning"], width=72,
                        break_long_words=False, break_on_hyphens=False),
+        *document_tail,
         "Accept = approve exactly this · Decline/Esc = keep edits pending",
     ))
     return message, {"type": "object", "properties": {}}
@@ -174,9 +255,13 @@ def _strip_presentation(result: dict) -> dict:
 
 class HostGovernance:
     def __init__(self, profile: str, *, elicit=None, context_ingress=bridge.trusted_governance_context,
-                 decision_ingress=bridge.trusted_governance_decision):
+                 decision_ingress=bridge.trusted_governance_decision, documents=None):
         self.profile, self.elicit = profile, elicit
         self.context_ingress, self.decision_ingress = context_ingress, decision_ingress
+        # PR 08 (ADR-0072 write-first): every config document is published once through the
+        # sidecar store under the real $EMPIRICA_HOME before any form is shown; tests inject a
+        # store under a temporary machine home.
+        self.documents = documents if documents is not None else HitlDocuments()
 
     def __call__(self, result: dict, *, confirmation: bool = False) -> dict:
         """Finalize one host mediation and convert all failures to typed closed results."""
@@ -189,8 +274,42 @@ class HostGovernance:
             return _strip_presentation(result)
         return _strip_presentation(mediated)
 
-    def _mediate(self, result: dict, *, confirmation: bool = False,
-                 before: Mapping[str, Any] | None = None) -> dict:
+    def _bound_document(self, context_result: dict) -> Mapping[str, Any] | None:
+        """Write-first (ADR-0072, PR 08): verify the private answer's rendered ``document`` pair
+        and publish it once through :func:`adapters.state.hitl.publish` — the one bound helper
+        (review-2 m1) that parses and object-checks the pair before the write — then return
+        the shown-document record: the digest, the written file's absolute path, the
+        core-owned amendment priors the confirm form reads, and the parsed document's
+        ``question`` — the core-derived form discriminator (ADR-0072), so the mediation
+        chooses the form from the document it binds, never from an adapter flag.
+        ``None`` means the mediation must refuse (the document impossible to bind, or the
+        storage refused the write): the caller returns unavailable before any present,
+        nothing spent."""
+        presentation = context_result.get("presentation")
+        document = presentation.get("document") if isinstance(presentation, Mapping) else None
+        run = context_result.get("run") if isinstance(context_result, dict) else None
+        run_id = run.get("id") if isinstance(run, dict) else None
+        try:
+            published = publish(self.documents, run_id, document)
+        except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
+            return None
+        if published is None:
+            return None
+        # X3 (Copilot #49), defense in depth beside the shared publish helper: a
+        # digest-matching document whose parsed question is missing or not one of the two the
+        # core derives would choose a form from nothing — the present the core then refuses as a
+        # document mismatch, when nothing was verifiable in the first place. Refuse here: the
+        # mediation answers ``governance.approval_unavailable`` before any present, nothing
+        # spent.
+        question = published.parsed.get("question")
+        if question not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT):
+            return None
+        return {"digest": published.digest, "path": str(published.path),
+                "amendment": published.parsed.get("amendment"),
+                "question": question}
+
+
+    def _mediate(self, result: dict, *, confirmation: bool = False) -> dict:
         run = result.get("run")
         if result.get("type") != "Allow" or not isinstance(run, dict) or not run.get("governance"):
             return result
@@ -213,6 +332,20 @@ class HostGovernance:
             return unavailable(result, g["prompt_error"])
         envelope = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                     "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
+        document = None
+        if approval_kind == "host_ui":
+            # write-first: bind the document (verify, publish once, read the path back) before any
+            # present; a document this state cannot bind refuses the mediation outright
+            document = self._bound_document(result)
+            if document is None:
+                return unavailable(result)
+            envelope["document_digest"] = document["digest"]
+            # PR 16 (A10/A11): the one Details link per presentation — a live observer of this
+            # home's link to the decision row beside the short digest, else the honest fallback
+            # keeping the path. Presentation only: it never enters the decision envelope.
+            from adapters.observer.discovery import document_details  # lazy: a no-document refresh never pays it
+            document = {**document, **document_details(getattr(self.documents, "home", None),
+                                                        run["id"], document)}
 
         def dismiss(message=None):
             stored = self.decision_ingress(self.profile, run["id"], {**envelope, "outcome": "dismiss"})["result"]
@@ -230,9 +363,17 @@ class HostGovernance:
             if not isinstance(dialog, dict):
                 return dismiss()
             timeout = governance_timeout()
-            message, schema = (confirm_form(dialog, before, timeout) if confirmation and before is not None
-                               else review_form(dialog, timeout))
-            resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirmation)
+            # M1 (review 2): the form is chosen by the bound document's core-derived question,
+            # never by the adapter's own recursion flag (ADR-0072 "The question and the
+            # amendment's priors" — ``question`` is derived by the core). The recursion
+            # flag can only agree here (an amend commit always makes the epoch's question
+            # ``confirm_amendment``); where it could disagree, the document wins — the flag
+            # stays only for the re-entry guard (the stale proposal re-check below and the
+            # recursion), no longer for the form choice.
+            confirm = document["question"] == core_hitl.CONFIRM_AMENDMENT
+            message, schema = (confirm_form(dialog, document, timeout) if confirm
+                               else review_form(dialog, document, timeout))
+            resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirm)
             if isinstance(resolved, Dismiss):
                 return dismiss()
             action = "reject" if isinstance(resolved, Reject) else "approve"
@@ -247,5 +388,5 @@ class HostGovernance:
             return stored
         revised = admitted.get("run", {}).get("governance", {}).get("plan_revision") != g["plan_revision"]
         if not confirmation and action == "approve" and admitted.get("type") == "Allow" and revised:
-            return self._mediate(admitted, confirmation=True, before=dialog)
+            return self._mediate(admitted, confirmation=True)
         return admitted

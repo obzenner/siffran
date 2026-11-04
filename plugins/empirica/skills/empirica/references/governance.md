@@ -6,7 +6,11 @@ The default control mode is **deliberative**. Route, then propose a root-connect
 
 Submit `configure_run` with **all three** proposed ceilings and a nonblank 1–600 character `rationale`. Explain why the graph and task need that size; do not write a command, authority claim, evidence claim, or approvable conclusion. This requests host review and never approves itself. The schema rejects missing ceilings and reviewer fields because reviewer selection belongs to host configuration. Only the exact current approved configuration permits `investigate`.
 
-The ordinary host review displays the goal read-only, the three budget ceilings, and escaped literal rationale under **Agent sizing rationale — unverified**. Claude uses its built-in **Accept** button to approve the displayed values, **Decline** to reject, and Esc to decide later; editing any value and accepting submits a ceiling-only amendment. Pi presents the same model in one host-native component. Amendments immediately open one host-owned locked confirmation in the same call. It shows original versus amended ceilings and warns **Written for the original proposal; not regenerated for these human-edited values**. It is read-only: Accept/Approve approves exactly that revision, while Decline/Esc/Keep pending retains the edits without consent. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms.
+The ordinary host review is a short form: it displays the goal's first line read-only, the three budget ceilings,
+and the bound document by its short digest and absolute path; the sizing rationale and every other detail live in
+that immutable core-rendered document (`empirica.hitl/1`, written beside the run's record before the form is shown,
+mode `0400`), whose digest the decision must carry. The rationale appears under its contract-owned
+**Agent sizing rationale — unverified** label, in the document. Claude uses its built-in **Accept** button to approve the displayed values, **Decline** to reject, and Esc to decide later; editing any value and accepting submits a ceiling-only amendment. Pi presents the same model in one host-native component. Amendments immediately open one host-owned locked confirmation in the same call. It shows the amended values beside their **(was …)** priors and warns **Written for the original proposal; not regenerated for these human-edited values**. It is read-only: Accept/Approve approves exactly that revision, while Decline/Esc/Keep pending retains the edits without consent. No author action runs between amendment and confirmation. The original timeout, raw receipt fingerprinting, CAS, and exact epoch/digest checks apply across both forms, and a decision whose document digest no longer matches the run's state is refused (`governance.document_mismatch`) with nothing spent.
 
 Cancel, timeout, invalid content, stale/conflicting replies, and missing UI never grant authority. After dismissal, timeout, or rejection the author resubmits `configure_run` (same or human-edited ceilings) to reopen the dialog and records `investigate` only once the view says `approved`. Presentations are CAS-reserved before UI and bounded to three per configuration epoch and 128 per run. Exact current-schema receipt replay is inert; conflicting replay blocks.
 
@@ -35,15 +39,19 @@ Reviewer configuration is not itself evidence of independence. Audit identity cl
 Run configuration is the only thing the configuration dialog approves. Confirming research or answering a
 `needs-decision` claim is a separate human receipt at the end of a pass (ADR-0067): the host first records a
 presentation of the pending set (it spends one human interaction, counted together with configuration
-presentations against the 128-per-run allowance), then one receipt carries one decision per item. A receipt
-binds the presentation it answers and each item's record or claim wording, so it can never be mistaken for a
-configuration approval, and an identical replay is inert while a conflicting one blocks. With no approval
-ingress (route `unavailable`) nothing is asked and the requirement stays open.
+presentations against the 128-per-run allowance), then one receipt carries one decision per item. Every
+presentation first writes the core-rendered document for that batch (`empirica.hitl/1`, beside the run's record),
+and each item dialog names it by its short digest and absolute path; a receipt binds that document's
+digest, the presentation it answers and each item's record or claim wording, so it can never be
+mistaken for a configuration approval, and an identical replay is inert while a conflicting one blocks. With no approval
+ingress (route `unavailable`) nothing is asked and the requirement stays open. A submit the service refused
+(a Block, a Fault, or one that never landed) admitted nobody's answer: the run reads `host_failed` and is
+recovered only by showing the batch again — never as the human's decline.
 
 ## Timeout and recovery
 
 The host decision timeout defaults to 900 seconds. `EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS` accepts host-owned overrides written as whole seconds in plain decimal digits from 1 to 1500 (no fractions, signs, exponents, or hex); a set but malformed or out-of-range value fails extension or server start with an error naming the variable instead of defaulting. It appears in the dialog header and is never approvable. Pi shares one timeout across review and locked confirmation.
 
-A persisted document that is not exactly the current wire `empirica/v2` and state family `empirica.run/3`, or that the strict current schema rejects, fails closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs or carries approval from such a document.
+A persisted document that is not exactly the current wire `empirica/v2` and state family `empirica.run/4`, or that the strict current schema rejects, fails closed as `run.corrupt`. A later `StartRun` creates a fresh generation. The runtime never mutates, repairs or carries approval from such a document.
 
 Deterministic unit/integration tests are not native human-approval or installed-host qualification evidence.

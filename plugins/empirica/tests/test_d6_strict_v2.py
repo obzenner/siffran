@@ -264,7 +264,7 @@ class D6ProtocolPrevalidation(unittest.TestCase):
     def test_committed_valid_active_state_loads(self):
         """The committed valid-active state fixture loads and has exact identity."""
         self.assertEqual(_VALID_ACTIVE_STATE["protocol"], _PROTOCOL)
-        self.assertEqual(_VALID_ACTIVE_STATE["state_schema"], "empirica.run/3")
+        self.assertEqual(_VALID_ACTIVE_STATE["state_schema"], "empirica.run/4")
         self.assertEqual(_VALID_ACTIVE_STATE["spike_backend"], {"kind": "spikes_unavailable"})
         self.assertEqual(_VALID_ACTIVE_STATE["status"], "active")
         self.assertTrue(_VALID_ACTIVE_STATE["children"])

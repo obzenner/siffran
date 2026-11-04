@@ -73,7 +73,10 @@ batch is capped (at most 64 items, decisions first) and owned by the service, ne
 presentation shows is exactly what it records as shown, so an item that was not on screen is never marked
 shown. The choices are **Confirm**, **Reject** (with an optional note to you) or **Later**. There is no "approve all", a
 decided item is never asked again, and **Later**, a cancelled dialog and a timeout leave it pending and
-spend the presentation (the re-ask rule is below, in the paragraph on Claude). The human reads the whole verbatim quote; nothing is truncated. `empirica_read GetRun` and `empirica_read GetArgument` show
+spend the presentation (the re-ask rule is below, in the paragraph on Claude). The human reads the whole verbatim quote; nothing is truncated. The short form keeps each record's source line and quote and each
+needs-decision claim's full text; each record's per-claim context and the reason an observed record has no
+deterministic check live in the immutable document every shown dialog names by its short digest and absolute
+path. `empirica_read GetRun` and `empirica_read GetArgument` show
 you what waits (source and claim), whether a human is asked at your report, each citation's verification status, and
 the human's note or answer.
 A confirmed record counts; a rejected record is inactive and does not refute the claim, so find other

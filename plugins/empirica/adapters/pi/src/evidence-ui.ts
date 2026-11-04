@@ -4,11 +4,16 @@
 // RPC-forwardable, unlike `ctx.ui.custom`, so the same dialog works in the TUI and in RPC mode. Without a
 // UI (print, JSON) nothing is shown: a presentable batch then blocks with the presentation_failed notice.
 //
-// Fail closed: a cancelled or timed-out dialog, a missing UI, or any error submits nothing beyond the
-// presentation already recorded, and grants nothing. "Later" is sent as `choice: later`; the core records it as nothing decided.
+// Fail closed per item (PR 18, ADR-0072 amendment): a cancel, a wrong label or a timeout at item k keeps every
+// answer completed before k and sends item k and the rest as `later`, which grants nothing — only a batch with no
+// decided item submits nothing at all. Esc at an item's optional note never cancels and is never consent (A3): the
+// same item's select is shown again under the same deadline, so nothing is lost. Without a UI (print, JSON) nothing
+// is shown: a presentable batch then blocks with the presentation_failed notice.
+// "Later" is sent as `choice: later`; the core records it as nothing decided.
 
 import type { ExtensionContext } from "./pi-types.ts";
-import type { EvidenceAnswer, EvidenceItem, PrivateIngress } from "./private-transport.ts";
+import type { EvidenceAnswer, EvidenceDocument, EvidenceItem, PrivateIngress } from "./private-transport.ts";
+import { hardWrapLines } from "./dialog-view.ts";
 import { isTerminalBatch, type ConfirmationBatch, type HostFailure, type Response } from "./contract.ts";
 import { hostFailureNotice } from "./author-view.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
@@ -88,43 +93,160 @@ export function evidenceHostFailure(result: Response["result"], reported?: HostF
 
 /** What the human reads above the choices; the labels are the whole vocabulary of the dialog. The first line is the
  * heading, the second the item's own short title and the third its description (the same texts Claude shows as the field
- * title and under the field; both are built in `adapters/confirmation.py`, the one owner of their lengths), then the full
- * detail. The end of a deliberative run has its own heading: it is not evidence. */
-export function itemTitle(item: EvidenceItem, number: number, count: number): string {
+ * title and under the field; both are built in `adapters/confirmation.py`, the one owner of their lengths), then the item's
+ * own lines. The end of a deliberative run has its own heading: it is not evidence.
+ *
+ * PR 12 (ADR-0072 "What the forms keep"): the dialogs mirror Claude's short forms line for line.
+ * A research item keeps its source line and its quote — the quote is the fact judged — and every
+ * claim context ("For claim …") and every "why no deterministic check" reason moved to the
+ * document; the pointer line under them names exactly that, in the same words Claude's form uses.
+ * A needs-decision claim item keeps its own text in FULL: the claim text is what the human
+ * decides — the research records' per-claim context moved, decided claims did not; its dialog has
+ * no pointer, because nothing of it moved. The terminal item keeps the full decision wording and
+ * names the residual count read out of the written document itself. Every dialog ends with the
+ * document's Details (PR 16, A11/A12): a live observer's link or the honest fallback with the
+ * path broken at every `/` (no Empirica code shortens or re-derives a path — every piece is a
+ * real slice, and the joined lines rebuild the exact record), and the LAST title line is the
+ * short digest `Document sha256:<12>`, so Pi's countdown — which `ui.select` attaches to the
+ * title's last line — never lands on a path, a quote or a URL (A12).
+ *
+ * PR 18 (A4): from item 2 on, when an earlier item's answer was completed, one promise line sits
+ * between the item's own lines and the Details — `KEEP_COMPLETED` — so the human knows what Esc
+ * does before pressing it. The earlier answers come with the asking dialog (`history`, which
+ * `askItems` passes); a pure reader passes none and so makes no promise. The promise line obeys
+ * the same 76-column rule (A12) as every composed line; the item's own full text stays unwrapped. */
+export function itemTitle(item: EvidenceItem, number: number, count: number, document: EvidenceDocument,
+                          history: readonly EvidenceAnswer[] = []): string {
   const head = item.subject === "claim" && item.terminal
     ? "Empirica · end this run without converging?"
     : `Empirica · evidence that needs you (${number} of ${count})`;
-  if (item.subject === "claim") return `${head}\n${item.title}\n${item.description}\n${item.text}`;
-  const lines = [head, item.title, item.description, `${item.source_kind} source: ${item.source_ref}`, `Quote: "${item.quote}"`,
-    ...item.claims.map((claim) => `For claim ${claim.id}: ${claim.text}`)];
-  if (item.reason) lines.push(`Why no deterministic check: ${item.reason}`);
-  return lines.join("\n");
+  const lines = [head, item.title, item.description];
+  if (item.subject === "claim") {
+    lines.push(item.text);
+    if (item.terminal) lines.push(...residualLines(document));
+    if (number > 1 && keepsAnswer(history)) lines.push(KEEP_COMPLETED);   // PR 18 (A4): the promise, before the Details
+    return [...lines, ...documentLines(document)].join("\n");
+  }
+  lines.push(`${item.source_kind} source: ${item.source_ref}`, `Quote: "${item.quote}"`);
+  // One pointer line, in Claude's exact wording, naming what moved to the document.
+  lines.push(POINTER);
+  if (number > 1 && keepsAnswer(history)) lines.push(KEEP_COMPLETED);   // PR 18 (A4): the promise, before the Details
+  return [...lines, ...documentLines(document)].join("\n");
 }
+
+/** PR 18 (A4): the promise needs an earlier answer that decided something; an earlier Later keeps nothing. */
+const keepsAnswer = (history: readonly EvidenceAnswer[]): boolean => history.some((answer) => answer.choice !== "later");
+
+/** The pointer of a research item's dialog (mirrors `adapters/confirmation.py`'s form pointer, `_item_text`). */
+const POINTER = "Claim texts and their no-deterministic-check reasons: in the document.";
+/** PR 18 (A4): what the select promises once an earlier item's answer is complete — Esc or a timeout
+ * keeps it, this and the rest stay for later. Fits the 76-column rule (A12); the FIRST item's select
+ * carries no earlier answer and so makes no promise on this host. */
+export const KEEP_COMPLETED = "Esc or timeout keeps completed answers; this and the rest stay for later.";
+/** PR 18 (A4): the Pi note prompt's own instructions, composed in this file alone — the shared
+ * `note_title` (`adapters/confirmation.py`'s `NOTE_TITLE`) is untouched, because on Claude the one
+ * form for the whole batch is cancelled whole by Esc; only Pi's one-item-at-a-time dialog can
+ * promise that Esc returns to the item's choice. "finishes" (never "saves"): Enter records the
+ * typed note, or the same choice without one. The instructions stay whole; a longer shared title
+ * is shortened first, the same `…` convention the Python builder itself uses. */
+const NOTE_INSTRUCTIONS = " · Enter finishes this item · Esc goes back";
+/** The note prompt's title: the shared `note_title` plus Pi's own instructions, never over 76 columns. */
+export const notePrompt = (noteTitle: string): string => {
+  const room = TITLE_WIDTH - NOTE_INSTRUCTIONS.length;
+  const fit = noteTitle.length <= room ? noteTitle
+    : room <= 1 ? "" : noteTitle.slice(0, room - 1).trimEnd() + "…";
+  return fit + NOTE_INSTRUCTIONS;
+};
+/** The widest line the dialog composes itself (A12): the Details fallback lines are shorter than
+ * this, and a five-digit port's URL line is about 74 columns, so every composed line fits
+ * without any renderer's help — nothing in the dialog waits on a wrap it never gets. */
+const TITLE_WIDTH = 76;
+/** This host's observer-UI command (README.md "Usage"), the one its fallback Details names (A11)
+ * — Claude's form names its own, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``)
+ * holds the words. */
+const UI_COMMAND = "/empirica-ui";
+/** PR 16 (A11): the bound document's Details. A live observer's deep link —
+ * ``http://127.0.0.1:<port>/app/?run=<compact id>&decision=<12 hex>`` — plus the short digest;
+ * or, without one, the honest fallback: this host's own command and the run's compact id, the
+ * exact path broken at every ``/`` (explicit newlines — the ``File: `` label opens the first
+ * piece), and the short digest **last** (A12: ``ui.select`` owns the countdown and attaches it
+ * to the title's last line, so it lands on ``Document sha256:<12>``, a short line, never on a
+ * path, a quote or a URL). O5, decided: with a verified link the path is dropped entirely. */
+const documentLines = (document: EvidenceDocument): readonly string[] => {
+  const short = `Document ${document.digest.slice(0, 19)}`;
+  if (document.url !== null) return [`Details: ${document.url}`, short];
+  // Follow-up review 16-1: one short arrow line (58 columns with the 12-hex run), never the
+  // old two-line fallback that broke after "Human" at the wrap width; `hardWrapLines` labels
+  // the first piece `Details: ` (the one `/` is the command's own, so the line never splits).
+  const details = UI_COMMAND
+    + (document.run12 === null ? "" : ` → run ${document.run12}`) + " → Human decisions";
+  return [
+    ...hardWrapLines(details, TITLE_WIDTH, "Details: "),
+    ...hardWrapLines(document.path, TITLE_WIDTH, "File: "),
+    short,
+  ];
+};
+/** The terminal dialog's count line, the same sentences `adapters/confirmation.py`
+ * `_residual_lines` renders — shown only when the presentation read a count out of the document. */
+const residualLines = (document: EvidenceDocument): readonly string[] =>
+  document.residuals === undefined ? [] : document.residuals === 0
+    ? ["Nothing would stay unresolved; the record is in the document."]
+    : [`${document.residuals} unresolved ${document.residuals === 1 ? "obligation" : "obligations"}`
+        + " would remain — they are listed in the document."];
 
 const LABELS: Readonly<Record<EvidenceItem["subject"], readonly string[]>> = {
   research: ["Confirm", "Reject", "Later"],
   claim: ["Approve", "Reject", "Later"],
 };
 
-/** Ask about every item in turn; `null` (nothing is submitted) when the human cancels any dialog. */
+/** Ask about every item in turn; every dialog names the written document it is bound to (PR 12), so
+ * the human can open what is judged. `null` is only the missing-UI case (`canPresent`); every human
+ * walk returns the answers to submit.
+ *
+ * PR 18 (per-item fail-closed, ADR-0072 amendment): a completed answer is kept, whatever happens next.
+ * A cancel, a wrong label or a timeout at item k's select stops the asking there — items 1..k-1 keep
+ * their answers, item k and the rest are answered `later`, and the batch is submitted once by
+ * `confirmEvidence` unless nothing was decided. Esc at an item's optional note is never consent and
+ * never a cancel (A3): the same item's select is shown again under the same deadline, and only a
+ * note step that ends with Enter completes the item; a timeout at the note — the deadline passed
+ * while it was open — stops there like a cancel at the select would, the item staying `later`
+ * rather than its chosen answer without its note (O1, decided). An empty note submitted with Enter
+ * stays the choice with no note, as before. The deadline is host-local only (A1): there is no
+ * receipt TTL, and `confirmEvidence` submits what completed while it could still be asked. */
 export async function askItems(items: readonly EvidenceItem[], ctx: ExtensionContext,
-                               deadline: number): Promise<EvidenceAnswer[] | null> {
+                               deadline: number, document: EvidenceDocument): Promise<EvidenceAnswer[] | null> {
   const ui = ctx.ui;
   if (!canPresent(ctx) || !ui.select || !ui.input) return null;  // canPresent is the rule; the tests narrow the types
   const answers: EvidenceAnswer[] = [];
+  const later = (item: EvidenceItem): EvidenceAnswer => ({ subject: item.subject, id: item.id, choice: "later", note: null });
   for (const [index, item] of items.entries()) {
-    if (Date.now() >= deadline) return null;
-    const picked = await ui.select(itemTitle(item, index + 1, items.length), [...LABELS[item.subject]],
-      { timeout: Math.max(1, deadline - Date.now()) });
-    if (picked === undefined || !LABELS[item.subject].includes(picked)) return null;
-    const choice = picked.toLowerCase();
-    let note: string | null = null;
-    if (choice !== "later") {
-      const typed = await ui.input(item.note_title, undefined, { timeout: Math.max(1, deadline - Date.now()) });
-      if (typed === undefined) return null;
-      note = typed.trim() === "" ? null : typed;
+    if (Date.now() >= deadline) {
+      answers.push(...items.slice(index).map(later));   // this item and the rest stay for later
+      break;
     }
-    answers.push({ subject: item.subject, id: item.id, choice, note });
+    const labels = LABELS[item.subject];
+    while (true) {
+      const picked = await ui.select(itemTitle(item, index + 1, items.length, document, answers),
+        [...labels], { timeout: Math.max(1, deadline - Date.now()) });
+      if (picked === undefined || !labels.includes(picked)) {
+        // Esc, a timeout or a label that was not offered at the select: fail closed from this item on.
+        answers.push(...items.slice(index).map(later));
+        return answers;
+      }
+      const choice = picked.toLowerCase();
+      if (choice === "later") { answers.push(later(item)); break; }
+      const typed = await ui.input(notePrompt(item.note_title), undefined,
+        { timeout: Math.max(1, deadline - Date.now()) });
+      if (typed === undefined && Date.now() >= deadline) {
+        // The deadline passed while the note was open: the item stays `later` (its answer minus its note
+        // is never recorded), and the asking stops here — the completed answers before it are kept.
+        answers.push(...items.slice(index).map(later));
+        return answers;
+      }
+      if (typed === undefined) continue;   // Esc at the note (A3): the same item's select is shown again
+      answers.push({ subject: item.subject, id: item.id, choice, note: typed.trim() === "" ? null : typed });
+      break;
+    }
   }
   return answers;
 }
@@ -147,6 +269,28 @@ export async function observeSurface(runId: string, ctx: ExtensionContext, trust
   return (await record(present ? "human" : "unavailable")) || (present && await record("unavailable"));
 }
 
+/** The document pair of a presentation answer, checked before anything may be shown: the same
+ * shape `private-transport.ts` holds the sole transport validator for (defense in depth — a
+ * hostile or buggy ingress cannot make a dialog out of an unproven document, so "nothing shown"`)
+ * and never its bytes. PR 16 (A10–A12): the pair also carries the presentation-only link fields
+ * — `url` (the observer's deep link, `null` without a live observer of this home) and `run12`
+ * (the run's compact id) — which this validator dropped with every extra field; they now cross,
+ * as data for the dialog's Details lines, and never reach any receipt. */
+function presentedDocument(value: unknown): EvidenceDocument | null {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  const { digest, path, url, run12, ...rest } = value as Record<string, unknown>;
+  if (typeof digest !== "string" || !/^sha256:[0-9a-f]{64}$/.test(digest)) return null;
+  if (typeof path !== "string" || !path.startsWith("/")) return null;
+  if (url !== null && (typeof url !== "string"
+    || !/^http:\/\/127\.0\.0\.1:[0-9]{1,5}(\/.*)?$/.test(url))) return null;
+  if (run12 !== null && (typeof run12 !== "string" || !/^[0-9a-f]{12}$/.test(run12))) return null;
+  const residuals = (value as Record<string, unknown>).residuals;
+  if (residuals !== undefined && (typeof residuals !== "number" || !Number.isSafeInteger(residuals) || residuals < 0))
+    return null;
+  if ("text" in rest) return null;   // bytes never cross the transport at all
+  return { digest, path, url, run12, ...(residuals === undefined ? {} : { residuals }) };
+}
+
 /**
  * Present the core's batch once (whatever else blocks the run), submit the human's per-item decisions as
  * one receipt and return the response to act on, with the host failure to report (`failure`, `undefined` when the
@@ -157,7 +301,19 @@ export async function observeSurface(runId: string, ctx: ExtensionContext, trust
  * ingress faulted, threw, or refused) is evaluated again with `presentation_failed`, so the response says nobody was
  * asked; the core's own refusal (`already_presented`, `interaction_limit`) outranks it. A presentable batch with no
  * dialog to show it in is the same failure to ask: nothing is spent and nothing is evaluated, but `failure` says so,
- * so the gate never settles on a wait nobody was asked about.
+ * so the gate never settles on a wait nobody was asked about. Review-2 m5 (round 12, decision 7c): a submit the core
+ * refused — a Block, a Fault, or one that never answered (the bridge threw between present and confirm) — admitted
+ * nobody's answer, so it is reported and re-evaluated as the same `presentation_failed`: the run reads `host_failed`
+ * (recovered only by showing the batch again), never the human's decline.
+ *
+ * PR 12 (ADR-0072): a presentation answer also names the document its presentation wrote, and it must
+ * be a proven pair before a dialog may show it — an answer without one is "nothing shown" and the
+ * same `presentation_failed` as any refusal. Every item dialog ends with the document's Details
+ * and its short digest (PR 16: a live observer's link, or this host's command with the exact
+ * path — the path is dropped only when a verified link is shown), and the receipt repeats the
+ * presentation's digest (`document_digest`), so
+ * the core records that what was submitted was decided against the document the human was shown;
+ * the pair itself, its path included, never leaves the private lane.
  */
 export async function confirmEvidence(response: Response, runId: string, ctx: ExtensionContext,
                                       trusted: PrivateIngress, reevaluate: (hostFailure?: HostFailure) => Promise<Response>,
@@ -166,20 +322,39 @@ export async function confirmEvidence(response: Response, runId: string, ctx: Ex
   if (batch === null) return { response };
   if (!canPresent(ctx)) return { response, failure: "presentation_failed" };
   let shown = false;
+  let refused = false;   // review-2 m5 (round 12, decision 7c): the submit admitted nobody's answer
   try {
     // The end of a deliberative run is asked by the evaluation that reaches it: the core's batch travels with the call.
     const presented = await trusted({ operation: "evidence_presentation", run_id: runId,
       payload: isTerminalBatch(batch) ? { batch } : {} }) as
-      { type: string; receipt_id?: string; items?: EvidenceItem[] };
-    if (presented.type === "evidence_presentation" && presented.receipt_id && presented.items) {
+      { type: string; receipt_id?: string; items?: EvidenceItem[]; document?: unknown };
+    const document = presented.type === "evidence_presentation" ? presentedDocument(presented.document) : null;
+    if (presented.type === "evidence_presentation" && document !== null
+      && presented.receipt_id && presented.items) {
       shown = true;
-      const answers = await askItems(presented.items, ctx, deadline);
-      // Cancelled, or every item left on Later: nothing to submit, nothing granted.
-      if (answers !== null && !answers.every((answer) => answer.choice === "later"))
-        await trusted({ operation: "evidence_confirmation", run_id: runId,
-          payload: { receipt_id: presented.receipt_id, items: presented.items, answers } });
+      const answers = await askItems(presented.items, ctx, deadline, document);
+      // PR 18: a batch with no decided item — every answer `later`, including the items a cancel or a
+      // timeout left from that step on — submits nothing, as before; a partial batch submits the
+      // answers completed before the stop, once, and the core's own current-state checks admit them.
+      if (answers !== null && !answers.every((answer) => answer.choice === "later")) {
+        const confirmed = await trusted({ operation: "evidence_confirmation", run_id: runId,
+          payload: { receipt_id: presented.receipt_id, items: presented.items, answers,
+            document_digest: document.digest } }) as
+          { type?: string; result?: { type?: string } };
+        // The submit's outcome decides what was recorded: an admitted receipt (Allow, Inert) or the
+        // genuine human nothing (evidence_none, when the answers derived no decision) recorded the
+        // human's word; a refused one (a Block — the residuals moved while the dialog was open — a
+        // Fault, or anything malformed) admitted nobody's answer, so the run reads host_failed
+        // (recovered only by showing the batch again), never the human's decline.
+        refused = !(confirmed?.type === "evidence_none"
+          || confirmed?.type === "evidence_receipt"
+          && (confirmed.result?.type === "Allow" || confirmed.result?.type === "Inert"));
+      }
     }
-  } catch { /* nothing is granted by a failure; the batch was shown only if `shown` is set */ }
-  const failure: HostFailure | undefined = shown ? undefined : "presentation_failed";
+  } catch {
+    /* nothing is granted by a failure; the batch was shown only if `shown` is set */
+    refused = shown;   // a throw after the showing recorded nobody's answer either
+  }
+  const failure: HostFailure | undefined = !shown || refused ? "presentation_failed" : undefined;
   try { return { response: await reevaluate(failure), failure }; } catch { return { response, failure }; }
 }

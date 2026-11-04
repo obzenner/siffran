@@ -142,8 +142,15 @@ class TerminalConsentTests(MediatorFixture):
         self.assertEqual(message.splitlines()[0], "Empirica · end this run without converging?  (15 min)")
         self.assertNotIn("evidence that needs you", message)
         self.assertEqual(schema["properties"]["d1"]["title"], f"1. End the run as {status}?")
-        self.assertEqual(schema["properties"]["d1"]["description"],
-                         f"Not converged. Approve ends the run now as {status}; Reject or Later keeps it active.")
+        # PR 19 (finding N7): the field description keeps the sentence and names the residual
+        # count the written document read out — Claude Code 2.1.304 renders it in full while
+        # folding the message, so the count the human is deciding by is never folded away.
+        description = schema["properties"]["d1"]["description"]
+        self.assertTrue(description.startswith(
+            f"Not converged. Approve ends the run now as {status}; Reject or Later keeps it active."),
+            description)
+        self.assertRegex(description, r" · [1-9][0-9]* unresolved obligations? would remain$",
+                         "a stopped_residual consent names its residuals in the description")
         self.assertEqual(schema["properties"]["n1"]["title"], "1. Note (optional)")
 
     def test_EHB_TERM_01_the_item_is_the_status_and_binds_the_derivation(self):

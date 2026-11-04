@@ -436,25 +436,58 @@ def dropped(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
 
 _GOVERNANCE_ANSWERS = {"approve": ("approve", "configuration_approved"), "amend": ("approve", "configuration_amended"),
                        "reject": ("reject", "configuration_rejected"), "dismiss": ("later", "none")}
+#: The receipt outcomes that answer a configuration ask (a later one supersedes the presentation of the same ask:
+#: the ask, not the dialog, is what the pending row names; ``dismiss`` closes that dialog but answers nothing).
+_GOVERNANCE_ANSWER_OUTCOMES = ("approve", "amend", "reject")
 
 
 def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
-              receipts_at: Mapping[str, float | None] | None = None) -> list[dict[str, Any]]:
+              receipts_at: Mapping[str, float | None] | None = None,
+              documents: Mapping[str, Mapping[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Every answer a human gave the run: its configuration's receipts from a host's dialog (an ``auto`` approval is
     nobody's answer), in the order the state records them (``at``: the write that recorded each, from ``receipts_at``),
     then, in history order, each recorded confirmation and each item a host showed
     that its human left for later. Each says what was asked (``ASKS``), what it is attached to (``claim``: the claim
     decided, or the claim a confirmed source supports; ``source``: that source; ``plan``: the configuration's plan
     revision; none of them for the run's end), the answer (``ANSWERS``) and the effect the core records for it
-    (``EFFECTS``)."""
-    rows, approved = [], False
-    for r in snapshot.state.governance["receipts"]:
+    (``EFFECTS``).
+
+    Every row that names a presentation carries the immutable document that presentation showed (ADR-0072) as its
+    ``document`` member. ``documents`` (PR 15) maps each ``document_digest`` to the observer's served read of that
+    document (``status``, ``path``, ``body``, with a parsed body only beside ``status: verified``); with
+    ``documents=None`` — the published detail — each row still names the exact digest its presentation bound, in a
+    placeholder ``{"digest": ...}`` the richer /api/run answer replaces. A configuration ask a host presented and
+    its human has not answered (a dialog still open, or superseded by a later answer's own presentation) is one
+    ``answer: later`` row too: ``later`` reads "not answered" — presented, but no answer recorded against that
+    ask (operator finding F3: a stop must stay a stop, never silently read as a deliberate deferral)."""
+    def _shown(digest) -> Mapping[str, Any] | None:
+        if digest is None:
+            return None
+        return {"digest": digest} if documents is None else documents[digest]
+
+    receipts = snapshot.state.governance["receipts"]
+    answered_at_revision = {}  # the last answer that closed each revision's ask, by its own receipt's place
+    for position, r in enumerate(receipts):
+        if r["approval_kind"] == "host_ui" and r["outcome"] in _GOVERNANCE_ANSWER_OUTCOMES:
+            answered_at_revision[r["plan_revision"]] = position
+    rows, approved, position = [], False, 0
+    for r in receipts:
         if r["approval_kind"] == "host_ui" and r["outcome"] in _GOVERNANCE_ANSWERS:
             answer, effect = _GOVERNANCE_ANSWERS[r["outcome"]]
             rows.append({"asked": "approve_revision" if approved else "approve_configuration",
                          "claim": None, "source": None, "plan": r["plan_revision"], "answer": answer, "effect": effect,
-                         "at": (receipts_at or {}).get(r["id"])})
+                         "at": (receipts_at or {}).get(r["id"]), "document": _shown(r["document_digest"])})
+        elif (r["approval_kind"] == "host_ui" and r["outcome"] == "present"
+              and answered_at_revision.get(r["plan_revision"], -1) < position):
+            # PR 15 (A3, operator finding F2): the pending configuration ask — a host showed the
+            # dialog and no answer closed that ask yet — is a decision row of its own, carrying
+            # the document that showing bound, so an open dialog is never presented as though
+            # a human had decided. Superseded by a later answer at the same revision it is not.
+            rows.append({"asked": "approve_revision" if approved else "approve_configuration",
+                         "claim": None, "source": None, "plan": r["plan_revision"], "answer": "later", "effect": "none",
+                         "at": (receipts_at or {}).get(r["id"]), "document": _shown(r["document_digest"])})
         approved = approved or r["outcome"] in {"approve", "amend"}  # the first approval; every later ask is a revision
+        position += 1
     records = {a["artifact_id"]: a for a in snapshot.history if a.get("kind") == "research"}
     answered: dict[str, set[str]] = {}
     for a in snapshot.history:
@@ -475,7 +508,8 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
             else:
                 asked, claim, effect = "decide_claim", a["claim_id"], "claim_approved" if yes else "claim_rejected"
             rows.append({"asked": asked, "claim": claim, "source": source, "plan": None,
-                         "answer": "approve" if yes else "reject", "effect": effect, "at": when})
+                         "answer": "approve" if yes else "reject", "effect": effect, "at": when,
+                         "document": _shown(a.get("document_digest"))})
         elif a.get("kind") == confirmation.PRESENTATION:
             done = answered.get(a.get("receipt_id"), set())
             terminal = isinstance(a.get("terminal"), Mapping)
@@ -484,13 +518,15 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
                     asked = (("freeze_scope" if c["claim_id"] == "stopped_frozen" else "consent_stop") if terminal
                              else "decide_claim")
                     rows.append({"asked": asked, "claim": None if terminal else c["claim_id"], "source": None, "plan": None,
-                                 "answer": "later", "effect": "none", "at": when})
+                                 "answer": "later", "effect": "none", "at": when,
+                                 "document": _shown(a.get("document_digest"))})
             for record_id in a.get("record_ids", []):
                 if record_id not in done:
                     record = records.get(record_id, {})
                     rows.append({"asked": "confirm_source", "claim": record.get("claim_id"),
                                  "source": record.get("source_ref"), "plan": None,
-                                 "answer": "later", "effect": "none", "at": when})
+                                 "answer": "later", "effect": "none", "at": when,
+                                 "document": _shown(a.get("document_digest"))})
     return rows
 
 

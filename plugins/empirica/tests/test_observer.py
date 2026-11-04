@@ -35,7 +35,8 @@ from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 import validate_ui_view  # noqa: E402
 from application import observer as observer_module  # noqa: E402
 from application import protocol as _proto  # noqa: E402
-from application.observer import Observer  # noqa: E402
+from application.location import decode_handle  # noqa: E402
+from application.observer import Observer, run_key  # noqa: E402  # noqa: E402
 from core import observer as core_observer  # noqa: E402
 from core.records import RunKey  # noqa: E402
 from assertions import (action_graph, action_investigate, action_research, action_route,  # noqa: E402
@@ -367,7 +368,12 @@ class WaitingOwnerTests(unittest.TestCase):
         b.evaluate(run, "report_convergence")
         ids = b.record_ids(run)
         if present:
-            b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1", "key": b.batch_key(run)})
+            # PR 13: the presentation names its batch's document — null fetch, then bound
+            fetch = b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1",
+                                                              "key": b.batch_key(run),
+                                                              "document_digest": None})["result"]
+            b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "r1", "key": b.batch_key(run),
+                                                     "document_digest": fetch["document"]["digest"]})
         if answer:
             patch = mock.patch.object(governance, "MAX_INTERACTIONS", len(
                 (lambda src: src.read_state(next(iter(src.keys()))))(DriverSource(b.store)).value["governance"]["receipts"]) + 1) if limit else contextlib.nullcontext()
@@ -1563,6 +1569,149 @@ class HistoricalSpikeLiteralTests(unittest.TestCase):
                     admitted = False
                 self.assertEqual(admitted, spike_plan.spike_backend_kind(binding) == "qualified")
 
+
+
+def _view_problems(summary, rows, details):
+    import validate_ui_view
+    return validate_ui_view.view_problems(summary, rows, details)
+
+
+class DecisionDocumentTests(unittest.TestCase):
+    """PR 15 (operator findings F2 and F3; amendments A2, A3 and A7): every decision row carries
+    the immutable document the human was shown against (ADR-0072), resolved by the observer from
+    the run's own sidecar at each read - ``verified`` with the parsed body exactly as the host
+    bound it, or one of the refuse-closed statuses beside no body; a configuration presented and
+    not answered is a row too (``answer: later``: presented, no answer recorded - still open,
+    dismissed, or timed out), gone once the answer is recorded; and the contract refuses a
+    ``body`` beside any status but ``verified``."""
+
+    GRAPH = _graph("C0", [("C0", "ordinary", "The export reads one documented path."),
+                          ("C1", "ordinary", "The nightly log shows no other read.")], [("C0", "C1")])
+
+    @staticmethod
+    def _key(run):
+        return run_key(decode_handle(run))
+
+    def _build(self, *, approve=True):
+        b = _Builder()
+        run = b.begin("atlas", "s-doc", "Show the document beside the decision.", self.GRAPH, approve=approve)
+        b.research(run, "C0", ref="docs/path.md")
+        b.cite(run, "C1", "runtime", "nightly log", "0 reads outside the index",
+               spike_unavailable="Only runs nightly.")
+        return b, run
+
+    def _detail(self, b, run):
+        view, details = observed(Observer(DriverSource(b.store)))
+        return view, details[self._key(run)]
+
+    def _batch(self, b, run):
+        return b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["confirmation_batch"]
+
+    def test_a_configuration_presented_and_not_answered_is_a_row_with_its_document(self):
+        b, run = self._build(approve=False)
+        b.ask_configuration(run, "rcpt-shown")  # the dialog is open, not answered
+        _, detail = self._detail(b, run)
+        row = next(d for d in detail["decisions"] if d["asked"] == "approve_configuration")
+        self.assertEqual((row["answer"], row["effect"]), ("later", "none"))
+        state = b.drv._runs.read(decode_handle(run)).value
+        receipt = next(r for r in state["governance"]["receipts"] if r["id"] == "rcpt-shown")
+        self.assertEqual(row["document"]["digest"], receipt["document_digest"])
+        view, _ = observed(Observer(DriverSource(b.store)))
+        self.assertFalse(view["projects"][0]["runs"][0]["flags"]["decided"],
+                         "presented, no answer recorded (still open, dismissed, or timed out): "
+                         "nothing was answered, so the flag the aggregates count stays down")
+
+    def test_the_pending_configuration_row_is_gone_once_the_answer_is_recorded(self):
+        b, run = self._build(approve=False)
+        b.ask_configuration(run, "rcpt-shown")
+        b.drv.approve_governance(run)  # the human answers the same ask
+        _, detail = self._detail(b, run)
+        answers = [(d["asked"], d["answer"], d["effect"]) for d in detail["decisions"]]
+        self.assertNotIn(("approve_configuration", "later", "none"), answers,
+                         "the dialog was answered: the pending row is gone")
+        self.assertIn(("approve_configuration", "approve", "configuration_approved"), answers)
+
+    def test_a_presented_evidence_left_without_an_answer_reads_later_and_does_not_decide(self):
+        b, run = self._build()
+        b.evaluate(run, "report_convergence")
+        batch = self._batch(b, run)
+        _, digest = b._present(run, {"run_id": run, "receipt_id": "l1", "key": batch["key"]})
+        view, detail = self._detail(b, run)
+        rows = [d for d in detail["decisions"] if d["asked"] == "confirm_source"]
+        self.assertTrue(rows, "the batch waits on a human")
+        self.assertEqual({(d["answer"], d["effect"]) for d in rows}, {("later", "none")},
+                         "presented, no answer recorded (still open, dismissed, or timed out)")
+        self.assertEqual({d["document"]["digest"] for d in rows}, {digest})
+
+    def test_the_served_document_body_is_exactly_what_the_host_bound(self):
+        b, run = self._build()
+        b.evaluate(run, "report_convergence")
+        batch = self._batch(b, run)
+        pair = b.drv.trusted_evidence_presentation(
+            run, {"run_id": run, "receipt_id": "bound-pair", "key": batch["key"], "document_digest": None}
+        )["result"]["document"]  # the throwaway fetch: nothing is spent, nothing is recorded
+        b.publish_document(run, pair)
+        b.present_and_answer(run, "d1", [
+            {"subject": "research", "artifact_id": b.record_ids(run)["C1"], "outcome": "confirm"}])
+        detail = Observer(DriverSource(b.store)).sheet(self._key(run))
+        row = next(d for d in detail["decisions"] if d["asked"] == "confirm_source")
+        document = row["document"]
+        self.assertEqual((document["digest"], document["status"]), (pair["digest"], "verified"))
+        self.assertEqual(document["body"], json.loads(pair["text"]))
+        from core import hitl
+        self.assertEqual(hitl.render(document["body"]).decode("utf-8"), pair["text"],
+                         "re-rendering the served body gives back the exact bound bytes")
+
+    def test_every_document_status_is_served_and_a_body_only_with_verified(self):
+        b, run = self._build()
+        b.evaluate(run, "report_convergence")
+        batch = self._batch(b, run)
+        pair = b.drv.trusted_evidence_presentation(
+            run, {"run_id": run, "receipt_id": "bound-pair", "key": batch["key"], "document_digest": None}
+        )["result"]["document"]  # the throwaway fetch: nothing is spent, nothing is recorded
+        b.publish_document(run, pair)
+        b.present_and_answer(run, "d1", [
+            {"subject": "research", "artifact_id": b.record_ids(run)["C1"], "outcome": "confirm"}])
+        # the presentation is bound; corrupt the same digest to each refuse-closed status in turn
+        for status in ("mismatch", "unreadable", "too_large"):
+            with self.subTest(status=status):
+                other, other_run = self._build(approve=False)
+                other.ask_configuration(other_run, "rcpt-refused")
+                state = other.drv._runs.read(decode_handle(other_run)).value
+                receipt = next(r for r in state["governance"]["receipts"] if r["id"] == "rcpt-refused")
+                other.corrupt_document(other_run, receipt["document_digest"], status)
+                detail = Observer(DriverSource(other.store)).sheet(self._key(other_run))
+                doc = next(d for d in detail["decisions"] if d["plan"] is not None)["document"]
+                self.assertEqual((doc["status"], doc["body"]), (status, None))
+        # a digest the store never held reads as missing, also with no body
+        detail = Observer(DriverSource(b.store)).sheet(self._key(run))
+        docs = [d["document"] for d in detail["decisions"]]
+        missing = next(d for d in docs if d["status"] == "missing")
+        self.assertIsNone(missing["body"])
+        verified = next(d for d in docs if d["status"] == "verified")
+        self.assertIsNotNone(verified["body"])
+        self.assertEqual([d["body"] is not None for d in docs], [d["status"] == "verified" for d in docs],
+                         "a body is shown only beside a verified document")
+
+    def test_a_document_body_beside_a_non_verified_status_fails_the_contract(self):
+        """The nil-flowing (no-publish) fixture leaves rows non-verified; a body there is a lie the
+        schema must refuse (A7: `body` is bound to `status: verified`)."""
+        from copy import deepcopy
+        view, details = _observe()
+        key = next(iter(details))
+        sheet = details[key]
+        rows = deepcopy(sheet["decisions"])
+        forged_rows = 0
+        for row in rows:
+            document = row["document"]
+            if document is not None and document["status"] != "verified":
+                document["body"] = {"schema": "empirica.hitl/1", "kind": "configuration",
+                                    "run_id": "x", "decided_at": 1, "decided": "published",
+                                    "question": "approve"}
+                forged_rows += 1
+        self.assertTrue(forged_rows, "the served sheet must contain a non-verified document to forge")
+        problems = _view_problems(view["summary"], view["rows"], {**details, key: {**sheet, "decisions": rows}})
+        self.assertTrue(problems, "the contract refuses a body beside a non-verified status")
 
 if __name__ == "__main__":
     unittest.main()

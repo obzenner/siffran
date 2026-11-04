@@ -12,11 +12,24 @@ port, ``serve`` says so (``already running``), opens that one with ``--open``, a
 project's history is found in the repository recorded for it when its runs were created
 (``adapters.state.locations``). ``--repo`` adds repositories for runs recorded before that, matched
 by the plugin's identity; without one, the current directory's repository is used when there is one.
+
+``serve`` (PR 16, A10, ``adapters.observer.discovery``) also publishes one small advertise file —
+``<home>/observer/serve.json``, ``0600`` inside a ``0700`` directory — naming its port, pid, a
+per-process instance token, the home's identity and its capabilities, and removes it on a clean
+exit. That is the observer's **one write**, and it lives outside the run store's ``projects/``
+tree: everything under ``projects/`` stays exactly as it was (the observer itself stays read-only).
+A host form finds the UI through that file (``adapters.observer.discovery.observer_url``), probes
+``/api/about`` once per presentation, and falls back to honest lines without a link when no live
+server of this home answers. A second ``serve`` of the same home — on the preferred port or on any
+port an advertise file names — says ``already running`` and reuses that server instead of binding
+a new one; the demo (``--demo``, which reads no store) publishes nothing, so no form ever links to
+fixture data.
 """
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import signal
 import sys
 import threading
@@ -32,6 +45,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from adapters.git.artifact_repo import toplevel  # noqa: E402
 from adapters.observer import civil  # noqa: E402
+from adapters.observer import discovery  # noqa: E402
 from adapters.observer.source import StoreSource  # noqa: E402
 from adapters.state.repository import empirica_home  # noqa: E402
 from application.observer import Observer  # noqa: E402
@@ -122,20 +136,44 @@ def announce(label: str, port: int, page: str, suffix: str = "") -> str:
     return url
 
 
+def _advertised(home: Path | None) -> int | None:
+    """The port a live, advertised observer of this very home serves on (A10) — the discovery
+    reader probes the advertise file with the 0.5 s budget — or ``None``. ``observe serve`` asks
+    this *before* it binds a port of its own, so a live server for the same home is reused (the
+    ``already running`` path) instead of shadowed."""
+    if home is None:
+        return None
+    url = discovery.observer_url(home)
+    if url is None:
+        return None
+    return int(url.rsplit(":", 1)[1])
+
+
 def _serve(args, source: StoreSource | None) -> int:
     from adapters.observer.indexer import Indexer
     from adapters.observer.server import Sources, serve
     store = identity(source, args.repo or [])
+    home = source.home if source is not None else None
     page = "/app/" + ("?data=demo" if args.demo else "")
-    if running(args.port, store):  # the same store is already served: use that one
-        url = announce("Empirica observer (already running)", args.port, page)
+    reuse = None
+    if running(args.port, store):  # the same store is already served on the preferred port: use that one
+        reuse = args.port
+    else:
+        use = _advertised(home)  # A10: a live advertised server of this home, whatever port it took
+        if use is not None:
+            reuse = use
+    if reuse is not None:
+        url = announce("Empirica observer (already running)", reuse, page)
         if args.open:
             webbrowser.open(url)
         return 0
     # The store is indexed in the background (its clock bounds each slice), so a request never pays for indexing and a
     # cold start answers at once with what has been read so far.
     observer = None if source is None else Observer(source, clock=time.monotonic, zones=civil.zone)
-    sources = Sources(observer, identity=store)
+    instance = discovery.instance_token()
+    sources = Sources(observer, identity=store,
+                      home_identity=discovery.home_identity(home) if home is not None else None,
+                      instance=instance)
     if observer is not None:
         Indexer(observer, after=sources.prepare).start()
     try:
@@ -145,6 +183,11 @@ def _serve(args, source: StoreSource | None) -> int:
     url = announce("Empirica observer", server.server_address[1], page, "  (Ctrl-C to stop)")
     if args.open:
         webbrowser.open(url)
+    # PR 16 (A10): advertise once listening — the observer's one write, outside ``projects/``
+    # (a publication that fails never stops the server: a form then falls back to no link).
+    if source is not None and discovery.publish_serve(
+            home, port=server.server_address[1], pid=os.getpid(), instance=instance) is None:
+        print("observe: this run store's observer could not advertise its UI link", file=sys.stderr)
     if args.exit_with_stdin:
         def watch() -> None:
             while sys.stdin.buffer.read(4096):
@@ -157,6 +200,8 @@ def _serve(args, source: StoreSource | None) -> int:
         pass
     finally:
         server.server_close()
+        if source is not None:  # the clean exit withdraws its own advertise (A10: only its own pid's)
+            discovery.withdraw_serve(home, os.getpid())
     return 0
 
 

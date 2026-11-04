@@ -58,7 +58,8 @@ class PresentationBindsWhatWasShown(MediatorFixture):
         self.research(drv, run_id, "web", URL)
         before = self.interactions(drv, run_id)["total"]
         refused = drv.trusted_evidence_presentation(
-            run_id, {"run_id": run_id, "receipt_id": "p1", "key": "sha256:" + "0" * 64})["result"]
+            run_id, {"run_id": run_id, "receipt_id": "p1", "key": "sha256:" + "0" * 64,
+                     "document_digest": None})["result"]
         self.assertEqual((refused["type"], refused["code"]), ("Fault", "conflict"))
         self.assertEqual(self.interactions(drv, run_id)["total"], before)
         self.assertEqual(self.presentations(drv, run_id), [])
@@ -95,7 +96,7 @@ class PresentationBindsWhatWasShown(MediatorFixture):
         self.research(drv, run_id, "web", URL)
         shown = confirmation.present(CLAUDE_PROFILE, run_id, dispatch=lambda req, _p: drv.request(req),
                                      ingress=self.racing(drv, run_id))
-        receipt_id, items = shown
+        receipt_id, items, document = shown
         self.assertEqual(len(items), 2)
         stored = self.presentations(drv, run_id)[-1]
         self.assertEqual(sorted(stored["record_ids"]), sorted(i["id"] for i in items))

@@ -566,6 +566,21 @@
           ],
           "properties": {
             "code": {
+              "const": "evidence.document_mismatch"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "budget.exhausted"
             },
             "parameters": {
@@ -1002,6 +1017,21 @@
           "properties": {
             "code": {
               "const": "governance.stale_proposal"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.document_mismatch"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -3883,6 +3913,127 @@
         }
       }
     },
+    "evidenceDocument": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "digest"
+      ],
+      "description": "The core-rendered immutable HITL evidence document a private evidence.document_mismatch refusal carries (ADR-0072, PR 10, the evidence carrier): the exact rendered UTF-8 string plus the sha256 identity of exactly those bytes, so an adapter writes what the core rendered and never re-renders a dict. The refusal is the fetch: the adapter writes the document it names and repeats the call. Only a mismatch refusal carries it and only on the trusted evidence legs; the public wire has no such member anywhere.",
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The exact rendered UTF-8 string of the document — deterministic pretty JSON, sorted keys, 2-space indent, one trailing newline."
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "The sha256 identity of exactly the text's bytes; the repeated call's document_digest must name this value."
+        }
+      }
+    },
+    "privateEvidenceRefusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "run",
+        "reasons",
+        "document"
+      ],
+      "description": "The one private evidence result that carries a document (ADR-0072, PR 10): a run-bearing Block on evidence.document_mismatch plus the core-rendered pair for the batch the call named — the refusal is the fetch. Only the trusted evidence legs can emit it; never the public wire.",
+      "properties": {
+        "type": {
+          "const": "Block"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "reasons": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/reasonEntry"
+          }
+        },
+        "document": {
+          "$ref": "#/$defs/evidenceDocument"
+        }
+      }
+    },
+    "privateEvidenceResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "request_id",
+        "result"
+      ],
+      "description": "ADR-0072 (PR 10) private trusted-evidence ingress definition: the public responses of the evidence presentation and confirmation legs unchanged, plus the one private alternative — a mismatch refusal that carries the document so the fetch never needs a second round trip. Every other alternative must not carry a document member; the public response schema has none, so a document reaching any public result is invalid there. Validated only inside application evidence ingress.",
+      "properties": {
+        "protocol": {
+          "const": "empirica/v2"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/privateEvidenceRefusal"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/allow"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "document"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/block"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "document"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/inert"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "document"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$ref": "#/$defs/fault"
+            }
+          ]
+        }
+      }
+    },
     "privateGovernanceResponse": {
       "type": "object",
       "additionalProperties": false,
@@ -4355,6 +4506,27 @@
               "type": "null"
             }
           ]
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "digest"
+          ],
+          "description": "The core-rendered immutable HITL document the private governance_context answer carries beside the dialog (ADR-0072 Q1): the exact rendered UTF-8 string plus the sha256 identity of exactly those bytes, so an adapter writes what the core rendered and never re-renders a dict. Optional: present exactly where this state's configuration judgment is a human's now (a `governance_context` leg over a human-wait state); the decision legs never carry it.",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The exact rendered UTF-8 string of the document — deterministic pretty JSON, sorted keys, 2-space indent, one trailing newline."
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "The sha256 identity of exactly the text's bytes; the decision's document_digest must name this value."
+            }
+          }
         }
       }
     },

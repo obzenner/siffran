@@ -283,7 +283,8 @@ class DecisionShapeTests(unittest.TestCase):
         for key, detail in observer.details().items():
             claims = {c["id"] for c in rows[key]["claims"] or ()} | {d["claim"] for d in detail["dropped"] or ()}
             for d in detail["decisions"] or ():
-                self.assertEqual(set(d), {"asked", "claim", "source", "plan", "answer", "effect", "at"}, key)
+                self.assertEqual(set(d), {"asked", "claim", "source", "plan", "answer", "effect", "at", "document"}, key)
+                self.assertIn("digest", d["document"], key)  # PR 15: the presentation's bound document
                 seen.add(d["asked"])
                 if d["asked"] == "decide_claim":
                     self.assertIn(d["claim"], claims, key)
@@ -705,8 +706,15 @@ class EndpointTests(unittest.TestCase):
         self.assertEqual(about["sources"], {"store": "store", "demo": "fixtures"})
         self.assertEqual(Sources(None, identity="x", store_kind="generated").about()["sources"],
                          {"demo": "fixtures"})
-        self.assertEqual(Sources(Observer(DriverSource(self.store)), identity="x", store_kind="generated").about(),
-                         {"observer": "empirica-observer", "identity": "x", "sources": {"store": "generated", "demo": "fixtures"}})
+        answer = Sources(Observer(DriverSource(self.store)), identity="x", store_kind="generated").about()
+        self.assertEqual({key: answer[key] for key in ("observer", "identity", "sources")},
+                         {"observer": "empirica-observer", "identity": "x",
+                          "sources": {"store": "generated", "demo": "fixtures"}})
+        # PR 16 (A10): about answers what a hardened reader probes before it trusts the server —
+        # the resolved home's identity, this process's instance token, and its capabilities.
+        self.assertIsNone(answer["home_identity"], "a Sources without a home answers None (A10)")
+        self.assertRegex(answer["instance"], r"^[0-9a-f]{32}$", "a one-process instance token")
+        self.assertEqual(answer["capabilities"], ["hitl/1"], "the one capability a form asks for")
 
     def test_the_demo_serves_the_contract_from_its_fixtures(self):
         page = json.loads(self._get("/api/runs?source=demo&limit=5")[1])

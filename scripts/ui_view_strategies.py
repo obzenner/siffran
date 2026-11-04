@@ -17,7 +17,8 @@ from hypothesis import strategies as st
 from validate_ui_view import view_schemas
 
 KNOWN = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf", "properties",
-         "required", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "minLength", "pattern"}
+         "required", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "minLength",
+         "pattern", "allOf"}
 #: Generated arrays and maps are short: what is checked is the shape, never the volume.
 MAX_ITEMS = 3
 _TEXT = st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), max_size=12)
@@ -127,9 +128,65 @@ class Strategies:
             return self._object(node, doc, pointer)
         raise ValueError(f"{doc['$id']}#{pointer}: type {kind}")
 
+    def _implications(self, node: dict, doc: dict, pointer: str) -> list[tuple[str, str, Any, str, dict]]:
+        """The member-to-member couplings this node's ``allOf`` states, as one derivation rule set:
+        each entry must be the contract's one conditional form - ``if`` a ``{const}`` or a
+        ``{not: {const}}`` on one required member, ``then`` a schema for exactly one other member.
+        The contract uses it for the coupling the served document must never break (PR 15, A7):
+        ``status == verified`` carries a parsed ``empirica.hitl/1`` body, every other status a
+        null one. Any other `if`/`then` shape is refused, never guessed: the guards cover every
+        value the guarded member's own enumeration can draw, or a drawing would be unsatisfiable.
+        """
+        rules: list[tuple[str, str, Any, str, dict]] = []
+        for entry in node.get("allOf", ()):
+            if set(entry) != {"if", "then"}:
+                raise ValueError(f"{doc['$id']}#{pointer}: an allOf entry that is not this contract's conditional")
+            cond, then = entry["if"], entry["then"]
+            if set(cond) != {"properties", "required"} or set(then) != {"properties"}:
+                raise ValueError(f"{doc['$id']}#{pointer}: an allOf guard must name its own member, then one member")
+            (member, guard), = cond["properties"].items()
+            if cond["required"] != [member]:
+                raise ValueError(f"{doc['$id']}#{pointer}: an allOf guard without its own member required")
+            if set(guard) == {"const"}:
+                mode, value = "const", guard["const"]
+            elif set(guard) == {"not"} and set(guard["not"]) == {"const"}:
+                mode, value = "not", guard["not"]["const"]
+            else:
+                raise ValueError(f"{doc['$id']}#{pointer}: an allOf guard is a const or a not-const only")
+            (target, schema), = then["properties"].items()
+            rules.append((member, mode, value, target, schema))
+        return rules
+
     def _object(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
         props = node.get("properties", {})
         required = set(node.get("required", ()))
+        rules = self._implications(node, doc, pointer)
+        if rules and len({(rule[0], rule[3]) for rule in rules}) == 1:
+            driver, target = rules[0][0], rules[0][3]
+            if driver not in required or target not in required or driver not in props:
+                raise ValueError(f"{doc['$id']}#{pointer}: a coupling over members its own object does not require")
+            others = {k: v for k, v in {**props}.items() if k not in (driver, target)}
+            fixed = {k: self.node(v, doc, f"{pointer}/properties/{k}") for k, v in others.items() if k in required}
+            optional = {k: self.node(v, doc, f"{pointer}/properties/{k}") for k, v in others.items() if k not in required}
+            rest = st.fixed_dictionaries({**fixed, **optional}) if self.full else st.fixed_dictionaries(fixed, optional=optional)
+            driven = self.node(props[driver], doc, f"{pointer}/properties/{driver}")
+
+            def _coupled(when: tuple[Any, dict[str, Any]]) -> dict:
+                a_value, rest_values = when
+                for _, mode, value, _, schema in rules:
+                    if (a_value == value) if mode == "const" else (a_value != value):
+                        return {**rest_values, driver: a_value, **{target: schema}}
+                raise ValueError(f"{doc['$id']}#{pointer}: no coupling guard covers {a_value!r}")
+
+            chosen = st.tuples(driven, rest).map(_coupled)
+            extra = node.get("additionalProperties", True)
+            if extra is not False:
+                raise ValueError(f"{doc['$id']}#{pointer}: a coupled object must be closed")
+            return chosen.flatmap(lambda drawn: st.builds(
+                lambda b, rest, a=drawn[driver]: {**rest, driver: a, target: b},
+                self.node(drawn[target], doc, f"{pointer}/properties/{target}"), st.just(drawn)))
+        if rules:
+            raise ValueError(f"{doc['$id']}#{pointer}: coupling rules over more than one member pair")
         fixed = {k: self.node(v, doc, f"{pointer}/properties/{k}") for k, v in props.items() if k in required}
         optional = {k: self.node(v, doc, f"{pointer}/properties/{k}") for k, v in props.items() if k not in required}
         whole = st.fixed_dictionaries({**fixed, **optional}) if self.full else st.fixed_dictionaries(fixed, optional=optional)

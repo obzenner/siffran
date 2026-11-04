@@ -1716,6 +1716,35 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
     if proto_const != contract.get("protocol"):
         errors.append(f"{where}: state.protocol const {proto_const!r} != registry "
                       f"protocol {contract.get('protocol')!r}")
+    # receipts[].superseded_budgets (ADR-0072, run/4): every governance receipt requires the
+    # member, and its object form is a closed shape naming exactly the ceilings of governance.CEILINGS
+    # — a mechanical mirror, like the status enums, so the state schema cannot drift from the core's
+    # one ceiling vocabulary.
+    from core.governance import CEILINGS
+    receipts = props.get("governance", {}).get("properties", {}).get("receipts", {})
+    item = receipts.get("items", {})
+    if "superseded_budgets" not in item.get("required", []):
+        errors.append(f"{where}: governance.receipts must require 'superseded_budgets' "
+                      "on every receipt")
+    superseded = item.get("properties", {}).get("superseded_budgets", {})
+    object_form = next((alt for alt in superseded.get("oneOf", [])
+                        if alt.get("type") == "object"), None)
+    if (object_form is None or object_form.get("additionalProperties") is not False
+            or set(object_form.get("properties", {})) != set(CEILINGS)
+            or set(object_form.get("required", [])) != set(CEILINGS)):
+        errors.append(f"{where}: governance.receipts superseded_budgets must be a closed object "
+                      f"naming exactly the three ceilings ({', '.join(CEILINGS)}) required together")
+    # receipts[].document_digest (ADR-0072, PR 07): the recorded document binding is required on
+    # every receipt — the sole receipt writer records it, null where no document was verified —
+    # and a recorded value is exactly the digest256 pattern, like presentation_fingerprint.
+    if "document_digest" not in item.get("required", []):
+        errors.append(f"{where}: governance.receipts must require 'document_digest' "
+                      "on every receipt")
+    document = item.get("properties", {}).get("document_digest", {})
+    if (document.get("type") != ["string", "null"]
+            or document.get("pattern") != "^sha256:[0-9a-f]{64}$"):
+        errors.append(f"{where}: governance.receipts document_digest must be a string-or-null "
+                      "member carrying exactly the sha256 digest256 pattern")
     # purpose shape parity: state childRecord.purpose must exact-match the D2
     # request actionChildReserve.purpose AND the response childSummary.purpose
     # (both are nonempty opaque strings). Extract the actual request/response purpose
@@ -1839,11 +1868,112 @@ def check_state_child_branch_matrix(state_schema: dict, contract: dict,
                               f"{bad_value!r} was NOT rejected")
 
 
+def check_hitl_bytes(raw: bytes, doc: Any, where: str, errors: list[str]) -> None:
+    """The hitl byte form is pinned before the renderer exists (ADR-0072, Q2): a document's
+    bytes are its identity (its ``document_digest`` covers exactly them), so every fixture
+    must already be in the canonical pretty form — ``json.dumps(doc, sort_keys=True, indent=2,
+    ensure_ascii=False)`` plus one trailing newline, encoded UTF-8.
+    """
+    canonical = (json.dumps(doc, sort_keys=True, indent=2, ensure_ascii=False) + "\n").encode("utf-8")
+    if raw != canonical:
+        errors.append(f"{where}: bytes are not the pinned pretty form (json.dumps(doc, sort_keys=True, "
+                      f"indent=2, ensure_ascii=False) + one trailing newline, UTF-8)")
+
+
+def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: list[str]) -> None:
+    """One mutation per hitl rule, each with the diagnostic it must produce, so a fixture that
+    silently became valid (or a byte check that stopped checking) cannot pass quietly.
+    The same harness as ``run_negatives``; skipped until the schema and the valid fixtures exist.
+    """
+    import copy
+
+    if not hitl_schema or not hitl_docs:
+        return
+
+    def expect(run, expected: str, label: str) -> None:
+        local: list[str] = []
+        run(local)
+        if not local:
+            errors.append(f"NEG hitl {label}: expected rejection but none produced")
+        elif not any(expected in e for e in local):
+            errors.append(f"NEG hitl {label}: rejected but no diagnostic contains {expected!r}; got {local}")
+
+    def schema_errors(bad: Any, where: str):
+        def run(local: list[str]) -> None:
+            if Draft202012Validator is None:
+                return
+            for e in Draft202012Validator(hitl_schema).iter_errors(bad):
+                local.append(f"{where}: {e.message}")
+        return run
+
+    config = hitl_docs.get("valid-configuration-approve")
+    confirm = hitl_docs.get("valid-configuration-confirm-edited")
+    evidence = hitl_docs.get("valid-evidence-batch")
+    terminal = hitl_docs.get("valid-evidence-terminal")
+    if config:
+        bad = copy.deepcopy(config)
+        bad["schema"] = "empirica.hitl/0"
+        expect(schema_errors(bad, "neg"), "empirica.hitl/1", "schema const bites")
+        bad = copy.deepcopy(config)
+        del bad["goal"]
+        expect(schema_errors(bad, "neg"), "goal", "a per-kind required field bites")
+        bad = copy.deepcopy(config)
+        bad["surprise"] = 1
+        expect(schema_errors(bad, "neg"), "Additional properties", "the closed document bites")
+        # the configuration's own required facts (review-1 finding 6)
+        for missing in ("question", "control_mode", "rationale_source"):
+            bad = copy.deepcopy(config)
+            bad.pop(missing, None)
+            expect(schema_errors(bad, "neg"), f"'{missing}' is a required property",
+                   f"the required {missing} bites")
+        # the question is the form discriminator, not the state word (review-1 finding 2)
+        bad = copy.deepcopy(config)
+        bad["question"] = "confirm_amendment"
+        expect(schema_errors(bad, "neg"), "'amendment' is a required property",
+               "confirm_amendment names the amendment it confirms")
+        bad = copy.deepcopy(config)
+        bad["amendment"] = confirm["amendment"] if confirm else {"budgets": {
+            "max_passes": {"value": 6, "was": 8},
+            "max_spawns": {"value": 1, "was": 1},
+            "max_audit_spawns": {"value": 2, "was": 2}}}
+        expect(schema_errors(bad, "neg"), "should not be valid",
+               "an approve document carries no amendment")
+        # byte-form mutations: each variant must lose to the canonical pretty form (the fixture
+        # carries a non-ASCII administrator dash so ASCII escaping bites too).
+        wrong_indent = (json.dumps(config, sort_keys=True, indent=4, ensure_ascii=False) + "\n").encode("utf-8")
+        expect(lambda local: check_hitl_bytes(wrong_indent, config, "neg", local),
+               "pretty form", "byte form pins the 2-space indent")
+        no_newline = json.dumps(config, sort_keys=True, indent=2, ensure_ascii=False).encode("utf-8")
+        expect(lambda local: check_hitl_bytes(no_newline, config, "neg", local),
+               "pretty form", "byte form pins the trailing newline")
+        ascii_escaped = (json.dumps(config, sort_keys=True, indent=2) + "\n").encode("utf-8")
+        expect(lambda local: check_hitl_bytes(ascii_escaped, config, "neg", local),
+               "pretty form", "byte form pins literal UTF-8 (no ASCII escaping)")
+    if evidence:
+        bad = copy.deepcopy(evidence)
+        bad["budgets"] = []
+        expect(schema_errors(bad, "neg"), "Additional properties", "cross-kind content bites")
+        for missing in ("claim_text", "outcome", "claim_digest"):
+            bad = copy.deepcopy(evidence)
+            bad["records"][0].pop(missing, None)
+            expect(schema_errors(bad, "neg"), f"'{missing}' is a required property",
+                   f"a record's required {missing} bites")
+    if terminal and evidence:
+        bad = copy.deepcopy(terminal)
+        bad["records"] = copy.deepcopy(evidence["records"])
+        expect(schema_errors(bad, "neg"), "is expected to be empty",
+               "the terminal consent holds no records")
+        bad = copy.deepcopy(terminal)
+        bad["claims"] = copy.deepcopy(evidence["claims"])
+        expect(schema_errors(bad, "neg"), "is expected to be empty",
+               "the terminal consent holds no claims")
+
+
 def _minimal_valid_state() -> dict:
     """A minimal valid state wrapper for child-matrix validation."""
     return {
         "protocol": "empirica/v2",
-        "state_schema": "empirica.run/3",
+        "state_schema": "empirica.run/4",
         "spike_backend": {"kind": "spikes_unavailable"},
         "governance": json.loads((V2 / "state-fixtures/valid-active.json").read_text())["governance"],
         "goal": "g",
@@ -2782,6 +2912,69 @@ def main() -> int:
             elif expected_sub and not any(expected_sub in e for e in produced):
                 errors.append(f"{where}: rejected but no diagnostic contains "
                               f"{expected_sub!r}; got {produced}")
+
+    # --- hitl documents (ADR-0072): the empirica.hitl/1 schema, its fixtures, and the pinned bytes ---
+    hitl_schema = schemas.get(("empirica/v2", "hitl"), {})
+    if not hitl_schema:
+        errors.append("contracts/empirica/v2/hitl.schema.json: the empirica.hitl/1 schema is missing")
+    hitl_fixture_dir = V2 / "hitl-fixtures"
+    hitl_fixture_paths = sorted(hitl_fixture_dir.glob("*.json")) if hitl_fixture_dir.is_dir() else []
+    REQUIRED_HITL_FIXTURES = {
+        "valid-configuration-approve", "valid-configuration-confirm-edited",
+        "valid-configuration-confirm-pre-approval", "valid-configuration-rejected",
+        "valid-evidence-batch", "valid-evidence-terminal",
+        "invalid-wrong-schema", "invalid-unknown-kind", "invalid-unknown-field",
+        "invalid-unknown-nested-field", "invalid-missing-required",
+        "invalid-configuration-on-evidence", "invalid-repeated-budget-rows",
+    }
+    hitl_names = {p.name.removesuffix(".json") for p in hitl_fixture_paths}
+    for name in sorted(REQUIRED_HITL_FIXTURES - hitl_names):
+        errors.append(f"contracts/empirica/v2/hitl-fixtures/{name}.json: required hitl fixture is missing")
+    # Map fixture name -> the substring its rejection must contain (``None`` for valid ones).
+    # Validity itself derives from the name prefix (``valid-``/``invalid-``); an unmapped name fails the
+    # suite, so no fixture lands in the folder without a committed expectation (review-1 finding 13).
+    hitl_expect: dict[str, str | None] = {
+        "valid-configuration-approve": None,
+        "valid-configuration-confirm-edited": None,
+        "valid-configuration-confirm-pre-approval": None,
+        "valid-configuration-rejected": None,
+        "valid-evidence-batch": None,
+        "valid-evidence-terminal": None,
+        "invalid-wrong-schema": "'empirica.hitl/1' was expected",
+        "invalid-unknown-kind": "is not one of ['configuration', 'evidence']",
+        "invalid-unknown-field": "Additional properties",
+        "invalid-unknown-nested-field": "Additional properties",
+        "invalid-missing-required": "'goal' is a required property",
+        "invalid-configuration-on-evidence": "Additional properties",
+        # review-2 #44: three repeated max_passes rows refused by the per-position key pin
+        "invalid-repeated-budget-rows": "was expected",
+    }
+    hitl_docs: dict[str, dict] = {}
+    for path in hitl_fixture_paths:
+        name = path.name.removesuffix(".json")
+        where = str(path.relative_to(ROOT))
+        doc = load(path)
+        if name not in hitl_expect:
+            errors.append(f"{where}: unmapped hitl fixture name {name!r}: a fixture is "
+                           "committed with its verdict in its name and its expectation in hitl_expect")
+            continue
+        expect_valid = name.startswith("valid-")
+        expected_sub = hitl_expect[name]
+        if expect_valid:
+            validate_schema_instance(doc, "empirica/v2", "hitl", where)
+            hitl_docs[name] = doc
+            check_hitl_bytes(path.read_bytes(), doc, where, errors)
+        else:
+            before = len(errors)
+            validate_schema_instance(doc, "empirica/v2", "hitl", where)
+            produced = errors[before:]
+            del errors[before:]
+            if not produced:
+                errors.append(f"{where}: invalid hitl fixture was NOT rejected")
+            elif expected_sub and not any(expected_sub in e for e in produced):
+                errors.append(f"{where}: rejected but no diagnostic contains "
+                              f"{expected_sub!r}; got {produced}")
+    run_hitl_negatives(hitl_schema, hitl_docs, errors)
 
     # --- v2 fixtures ---
     REQUIRED_V2_FIXTURES = {
@@ -4635,6 +4828,52 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                     "$ref": "#/$defs/digest256"}
         expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
                "terminal-fingerprint", "state: terminal-fingerprint coverage drift")
+        # receipts priors drift: a receipt that stops requiring the supersided member (review-1's
+        # mirror bite: the amend branch would have nothing to bind the confirm form's priors to)
+        bad_ss = copy.deepcopy(state_schema)
+        receipts_required = (bad_ss["properties"]["governance"]["properties"]
+                             ["receipts"]["items"]["required"])
+        receipts_required.remove("superseded_budgets")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "must require 'superseded_budgets'", "state: receipts drop the priors requirement")
+        # receipts priors drift: the object form names the wrong ceiling set
+        bad_ss = copy.deepcopy(state_schema)
+        superseded_object = next(
+            alt for alt in (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                            ["items"]["properties"]["superseded_budgets"]["oneOf"])
+            if alt.get("type") == "object")
+        superseded_object["properties"]["max_widgits"] = superseded_object["properties"].pop("max_passes")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "exactly the three ceilings", "state: receipts ceiling-key drift")
+        # receipts priors drift: the object form stops closing its keys
+        bad_ss = copy.deepcopy(state_schema)
+        superseded_object = next(
+            alt for alt in (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                            ["items"]["properties"]["superseded_budgets"]["oneOf"])
+            if alt.get("type") == "object")
+        superseded_object["additionalProperties"] = True
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "closed object", "state: receipts priors stop being closed")
+        # document-binding drift (ADR-0072, PR 07): a receipt that stops requiring the recorded
+        # document binding
+        bad_ss = copy.deepcopy(state_schema)
+        (bad_ss["properties"]["governance"]["properties"]["receipts"]
+         ["items"]["required"]).remove("document_digest")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "must require 'document_digest'", "state: receipts drop the document binding")
+        # document-binding drift: the member stops being a digest256 string-or-null
+        bad_ss = copy.deepcopy(state_schema)
+        document_member = (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                           ["items"]["properties"]["document_digest"])
+        document_member.pop("pattern")
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "sha256 digest256 pattern", "state: receipts document member loses its pattern")
+        bad_ss = copy.deepcopy(state_schema)
+        document_member = (bad_ss["properties"]["governance"]["properties"]["receipts"]
+                           ["items"]["properties"]["document_digest"])
+        document_member["type"] = "string"
+        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
+               "string-or-null", "state: receipts document member stops admitting null")
     bad_state = {"budgets": {"max_passes": 1, "passes_used": 5,
                             "max_spawns": 0, "spawns_used": 0}}
     expect(lambda e: check_state_invariants(bad_state, e, "neg"),

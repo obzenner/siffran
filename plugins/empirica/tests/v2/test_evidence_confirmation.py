@@ -25,8 +25,11 @@ NO_REF = "the deploy pipeline output"
 WORKSPACE_REF = CITED_SOURCE[0] + ":3"
 
 
-def receipt_of(run_id: str, receipt: str, *decisions: dict) -> dict:
-    return {"run_id": run_id, "receipt_id": receipt, "decisions": list(decisions)}
+def receipt_of(run_id: str, receipt: str, *decisions: dict, document_digest: str | None = None) -> dict:
+    """One confirmation payload; PR 13: ``document_digest`` is required by the wire — the
+    digest of the presentation the receipt answers (the fixture records it with its present)."""
+    return {"run_id": run_id, "receipt_id": receipt, "decisions": list(decisions),
+            "document_digest": document_digest}
 
 
 def confirm(record: str) -> dict:
@@ -54,6 +57,12 @@ class EvidenceFixture(ConformanceCase):
     observe exactly where Claude does."""
 
     SURFACE_AT_START = "human"
+
+    def setUp(self) -> None:
+        super().setUp()
+        # PR 13: each presentation this fixture makes records the document its batch bound,
+        # so the confirmation that answers it names the same digest (required by the wire).
+        self._presentation_digests: dict[str, str] = {}
 
     def start(self, profile: str | None = None, *, graph: dict | None = None, kind: str = "ordinary",
               mode: str = "deliberative", qualified: bool = False, **invocation):
@@ -104,15 +113,35 @@ class EvidenceFixture(ConformanceCase):
 
     def present_now(self, drv, run_id, receipt="p1", key=None) -> dict:
         """The core's presentation ingress, with no host step before it: the batch the run shows now, under the key it
-        was shown under. A host fixture overrides ``present`` to add the host's own step first."""
+        was shown under. PR 13: the presentation names its batch's core-rendered document — the null fetch's refusal
+        carries the pair, then the same presentation is sent bound — the host step this fixture stands in for, whose
+        byte-write is the host adapters' own surface. A presentation of a batch the core would not admit refuses the
+        fetch itself (the key gate is first); that result is returned untouched. A host fixture overrides ``present``
+        to add the host's own step first."""
         shown = key or (self.run_view(drv, run_id)["confirmation_batch"] or {}).get("key")
-        return drv.trusted_evidence_presentation(
-            run_id, {"run_id": run_id, "receipt_id": receipt, "key": shown})["result"]
+        fetch = drv.trusted_evidence_presentation(
+            run_id, {"run_id": run_id, "receipt_id": receipt, "key": shown,
+                     "document_digest": None})["result"]
+        document = fetch.get("document")
+        if document is None:
+            return fetch  # the key itself was refused (or nothing pending): no presentation
+        bound = drv.trusted_evidence_presentation(
+            run_id, {"run_id": run_id, "receipt_id": receipt, "key": shown,
+                     "document_digest": document["digest"]})["result"]
+        self._digests().setdefault(receipt, document["digest"])
+        return bound
 
     present = present_now
 
+    def _digests(self) -> dict:
+        """The digests this fixture's presentations bound, created on first use (a plain
+        ``EvidenceFixture()`` constructed outside ``setUp`` must work too)."""
+        return self.__dict__.setdefault("_presentation_digests", {})
+
     def answer(self, drv, run_id, receipt, *decisions) -> dict:
-        return drv.trusted_evidence_confirmation(run_id, receipt_of(run_id, receipt, *decisions))["result"]
+        return drv.trusted_evidence_confirmation(
+            run_id, receipt_of(run_id, receipt, *decisions,
+                               document_digest=self._digests().get(receipt)))["result"]
 
     def interactions(self, drv, run_id) -> dict:
         return self.run_view(drv, run_id)["governance"]["interactions_remaining"]

@@ -12,8 +12,10 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import jsonschema
 
@@ -266,6 +268,14 @@ class _ServiceHarness(unittest.TestCase):
         self.run_id = self.req({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
                                 "invocation": dict(TEST_INVOCATION),
                                 "selector": {"project": "p", "session": "s"}})["run"]["id"]
+        # PR 08: mediating tests publish their HITL documents through a store under a temporary
+        # machine home — never the author's real $EMPIRICA_HOME (which is this harness's machines
+        # write root for the sidecar defaults the mediators construct).
+        machine_home = tempfile.TemporaryDirectory(prefix="economy-home-")
+        self.addCleanup(machine_home.cleanup)
+        machine_env = patch.dict("os.environ", {"EMPIRICA_HOME": machine_home.name})
+        machine_env.start()
+        self.addCleanup(machine_env.stop)
 
     def req(self, command):
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": "t",
@@ -326,7 +336,8 @@ class AudienceTests(_ServiceHarness):
         g = context["run"]["governance"]
         decision = {"run_id": self.run_id, "receipt_id": "r-" + str(g["plan_revision"]),
                     "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
-                    "approval_kind": "host_ui", "outcome": "present"}
+                    "approval_kind": "host_ui", "outcome": "present",
+                    "document_digest": context["presentation"]["document"]["digest"]}
         presented = self.service.trusted_governance_decision(
             run_id=self.run_id, payload=decision)["result"]
         self.assertIn("presentation", presented)
@@ -777,8 +788,12 @@ class NextActionReachabilityTests(_ServiceHarness):
 
     def test_the_evidence_confirmation_directive_belongs_to_the_confirmation_reason_alone(self):
         """``human.confirm_evidence`` (operation ``confirmation``) is listed by, and only by, the two reasons whose
-        wait is the confirmation batch: ``evidence.confirmation_required`` (evidence waits on a human) and
-        ``governance.terminal_stop_pending`` (a deliberative run's terminal stop waits on the same batch, ADR-0063)."""
+        subject is an open human batch: ``evidence.confirmation_required`` (evidence waits on a human) and
+        ``governance.terminal_stop_pending`` (a deliberative run's terminal stop waits on the same batch,
+        ADR-0063). ``evidence.document_mismatch`` no longer lists it (review-2 m4/7b): the reason's recovery
+        is the author's lever that re-presents — ``convergence.report`` first, ``residual.accept`` second —
+        because a mismatched confirmation is rescued only by a fresh showing of the same batch, never
+        by repeating the confirm call the stale receipt names."""
         contract = _proto._PUBLIC_CONTRACT
         listing = {code for code, reason in contract["reasons"].items()
                    if "human.confirm_evidence" in reason.get("next_actions", [])}
@@ -786,6 +801,14 @@ class NextActionReachabilityTests(_ServiceHarness):
         confirmations = {d for d, row in contract["next_actions"].items()
                          if row["surface"].get("operation") == "confirmation"}
         self.assertEqual(confirmations, {"human.confirm_evidence"})
+
+    def test_a_document_mismatch_routes_the_author_to_the_fresh_showing_first(self):
+        """``evidence.document_mismatch`` is model-facing despite its ``host_recovery`` disposition, so its
+        next actions lead with the author action that re-presents (``convergence.report``) and keep the honest
+        stop (``residual.accept``) second — never the human-step ``human.confirm_evidence``, which names a
+        call the host makes, not a recovery the author can follow (review-2 m4, 7b)."""
+        row = _proto._PUBLIC_CONTRACT["reasons"]["evidence.document_mismatch"]
+        self.assertEqual(tuple(row["next_actions"]), ("convergence.report", "residual.accept"))
 
     def test_a_needs_decision_claim_emits_the_one_human_batch_reason(self):
         """A needs-decision claim is not a reason of its own: it is part of the one human batch, so the core

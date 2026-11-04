@@ -185,15 +185,16 @@ function paintSheet() {
   if (!open) { $("sheet").data = null; paintedSheet = ""; document.title = t("page.title"); return; }
   const s = sheets.state(place.run);
   const notice = s.status === "failed" ? NOTICE[s.failure] : null;
-  const sig = JSON.stringify([place.run, place.claim, s.status, s.failure, s.sheet?.version, s.sheet?.attempts.map((a) => a.version)]);
+  const sig = JSON.stringify([place.run, place.claim, place.decision, s.status, s.failure, s.sheet?.version, s.sheet?.attempts.map((a) => a.version)]);
   if (sig === paintedSheet) return;
   paintedSheet = sig;
   if (!s.sheet) { $("sheet").data = { pending: true, notice }; return; }
   if (place.view === "universe") paintMain();
   const { row, attempts } = s.sheet;
   const project = summary?.projects.find((p) => p.id === row.project) ?? null;
-  $("sheet").data = { row, project, detail: s.sheet, attempts, notice, claim: place.claim, now: now(), href: (changes) => linkTo(changes) };
+  $("sheet").data = { row, project, detail: s.sheet, attempts, notice, claim: place.claim, decision: place.decision, now: now(), href: (changes) => linkTo(changes) };
   document.title = plain("page.title.run", { goal: clip(row.goal ?? "", 60) });
+  if (place.decision) $("sheet").querySelector("[data-decision-match]")?.scrollIntoView({ block: "center" });
 }
 
 function paintAll() {

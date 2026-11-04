@@ -29,8 +29,13 @@ const catalogue = JSON.parse(fs.readFileSync(path.join(ui, "catalogue.json"), "u
 const copy = JSON.parse(fs.readFileSync(path.join(ui, "copy", "en.json"), "utf8"));
 const home = fs.mkdtempSync(path.join(os.tmpdir(), "ev-home-"));
 const children = [];
+// PR 17 hardening (its own item): a runner that dies — a crash before its cleanup, a kill, anything — must never
+// leave its observer servers alive holding the caller's pipes open. Each child's stdin is a pipe this process holds,
+// the cli's `serve` runs `--exit-with-stdin` (it ends when the pipe closes, with us), and the process 'exit' kill below
+// takes every child besides — serve_generated.py has no such flag yet, so it is killed explicitly on any exit, the
+// graceful ones and the uncaught-exception ones alike ('exit' listeners run for both).
 function start(args, cwd = home) {
-  const p = spawn("python3", args, { cwd, stdio: ["ignore", "pipe", "inherit"] });
+  const p = spawn("python3", args[0] === CLI ? [...args, "--exit-with-stdin"] : args, { cwd, stdio: ["pipe", "pipe", "inherit"] });
   children.push(p);
   return new Promise((res, rej) => {
     let buf = "";
@@ -38,6 +43,12 @@ function start(args, cwd = home) {
     setTimeout(() => rej(new Error("a server did not start")), 120000);
   });
 }
+process.on("exit", () => {
+  try {
+    for (const p of children) p.kill();
+    fs.rmSync(home, { recursive: true, force: true });  // the temp home a crashed run would have left behind
+  } catch { /* exiting: nothing more may fail into another crash */ }
+});
 const MODE = process.env.MODE ?? "journeys";
 if (!["journeys", "smoke", "shots", "readme"].includes(MODE)) throw new Error(`MODE=${MODE}: journeys, smoke, shots or readme`);
 const FROZEN = Date.UTC(2026, 9, 13, 12, 0, 0);
@@ -51,6 +62,7 @@ const servers = {
 const [DEMO, EMPTY, LIVE, BIG] = await servers[MODE]();
 const SOURCES = [{ name: "demo", base: DEMO, data: "demo" }, { name: "generated", base: LIVE, data: "store" }];
 const SIZES = ["1440x900", "1024x768"], WIDE = SIZES[0], SCHEMES = ["light", "dark"];
+const { shortIdentifier } = await import("../app/identifiers.js");
 const fixtures = path.join(ui, "..", "vendor", "contracts", "empirica-ui-view", "v1", "fixtures");
 const S = JSON.parse(fs.readFileSync(path.join(fixtures, "scenarios.json"), "utf8"));
 const json = async (base, u) => (await fetch(`${base}${u}`)).json();
@@ -189,6 +201,17 @@ async function sheet(A) {
   check(`sheet ${tag}: Esc closes the claim, then the run`, !afterOne.includes("claim=") && afterOne.includes("run=") && !(await A.url()).includes("run=") && (await A.count("ev-sheet h1")) === 0, [afterOne, await A.url()]);
   await A.go(`&run=${id}&claim=${claim.id}`);
   check(`sheet ${tag}: opening the link restores the run and its claim`, (await E(`document.querySelector('[data-claim-row="${claim.id}"] details').open`)) && (await A.count("ev-sheet h1")) === 1, null);
+  const decided = (detail.decisions ?? []).find((d) => d.document);
+  if (decided) {
+    await A.go(`&run=${id}&decision=${decided.document.digest.slice(7, 19)}`);
+    await P.sleep(350);
+    check(`sheet ${tag}: a decision link opens the decisions section on the exact document the host showed (F2)`,
+      (await A.url()).includes("decision=") && (await E(`(() => { const row = document.querySelector("[data-decision-match]"); return !!row && !!row.querySelector("details[data-decision-document]")?.open; })()`)),
+      await A.url());
+    check(`sheet ${tag}: the document's own words are on the page`, /What you were shown/.test(await A.text("ev-sheet")), null);
+    await P.key("Escape"); await P.sleep(350);
+    check(`sheet ${tag}: Esc closes the opened decision back to its sheet`, !(await A.url()).includes("decision=") && (await A.url()).includes(`run=${id}`), await A.url());
+  }
   P.errors.length = 0;
 }
 
@@ -260,13 +283,31 @@ async function attempts(A) {
 
 async function audits(A) {
   const tag = `${A.src.name} ${A.size}`;
-  // every audited fixture run (P3b: an independence the fixtures do not hold is worded in views.test.mjs)
+  // every audited fixture run (P3b: an independence the fixtures do not hold is worded in views.test.mjs).
+  // PR 17 §4: a sha256 digest inside a finding renders as the one identifier atom - its short form read, the exact
+  // value carried by the atom's title and Copy - so the sentence a person reads is the finding with each token
+  // shortened that way. The atom is its own box on the line layout, so innerText puts line breaks around it: both
+  // sides are flattened to single spaces before comparing (and the quiet Copy buttons' own word drops out).
+  const spaces = (s) => s.replace(/\s+/g, " ").trim();
+  const reads = (f) => spaces(f.replace(/sha256:[0-9a-f]{12,64}(?:…[0-9a-f]+)?/g, (m) => shortIdentifier(m)));
+  const flat = (s) => spaces(s.split(copy["copy.button"]).join(" "));
   for (const scenario of ["audit-failed", "converged", "reaudit"]) {
     await A.go(`&run=${A.id(scenario)}`);
     const detail = await A.api("/api/run", `&key=${A.id(scenario)}`);
-    const text = await A.text("ev-sheet [data-section='audit']");
-    check(`audits ${tag}: every audit verdict of ${scenario} is listed with its auditor and how independent it was`, detail.audits.length > 0 && detail.audits.every((a) => a.independence !== null && text.includes(copy[`independence.${a.independence}`]) && a.findings.every((f) => text.includes(f))), text.slice(0, 300));
+    const text = flat(await A.text("ev-sheet [data-section='audit']"));
+    check(`audits ${tag}: every audit verdict of ${scenario} is listed with its auditor and how independent it was`, detail.audits.length > 0 && detail.audits.every((a) => a.independence !== null && text.includes(copy[`independence.${a.independence}`]) && a.findings.every((f) => text.includes(reads(f)))), text.slice(0, 300));
   }
+  // PR 17 §4 (review 17-1): a finding's hidden quiet Copy takes no space at all — out of the flow, so the sentence
+  // reads as a sentence, no blank gap after the digest chip and no line-height inflation — and the tab key still
+  // reveals it in place (focus-within: back in the flow, visible, clickable).
+  await A.go(`&run=${A.id("audit-failed")}`);
+  const hidden = await A.E(`(() => { const b = document.querySelector("ev-sheet [data-copy-quiet] [data-copy]"); if (!b) return null;
+    const s = (cs) => [cs.position, cs.opacity, cs.pointerEvents].join("/"); const hid = s(getComputedStyle(b)); b.focus();
+    return JSON.stringify({ hidden: hid, reachable: document.activeElement === b }); })()`);
+  await A.P.sleep(400);  // the reveal fades in (duration-fast), so the focused reading waits for the transition
+  const focused = await A.E(`(() => { const b = document.querySelector("ev-sheet [data-copy-quiet] [data-copy]"); if (!b) return null;
+    return [getComputedStyle(b).position, getComputedStyle(b).opacity, getComputedStyle(b).pointerEvents].join("/"); })()`);
+  check(`quiet copy ${tag}: a finding's hidden Copy takes no space and Tab reveals it`, hidden && JSON.parse(hidden).hidden === "absolute/0/none" && focused === "static/1/auto", [hidden, focused]);
 }
 
 // ---- J5 · finding a remembered goal -----------------------------------------------------------------------------------------------

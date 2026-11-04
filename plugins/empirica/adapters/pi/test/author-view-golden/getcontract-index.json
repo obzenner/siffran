@@ -205,6 +205,13 @@
             ]
           },
           {
+            "code": "evidence.document_mismatch",
+            "sections": [
+              "evidence/research",
+              "terminal"
+            ]
+          },
+          {
             "code": "budget.exhausted",
             "sections": [
               "budget"
@@ -380,6 +387,12 @@
           },
           {
             "code": "governance.stale_proposal",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
+            "code": "governance.document_mismatch",
             "sections": [
               "governance"
             ]

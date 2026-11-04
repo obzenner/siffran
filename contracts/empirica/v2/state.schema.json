@@ -30,7 +30,7 @@
       "const": "empirica/v2"
     },
     "state_schema": {
-      "const": "empirica.run/3"
+      "const": "empirica.run/4"
     },
     "spike_backend": {
       "oneOf": [
@@ -406,7 +406,9 @@
               "outcome",
               "plan_revision",
               "proposal_digest",
-              "approval_kind"
+              "approval_kind",
+              "superseded_budgets",
+              "document_digest"
             ],
             "properties": {
               "id": {
@@ -449,8 +451,88 @@
                   "auto"
                 ],
                 "description": "Immutable per-receipt approval kind; host_ui requires a prior exact presentation, auto has none."
+              },
+              "superseded_budgets": {
+                "description": "The ceilings of the proposal this amendment superseded, recorded at the amend commit: the revise erases them from the run's state, so the confirm form's (was ...) priors cannot be derived later (ADR-0072). Null for every other outcome; an amend receipt always names the revision before the one it brought about.",
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "max_passes",
+                      "max_spawns",
+                      "max_audit_spawns"
+                    ],
+                    "properties": {
+                      "max_passes": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max_spawns": {
+                        "type": "integer",
+                        "minimum": 0
+                      },
+                      "max_audit_spawns": {
+                        "type": "integer",
+                        "minimum": 0
+                      }
+                    }
+                  }
+                ]
+              },
+              "document_digest": {
+                "description": "The immutable HITL document this receipt's decision was shown against (ADR-0072, PR 07; conditioned on the approval kind since PR 13): every host_ui receipt names the sha256 of exactly the bytes the core rendered — verified against the state's own recomputation before the receipt was written, so a present bound to another state's document never records anything — and every auto receipt records null: auto answers no human's question. A finalizing decision must name the document its own present receipt recorded.",
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "pattern": "^sha256:[0-9a-f]{64}$"
               }
-            }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "approval_kind": {
+                      "const": "host_ui"
+                    }
+                  },
+                  "required": [
+                    "approval_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "document_digest": {
+                      "type": "string",
+                      "pattern": "^sha256:[0-9a-f]{64}$"
+                    }
+                  }
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "approval_kind": {
+                      "const": "auto"
+                    }
+                  },
+                  "required": [
+                    "approval_kind"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "document_digest": {
+                      "type": "null"
+                    }
+                  }
+                }
+              }
+            ]
           }
         }
       }

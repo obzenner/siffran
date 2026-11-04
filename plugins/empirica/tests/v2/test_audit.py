@@ -524,11 +524,17 @@ class AuditTests(ConformanceCase):
         self.assertEqual([r["code"] for r in asked["reasons"]], ["governance.terminal_stop_pending"])
         drv.trusted_human_surface(run_id, "human")
         batch = self.dispatch(drv, evaluate(run_id=run_id, intent="report_convergence"))["result"]["run"]["confirmation_batch"]
-        shown = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "t1", "key": batch["key"]})["result"]
+        # PR 13: the consent names its document — the null fetch (refusal carries the pair), then bound
+        fetch = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "t1",
+                                                          "key": batch["key"], "document_digest": None})["result"]
+        shown = drv.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "t1",
+                                                           "key": batch["key"],
+                                                           "document_digest": fetch["document"]["digest"]})["result"]
         self.assertEqual(shown["type"], "Allow")
         decision = {"subject": "claim", "claim_id": batch["terminal"]["status"], "claim_digest": batch["terminal"]["digest"],
                     "outcome": "approve"}
-        answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "t1", "decisions": [decision]})["result"]
+        answered = drv.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "t1", "decisions": [decision],
+                                                              "document_digest": fetch["document"]["digest"]})["result"]
         self.assertEqual(answered["type"], "Allow")
         after = self.assert_argument_view(self.dispatch(drv, get_argument(run_id=run_id))["result"])
         self.assertEqual(self.assert_audit_view(after, verdict="passed", current=True, independence="distinct")["reviewed_argument_digest"],

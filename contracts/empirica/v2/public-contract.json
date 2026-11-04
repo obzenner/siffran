@@ -1348,6 +1348,24 @@
       "message": "Simultaneous supporting and refuting research fails closed; resolve or stop with residual.",
       "ended_message": "Supporting and refuting research conflicted when the run stopped."
     },
+    "evidence.document_mismatch": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "convergence.report",
+        "residual.accept"
+      ],
+      "sections": [
+        "evidence/research",
+        "terminal"
+      ],
+      "message": "The named document no longer matches this batch; report again to have the batch shown again, or stop with the residual.",
+      "ended_message": "A document named for this batch could not be verified when the run stopped.",
+      "disposition": "host_recovery"
+    },
     "budget.exhausted": {
       "params": {
         "type": "object",
@@ -1910,6 +1928,22 @@
         "governance"
       ],
       "message": "Decision is bound to a different run/revision/digest. Inspect current proposal and request a new decision.",
+      "disposition": "host_recovery"
+    },
+    "governance.document_mismatch": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "The host's dialog named a configuration document that no longer matches this run's state; a refused present spent nothing, and a refused decision kept its spent presentation. Issue a task-sized configure_run again so the host can show you the current document (the re-present costs one review unit of the 3 per configuration).",
       "disposition": "host_recovery"
     },
     "governance.receipt_replay": {

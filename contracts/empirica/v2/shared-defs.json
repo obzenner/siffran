@@ -523,6 +523,27 @@
               "type": "null"
             }
           ]
+        },
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "text",
+            "digest"
+          ],
+          "description": "The core-rendered immutable HITL document the private governance_context answer carries beside the dialog (ADR-0072 Q1): the exact rendered UTF-8 string plus the sha256 identity of exactly those bytes, so an adapter writes what the core rendered and never re-renders a dict. Optional: present exactly where this state's configuration judgment is a human's now (a `governance_context` leg over a human-wait state); the decision legs never carry it.",
+          "properties": {
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "description": "The exact rendered UTF-8 string of the document — deterministic pretty JSON, sorted keys, 2-space indent, one trailing newline."
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$",
+              "description": "The sha256 identity of exactly the text's bytes; the decision's document_digest must name this value."
+            }
+          }
         }
       }
     }

@@ -178,6 +178,15 @@ class LiveDriver:
         import assertions
         assertions.RESPONSE_VALIDATOR.validate(resp)
 
+    def _validate_evidence_response(self, resp: dict) -> None:
+        """Validate one evidence-leg response against the private evidence definition (PR 10):
+        the public shapes plus the ``document`` pair only an ``evidence.document_mismatch``
+        refusal may carry — the refusal that **is** the fetch the PR 11 write-first flow needs. The
+        public schema has no ``document`` anywhere (by design: the public wire never carries it)."""
+        from application import protocol
+        if not protocol.validate_private_evidence_response(resp):
+            raise AssertionError(f"evidence-leg response invalid: {resp}")
+
     def trusted_child_event(self, run_id: str, child_id: str, event: dict) -> dict:
         """Deliver a trusted child event through the private composition ingress.
 
@@ -202,7 +211,7 @@ class LiveDriver:
     def trusted_evidence_presentation(self, run_id: str, payload: dict) -> dict:
         """Deliver one evidence presentation through the private ingress."""
         resp = self._service.trusted_evidence_presentation(run_id=run_id, payload=payload)
-        self._validate_trusted_response(resp)
+        self._validate_evidence_response(resp)
         return resp
 
     def trusted_human_surface(self, run_id: str, surface: str) -> dict:
@@ -215,7 +224,7 @@ class LiveDriver:
     def trusted_evidence_confirmation(self, run_id: str, payload: dict) -> dict:
         """Deliver one human receipt of per-item decisions through the private ingress."""
         resp = self._service.trusted_evidence_confirmation(run_id=run_id, payload=payload)
-        self._validate_trusted_response(resp)
+        self._validate_evidence_response(resp)
         return resp
 
     def trusted_audit_verdict(self, run_id: str, child_id: str, payload: dict) -> dict:

@@ -40,6 +40,10 @@ export interface PrivateIngressRequest<Op extends PrivateOperation = PrivateOper
   author?: Record<string, unknown>;
   auditor?: Record<string, unknown>;
   payload?: Record<string, unknown>;
+  /** Raw-level bind flag (m2, review 2): only the mediator's own refresh sets it, and only
+   * then does the Python bridge write the HITL document; a plain refresh requests the
+   * governance context without any document at all. */
+  bind_document?: boolean;
 }
 
 type IdentityResponse = Readonly<{
@@ -63,9 +67,34 @@ export type EvidenceItem =
       title: string; description: string; note_title: string }
   | { subject: "claim"; id: string; digest: string; text: string; terminal?: true; title: string; description: string; note_title: string };
 export interface EvidenceAnswer { subject: "research" | "claim"; id: string; choice: string; note: string | null }
-/** The presentation is recorded (and has spent one interaction) or the core refused it. */
+/** The bound document of the presentation (ADR-0072, PR 11/12): the written file's identity — full
+ * digest, absolute path, and a terminal batch's residual count — never its bytes. The words of the
+ * dialog come from the one shared owner (adapters/confirmation.py); only these values cross.
+ *
+ * PR 16 (A10–A12) adds the presentation-only link fields, computed by the Python side once per
+ * presentation (a 0.5 s discovery probe, never per item): `url` is the observer UI's deep link
+ * to the run's decision row — `http://127.0.0.1:<port>/app/?run=<12 hex>&decision=<12 hex>` —
+ * or `null` when no live observer of this home answers; `run12` is the run's compact id the
+ * fallback names. `null` is not absence: the transport requires both members, and a host renders
+ * its fallback lines from them. They never cross to the core: the receipt carries the digest. */
+export interface EvidenceDocument {
+  digest: string;
+  path: string;
+  url: string | null;
+  run12: string | null;
+  residuals?: number;
+}
+/** The link a presentation may carry, checked exactly as the private response validator is: a
+ * loopback URL the discovery helper built (never an arbitrary host), or nothing. */
+const OBSERVER_URL = /^http:\/\/127\.0\.0\.1:[0-9]{1,5}([/#?].*)?$/;
+const COMPACT_RUN = /^[0-9a-f]{12}$/;
+const isUrlOrNull = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && OBSERVER_URL.test(value));
+const isRunOrNull = (value: unknown): value is string | null =>
+  value === null || (typeof value === "string" && COMPACT_RUN.test(value));
+/** The presentation is recorded (and has spent one interaction) — and its document is written — or the core refused it. */
 type EvidencePresentationResponse =
-  | Readonly<{ type: "evidence_presentation"; receipt_id: string; items: EvidenceItem[] }>
+  | Readonly<{ type: "evidence_presentation"; receipt_id: string; items: EvidenceItem[]; document: EvidenceDocument }>
   | Readonly<{ type: "evidence_refused"; result: Record<string, unknown> }>;
 /** The receipt was admitted (`evidence_receipt`), or the answers granted nothing (`evidence_none`). */
 type EvidenceConfirmationResponse =
@@ -103,11 +132,41 @@ const typed = (type: string) => (value: unknown) => object(value) && value.type 
 const envelope = (value: unknown) => object(value) && value.protocol === "empirica/v2"
   && string(value.request_id) && object(value.result);
 
+/** The private governance presentation may carry the bound document the Python bridge wrote
+ * (ADR-0072, PR 09: full digest, absolute path, core-owned priors, and the parsed document's
+ * `question` — `approve` or `confirm_amendment`, the core-derived discriminator (M1, review 2)
+ * that chooses which dialog is shown — never text, and never three `priors` any host may
+ * recompute) and, when the pair could not be proven or published, this marker instead. This
+ * validator is the transport's sole authority for the shape; an answer whose presentation
+ * carries anything else is invalid before any mediator reads it. */
+const GOVERNANCE_DIGEST = /^sha256:[0-9a-f]{64}$/;
+function governanceEnvelope(value: unknown): boolean {
+  if (!envelope(value)) return false;
+  const result = (value as Record<string, unknown>).result as Record<string, unknown>;
+  const presentation = result.presentation;
+  if (presentation === undefined) return true;      // model-face stripping already happened, or no dialog ran
+  if (!object(presentation)) return false;
+  if (presentation.document_unavailable !== undefined && presentation.document_unavailable !== true)
+    return false;
+  const document = presentation.document;
+  if (document === undefined) return true;
+  if (!object(document) || typeof document.digest !== "string"
+    || !GOVERNANCE_DIGEST.test(document.digest)
+    || typeof document.path !== "string" || !document.path.startsWith("/")
+    || (document.question !== "approve" && document.question !== "confirm_amendment")
+    || !isUrlOrNull(document.url) || !isRunOrNull(document.run12)
+    || "text" in document)
+    return false;
+  const priors = document.priors;
+  return priors === undefined || priors === null || (object(priors)
+    && Object.values(priors).every(prior => typeof prior === "number"));
+}
+
 /** Shape predicate per private operation; this table is the sole private-response validator. */
 const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => boolean } = {
   classify_identity: (value) => value === null || (object(value) && string(value.identity)),
-  governance_context: envelope,
-  governance_decision: envelope,
+  governance_context: governanceEnvelope,
+  governance_decision: governanceEnvelope,
   audit_prepare: (value) => object(value) && (
     (value.type === "audit_refused" && value.reason === "runtime_changed")
     || (value.type === "audit_excluded" && string(value.message) && Array.isArray(value.identities)
@@ -128,7 +187,16 @@ const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => b
   evidence_presentation: (value) => object(value) && (
     (value.type === "evidence_presentation" && string(value.receipt_id) && Array.isArray(value.items)
       && value.items.every((item) => object(item) && string(item.id)
-        && (item.subject === "research" || item.subject === "claim")))
+        && (item.subject === "research" || item.subject === "claim"))
+      && object(value.document) && typeof value.document.digest === "string"
+      && GOVERNANCE_DIGEST.test(value.document.digest)
+      && typeof value.document.path === "string" && value.document.path.startsWith("/")
+      && isUrlOrNull((value.document as Record<string, unknown>).url)
+      && isRunOrNull((value.document as Record<string, unknown>).run12)
+      && !("text" in value.document)
+      && (value.document.residuals === undefined || typeof (value.document as Record<string, unknown>).residuals === "number" &&
+        Number.isSafeInteger((value.document as Record<string, unknown>).residuals as number)
+        && (value.document as Record<string, unknown>).residuals as number >= 0))
     || (value.type === "evidence_refused" && object(value.result))),
   evidence_confirmation: (value) => object(value)
     && (value.type === "evidence_none" || (value.type === "evidence_receipt" && object(value.result))),

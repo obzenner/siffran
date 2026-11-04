@@ -9,7 +9,7 @@ import { CONTRACTS as dir } from "./paths.mjs";
 
 export const schemas = Object.fromEntries(["summary", "row", "page", "run"].map((n) => [n, JSON.parse(readFileSync(new URL(`${n}.schema.json`, dir), "utf8"))]));
 const byId = Object.fromEntries(Object.values(schemas).map((s) => [s.$id, s]));
-const KNOWN = new Set(["$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf", "properties", "required", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "minLength", "pattern"]);
+const KNOWN = new Set(["$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf", "properties", "required", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "minLength", "pattern", "allOf"]);
 const MAX_ITEMS = 3;
 const name = (doc) => doc.$id.split("/").pop();
 
@@ -68,6 +68,28 @@ export function arbitraries({ full = false, seen = null } = {}) {
     if (full && types.length > 1) types = types.filter((t) => t !== "null");
     return fc.oneof(...types.map((t) => typed(t, n, doc, pointer)));
   };
+  /** The member-to-member couplings a node's `allOf` states (the Python twin is
+   * `scripts/ui_view_strategies.Strategies._implications`): each entry must be the contract's one
+   * conditional form - `if` a `{const}` or a `{not: {const}}` on one required member, `then` a
+   * schema for exactly one other member - the coupling of `document.body` to `document.status`
+   * (PR 15, A7: only `verified` carries a parsed body). Any other shape is refused, not guessed. */
+  const implications = (n, doc, pointer) => {
+    const rules = [];
+    for (const entry of n.allOf ?? []) {
+      const gone = (why) => { throw new Error(`${doc.$id}#${pointer}: ${why}`); };
+      if (Object.keys(entry).join(",") !== "if,then") gone("an allOf entry that is not this contract's conditional");
+      const [member, guard] = Object.entries(entry.if.properties)[0];
+      if (entry.if.required.length !== 1 || entry.if.required[0] !== member)
+        gone("an allOf guard must name its own member required");
+      if (Object.keys(entry.then.properties).length !== 1) gone("an allOf guard then names one member");
+      const [target, schema] = Object.entries(entry.then.properties)[0];
+      if ("const" in guard) rules.push({ member, mode: "const", value: guard.const, target, schema });
+      else if ("not" in guard && "const" in guard.not) rules.push({ member, mode: "not", value: guard.not.const, target, schema });
+      else gone("an allOf guard is a const or a not-const only");
+    }
+    return rules;
+  };
+
   const typed = (kind, n, doc, pointer) => {
     switch (kind) {
       case "null": return fc.constant(null);
@@ -86,6 +108,23 @@ export function arbitraries({ full = false, seen = null } = {}) {
       }
       case "object": {
         const props = n.properties ?? {}, required = new Set(n.required ?? []);
+        const rules = implications(n, doc, pointer);
+        if (rules.length) {
+          if (new Set(rules.map((r) => `${r.member}:${r.target}`)).size !== 1)
+            throw new Error(`${doc.$id}#${pointer}: coupling rules over more than one member pair`);
+          const { member: driver, target } = rules[0];
+          if (!required.has(driver) || !required.has(target) || n.additionalProperties !== false)
+            throw new Error(`${doc.$id}#${pointer}: a coupling over members its own object does not require, or not closed`);
+          const record = {};
+          for (const [k, v] of Object.entries(props)) if (k !== driver && k !== target) record[k] = node(v, doc, `${pointer}/properties/${k}`);
+          const rest = fc.record(record, full ? {} : { requiredKeys: [...required].filter((k) => k !== driver && k !== target) });
+          return node(props[driver], doc, `${pointer}/properties/${driver}`).chain((a) => {
+            const rule = rules.find((r) => (r.mode === "const" ? a === r.value : a !== r.value));
+            if (!rule) throw new Error(`${doc.$id}#${pointer}: no coupling guard covers ${a}`);
+            return fc.tuple(rest, node(rule.schema, doc, `${pointer}/properties/${target}`))
+              .map(([others, value]) => ({ ...others, [driver]: a, [rule.target]: value }));
+          });
+        }
         const record = {};
         for (const [k, v] of Object.entries(props)) record[k] = node(v, doc, `${pointer}/properties/${k}`);
         const whole = fc.record(record, full ? {} : { requiredKeys: [...required] });

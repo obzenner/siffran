@@ -12,6 +12,7 @@ fixed 8/1/2 envelope that inputs may only narrow.
 """
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from types import MappingProxyType
 from typing import Any, NamedTuple
@@ -33,6 +34,8 @@ DEFAULT_CEILINGS = MappingProxyType(
 HUMAN_CONFIGURATION = "human_configuration"
 UNAVAILABLE_CAPABILITY = "unavailable"
 APPROVAL_KINDS = ("host_ui", "auto")
+#: The recorded document binding's shape (ADR-0072, PR 07: ``receipts[].document_digest``).
+_DOCUMENT_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 
 
 class Budget(NamedTuple):
@@ -125,10 +128,29 @@ def _material_revision(goal: str, current: Mapping, proposal: Mapping) -> bool:
     return not _initial_sizing(current, proposal)
 
 
+def _ceilings_as_ints(budgets: Mapping) -> dict:
+    """Every ceiling as the exact ``int`` the HITL document renders (Copilot X2, #48).
+
+    The wire's ``integer`` admits integral floats, so a sized proposal can arrive carrying
+    ``8.0``; run/4 stores each ceiling as the one representation the document's renderer demands
+    (``core.hitl._integer``): before this normalization an admitted ``8.0`` made a context fetch
+    Fault with ``invalid_request`` and a changed-context fetch raise after its own commit.
+    ``revise`` is the one admission point every proposal path flows through — author
+    ``configure_run`` resolutions, human amendments, auto — so state, dialog rows and the
+    document agree. A non-integral float, a bool or a non-number stays exactly as it arrived:
+    the request schema and the renderer refuse it elsewhere, fail closed."""
+    normalized = plain(budgets)
+    for name, value in normalized.items():
+        if type(value) is float and value.is_integer():
+            normalized[name] = int(value)
+    return normalized
+
+
 def revise(goal: str, current: Mapping, *, proposal=None, context=None) -> dict:
     value = plain(current)
     if proposal is not None:
         value["proposal"] = plain(proposal)
+        value["proposal"]["budgets"] = _ceilings_as_ints(value["proposal"]["budgets"])
     if context is not None:
         value["context"] = plain(context)
     observed = proposal_digest(goal, value)
@@ -327,6 +349,20 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping,
         return None if expected == "host_ui" else "governance.approval_unavailable"
     if expected == "host_ui" and prior is None:
         return "governance.receipt_replay"
+    if outcome == "amend" and "amendment" in decision:
+        amendment = decision["amendment"]
+        # Copilot X1 (#47): an explicit amendment that changes no ceiling names numbers the
+        # standing proposal already records — a replay of the standing configuration, so it
+        # must not reopen authority nor write a receipt. Committing it would append an amend
+        # receipt whose revision never advanced (``revise`` refuses a no-op), and run/4's
+        # invariant then classifies the whole run corrupt. A human amendment never reaches this:
+        # ``resolve_submission`` resolves an unchanged human edit to ``approve`` — the no-op
+        # host_ui amend has no refusal reason of its own to mirror — so only an explicit auto
+        # amendment can arrive here; it is refused before any mutation, nothing spent.
+        if (isinstance(amendment, Mapping)
+                and isinstance(amendment.get("budgets"), Mapping)
+                and amendment["budgets"] == governance["proposal"]["budgets"]):
+            return "governance.receipt_replay"
     return None
 
 
@@ -338,6 +374,31 @@ def invariant(doc: Mapping) -> bool:
         return False
     for receipt in receipts:
         if receipt["approval_kind"] not in APPROVAL_KINDS:
+            return False
+        # The amendment's superseded ceilings ride their receipt (ADR-0072, run/4): an amend
+        # receipt must name them — after the revise they can be derived nowhere else — and no
+        # other outcome may carry them. An amend receipt always names a strictly earlier revision
+        # than the one its amendment brought about.
+        if receipt["outcome"] == "amend":
+            superseded = receipt.get("superseded_budgets")
+            if (not isinstance(superseded, Mapping) or set(superseded) != set(CEILINGS)
+                    or receipt["plan_revision"] >= value["plan_revision"]):
+                return False
+        elif receipt.get("superseded_budgets") is not None:
+            return False
+        # The document binding the decision named (ADR-0072, receipts[].document_digest; the
+        # contract step, PR 13): every host_ui receipt names the sha256 of the bytes the core
+        # rendered and verified — a human approval without its document cannot decode — and an
+        # auto receipt records null exactly: auto answers no human's question. The gate side
+        # (the application) refuses a decision whose digest differs from the one its present
+        # receipt recorded, so a finalized receipt keeps the document its present bound; the
+        # member's presence is the state schema's rule, checked at every decode.
+        recorded = receipt.get("document_digest")
+        if receipt["approval_kind"] == "auto":
+            if recorded is not None:
+                return False
+        elif not (isinstance(recorded, str)
+                  and _DOCUMENT_DIGEST.fullmatch(recorded) is not None):
             return False
         # The presentation fingerprint is bound to the immutable receipt kind.
         if ((receipt["presentation_fingerprint"] is None)

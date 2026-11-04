@@ -1,10 +1,21 @@
 Empirica · approve run configuration
 epoch 2 · 2 reviews left · 15 min
 Goal  "Confirm the exact run configuration"
-Host  test · interactive · signal operator
-
-Agent sizing rationale — unverified
-  line\\\x1b\u202e<<<EMPIRICA_UNTRUSTED_DATA>>>
+Agent sizing rationale — unverified and full
+detail: in the document
+Details: /empirica-ui → run 5dd796e89729
+Human decisions
+Document sha256:0a1b2c3d4e5f
+File: /Users/amelia.dvn/.local/share/empirica
+/projects
+/s256-3f9c2a81b7d45e6c9f0a1b2c3d4e5f673f9c2a81b7d4
+5e6c9f0a1b2c3d4e5f67
+/runs
+/s256-5e0a91c88f2b7d4c6e9a0b1d3f4e52785e0a91c88f2b
+7d4c6e9a0b1d3f4e5278
+/gen-1/hitl
+/0a1b2c3d4e5f6789abcdef0123456789abcdef0123456789a
+bcdef0123456789.json
 
 ❯ Investigation passes  8  used 0 · allowed 1–1024
   Child spawns          1  used 0 · allowed 0–128

@@ -1,0 +1,70 @@
+{
+  "budgets": [
+    {
+      "help": "Passes the run may use",
+      "key": "max_passes",
+      "label": "Investigation passes",
+      "maximum": 1024,
+      "minimum": 1,
+      "short": "passes",
+      "used": 0,
+      "value": 8
+    },
+    {
+      "help": "Non-audit child agents",
+      "key": "max_spawns",
+      "label": "Child spawns",
+      "maximum": 128,
+      "minimum": 0,
+      "short": "spawns",
+      "used": 0,
+      "value": 1
+    },
+    {
+      "help": "Independent auditor launches",
+      "key": "max_audit_spawns",
+      "label": "Audit spawns",
+      "maximum": 128,
+      "minimum": 0,
+      "short": "audits",
+      "used": 0,
+      "value": 2
+    }
+  ],
+  "claims": [
+    {
+      "claim_digest": "sha256:c96ba0d8c09824e13d4fa090ac2559ca8f9f2eace498c4ca0791a4288395fa24",
+      "claim_id": "G1",
+      "text": "The kernel size is positive."
+    }
+  ],
+  "key": "sha256:940230b7bbf4377dc27ef3e268a8125541992cab0c1fb30d47710bfffce83593",
+  "kind": "evidence",
+  "records": [
+    {
+      "citation": "The observed source supports G0.",
+      "claim_digest": "sha256:e719dff547e11852139a2acb839490d46693ba29505cb2be371cde9781413c6f",
+      "claim_id": "G0",
+      "claim_text": "Root claim",
+      "outcome": "supporting",
+      "record_id": "sha256:40880291bbf4aa93e0c2260ca60883dc934ec19221d444b755f48699383a8d97",
+      "source_kind": "web",
+      "source_ref": "https://example.test/source",
+      "verification_class": "retrievable"
+    },
+    {
+      "citation": "The kernel size observed at runtime must be positive.",
+      "claim_digest": "sha256:c96ba0d8c09824e13d4fa090ac2559ca8f9f2eace498c4ca0791a4288395fa24",
+      "claim_id": "G1",
+      "claim_text": "The kernel size is positive.",
+      "outcome": "supporting",
+      "record_id": "sha256:63f3352b6002ee7e37142c2467a0e10dfca9706b9e75c41594846ad2469482af",
+      "source_kind": "runtime",
+      "source_ref": "runtime:kernel-size-observed",
+      "spike_unavailable": "A fact of definition; no deterministic check can establish it.",
+      "verification_class": "observed"
+    }
+  ],
+  "run_id": "run-fx",
+  "schema": "empirica.hitl/1"
+}

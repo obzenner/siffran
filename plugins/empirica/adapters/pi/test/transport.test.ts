@@ -303,6 +303,8 @@ test("HOST_PROFILE_ID is the contract's pi profile with no default", () => {
 test("assertPrivateResponse accepts the real private shapes and rejects every malformed one", async () => {
   const { assertPrivateResponse } = await import("../src/private-transport.ts");
   const plan = { child_id: "c", role_profile: "empirica.empirica-auditor", operation_id: "o", argument: {} };
+  const presented = (document: unknown, items: unknown[] = [{ subject: "research", id: "sha256:x" }]) =>
+    ({ type: "evidence_presentation", receipt_id: "p-1", items, ...(document === undefined ? {} : { document }) });
   const accepted: Array<[PrivateOperation, unknown]> = [
     ["classify_identity", null],
     ["classify_identity", { identity: "anthropic/claude" }],
@@ -316,6 +318,22 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["audit_reject", { type: "audit_terminal" }],
     ["audit_failure", { type: "audit_terminal" }],
     ["child_event", { protocol: "empirica/v2", request_id: "trusted-child", result: { type: "Allow" } }],
+    // PR 12: a presentation answer names the bound document — a full sha256 digest and an absolute
+    // path, and nothing else crossing the transport (a terminal batch also its residual count).
+    // PR 16: the document also names the link fields — `url` (null as the honest "no link", or
+    // the observer's own loopback deep link) and `run12` (the run's 12-hex compact id).
+    ["evidence_presentation", { type: "evidence_presentation", receipt_id: "p-1",
+      items: [{ subject: "research", id: "sha256:x" }], document: { digest: "sha256:" + "a".repeat(64),
+        path: "/Users/amelia.dvn/empirica-projects/p/r/gen-1/hitl/a.json", url: null, run12: null } }],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64),
+      path: "/var/empirica/hitl/a.json", residuals: 4, url: null, run12: "0".repeat(12) })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64),
+      path: "/var/empirica/hitl/a.json",
+      url: "http://127.0.0.1:8765/app/?run=" + "0".repeat(12) + "&decision=" + "1".repeat(12),
+      run12: "0".repeat(12) })],
+    ["evidence_presentation", { type: "evidence_refused", result: { failure: "presentation_failed" } }],
+    ["evidence_confirmation", { type: "evidence_receipt", result: { type: "Allow" } }],
+    ["evidence_confirmation", { type: "evidence_none" }],
   ];
   for (const [operation, value] of accepted)
     assert.deepEqual(assertPrivateResponse(operation, value), value, operation);
@@ -331,7 +349,59 @@ test("assertPrivateResponse accepts the real private shapes and rejects every ma
     ["child_event", { result: { type: "Allow" } }],
     ["child_event", []],
     ["audit_verdict", null],
+    // PR 12: a presentation without a valid document pair is invalid at the boundary — bytes must
+    // never cross the transport, and a digest must be proven before a dialog may show it.
+    ["evidence_presentation", presented({ digest: "sha256:0a1b2c3d4e5f", path: "/var/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "a".repeat(60), path: "/var/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "empirica-projects/r/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64) })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "/var/hitl/a.json",
+      text: '{"kind": "hitl_document"}' })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "/var/hitl/a.json",
+      residuals: "4" })],
+    // PR 16: no link members is not the fallback — `url: null` is; a missing member is refused.
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "/var/hitl/a.json" })],
+    ["evidence_presentation", presented({ digest: "sha256:" + "a".repeat(64), path: "/var/hitl/a.json",
+      url: "http://10.0.0.1:1/app/", run12: null })],
+    ["evidence_presentation", presented(undefined)],
   ];
   for (const [operation, value] of rejected)
     assert.throws(() => assertPrivateResponse(operation, value), /response is invalid/, operation);
+});
+
+test("the governance presentation document names its question and never carries text", async () => {
+  const { assertPrivateResponse } = await import("../src/private-transport.ts");
+  const envelope = (document: unknown) => structuredClone({
+    protocol: "empirica/v2", request_id: "trusted-governance",
+    result: { type: "Allow", run: { id: "r" },
+      presentation: { dialog: {}, scope: null, document } } });
+  const goodDigest = "sha256:" + "a".repeat(64);
+  const goodPath = "/home/projects/s256-" + "a".repeat(64) + "/runs/s256-" + "b".repeat(64)
+    + "/gen-1/hitl/" + "c".repeat(64) + ".json";
+  // m11 (review 2): the TS never receives the document text — the human opens the file — and
+  // M1: the bound document names the core-derived question that chooses the form (review-2
+  // item 7). Anything else is refused before any mediator reads it.
+  // PR 16 (A10–A12): the document also names the presentation-only link fields — `url`, the
+  // observer's own loopback deep link, `null` as the honest "no link", and `run12`, the run's
+  // 12-hex compact id — or it is not the shape any dialog may render Details from.
+  assertPrivateResponse("governance_context", envelope(
+    { digest: goodDigest, path: goodPath, priors: null, question: "approve", url: null, run12: null }));
+  assertPrivateResponse("governance_context", envelope(
+    { digest: goodDigest, path: goodPath, priors: { max_passes: 8 }, question: "confirm_amendment",
+      url: "http://127.0.0.1:18770/app/?run=" + "0".repeat(12) + "&decision=" + "1".repeat(12),
+      run12: "0".repeat(12) }));
+  const rejected = [
+    { digest: goodDigest, path: goodPath, priors: null,
+      question: "approve", text: "{\"question\": \"approve\"}" },
+    { digest: goodDigest, path: goodPath, priors: null },
+    { digest: goodDigest, path: goodPath, priors: null, question: "amend" },
+    { digest: goodDigest, path: goodPath, priors: null, question: "approve" },
+    { digest: goodDigest, path: goodPath, priors: null, question: "approve", url: null,
+      run12: "not-twelve-hex" },
+    { digest: goodDigest, path: goodPath, priors: null, question: "approve", run12: null,
+      url: "http://evil.example:18770/" },
+];
+  for (const document of rejected)
+    assert.throws(() => assertPrivateResponse("governance_context", envelope(document)),
+      /response is invalid/, JSON.stringify(document));
 });

@@ -19,15 +19,28 @@ from unittest import mock
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent), str(HERE.parents[1])]
 
+import json  # noqa: E402
+from core.governance import expected_approval_kind  # noqa: E402
+
+from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
+
+from adapters import bridge  # noqa: E402
 from adapters.git.artifact_repo import GitArtifactRepository  # noqa: E402
 from adapters.observer import indexer as indexer_module  # noqa: E402
 from adapters.observer.source import StoreSource  # noqa: E402
+from adapters.state import hitl as hitl_sidecar  # noqa: E402
+from adapters.state.hitl import HitlDocuments  # noqa: E402
+from application import protocol as _proto  # noqa: E402
 from application.location import storage_id  # noqa: E402
-from application.observer import Observer  # noqa: E402
-from application.observer_index import utc_day  # noqa: E402
+from application.observer import HITL_MAX_BYTES, Observer, run_key  # noqa: E402
+from application.observer_index import sheet_tag, utc_day  # noqa: E402
 from core.records import RunKey  # noqa: E402
 from fs_store import _git, build_fs_store, replace_run  # noqa: E402
-from observer_store import BOUND, body  # noqa: E402
+from application.location import decode_handle  # noqa: E402
+from observer_store import BOUND, body, _graph  # noqa: E402
+import subprocess  # noqa: E402
+
+force_absent_sandbox_home()
 
 RUNS, REPOS = 60, 20  # three runs a repository: two active templates and a stopped one
 
@@ -43,6 +56,142 @@ def setUpModule():
 
 def tearDownModule():
     _SHARED["tmp"].cleanup()
+
+
+class DecisionDocumentFsTests(unittest.TestCase):
+    """PR 15 (operator findings F2 and F3; amendments A5 and A6): the store's side of decision
+    documents. The shared fixture's runs were approved through the bridge's own drives - no host
+    bound a sidecar beside them - so every digest they carry reads ``missing``; the real-run cases
+    below bind a document with the adapters' own publish path and then face the observer with each
+    damaged-store state (tampered, removed, oversized, a symlinked sidecar): the statuses stay
+    honest, serve a body only beside ``verified``, and the /api/run ETag answers each transition
+    the moment it happens, with no read ever writing anything and a fresh observation reading the
+    same answer."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.store = _SHARED["store"]
+
+    def test_the_shared_fixture_reads_every_asked_document_missing_and_creates_nothing(self):
+        observer = Observer(StoreSource(self.store.home))
+        details = observer.details()
+        self.assertTrue(details)
+        asked = 0
+        for key, detail in details.items():
+            for row in detail["decisions"]:
+                asked += 1
+                self.assertEqual(row["document"]["status"], "missing", (key, row["asked"]))
+                self.assertIsNone(row["document"]["body"])
+                self.assertIn("path", row["document"])
+                self.assertTrue(row["document"]["path"].endswith(".json"), row["document"]["path"])
+        self.assertTrue(asked, "the fixture holds approved runs, each with its dialog's digest")
+        # the read of a missing document creates nothing: no generation gained a hitl directory
+        for runs in (self.store.home / "projects").glob("*/runs"):
+            for run in runs.iterdir():
+                for generation in run.iterdir():
+                    self.assertFalse((generation / "hitl").exists(), generation)
+        key = next(iter(details))
+        self.assertEqual(sheet_tag(observer.sheet(key)), sheet_tag(observer.sheet(key)),
+                         "two reads of one store state answer with one ETag")
+
+    def _governed_run(self, tmp: Path, receipt: str):
+        """A run whose configuration was published beside it through the adapters' own write path
+        (``adapters.state.hitl.publish``, the helper every host's binding call uses) and presented
+        to its human, unanswered."""
+        import governance_setup
+        home = tmp / "home"
+        home.mkdir(parents=True)
+        repo = tmp / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+        environment = {"EMPIRICA_HOME": str(home), "EMPIRICA_REPO_DIR": str(repo)}
+        with mock.patch.dict(os.environ, environment):
+            profile = _proto.host_profile_id("claude-code")
+            service = bridge.build_service(profile)
+            envelope_request = {"protocol": "empirica/v2", "request_id": "fs-documents"}
+
+            def dispatch(command):
+                response = service.dispatch({**envelope_request, "command": command})
+                self.assertEqual(response["result"]["type"], "Allow", response)
+                return response["result"]
+
+            run_id = dispatch({"type": "StartRun", "control_mode": "deliberative",
+                               "goal": "show the document beside the decision",
+                               "invocation": governance_setup.invocation_for(profile),
+                               "selector": {"project": "atlas", "session": "governed"}})["run"]["id"]
+            dispatch({"type": "ObserveAction", "run_id": run_id,
+                      "action": {"kind": "route", "reason": "supplied context"}})
+            dispatch({"type": "ObserveAction", "run_id": run_id,
+                      "action": {"kind": "graph", "payload": _graph("C0", [("C0", "ordinary", "One path.")], [])}})
+            dispatch({"type": "ObserveAction", "run_id": run_id,
+                      "action": {"kind": "configure_run", "budgets": {"max_passes": 4, "max_spawns": 0,
+                                                                     "max_audit_spawns": 1},
+                                 "rationale": governance_setup.SIZED_RATIONALE}})
+            context = {"author": governance_setup.AUTHOR,
+                       "ingress": _proto.host_profile(profile)["approval_ingress"]}
+            asked = service.trusted_governance_context(run_id=run_id, payload=context)["result"]
+            assert asked.get("type") == "Allow", asked
+        pair = asked["presentation"]["document"]
+        self.assertIn("text", pair, asked)  # the claude-code binding answers the pair in full
+        published = hitl_sidecar.publish(HitlDocuments(home), run_id, pair)
+        self.assertIsNotNone(published, "the pair published beside the run")
+        g = asked["run"]["governance"]
+        decision = {"run_id": run_id, "receipt_id": receipt, "proposal_digest": g["proposal_digest"],
+                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g),
+                    "document_digest": pair["digest"]}
+        with mock.patch.dict(os.environ, environment):
+            service = bridge.build_service(profile)
+            presented = service.trusted_governance_decision(run_id=run_id, payload={**decision, "outcome": "present"})
+            self.assertEqual(presented["result"]["type"], "Allow", presented)
+        return home, run_id, pair["digest"], published.path
+
+    def test_a_real_sidecar_serves_the_bound_document_and_each_damaged_state_honestly(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            home, run_id, digest, published = self._governed_run(Path(tmp), "rcpt-fs")
+            key = run_key(decode_handle(run_id))
+            observer = Observer(StoreSource(home))
+            row = next(d for d in observer.sheet(key)["decisions"] if d["plan"] is not None)
+            self.assertEqual((row["asked"], row["answer"]), ("approve_configuration", "later"))
+            document = row["document"]
+            self.assertEqual((document["digest"], document["status"]), (digest, "verified"))
+            self.assertEqual(document["path"], str(published))
+            parsed = json.loads((published).read_bytes())
+            self.assertEqual(document["body"], parsed, "the served body is the sidecar's own parsed document")
+            verified_tag = sheet_tag(observer.sheet(key))
+
+            def status_of(observer=observer, key=key, digest=digest):
+                sheet = observer.sheet(key)
+                document = next(d for d in sheet["decisions"] if d["plan"] is not None)["document"]
+                return document["status"], document["body"], sheet_tag(sheet)
+
+            # a tampered file: other bytes at the digest's name
+            os.chmod(published, 0o600)
+            published.write_bytes(published.read_bytes() + b" x")
+            self.assertEqual(status_of()[0], "mismatch", "the append changed the digest's bytes")
+            self.assertIsNone(status_of()[1])
+            # removed: the store no longer holds the document
+            os.unlink(published)
+            self.assertEqual(status_of()[0], "missing")
+            # oversized: a planted file over the read cap is refused before it is read
+            os.close(os.open(published, os.O_WRONLY | os.O_CREAT, 0o600))
+            with open(published, "wb") as planted:
+                planted.write(b" " * (HITL_MAX_BYTES + 1))
+            self.assertEqual(status_of()[0], "too_large")
+            # a symlinked sidecar directory: refused, named unreadable, never followed
+            os.unlink(published)
+            hitl_dir = published.parent
+            moved = hitl_dir.parent / "moved"
+            moved.mkdir()
+            os.rename(hitl_dir, moved / "hitl")
+            os.symlink(moved / "hitl", hitl_dir)
+            self.assertEqual(status_of()[0], "unreadable")
+            # every transition above changed the ETag of the same published detail
+            self.assertNotEqual(status_of()[2], verified_tag)
+            # and a fresh observation of the same store answers the same statuses
+            fresh = Observer(StoreSource(home))
+            self.assertEqual(status_of(fresh)[0], "unreadable")
+            # nothing a read wrote: the symlink the hand planted is still a symlink, unread, unfollowed
+            self.assertTrue(os.path.islink(hitl_dir), hitl_dir)
 
 
 class FsStoreTests(unittest.TestCase):

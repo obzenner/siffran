@@ -219,12 +219,22 @@ class StaticPathTests(unittest.TestCase):
             self.assertIsNone(static_path(root, "/app/inner.json"), "a link to a dotfile inside the root")
 
     def test_about_names_the_observer_and_which_store_it_observes(self):
-        served = _Served(Sources(None, identity="sha256:abc"))
+        sources = Sources(None, identity="sha256:abc")
+        served = _Served(sources)
         try:
             reply, body = served.get("/api/about")
-            self.assertEqual((reply.status, json.loads(body)),
+            answer = json.loads(body)
+            instance = answer.pop("instance")
+            # PR 16 (A10): the about answer also names which *home* the store lives in (independent
+            # of ``--repo``), a random per-process ``instance`` token, and the ``capabilities`` a
+            # host form's discovery probe may require (``hitl/1``: each decision's bound document).
+            self.assertEqual((reply.status, answer),
                              (200, {"observer": "empirica-observer", "identity": "sha256:abc",
+                                    "home_identity": None, "capabilities": ["hitl/1"],
                                     "sources": {"demo": "fixtures"}}))
+            self.assertRegex(instance, r"\A[0-9a-f]{32}\Z",
+                            "an instance is a random 32-hex token, one per server process")
+            self.assertEqual(instance, sources.instance, "about answers its own token")
         finally:
             served.close()
 

@@ -36,6 +36,7 @@ export const PATHS = {
   why: [["run", "dropped", "[]", "why"]],
   answer: [["run", "decisions", "[]", "answer"]],
   effect: [["run", "decisions", "[]", "effect"]],
+  document: [["run", "decisions", "[]", "document", "status"]],
   // the profiles a spike backend may be bound to: the backend's own list, which validates it (app/client.js); the
   // profiles a claim's request and result name must agree with it (tests/contract.test.mjs)
   profile: [["run", "spike_backend", "profile_id"]],

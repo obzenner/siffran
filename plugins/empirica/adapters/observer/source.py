@@ -32,11 +32,12 @@ from typing import Any
 from adapters.execution import FilesystemWorkspace
 from adapters.git.artifact_repo import GitArtifactRepository, GitError, toplevel
 from adapters.state import identity
+from adapters.state.hitl import HitlDocuments
 from adapters.state.locations import Locations
 from adapters.state.repository import GEN_PREFIX, FilesystemRunRepository
 from adapters.state.timeline import TIMELINE, Timeline
 from application.location import storage_id
-from application.observer import Project
+from application.observer import HITL_MAX_BYTES, Project, document_entry
 from core.records import Corrupt, RunKey
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class StoreSource:
     def __init__(self, home: Path, repos: Iterable[Path] = ()) -> None:
         self._home = Path(home)
         self._runs = FilesystemRunRepository(self._home)
+        self._documents = HitlDocuments(self._home)  # PR 15: the run's own HITL sidecar, read-only
         self._locations = Locations(self._home)
         self._timeline = Timeline(self._home)
         self._given: dict[str, Path] = {}  # project -> the working tree given for it
@@ -290,6 +292,25 @@ class StoreSource:
         except GitError as exc:
             return Corrupt(str(exc))
 
+    def document(self, key: RunKey, document_digest: str) -> dict[str, Any]:
+        """One decision's HITL document (PR 15, operator finding F2; A6): the sidecar file the
+        host's binding call wrote beside the run, read no-follow, unblocking and bounded by
+        ``HITL_MAX_BYTES``, its digest verified from the bytes themselves. The statuses are the
+        store's own honest answers - ``verified`` with the parsed body only when the bytes both
+        hash to the digest and parse as an ``empirica.hitl/1`` document, ``missing``,
+        ``mismatch``, ``too_large`` - and a hostile or damaged read (a symlink, a special file, an
+        unreadable path) is ``unreadable``, never an exception a reader's page would spend. No
+        read writes anything: the store is read at each /api/run only, once per distinct digest."""
+        try:
+            document_path = str(self._documents.path(key, document_digest))
+        except ValueError:  # not a document identity: the row's own digest would be malformed
+            return document_entry(document_digest, "unreadable", None, _UNREADABLE_DOCUMENT_PATH)
+        try:
+            read_status, data = self._documents.read_bounded(key, document_digest, HITL_MAX_BYTES)
+        except (OSError, ValueError):  # a symlinked path, a special file, an unreadable path
+            return document_entry(document_digest, "unreadable", None, document_path)
+        return document_entry(document_digest, read_status, data, document_path)
+
     def workspace(self, key: RunKey) -> Any:
         """The run's recorded workspace, else its repository's working tree; ``None`` when there is
         neither or it has gone (the observer reports a run that then needs it as
@@ -302,6 +323,11 @@ class StoreSource:
             except OSError:
                 self._workspaces[root] = None
         return self._workspaces[root]
+
+
+#: The ``path`` member of a document that is refused before its sidecar path could be named (a
+#: malformed digest on a row): the reader sees a defined string, never an exception's text.
+_UNREADABLE_DOCUMENT_PATH = "<the run's HITL sidecar, path refused>"
 
 
 def _directories(path: str) -> list[os.DirEntry]:

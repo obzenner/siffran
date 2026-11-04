@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/3",
+  "state_schema": "empirica.run/4",
   "goal": "Prove refunded on non-launch_rejected state is rejected.",
   "invocation": {
     "host": "test",

@@ -211,7 +211,8 @@ test("the claims are the support graph: each listed once, under the claim it sup
 test("a decision is attached to what it decides: the claim by its words (a link to it), the source, or the plan; never a bare id", () => {
   const s = sheets[scenarios.verification];
   const html = sheetHtml(ctx(s));
-  const section = /data-section="decisions"[\s\S]*?<\/details>/.exec(html)[0];
+  // the decisions section's rows hold the documents' own nested `<details>`, so the section runs to the next one
+  const section = html.slice(html.indexOf('data-section="decisions"'), html.indexOf('data-section="attempts"'));
   for (const d of s.decisions.filter((x) => x.claim)) {
     const c = s.row.claims.find((x) => x.id === d.claim);
     assert.ok(section.includes(`data-decision-claim="${d.claim}"`) && visible(section).includes(c.text.slice(0, 30)), d.claim);
@@ -280,8 +281,134 @@ test("a claim of a failed-audit run is 'In a failed audit', never 'Audit failed'
   const audit = sectionText(sheetHtml(ctx(s)), "audit", "claims");
   assert.ok(audit.includes(copy["audit.failed.label"]), "the run-level audit verdict still reads \"Audit failed\"");
 });
+// PR 15 (operator findings F2 and F3): every decision row carries its immutable document, and `later` reads "Not answered".
+test("every decision row shows its document's status; a verified one shows the very form the human saw", () => {
+  const verified = [];
+  for (const [key, s] of Object.entries(sheets)) {
+    if (!(s.decisions ?? []).some((d) => d.document)) continue;
+    const html = sheetHtml(ctx(s));
+    const rendered = text(html);
+    assert.ok(rendered.includes("What you were shown"), `${key}: the disclosure label`);
+    for (const d of s.decisions ?? []) {
+      if (d.document === null) continue;
+      assert.ok(rendered.includes(copy[`document.${d.document.status}.label`]), `${key}: ${d.document.status}`);
+      if (d.document.status === "verified") verified.push(s);
+    }
+  }
+  assert.ok(verified.length >= 1, "the fixtures hold a verified document to show");
+  const s = verified.find((x) => (x.decisions ?? []).some((r) => r.document?.body?.kind === "evidence")) ?? verified[0];
+  const d = (s.decisions ?? []).find((x) => x.document?.status === "verified");
+  const rendered = text(sheetHtml(ctx(s)));
+  const body = d.document.body, rows = [...(body.claims ?? []), ...(body.records ?? [])];
+  for (const member of [body.run_id, ...rows.map((c) => c.text ?? c.claim_text).filter(Boolean)]) {
+    assert.ok(rendered.includes(member.slice(0, 30)), `${s.key}: the body words ${member}`);
+  }
+});
+test("a damaged sidecar is worded honestly and shows no body: missing, mismatch, too large, unreadable", () => {
+  const byStatus = {};
+  for (const s of Object.values(sheets)) for (const d of s.decisions ?? []) if (d.document && d.document.status !== "verified") (byStatus[d.document.status] ??= []).push(d);
+  for (const status of ["missing", "mismatch", "too_large", "unreadable"]) assert.ok((byStatus[status] ?? []).length >= 1, status);
+  for (const [key, s] of Object.entries(sheets)) {
+    const rendered = text(sheetHtml(ctx(s)));
+    for (const d of s.decisions ?? []) {
+      if (d.document && d.document.body === null) assert.ok(rendered.includes(copy[`document.${d.document.status}.note`]), `${key}: ${d.document.status}`);
+    }
+  }
+});
+test("Not answered is the word for later, never Deferred (F3)", () => {
+  assert.equal(copy["answer.later.label"], "Not answered");
+  for (const s of Object.values(sheets)) for (const d of s.decisions ?? []) if (d.answer === "later") {
+    assert.ok(text(sheetHtml(ctx(s))).includes("Not answered"), `${s.key}: ${d.asked}`);
+    break;
+  }
+});
+test("a decision link opens its document's disclosure and marks every row that document decided; without one, every disclosure starts closed (A8)", () => {
+  const s = sheets[scenarios.verification];
+  const withDocument = (s.decisions ?? []).find((d) => d.document);
+  const named = withDocument.document.digest.slice(7, 19);
+  const linked = sheetHtml(ctx(s, { decision: named }));
+  assert.match(linked, /data-decision-document[^>]*\bopen\b/, "the named document starts open");
+  const rows = (s.decisions ?? []).filter((d) => d.document?.digest === withDocument.document.digest);
+  assert.equal((linked.match(/data-decision-match/g) ?? []).length, rows.length,
+    "every row the shared document decided is marked for the scroll (a batch answers several asks against one binding)");
+  assert.ok((linked.match(/data-decision-match/g) ?? []).length >= 1, "at least the named row is marked");
+  assert.match(linked, /<details[^>]*\bopen\b[^>]*data-section="decisions"/, "the decisions section opens");
+  assert.doesNotMatch(sheetHtml(ctx(s)), /data-decision-document[^>]*\bopen\b/, "no link, no opened disclosure");
+  assert.ok(!sheetHtml(ctx(s)).includes("data-decision-match"), "no link, no marked row");
+});
+test("two documents sharing a decision link's short form expand none: the section opens and no row is claimed (A8)", () => {
+  const s = structuredClone(sheets[scenarios.verification]);
+  const rows = (s.decisions ?? []).filter((d) => d.document);
+  assert.ok(rows.length >= 2, "the fixture holds more than one documented decision to collide");
+  const shared = "0123456789ab";
+  rows[0].document.digest = `sha256:${shared}${"a".repeat(52)}`;
+  rows[1].document.digest = `sha256:${shared}${"b".repeat(52)}`;
+  for (const r of rows.slice(2)) r.document = null;  // the contract's no-document row
+  const ambiguous = sheetHtml(ctx(s, { decision: shared }));
+  assert.ok(!ambiguous.includes("data-decision-match"), "an ambiguous link names nothing");
+  assert.doesNotMatch(ambiguous, /data-decision-document[^>]*\bopen\b/, "no disclosure opens on an ambiguous link");
+  assert.match(ambiguous, /<details[^>]*\bopen\b[^>]*data-section="decisions"/, "the decisions section still opens");
+  const exact = sheetHtml(ctx(s, { decision: rows[0].document.digest.slice(7) }));
+  assert.ok(exact.includes("data-decision-match"), "the full id of either resolves the ambiguity");
+});
+test("a link that names no document on the sheet opens the section and claims no row (A8)", () => {
+  const s = sheets[scenarios.verification];
+  const marked = sheetHtml(ctx(s, { decision: "ffffffffffff" }));
+  assert.ok(!marked.includes("data-decision-match"), "no row carries that document");
+  assert.match(marked, /<details[^>]*\bopen\b[^>]*data-section="decisions"/, "the decisions section opens");
+  assert.doesNotMatch(marked, /data-decision-document[^>]*\bopen\b/, "no disclosure opens");
+});
+
 // P3b: the fixtures are the minimal selection, so three facts the journeys read from runs no longer in them are held here,
 // on a fixture sheet changed in that one fact (the real service still produces each: tests/v2/test_observer_stateful.py).
+test("PR 17 §4: every machine value on the sheet is the one identifier atom — label and value separated, the exact value carried by Copy", async () => {
+  const { shortIdentifier } = await import("../app/identifiers.js");
+  const { esc } = await import("../elements/core/element.js");
+  const s = sheets[scenarios.verification];
+  const html = sheetHtml(ctx(s));  // the builders' strings, so an attribute is the fact asserted
+  assert.match(html, new RegExp(`<ev-copy text="${s.row.key}" label="fact.run_key"`), "the run's key in the header, with Copy (PR 17 §4)");
+  assert.ok(!/<code class="break-all font-mono text-xs">${s.row.key}<\/code>/.test(html), "no giant mono block for the key any more");
+  for (const d of s.decisions ?? []) if (d.document) {
+    assert.ok(html.includes(`<ev-copy text="${d.document.digest}" label="decision.document.digest"`),
+      "the decision's document digest copy still carries the exact value (PR 15's footer, PR 17's atom)");
+    assert.ok(html.includes(`<ev-copy text="${d.document.path}" label="decision.document.path"`), "and the path's");
+  }
+  for (const d of s.decisions ?? []) if (d.source)
+    assert.ok(html.includes(`<ev-copy text="${esc(d.source)}" quiet`), "a decision's source URL is a copyable identifier atom");
+  const body = (s.decisions ?? []).find((d) => d.document?.body?.proposal_digest !== undefined)?.document?.body;
+  if (body !== undefined) {
+    assert.ok(html.includes(`<ev-copy text="${body.proposal_digest}"`), "a document's proposal digest is the atom, copyable");
+    assert.ok(html.includes(`<ev-copy text="${body.run_id}"`), "the document's run handle too");
+    assert.ok(html.includes(`<ev-copy text="${body.key}"`), "and its batch key");
+  }
+  for (const c of s.claims ?? []) for (const r of c.records ?? []) {
+    const open = sheetHtml(ctx(s, { claim: c.id }));  // a record renders on its claim, open in place
+    assert.ok(open.includes(`<ev-copy text="${esc(r.source)}" quiet`), "each research source URL is a copyable identifier atom");
+  }
+  const qualified = sheetHtml(ctx(sheets[scenarios.converged]));
+  assert.match(qualified, /Qualification identity<\/span> <code class="ev-id/, "label and value separated (PR 17 §4: 'Qualification identitysha256:' runs together no more)");
+});
+test("PR 17 §4: the claim row names its id as the identifier atom", () => {
+  for (const [key, s] of Object.entries(sheets)) {
+    const html = sheetHtml(ctx(s));
+    for (const c of s.row.claims ?? []) {
+      const row = html.slice(html.indexOf(`data-claim-row="${c.id}"`), html.indexOf("</summary>", html.indexOf(`data-claim-row="${c.id}"`)));
+      assert.ok(row.includes(`<ev-copy text="${c.id}" label="fact.claim_id" quiet`), `${key}: the claim id ${c.id} in its row, with Copy`);
+    }
+  }
+});
+test("PR 17 §4: a sha256 digest inside an audit finding renders as the identifier atom — the sentence unchanged, everything else escaped text", () => {
+  const s = structuredClone(sheets[scenarios.converged]);
+  const digest = `sha256:${"ab".repeat(32)}`;
+  s.audits[0].findings = [`The artifact digest moved: claimed ${digest}; <i>markup</i> stays text.`];
+  const html = sheetHtml(ctx(s));
+  const finding = html.slice(html.indexOf("data-audit"), html.indexOf("data-audit", html.indexOf("data-audit") + 9));
+  assert.ok(html.includes(`<ev-copy text="${digest}" quiet`), "the digest is the copyable atom, exact value carried");
+  assert.ok(html.includes("The artifact digest moved: claimed "), "formatting only: the sentence around the token is unchanged");
+  assert.ok(html.includes("&lt;i&gt;markup&lt;/i&gt; stays text."), "the rest stays escaped text");
+  assert.ok(!html.includes("markup</i>"), "the helper introduced no markup of its own");
+});
+
 test("an audit's independence is worded on the sheet, for every value the contract declares", () => {
   const base = sheets[scenarios.converged];
   for (const independence of ["distinct", "mixed", "same_model", "unverified", "human_owned"]) {

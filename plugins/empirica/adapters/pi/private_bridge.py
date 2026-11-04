@@ -42,8 +42,86 @@ def _classify(_profile: str, _raw: dict, payload: dict):
                    source=payload.get("source", "pi-model"))
 
 
+def _bind_document(run_id: object, document: object) -> dict | None:
+    """Write-first (ADR-0072, PR 09 → the one bound helper, review-2 m1): publish the core's
+    rendered ``{text, digest}`` pair once through :func:`adapters.state.hitl.publish` — the
+    shared helper that verifies, parses and object-checks the pair before the write — and
+    return the shown-document record: ``digest``, the written file's absolute ``path``, ``priors``
+    — the document's own amendment block read from the verified bytes, never recomputed, so the
+    confirm form shows the record's ``was`` values, not a host-held dialog — and
+    ``question``, the parsed document's core-derived discriminator (M1, review 2) — ``approve``
+    or ``confirm_amendment`` — the one fact the TypeScript mediation chooses which dialog to
+    show from.
+
+    PR 16 (A10/A11) adds the record's presentation-only link members — ``url``, a live
+    observer's deep link to the run's decision (one hardened discovery probe of this home,
+    ``adapters.observer.discovery.document_details``, 0.5 s budget, once per mediation), or
+    ``None`` as the honest "no link", and ``run12``, the run's compact id the fallback names —
+    beside the digest; they never reach any present or decision envelope, and the path stays
+    what it was.
+    ``None`` means the mediation must refuse: the pair was absent, malformed, digest-
+    inconsistent, its question not one of the two, or the storage refused the write."""
+    if not isinstance(document, dict):
+        return None
+    # Lazy on purpose: the sidecar-store publish chain binds only the mediator's own refresh —
+    # the raw ``bind_document: true`` request (m2, review 2) — so its import cost is paid by the
+    # one operation that writes, never by the plain per-tool_call refreshes or the twelve other
+    # private operations this one-shot process shape also serves, whose startup stays
+    # exactly forms-08's (PR 09 measurement: whole-private-bridge import ~95 ms before and
+    # after this change).
+    from adapters.observer.discovery import document_details
+    from adapters.state.hitl import DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish
+    from core import hitl as core_hitl
+    try:
+        store = HitlDocuments()
+        published = publish(store, run_id, document)
+        if published is None:
+            return None
+        question = published.parsed.get("question")
+        if question not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT):
+            return None
+        amendment = published.parsed.get("amendment")
+        priors = None
+        if isinstance(amendment, dict) and isinstance(amendment.get("budgets"), dict):
+            priors = {name: row.get("was") for name, row in amendment["budgets"].items()
+                      if isinstance(row, dict) and isinstance(row.get("was"), int)}
+        details = document_details(store.home, run_id, {"digest": published.digest})
+    except (DocumentMismatch, HardLinkUnsupported, OSError, ValueError):
+        return None
+    return {"digest": published.digest, "path": str(published.path), "priors": priors,
+            "question": question, "url": details["url"], "run12": details["run12"]}
+
+
 def _governance_context(profile: str, raw: dict, payload: dict):
-    return bridge.trusted_governance_context(profile, raw["run_id"], payload)
+    response = bridge.trusted_governance_context(profile, raw["run_id"], payload)
+    result = response.get("result") if isinstance(response, dict) else None
+    presentation = result.get("presentation") if isinstance(result, dict) else None
+    if not isinstance(presentation, dict):
+        return response
+    document = presentation.get("document")
+    if document is None:
+        return response  # a state that waits on no human carries no document; that is normal
+    if raw.get("bind_document") is not True:
+        # (m2, review 2) A plain refresh — the one the TypeScript adapter runs in front of every
+        # tool_call, model_select and session event while the human is deciding — never binds:
+        # it is not the mediator's own refresh, no dialog is being shown from its answer, and
+        # the judgment an unbound document would serve is not the human's. Strip the pair and
+        # write nothing; the mediator binds when it actually mediates (bind_document: true).
+        presentation.pop("document", None)
+        return response
+    bound = _bind_document(raw["run_id"], document)
+    if bound is None:
+        # The pair could not be proven or published. Never hand the bytes to the transport and
+        # never let an adapter present a document no one has verified: strip the pair and mark
+        # the presentation, so the TypeScript mediation refuses `governance.approval_unavailable`
+        # before any present is sent.
+        presentation["document_unavailable"] = True
+        presentation.pop("document", None)
+        return response
+    presentation["document"] = {"digest": bound["digest"], "path": bound["path"],
+                                 "priors": bound["priors"], "question": bound["question"],
+                                 "url": bound["url"], "run12": bound["run12"]}
+    return response
 
 
 def _governance_decision(profile: str, raw: dict, payload: dict):
@@ -97,13 +175,33 @@ def _audit_verdict(profile: str, raw: dict, payload: dict):
 
 
 def _evidence_presentation(profile: str, raw: dict, payload: dict):
-    """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py)."""
+    """Record the presentation and hand back the items to show (shared flow: adapters/confirmation.py).
+
+    The shared ``present`` writes the batch's document first (fetch, verify, publish once,
+    present with the digest), so the sidecar file is written before anything is shown on either
+    host. The screen data the adapter receives is unchanged; the presentation answer names the
+    written document's ``{digest, path}`` — and, for a terminal batch, ``residuals``, the count of
+    obligations ending now would leave unresolved, read out of the written document itself — never
+    the bytes (PR 12: the dialog renders the identity; the count is data from the record, never
+    recomputed by any host). The confirmation repeat of the digest rides the mediator's
+    ``evidence_confirmation`` payload, so this bridge's confirmation leg forwards it when the
+    adapter sends it."""
     batch = payload.get("batch")
     shown = confirmation.present(profile, raw["run_id"], terminal=batch if confirmation.is_terminal(batch) else None)
     if isinstance(shown, confirmation.Outcome):  # nothing was shown or spent; the host reports presentation_failed
         return {"type": "evidence_refused", "result": {"failure": shown.failure}}
-    receipt_id, items = shown
-    return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items}
+    receipt_id, items, document = shown
+    identity = {"digest": document["digest"], "path": document["path"]}
+    if "residuals" in document:
+        identity["residuals"] = document["residuals"]
+    # PR 16 (A10–A12): the presentation-only link fields the shared flow computed once for this
+    # presentation — a live observer's deep link to the run's decision, `None` as the honest
+    # "no link", and the run's compact id the fallback names. They cross to the dialog only;
+    # the receipt binds the digest alone.
+    identity["url"] = document.get("url")
+    identity["run12"] = document.get("run12")
+    return {"type": "evidence_presentation", "receipt_id": receipt_id, "items": items,
+            "document": identity}
 
 
 def _human_surface(profile: str, raw: dict, payload: dict):
@@ -111,8 +209,14 @@ def _human_surface(profile: str, raw: dict, payload: dict):
 
 
 def _evidence_confirmation(profile: str, raw: dict, payload: dict):
+    answers = payload["answers"]
+    # PR 12/13: the mediator sends its presentation's digest, so a Pi receipt — like a Claude one —
+    # names the document the human was shown; the TS transport always sends the digest it validated
+    # with the presentation. A private call that carries none reaches ``submit`` as ``None`` — the
+    # in-domain fetch, which refuses every item before anything is admitted: never a silent shape.
+    digest = payload.get("document_digest")
     stored = confirmation.submit(profile, raw["run_id"], payload["receipt_id"], payload["items"],
-                                 payload["answers"])
+                                 answers, document_digest=digest if isinstance(digest, str) else None)
     if stored is None:
         return {"type": "evidence_none"}
     return {"type": "evidence_receipt", "result": stored}

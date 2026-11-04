@@ -106,10 +106,31 @@ export function duration(timeoutMs: number): string {
   return seconds >= 60 ? `${Math.ceil(seconds / 60)} min` : `${seconds} sec`;
 }
 
-const GOAL_LINES = 4;
 const INDENT = "      ";
+const SHORT_BODY = 12; // the ADR-0072 Q4 short digest: `sha256:` plus twelve hex
+/** The command that opens this host's observer UI (README.md "Usage"): Pi's fallback Details
+ * line names only this host's command (A11) — Claude's form names its own, and the cross-host
+ * caption pin (`tests/v2/test_evidence_hosts.py`) holds the words. */
+const UI_COMMAND = "/empirica-ui";
 
-export interface RenderOptions { confirmation: boolean; timeoutMs: number; before?: Dialog }
+/** The bound document the Python private bridge wrote (ADR-0072, PR 09): its full digest, the
+ * file's absolute path — the one copy-paste surface — the core-owned amendment priors the
+ * confirm form's ``(was …)`` values come from (never recomputed by the host), and the parsed
+ * document's core-derived ``question`` (M1, review 2) that alone chooses which dialog is
+ * shown. PR 16 (A10–A12) adds the presentation-only link fields — `url`, the observer UI's deep
+ * link to the run's decision row, `null` without a live observer of this home, and `run12`, the
+ * run's compact id the fallback names — computed by the Python side once per presentation; the
+ * digest stays what every present and decision binds, and the core never sees a URL.
+ * No text crosses the Pi transport; the human opens the file. */
+export interface BoundDocument {
+  digest: string;
+  path: string;
+  priors: Record<string, number> | null;
+  question: "approve" | "confirm_amendment";
+  url: string | null;
+  run12: string | null;
+}
+export interface RenderOptions { confirmation: boolean; timeoutMs: number; document?: BoundDocument }
 
 /** Title on the left and run facts on the right; the facts move to their own line if narrow. */
 function header(dialog: Dialog, options: RenderOptions, width: number, theme: DialogTheme): string[] {
@@ -123,27 +144,119 @@ function header(dialog: Dialog, options: RenderOptions, width: number, theme: Di
   return gap >= 2 ? [title + " ".repeat(gap) + theme.muted(facts)] : [title, theme.muted(facts)];
 }
 
-/** The quoted goal, wrapped and bounded so the controls always stay on screen. */
-function goalLines(dialog: Dialog, width: number, theme: DialogTheme): string[] {
-  const wrapped = wrapTextWithAnsi(`"${dialog.goal}"`, Math.max(10, width - INDENT.length));
-  const shown = wrapped.length <= GOAL_LINES ? wrapped
-    : [...wrapped.slice(0, GOAL_LINES - 1), theme.muted(`… (+${wrapped.length - GOAL_LINES + 1} more lines)`)];
-  return shown.map((line, index) => (index ? INDENT : "Goal  ") + line);
+/** The goal's first line, quoted and bounded so the controls always stay on screen (ADR-0072
+ * "What the forms keep": the full detail lives in the document). */
+function goalLines(dialog: Dialog, width: number): string[] {
+  const first = `"${dialog.goal.split("\n")[0]}"`;
+  const gap = width - "Goal  ".length;
+  const shown = visibleWidth(first) <= gap ? first : truncateToWidth(first, gap - 1, "…") + "\"";
+  return [`Goal  ${shown}`];
 }
 
-function rationaleLines(dialog: Dialog, options: RenderOptions, width: number,
-                        theme: DialogTheme): string[] {
-  if (dialog.rationale === null) return [];
-  const wrap = (text: string, indent = 0) => wrapTextWithAnsi(text, Math.max(10, width - indent));
-  return [...wrap(dialog.rationale_label), ...wrap(dialog.rationale, 2).map(line => `  ${line}`),
-    ...(options.confirmation ? wrap(dialog.amendment_warning).map(line => theme.warning(line)) : [])];
+/** The one line under the contract-owned label that names where the rationale actually is. */
+function pointerLines(dialog: Dialog, width: number): string[] {
+  return wrapTextWithAnsi(`${dialog.rationale_label} and full detail: in the document`, Math.max(10, width));
 }
 
-function hostLine(dialog: Dialog): string[] {
-  if (!dialog.invocation) return [];
-  const { host, interactive, signal } = dialog.invocation;
-  const mode = interactive === null ? "unknown" : interactive ? "interactive" : "non-interactive";
-  return [`Host  ${host} · ${mode} · signal ${signal}`];
+/** One token that must never be cut (`function` scope so the renderer inlines it): broken at
+ * every `/` boundary, and a single segment wider than the room is hard-wrapped at the width,
+ * never cut — no character is dropped (X4, Copilot #50: whatever the human copies assembles
+ * back into the exact token). `prefix` (the `File: ` label) takes the first line's room. */
+export function hardWrapLines(token: string, width: number, prefix = ""): string[] {
+  const room = Math.max(10, width - visibleWidth(prefix));
+  // Split at every `/`, keeping the head before the first one (a URL carries `Details: http:`
+  // there; a path starts at its own `/`): every chunk is a real consecutive slice, so joining
+  // the emitted lines (minus the label) rebuilds the exact token.
+  const segments = token === "" ? [] : token.split(/(?=\/)/);
+  const lines: string[] = [];
+  let line = "";
+  const hardWrap = (segment: string, limit: number): string[] => {
+    const pieces: string[] = [];
+    let piece = "", pieceWidth = 0;
+    for (const character of segment) {
+      const columns = visibleWidth(character);
+      if (pieceWidth + columns > limit) {
+        pieces.push(piece);
+        piece = "";
+        pieceWidth = 0;
+      }
+      piece += character;
+      pieceWidth += columns;
+    }
+    return [...pieces, piece];
+  };
+  for (let index = 0; index < segments.length; index++) {
+    const segment = segments[index] as string;
+    const isLast = index === segments.length - 1;
+    if (line !== "" && (isLast || visibleWidth(line) + visibleWidth(segment) > (lines.length === 0 ? room : width))) {
+      lines.push(line);
+      line = "";
+    }
+    if (visibleWidth(segment) > width) {
+      // X4: an oversized segment hard-wraps at the width instead of being cut by `renderLines`
+      // global width rule. Every piece of it is emitted, so the next segment starts a fresh
+      // line: every line is then either a run of whole segments or the inside of exactly one.
+      lines.push(...hardWrap(segment, lines.length === 0 ? room : width));
+      line = "";
+    } else {
+      line += segment;
+    }
+  }
+  if (line !== "") lines.push(line);
+  return lines.map((text, index) => index === 0 ? prefix + text : text);
+}
+
+/** PR 16 (A11): the bound document's Details. A live observer's link is the deep link to the
+ * run's decision row — hard-wrapped at `/`, never cut, when a narrow dialog cannot hold it —
+ * and the path never shows (O5: the path is dropped only when a verified link is shown).
+ * Without one, the honest fallback is one short arrow line — follow-up review 16-1: at most 76
+ * columns, never wrapping mid-phrase (the old two-line fallback broke after "Human") — naming
+ * this host's own command and the run, then the path broken at every `/` (`File: ` labels the
+ * first line), exactly as before minus nothing. */
+function documentLines(document: BoundDocument | undefined, width: number): string[] {
+  if (!document) return [];
+  const short = `Document ${document.digest.slice(0, "sha256:".length + SHORT_BODY)}`;
+  if (document.url !== null) {
+    return [...(visibleWidth(`Details: ${document.url}`) <= width
+      ? [`Details: ${document.url}`] : hardWrapLines(`Details: ${document.url}`, width)), short];
+  }
+  const details = fallbackDetails(document.run12, Math.max(10, width));
+  return [...details, short, ...hardWrapLines(document.path, width, "File: ")];
+}
+
+/** The fallback Details arrow line — follow-up review 16-1: `Details: <command> → run <12 hex>
+ * → Human decisions`, one line of at most 76 columns wherever the dialog is wide enough — and,
+ * where it is not, broken at the arrow boundaries only (never inside `Human decisions`): each
+ * phrase keeps its words whole and, joined back with their ` → ` separators (minus the
+ * ``Details: `` label), the pieces rebuild the exact line. */
+function fallbackDetails(run12: string | null, width: number): string[] {
+  const phrases = [UI_COMMAND, ...(run12 === null ? [] : [`run ${run12}`]), "Human decisions"];
+  const line = `Details: ${phrases.join(" → ")}`;
+  if (visibleWidth(line) <= width) return [line];
+  if (phrases.some(phrase => visibleWidth(phrase) > width - 2))
+    return wrapTextWithAnsi(line, width);  // a pathologically narrow dialog: last resort only
+  const lines: string[] = [];
+  let current = "Details:";
+  for (const phrase of phrases) {
+    const withNext = current === "Details:" ? `Details: ${phrase}`
+      : `${current} → ${phrase}`;
+    if (visibleWidth(withNext) <= width) {
+      current = withNext;
+    } else {
+      lines.push(current);
+      current = phrase;
+    }
+  }
+  lines.push(current);
+  return lines;
+}
+
+/** The amendment warning, in full, in the confirm view only. */
+function warningLines(dialog: Dialog, options: RenderOptions, width: number,
+                      theme: DialogTheme): string[] {
+  if (!options.confirmation) return [];
+  return wrapTextWithAnsi(dialog.amendment_warning, Math.max(10, width))
+    .map(line => theme.warning(line));
 }
 
 type Control = BudgetControl;
@@ -160,12 +273,10 @@ function detailText(control: Control): string {
 function controlLines(dialog: Dialog, state: DialogState, options: RenderOptions,
                       width: number, theme: DialogTheme): string[] {
   const controls: Control[] = dialog.budgets;
-  const before = new Map((options.before?.budgets ?? [])
-    .map(row => [row.key, row.value] as const));
+  const priors = options.confirmation ? options.document?.priors ?? null : null;
   const shown = controls.map(control => {
-    const value = state.values[control.key], prior = before.get(control.key);
-    const was = options.confirmation && prior !== undefined && prior !== value
-      ? ` (was ${valueText(prior).replace(/^[☐☑] /, "")})` : "";
+    const value = state.values[control.key], prior = priors ? priors[control.key] : undefined;
+    const was = prior !== undefined && prior !== value ? ` (was ${valueText(prior)})` : "";
     return valueText(value) + was;
   });
   const labelWidth = Math.max(...controls.map(control => visibleWidth(control.label))) + 2;
@@ -204,15 +315,19 @@ function legendLine(options: RenderOptions, width: number, theme: DialogTheme): 
   return theme.muted(fitting.join(" · "));
 }
 
-/** Render the whole dialog frame for the supplied terminal width; every line fits the width. */
+/** Render the whole dialog frame for the supplied terminal width; every line fits the width.
+ * Both hosts keep the same content and order (PR 09 mirrors PR 08's Claude forms): header, the
+ * goal's first line (review only), the pointer line, the amendment warning (confirm only), the
+ * document's Details (a live observer's link, or this host's command with the run and the
+ * document's broken-at-`/` path), the short-digest line, the editable rows, buttons, hints. */
 export function renderLines(dialog: Dialog, state: DialogState, width: number, theme: DialogTheme,
                             options: RenderOptions): string[] {
   return [
     ...header(dialog, options, width, theme),
-    ...goalLines(dialog, width, theme),
-    ...hostLine(dialog),
-    "",
-    ...rationaleLines(dialog, options, width, theme),
+    ...(options.confirmation ? [] : goalLines(dialog, width)),
+    ...pointerLines(dialog, width),
+    ...warningLines(dialog, options, width, theme),
+    ...documentLines(options.document, width),
     "",
     ...controlLines(dialog, state, options, width, theme),
     "",

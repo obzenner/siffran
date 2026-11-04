@@ -5,6 +5,7 @@ host decides no policy: these tests pin that it asks once, maps answers one item
 nothing on cancel, timeout, malformed input or a stale presentation."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest import mock
 
 from adapters import confirmation
@@ -96,6 +97,17 @@ class MediatorFixture(EvidenceFixture):
 
     def batch(self, drv, run_id):
         return self.run_view(drv, run_id)["confirmation_batch"]
+
+    def document(self, **extra) -> dict:
+        """A bound document's shown record for pure form tests: the identity pair plus the
+        presentation-only link fields, with any field overridden (``url`` for a live observer,
+        ``residuals`` for a terminal consent)."""
+        document = {"digest": "sha256:" + "a" * 64,
+                    "path": "/machine/projects/s256-" + "a" * 64 + "/runs/s256-" + "b" * 64
+                            + "/gen-0/hitl/" + "a" * 64 + ".json",
+                    "url": None, "run12": "aaaabbbbcccc"}
+        document.update(extra)
+        return document
 
 
 class MediatorTests(MediatorFixture):
@@ -272,7 +284,8 @@ class MediatorTests(MediatorFixture):
                   "source_kind": "web", "source_ref": URL, "quote": "q", "class": "retrievable",
                   "title": "t1", "description": "d1", "note_title": "n1"},
                  {"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t2", "description": "d2", "note_title": "n2"}]
-        message, schema = confirmation.form(items, 900)
+        document = {"digest": "sha256:" + "a" * 64, "path": "/machine/projects/p/runs/r/gen-0/hitl/" + "a" * 64 + ".json"}
+        message, schema = confirmation.form(items, 900, document)
         self.assertEqual(set(schema["properties"]), {"d1", "n1", "d2", "n2"})
         for key, prop in schema["properties"].items():
             self.assertEqual(prop["type"], "string", key)
@@ -282,14 +295,23 @@ class MediatorTests(MediatorFixture):
         self.assertEqual({p["default"] for k, p in schema["properties"].items() if k[0] == "d"}, {"later"})
         self.assertNotIn("max_passes", schema["properties"])
         self.assertNotIn("approve all", message.lower())
-        # What the human reads, per item: the source, the claim it supports, and the decision (decisions listed in order).
+        # What the human reads, per item: the source, its quote (the fact judged) and the decision
+        # (decisions first, in order). PR 11 (ADR-0072): the claim texts and the reasons no
+        # deterministic check exists are in the document the form points at, never in the message.
         self.assertIn(f"web source: {URL}", message)
-        self.assertIn("For claim C0: C", message)
+        self.assertIn('Quote: "q"', message)
+        self.assertNotIn("For claim C0", message)
         self.assertIn("2. Decision needed", message)
+        self.assertIn("Claim texts and their no-deterministic-check reasons: in the document.", message)
+        self.assertIn("Document sha256:" + "a" * 12, message)
+        # PR 16 (A11): this hand-built document carries no live observer link, so the form keeps
+        # the honest fallback — the run's exact absolute path on its own ``File:`` line, pasted
+        # as-is (the one line exempt from wrapping and truncation).
+        self.assertIn("File: " + document["path"], message, "the path is pasted as-is on its own line")
         observed = {"subject": "research", "id": "r3", "record_ids": ["r3"], "claims": [{"id": "C0", "text": "C"}],
                     "source_kind": "runtime", "source_ref": "none", "quote": "q", "class": "observed",
                     "reason": "No harness.", "title": "t3", "description": "d3", "note_title": "n3"}
-        self.assertIn("Why no deterministic check: No harness.", confirmation.form([observed], 900)[0])
+        self.assertNotIn("No harness.", confirmation.form([observed], 900, document)[0])
 
     # ---- F-Q4-2: every field names its subject; one source with one quote is one item -----------------------------
 
@@ -305,9 +327,12 @@ class MediatorTests(MediatorFixture):
         self.mediate(drv, run_id, human)
         message, schema = human.shown[0]
         self.assertEqual(set(schema["properties"]), {"d1", "n1"}, "two records of one source and quote are one item")
-        self.assertIn("For claim C0:", message)
-        self.assertIn("For claim C1:", message)
+        self.assertNotIn("For claim C0:", message)  # PR 11: the claim texts are in the document
+        self.assertNotIn("For claim C1:", message)
         self.assertEqual(message.count("Quote:"), 1)
+        self.assertEqual(schema["properties"]["d1"]["description"],
+                         'C0, C1 · Does the page say this? Quote: "The test observed this source directly."',
+                         "PR 19: the one grouped description names every claim id and rides one quote")
         rows = self.rows(drv, run_id)
         self.assertEqual([r["verification"]["status"] for r in rows], ["confirmed_by_human"] * 2,
                          "one answer is recorded as a decision per record")
@@ -324,12 +349,18 @@ class MediatorTests(MediatorFixture):
                          ["confirmed_by_human", "rejected_by_human"])
 
     def test_a_field_has_a_short_title_and_its_details_in_the_description(self):
-        """F-Q5-1: Claude cuts a field title at about 45 columns and collapses the message, so the title is short and the
-        item (claims, quote prefix, question) is the property's ``description``, which Claude renders under the field."""
-        from adapters.confirmation import DESCRIPTION_LIMIT, TITLE_LIMIT
+        """F-Q5-1: Claude cuts a field title at about 45 columns and folds the message after its
+        first ``CLAUDE_VISIBLE_LINES`` lines, so the title stays short and the human reads the
+        description rendered under the field. PR 19 (finding N7 of the Lima qualification of
+        ac401739): the description carries what is decided **whole** — the full research quote,
+        and the full ``Source:`` reference when the short title cut it — while the message keeps
+        the whole record below the visible lines, and the shared item Pi reads keeps the bare
+        ids and question alone (PR 16, A12: each host shows the quote once, in its own surface)."""
+        from adapters.confirmation import TITLE_LIMIT
         drv, run_id = self.two_claims()
         long_ref = "https://example.test/" + "a-very-long-path-segment/" * 6 + "spec"
-        self.research(drv, run_id, "web", "https://www.example.test/spec", claim="C0", citation="The required name field: " + "x" * 400)
+        long_quote = "The required name field: " + "x" * 500
+        self.research(drv, run_id, "web", "https://www.example.test/spec", claim="C0", citation=long_quote)
         self.research(drv, run_id, "web", long_ref, claim="C1")
         human = Human(accept())
         self.mediate(drv, run_id, human)
@@ -340,11 +371,23 @@ class MediatorTests(MediatorFixture):
         self.assertNotIn("description", properties["n1"])
         for key in ("d1", "d2", "n1", "n2"):
             self.assertLessEqual(len(properties[key]["title"]), TITLE_LIMIT, key)
+        message = human.shown[0][0]
+        self.assertIn('Quote: "The required name field: ' + "x" * 20, message,
+                      "the quote stays in the message, the fact judged, in full")
+        self.assertNotIn("…", message, "nothing of the record is cut out of the message")
+        self.assertEqual(message.count("Quote:"), 2,
+                         "one quote per research item in the message, and only there")
         description = properties["d1"]["description"]
-        self.assertTrue(description.startswith('For C0 · Quote: "The required name field: xxx'), description)
-        self.assertTrue(description.endswith("…\" · Does the page say this?"), description)
-        self.assertLessEqual(len(description), DESCRIPTION_LIMIT)
-        self.assertIn("For C1", properties["d2"]["description"])
+        self.assertEqual(description, f'C0 · Does the page say this? Quote: "{long_quote}"',
+                         "the WHOLE quote rides the description Claude renders in full (PR 19)")
+        self.assertNotIn("…", description)
+        self.assertNotIn("For ", description, "X6 (#52): the per-claim context is in the document,")
+        self.assertEqual(properties["d2"]["description"],
+                         f"C1 · Does the page say this? Source: {long_ref} "
+                         f'Quote: "The test observed this source directly."',
+                         "the full source rides the description when the short title cut it (PR 19, finding B2)")
+        self.assertNotIn("For ", properties["d2"]["description"],
+                        "X6 (#52): only the bare claim ids name the record's claims")
 
     def test_a_decision_field_names_the_claim_it_asks_about(self):
         drv, run_id = self.start(graph=graph_with_decision())
@@ -353,21 +396,43 @@ class MediatorTests(MediatorFixture):
         properties = human.shown[0][1]["properties"]
         self.assertEqual(properties["d1"]["title"], "1. Your decision on C1")
         self.assertTrue(properties["d1"]["description"].startswith("C1 · "), properties["d1"]["description"])
+        self.assertEqual(properties["d1"]["description"], f"C1 · {self.claim(drv, run_id, 'C1')['text']}")
         self.assertEqual(properties["n1"]["title"], "1. Note (optional)")
 
+    def test_a_decision_description_is_never_cut(self):
+        """PR 19 (finding N7): the decision claim's text is the thing the human decides, and
+        Claude renders the description in full — so no ``DESCRIPTION_LIMIT`` flattening reaches
+        it on Claude's form (the shared cut stays for Pi's own dialog line)."""
+        text = "The whole claim the human must decide, uncut: " + "y" * 300
+        item = {"subject": "claim", "id": "C1", "digest": "sha256:" + "c" * 64, "text": text,
+                "title": "Your decision on C1", "description": "C1 · cut for the dialog's subject line",
+                "note_title": "Note (optional)"}
+        message, schema = confirmation.form([item], 900, self.document())
+        self.assertEqual(schema["properties"]["d1"]["description"], f"C1 · {text}")
+        self.assertIn("The whole claim the human must decide, uncut: " + "y" * 20, message,
+                      "the message keeps the whole claim, wrapped, under the visible lines")
+        self.assertNotIn("…", message, "nothing of the claim is cut out of the message")
+
     def test_the_item_lines_of_the_message_come_before_the_boilerplate(self):
-        """F-Q5-1: a host that collapses the message shows its first lines; they carry the content, not the instructions."""
+        """F-Q5-1: a host that folds the message shows its first lines, so they carry the
+        content, not the instructions — PR 19 (finding N7): Claude Code 2.1.304 shows only the
+        first ``CLAUDE_VISIBLE_LINES`` lines, and they stay the heading, the document's
+        ``Details:`` and the fallback copy surface, with no blank line among them."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
         drv, run_id = self.start(graph=graph_with_decision())
         self.research(drv, run_id, "web", URL)
         human = Human(accept())
         self.mediate(drv, run_id, human)
         lines = human.shown[0][0].splitlines()
-        self.assertTrue(lines[0].startswith("Empirica · "))
+        window = lines[:CLAUDE_VISIBLE_LINES]
+        self.assertTrue(window[0].startswith("Empirica · "))
+        self.assertRegex(window[1], r"^Details: /empirica:ui → run [0-9a-f]{12} → Human decisions$")
+        self.assertTrue(window[2].startswith("File: "), window[2])
+        self.assertNotIn("", window, "no blank line hides what Claude Code shows")
         item = next(i for i, line in enumerate(lines) if line.startswith("1. "))
         boiler = next(i for i, line in enumerate(lines) if line.startswith("Decide each item"))
         self.assertLess(item, boiler)
         self.assertLess(boiler, next(i for i, line in enumerate(lines) if line.startswith("Accept = ")))
-        self.assertEqual(lines[1], "", "the heading, then the items")
 
     def test_a_batch_is_presentable_without_a_prompt_error_or_when_only_already_shown_and_whatever_the_reason(self):
         def view(batch, code="claim.research_missing"):
@@ -412,6 +477,130 @@ class MediatorTests(MediatorFixture):
         self.assertEqual(ended["run"]["status"], "stopped_residual")
 
 
+class ClaudeVisibleLinesTests(MediatorFixture):
+    """PR 19 (ADR-0072's PR-19 amendment): the Lima qualification of ``ac401739`` (finding N7)
+    observed Claude Code 2.1.304 showing only the first ``CLAUDE_VISIBLE_LINES`` lines of an
+    elicitation ``message`` and folding the rest as ``… (+N more lines)`` — nothing expands it in
+    place — while the fields (the title and the description under it) render in full. A quote the
+    human had to confirm was folded away, so every Claude form now opens with the heading, the
+    bound document's ``Details:`` and the copy surface (the short digest beside a live
+    observer's link, or the exact absolute path on the fallback's ``File:`` line), never a blank
+    line among them; what the human decides rides the field description in full; and the message
+    still carries the whole record under the visible lines, for transcripts, logs and hosts that
+    do not fold (a quote may therefore appear twice — on Claude only the description copy is
+    visible). Pi is unchanged and byte-identical: it reads the shared items, composed, never
+    edited."""
+
+    def research_item(self, **extra) -> dict:
+        item = {"subject": "research", "id": "r1", "record_ids": ["r1"],
+                "claims": [{"id": "C0", "text": "Claim C0."}],
+                "source_kind": "web", "source_ref": URL, "quote": "seen directly on the page",
+                "class": "retrievable", "title": "example.test/spec",
+                "description": "C0 · Does the page say this?", "note_title": "Note (optional)"}
+        item.update(extra)
+        return item
+
+    def claim_item(self, **extra) -> dict:
+        item = {"subject": "claim", "id": "C1", "digest": "sha256:" + "c" * 64,
+                "text": "Claim C1 supports the root.", "title": "Your decision on C1",
+                "description": "C1 · Claim C1 supports the root.", "note_title": "Note (optional)"}
+        item.update(extra)
+        return item
+
+    def test_the_evidence_form_opens_with_the_detail_lines_claude_actually_shows(self):
+        """F-Q5-1 and PR 19 (finding N7): the visible window of both forms of the bound document
+        — a live observer's link and the short digest, or the fallback's arrow line and the exact
+        absolute path — with no blank line among them, and the whole record kept below."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        items = [self.research_item(), self.claim_item()]
+        linked = self.document(url="http://127.0.0.1:18770/app/?run=aaaabbbbcccc&decision=" + "a" * 12)
+        for document, copy_surface, remainder in (
+                (linked, "Document sha256:" + "a" * 12, "File: "),
+                (self.document(), "File: " + self.document()["path"], "Document sha256:" + "a" * 12)):
+            with self.subTest(linked=document is linked):
+                message, _schema = confirmation.form(items, 900, document)
+                lines = message.splitlines()
+                window = lines[:CLAUDE_VISIBLE_LINES]
+                self.assertNotIn("", window, "what Claude Code shows has no blank line")
+                self.assertTrue(window[0].startswith("Empirica · evidence that needs you"), window[0])
+                self.assertTrue(window[1].startswith("Details: "), window[1])
+                self.assertEqual(window[2], copy_surface, "the copy surface is the third line")
+                self.assertNotIn(remainder, window[1], "the Details line is one line")
+                if document is linked:
+                    self.assertNotIn("File: ", message, "a verified link replaces the path entirely (O5)")
+                else:
+                    self.assertIn("\nDocument sha256:" + "a" * 12, message,
+                                  "the short digest stays in the message, past the items")
+                # the transcript keeps the record in full under the folded lines
+                self.assertIn(f"1. web source: {URL}", message)
+                self.assertIn('Quote: "seen directly on the page"', message)
+                self.assertIn("2. Decision needed", message)
+                self.assertIn("Claim texts and their no-deterministic-check reasons: in the document.", message)
+                for line in lines:
+                    if not line.startswith(("Details: http://", "File: ")):
+                        self.assertLessEqual(len(line), confirmation._WIDTH, line)
+
+    def test_the_terminal_consent_opens_with_the_detail_lines_and_names_its_residuals(self):
+        """PR 19: the terminal consent counts its residuals in the description Claude renders in
+        full — 0, 1 and many read their own sentence; a document that named no count adds
+        nothing — and its visible window keeps the heading, the fallback ``Details:`` and the
+        ``File:`` copy surface."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        terminal = self.claim_item(
+            id="stopped_residual", digest="sha256:" + "b" * 64, terminal=True, title="End the run as stopped_residual?",
+            text="End this run as stopped_residual, without converging? Approve to end it now; Reject "
+                 "or Later keeps it active and nothing is ended.",
+            description="Not converged. Approve ends the run now as stopped_residual; "
+                        "Reject or Later keeps it active.")
+        base = terminal["description"]
+        linked = self.document(url="http://127.0.0.1:18770/app/?run=aaaabbbbcccc&decision=" + "a" * 12)
+        for left, suffix in ((0, "Nothing would stay unresolved"),
+                             (1, "1 unresolved obligation would remain"),
+                             (3, "3 unresolved obligations would remain")):
+            for document in (self.document(residuals=left), {**linked, "residuals": left}):
+                with self.subTest(left=left, linked="url" in document):
+                    message, schema = confirmation.form([terminal], 900, document)
+                    window = message.splitlines()[:CLAUDE_VISIBLE_LINES]
+                    self.assertNotIn("", window)
+                    self.assertTrue(window[0].startswith("Empirica · end this run without converging?"), window[0])
+                    if document["url"]:
+                        self.assertEqual(window[1], f"Details: {linked['url']}")
+                        self.assertEqual(window[2], "Document sha256:" + "a" * 12)
+                        self.assertNotIn("File: ", message, "a verified link replaces the path entirely (O5)")
+                    else:
+                        self.assertRegex(window[1], r"^Details: /empirica:ui → run aaaabbbbcccc → Human decisions$")
+                        self.assertEqual(window[2], "File: " + self.document()["path"],
+                                         "the fallback's copy surface is the third line")
+                    self.assertEqual(schema["properties"]["d1"]["description"], f"{base} · {suffix}",
+                                     "the field description names the residual count (PR 19)")
+                    self.assertIn(suffix, message, "the message keeps the count line under the visible lines")
+        message, schema = confirmation.form([terminal], 900, self.document())
+        self.assertEqual(schema["properties"]["d1"]["description"], base,
+                         "no count was read: no suffix is invented")
+
+    def test_an_observed_records_description_asks_its_own_question(self):
+        observed = self.research_item(source_kind="runtime", source_ref="the deploy pipeline output",
+                                      description="C0 · Is the observation right?",
+                                      title="deploy pipeline output", **{"class": "observed"})
+        _message, schema = confirmation.form([observed], 900, self.document())
+        self.assertEqual(schema["properties"]["d1"]["description"],
+                         'C0 · Is the observation right? Quote: "seen directly on the page"')
+
+    def test_the_form_composes_copies_and_leaves_every_item_unchanged(self):
+        """Pi relays the very items the shared flow built; PR 19 composes Claude's descriptions
+        beside them, never inside them."""
+        import copy
+        items = [self.research_item(source_ref="https://example.test/" + "long-path-segment/" * 8 + "s.html",
+                                    quote="a very long quote " * 20),
+                 self.claim_item(text="Claim C1 supports the root. " + "decide it whole: " * 30),
+                 self.claim_item(terminal=True, id="stopped_residual",
+                                 text="End this run as stopped_residual, without converging?",
+                                 description="Not converged.", title="End the run?")]
+        before = copy.deepcopy(items)
+        confirmation.form(items, 900, self.document(residuals=2))
+        self.assertEqual(items, before, "nothing the bridge relays to Pi was edited")
+
+
 class ClaudeElicitationTests(EvidenceFixture):
     """The MCP session gives the batch form only to a client that declared form elicitation."""
 
@@ -434,9 +623,54 @@ class ClaudeElicitationTests(EvidenceFixture):
     def test_the_batch_is_a_separate_form_from_the_configuration_review(self):
         from adapters import governance
         self.assertNotEqual(confirmation.form.__module__, governance.review_form.__module__)
-        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t", "description": "d",
-                                        "note_title": "n"}], 60)
+        _, schema = confirmation.form([{"subject": "claim", "id": "C1", "digest": "d", "text": "T", "title": "t",
+                                        "description": "d", "note_title": "n"}], 60,
+                                      {"digest": "sha256:" + "a" * 64, "path": "/machine/x.json"})
         self.assertFalse({"max_passes", "max_spawns", "max_audit_spawns"} & set(schema["properties"]))
+
+    def test_the_document_captions_are_one_text_on_both_hosts(self):
+        # Review-2 fix 18 (finding m8): one pin for the captions the two hosts must never allow to drift —
+        # the document lines, the residual lines and the research pointer, plus the heading words the
+        # two forms share. Both hosts render from their own sources (the message in adapters/confirmation.py's
+        # form builders; the dialog titles in adapters/pi/src/evidence-ui.ts), so the pin reads both
+        # sources and asserts every caption appears verbatim in each. (The smaller of the two offered
+        # mechanisms: a shared fixture would re-route both builders' literals through a generated copy
+        # for no added honesty — the captions here are baked literals on both sides, and a drift is one
+        # edited string away on either file.)
+        pi = Path(confirmation.__file__).parent / "pi" / "src" / "evidence-ui.ts"
+        sources = {"claude": Path(confirmation.__file__).read_text(encoding="utf-8"),
+                   "pi": pi.read_text(encoding="utf-8")}
+        for caption in (
+            "Claim texts and their no-deterministic-check reasons: in the document.",
+            "Nothing would stay unresolved; the record is in the document.",
+            " would remain — they are listed in the document.",
+            "Details: ",
+            "Document ",
+            "end this run without converging?",
+            "evidence that needs you",
+        ):
+            for host, text in sources.items():
+                self.assertIn(caption, text,
+                              f"{host} lost the shared document caption {caption!r} — the hosts drifted")
+        # PR 16 (A11) / follow-up review 16-1: each host's fallback Details is one short arrow
+        # line naming only its own host's command — `Details: <command> → run <12 hex> → Human
+        # decisions`. Each file keeps the spelled literal in one place (Claude: `_UI_COMMAND`;
+        # Pi: `UI_COMMAND`) and joins the shared arrow tail beside it, so the two forms keep
+        # their own spelled commands side by side and the drift is one edited string away in
+        # one file only.
+        self.assertIn('_UI_COMMAND = "/empirica:ui"', sources["claude"],
+                      "the Claude form spells Claude Code's own command once, in its one literal")
+        self.assertIn("→ Human decisions", sources["claude"],
+                      "and joins the shared arrow tail (the run id between, review 16-1)")
+        self.assertIn('UI_COMMAND = "/empirica-ui"', sources["pi"],
+                      "Pi's dialog spells Pi's own command, review 16-1")
+        self.assertIn("→ Human decisions", sources["pi"],
+                      "and joins the same shared arrow tail")
+        # The short-digest caption is the same length on both hosts: twelve hex after "sha256:"
+        # (19 characters of the identity in all), so one digest line reads identically everywhere.
+        self.assertEqual(confirmation._SHORT_BODY, 12)
+        self.assertIn(".slice(0, 19)", sources["pi"],
+                      "Pi's short-digest line must be Claude's nineteen-character identity")
 
 
 class PiPrivateBridgeTests(EvidenceFixture):
@@ -454,9 +688,15 @@ class PiPrivateBridgeTests(EvidenceFixture):
     def test_presentation_relays_items_or_the_core_refusal(self):
         from unittest.mock import patch
         items = [{"subject": "claim", "id": "C1", "digest": "d", "text": "T"}]
-        with patch.object(confirmation, "present", return_value=("p-1", items)):
+        document = {"digest": "sha256:" + "a" * 64, "path": "/machine/projects/p/runs/r/gen-0/hitl/" + "a" * 64 + ".json"}
+        # PR 16 (A10/A12): the relay passes the presentation-only link fields through too — the
+        # shared flow computes them once per presentation; a mocked `present` that returns only
+        # the identity still crosses `url: None` (the honest "no link") and `run12: None`.
+        with patch.object(confirmation, "present", return_value=("p-1", items, document)):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
-                             {"type": "evidence_presentation", "receipt_id": "p-1", "items": items})
+                             {"type": "evidence_presentation", "receipt_id": "p-1", "items": items,
+                              "document": {"digest": document["digest"], "path": document["path"],
+                                           "url": None, "run12": None}})
         with patch.object(confirmation, "present", return_value=confirmation.PRESENTATION_FAILED):
             self.assertEqual(self.call({"operation": "evidence_presentation", "run_id": "r"}, {}),
                              {"type": "evidence_refused", "result": {"failure": "presentation_failed"}})

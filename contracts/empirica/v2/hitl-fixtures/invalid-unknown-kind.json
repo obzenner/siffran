@@ -1,0 +1,57 @@
+{
+  "budgets": [
+    {
+      "help": "Passes the run may use",
+      "key": "max_passes",
+      "label": "Investigation passes",
+      "maximum": 1024,
+      "minimum": 1,
+      "short": "passes",
+      "used": 0,
+      "value": 8
+    },
+    {
+      "help": "Non-audit child agents",
+      "key": "max_spawns",
+      "label": "Child spawns",
+      "maximum": 128,
+      "minimum": 0,
+      "short": "spawns",
+      "used": 0,
+      "value": 1
+    },
+    {
+      "help": "Independent auditor launches",
+      "key": "max_audit_spawns",
+      "label": "Audit spawns",
+      "maximum": 128,
+      "minimum": 0,
+      "short": "audits",
+      "used": 0,
+      "value": 2
+    }
+  ],
+  "context_when_shown": {
+    "invocation": {
+      "audit_retrieval": [
+        "local",
+        "workspace"
+      ],
+      "delegation": false,
+      "host": "test",
+      "interactive": true,
+      "signal": "operator"
+    }
+  },
+  "control_mode": "deliberative",
+  "goal": "Confirm the exact run configuration",
+  "governance_state": "pending",
+  "kind": "survey",
+  "plan_revision": 1,
+  "proposal_digest": "sha256:43b1daf033725fd73f49f9fb5d32686372e511a9c746889b303f2c15406562c7",
+  "question": "approve",
+  "rationale": "Sized for the supplied claims — two gating claims, three sources in every layer, one spike retry.",
+  "rationale_source": "author_unverified",
+  "run_id": "run-fx",
+  "schema": "empirica.hitl/1"
+}

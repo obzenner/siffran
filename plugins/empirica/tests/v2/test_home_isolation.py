@@ -18,7 +18,7 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PLUGIN = HERE.parents[1]
-SUITES = ["test_evidence_confirmation", "test_evidence_hosts", "test_evidence_scenarios", "test_a1_boundaries"]
+SUITES = ["test_evidence_confirmation", "test_evidence_hosts", "test_evidence_scenarios", "test_evidence_write_first", "test_a1_boundaries"]
 
 PROBE = '''
 import sys, unittest

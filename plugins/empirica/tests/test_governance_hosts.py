@@ -2,8 +2,13 @@
 """Fake host/MCP dialogs exercise the real public tool and private service lanes."""
 import copy
 import json
+import os
 import queue
+import re
+import shutil
+import stat
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -15,14 +20,26 @@ from adapters.governance import (Approve, Dismiss, HostGovernance, Reject, confi
                                  decision, expected_approval_kind, review_form)
 from adapters.mcp_server import McpSession
 from adapters.public_tools import PublicTools
+from adapters.state.hitl import DocumentMismatch, HitlDocuments
 from application import protocol as _proto
+from application.location import decode_handle
 from application.v2 import compose
+from core import hitl as core_hitl
 from test_governance import CONTEXT, GRAPH, AUTHOR
 from governance_setup import TEST_INVOCATION, SIZED_RATIONALE
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from application.protocol import host_profile_id  # noqa: E402
 force_absent_sandbox_home()
 CLAUDE_PROFILE = host_profile_id("claude-code")
+
+
+#: A canonical bound document (ADR-0072 Q4 shape) for pure presentation tests.
+TEST_DOCUMENT = {"digest": "sha256:" + "a" * 64,
+                "path": "/Users/operator/empirica-projects/p-b0415a68d5f/r-b0415a68d5f7e3b9c1a6f04"
+                         "c2d85790/gen-1/hitl/" + "a" * 64 + ".json",
+                "amendment": {"budgets": {"max_audit_spawns": {"value": 2, "was": 2},
+                                           "max_passes": {"value": 6, "was": 8},
+                                           "max_spawns": {"value": 1, "was": 1}}}}
 
 
 class GovernanceHostTests(unittest.TestCase):
@@ -42,9 +59,15 @@ class GovernanceHostTests(unittest.TestCase):
         self.incoming = queue.Queue()
         self.sent = []
         self.session = McpSession(self.profile, self.incoming, self.send, timeout=0.05)
+        # PR 08: the mediator writes its HITL documents once, write-first (ADR-0072), into a
+        # sidecar store under a test-local machine home — never the author's real $EMPIRICA_HOME.
+        self.document_home = tempfile.mkdtemp(prefix="hitl-home-")
+        self.addCleanup(shutil.rmtree, self.document_home, ignore_errors=True)
+        self.documents = HitlDocuments(home=Path(self.document_home))
         self.mediator = HostGovernance(self.profile,
             context_ingress=lambda _p, r, v: self.service.trusted_governance_context(run_id=r, payload=v),
-            decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v))
+            decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v),
+            documents=self.documents)
         self.session.mediator = self.mediator
         self.session.tools = PublicTools(self.profile, dispatch=lambda r, _p: self.service.dispatch(r), govern=self.mediator)
         self.reply_action = "accept"
@@ -86,7 +109,7 @@ class GovernanceHostTests(unittest.TestCase):
                            "rationale": SIZED_RATIONALE}})
         dialog = self.service.trusted_governance_context(
             run_id=self.run, payload=copy.deepcopy(CONTEXT))["result"]["presentation"]["dialog"]
-        schema = review_form(dialog, 900)[1]
+        schema = review_form(dialog, TEST_DOCUMENT, 900)[1]
         cases = [
             ({"action": "accept", "content": {}}, Approve),
             ({"action": "accept", "content": {"max_passes": "6"}}, Approve),
@@ -107,7 +130,7 @@ class GovernanceHostTests(unittest.TestCase):
                        {"action": "accept", "content": {"max_passes": True}},
                        {"action": "accept", "content": {"max_passes": "٣"}}):
             self.assertIsInstance(decision(answer, dialog, schema, confirmation=False), Dismiss)
-        confirm_schema = confirm_form(dialog, dialog, 900)[1]
+        confirm_schema = confirm_form(dialog, TEST_DOCUMENT, 900)[1]
         for answer in ({"action": "accept"}, {"action": "accept", "content": {}}):
             self.assertIsInstance(decision(answer, dialog, confirm_schema,
                                            confirmation=True), Approve)
@@ -116,6 +139,87 @@ class GovernanceHostTests(unittest.TestCase):
         for answer in ({"action": "decline"}, {"action": "cancel"}, None):
             self.assertIsInstance(decision(answer, dialog, confirm_schema,
                                            confirmation=True), Dismiss)
+
+    def governance_dialog(self):
+        return self.service.trusted_governance_context(
+            run_id=self.run, payload=copy.deepcopy(CONTEXT))["result"]["presentation"]["dialog"]
+
+    def test_the_review_form_opens_with_the_lines_claude_code_shows(self):
+        """PR 19 (finding N7 of the Lima qualification of ac401739): Claude Code 2.1.304 shows
+        only the first ``CLAUDE_VISIBLE_LINES`` lines of a form's message and folds the rest,
+        so the review opens with the heading (countdown riding it), the bound document's
+        ``Details:`` and the goal the human judges the configuration by — never a blank line
+        among them. The rationale pointer, the document's remaining lines and the legend stay
+        below the fold in full, both with a live observer's link and in the fallback."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        dialog = self.governance_dialog()
+        linked = {**TEST_DOCUMENT,
+                 "url": "http://127.0.0.1:18770/app/?run=aaaabbbbcccc&decision=" + "0" * 12}
+        for document in (TEST_DOCUMENT, linked):
+            with self.subTest(linked="url" in document):
+                message, _schema = review_form(dialog, document, 900)
+                lines = message.splitlines()
+                window = lines[:CLAUDE_VISIBLE_LINES]
+                self.assertNotIn("", window, "no blank line in what Claude Code shows")
+                self.assertTrue(window[0].startswith("Empirica · approve run configuration (epoch "), window[0])
+                self.assertIn("reviews left", window[0], "the countdown rides the heading")
+                self.assertTrue(window[1].startswith("Details: "), window[1])
+                self.assertEqual(window[2], 'Goal: "supplied task"',
+                                 "the goal is the line the form is judged by")
+                # the folded tail keeps the whole record
+                self.assertIn(f"{dialog['rationale_label']} and full detail: in the document", message)
+                document_line = next(index for index, line in enumerate(lines)
+                                     if line.startswith("Document sha256:"))
+                self.assertGreater(document_line, CLAUDE_VISIBLE_LINES - 1,
+                                  "the digest stays below the visible lines")
+                if "url" in document:
+                    self.assertNotIn("File: ", message, "a verified link replaces the path entirely (O5)")
+                else:
+                    self.assertTrue(lines[document_line + 1].startswith("File: /"),
+                                   "the fallback keeps the exact absolute path")
+                self.assertIn("Accept = approve as shown · edit values → confirm again", message)
+                self.assertIn("Decline = reject · Esc = decide later", message)
+                for line in lines:
+                    if not line.startswith(("Details: http://", "File: ")):
+                        self.assertLessEqual(len(line), 72, line)
+
+    def test_the_confirm_form_opens_with_its_budgets_and_rationale_cue(self):
+        """PR 19 (finding N7) with the B4 amendment: the confirm's visible lines carry what the
+        human judges — the heading, the budgets line complete with its ``(was …)`` priors, and
+        the compact cue that the rationale was not regenerated — and only then the ``Details:``
+        line. The contract-owned amendment warning and the bound document stay below, whole."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        dialog = copy.deepcopy(self.governance_dialog())
+        dialog["epoch"] = 1
+        dialog["budgets"][0]["value"] = 6
+        linked = {**TEST_DOCUMENT,
+                 "url": "http://127.0.0.1:18770/app/?run=aaaabbbbcccc&decision=" + "0" * 12}
+        for document in (TEST_DOCUMENT, linked):
+            with self.subTest(linked="url" in document):
+                message, _schema = confirm_form(dialog, document, 900)
+                lines = message.splitlines()
+                window = lines[:CLAUDE_VISIBLE_LINES]
+                self.assertNotIn("", window, "no blank line in what Claude Code shows")
+                self.assertTrue(lines[0].startswith("Empirica · confirm edited configuration (epoch "), lines[0])
+                budgets = window[1]
+                self.assertTrue(budgets.startswith("passes 6 (was 8)"), budgets)
+                for short in ("passes", "spawns", "audits"):
+                    self.assertIn(short + " ", budgets + " ",
+                                  f"every budget of the proposal rides the line: {budgets}")
+                self.assertEqual(window[2], "Rationale not regenerated for these values · details below",
+                                 "the compact cue names what the full warning below explains")
+                self.assertTrue(lines[3].startswith("Details: "), lines[3])
+                self.assertIn("not regenerated for these", " ".join(message.split()),
+                              "the contract-owned amendment warning stays below, whole")
+                self.assertIn("human-edited values", " ".join(message.split()))
+                document_line = next(index for index, line in enumerate(lines)
+                                     if line.startswith("Document sha256:"))
+                self.assertGreater(document_line, 3, "the document's digest stays below the cue")
+                self.assertIn("Accept = approve exactly this · Decline/Esc = keep edits pending", message
+                             .splitlines()[-1])
+                for line in lines:
+                    if not line.startswith(("Details: http://", "File: ")):
+                        self.assertLessEqual(len(line), 72, line)
 
     def test_host_owned_approval_views_do_not_offer_feedback_input(self):
         """The native incident must be impossible through the offered form fields."""
@@ -302,6 +406,300 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(safe("actual\x1b literal \\x1b \u202e emoji 😀 中"),
                          "actual\\x1b literal \\\\x1b \\u202e emoji 😀 中")
 
+    # --- the Claude forms are short and bound to the HITL document (ADR-0072, PR 08) ---
+
+    def _stored_receipts(self):
+        self.view_fresh = self.dispatch({"type": "GetRun", "run_id": self.run})
+        return self.service._coordinator.last_snapshot.state.governance["receipts"]
+
+    def _context_document(self, mutate=None):
+        """The private context answer's document pair, optionally mutated by a test."""
+        context = copy.deepcopy(CONTEXT)
+        context["ingress"] = "mcp_elicitation"
+        response = self.service.trusted_governance_context(run_id=self.run, payload=context)
+        presentation = response["result"]["presentation"]
+        if mutate is not None:
+            mutate(presentation)
+        return presentation.get("document")
+
+    def test_the_approve_form_is_short_and_bound_to_the_document(self):
+        """The form keeps what is judged (the numbers, the goal's first line) and binds to the
+        written document: the rationale text lives only in the document, and the short digest and
+        the document's absolute path stand on their own lines."""
+        self.initialize({"elicitation": {"form": {}}})
+        seen = []
+        def answer(message, _schema):
+            seen.append(message)
+            return {"action": "accept", "content": {}}
+        self.mediator.elicit = answer
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["run"]["governance"]["state"], "approved")
+        self.assertEqual(len(seen), 1)
+        lines = seen[0].splitlines()
+        self.assertIn('Goal: "supplied task"', lines)
+        self.assertNotIn(SIZED_RATIONALE, seen[0])
+        self.assertIn("unverified", seen[0])
+        # PR 16 (A11), follow-up review 16-1: the fallback Details is one short arrow line naming
+        # this host's own command and the run (never wrapping mid-phrase), the document's short
+        # digest follows it, and the exact absolute path (the one copy-paste surface, ``File: ``)
+        # is kept only because no observer of this temp home is live.
+        details = next(line for line in lines if line.startswith("Details: "))
+        self.assertRegex(details, r"^Details: /empirica:ui → run [0-9a-f]{12} → Human decisions$")
+        self.assertLessEqual(len(details), 76, "the arrow line never wraps mid-phrase (review 16-1)")
+        document_line = next(index for index, line in enumerate(lines)
+                             if line.startswith("Document sha256:"))
+        self.assertIsNotNone(re.fullmatch(r"Document sha256:[0-9a-f]{12}", lines[document_line]))
+        path_line = lines[document_line + 1]
+        self.assertTrue(path_line.startswith("File: /"), path_line)
+        path = path_line[len("File: "):]
+        self.assertTrue(path.startswith("/"), path)
+        self.assertTrue(path.endswith(".json"), path)
+        self.assertNotIn("…", path)
+        # the path names a file that exists and holds exactly what the core rendered
+        written = Path(path).read_bytes()
+        receipt = self._stored_receipts()[-1]
+        self.assertEqual(core_hitl.digest(written), receipt["document_digest"])
+
+    def test_host_owned_form_links_the_document_when_an_observer_serves_this_home(self):
+        """PR 16 (A11): with a live observer serving this home, the form shows the deep link to
+        the run's decision row in the UI and drops the document path from the form entirely (O5
+        as decided: the path is dropped only when a verified link is shown); the digest stays
+        the bound identity, and the discovery probe happens once per form presentation."""
+        from adapters.observer import discovery
+        self.initialize({"elicitation": {"form": {}}})
+        seen = []
+        def answer(message, _schema):
+            seen.append(message)
+            return {"action": "accept", "content": {}}
+        self.mediator.elicit = answer
+        with patch.object(discovery, "observer_url", return_value="http://127.0.0.1:18770") as probe:
+            result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["run"]["governance"]["state"], "approved")
+        receipt = self._stored_receipts()[-1]
+        short = receipt["document_digest"][len("sha256:"):len("sha256:") + 12]
+        link = ("Details: http://127.0.0.1:18770/app/?run="
+                + discovery.compact_run_id(self.run) + "&decision=" + short)
+        self.assertIn(link, seen[0])
+        self.assertNotIn("File: ", seen[0], "a verified link replaces the path entirely")
+        self.assertIn(f"Document sha256:{short}", seen[0])
+        self.assertEqual(probe.call_count, 1, "one probe per form presentation, not per item")
+
+    def test_the_document_is_written_before_the_present_and_binds_the_receipt(self):
+        """Write-first order (ADR-0072): the sidecar file already holds exactly the document's
+        bytes, mode 0400 (owner read-only), before the present call reaches the service; the present and the
+        decision envelopes both carry the digest, and the stored receipt names it."""
+        self.initialize({"elicitation": {"form": {}}})
+        order = []
+        real_ingress = self.mediator.decision_ingress
+        def probe(_profile, run_id, payload):
+            if payload.get("outcome") == "present":
+                key = decode_handle(run_id)
+                path = self.documents.path(key, payload["document_digest"])
+                data = path.read_bytes()
+                order.append({"file-exists-before-present": True,
+                             "mode": oct(stat.S_IMODE(os.stat(path).st_mode)),
+                             "bytes-are-the-document": core_hitl.digest(data) == payload["document_digest"],
+                             "digest": payload["document_digest"], "path": str(path)})
+            else:
+                order.append({"decision": True,
+                              "submission": "submission" in payload,
+                              "carries-digest": payload.get("document_digest") is not None,
+                              "digest": payload.get("document_digest")})
+            return real_ingress(_profile, run_id, payload)
+        self.mediator.decision_ingress = probe
+        self.mediator.elicit = lambda *_: {"action": "accept", "content": {}}
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["run"]["governance"]["state"], "approved")
+        self.assertEqual(len(order), 2)
+        self.assertEqual([event.get("file-exists-before-present") for event in order], [True, None])
+        self.assertEqual(order[0]["mode"], "0o400")
+        self.assertTrue(order[0]["bytes-are-the-document"])
+        self.assertTrue(order[1]["carries-digest"])
+        self.assertEqual(order[1]["digest"], order[0]["digest"])
+        receipt = self._stored_receipts()[-1]
+        self.assertEqual(receipt["document_digest"], order[1]["digest"])
+
+    def test_a_missing_or_malformed_document_refuses_before_any_present(self):
+        """No document, no form: a context answer whose document is absent or not exactly the
+        rendered pair binds nothing, and the mediation says unavailable — nothing spent."""
+        def mutant(kind):
+            def mutate(presentation):
+                document = presentation.get("document")
+                if kind == "absent":
+                    presentation.pop("document", None)
+                elif kind == "digest-mismatch":
+                    presentation["document"] = {
+                        **document,
+                        "digest": document["digest"][:-1] + ("0" if document["digest"][-1] != "0" else "1")}
+                elif kind == "text-not-a-string":
+                    presentation["document"] = {**document, "text": b"not text"}
+                elif kind == "short-digest":
+                    presentation["document"] = {**document, "digest": document["digest"][:17]}
+                elif kind == "empty-document":
+                    # X3 (Copilot #49): a digest-CONSISTENT pair whose text parses to {} — the
+                    # object and digest checks pass, and without the question check the
+                    # mediation would present a form chosen from nothing and eat the mismatch.
+                    data = core_hitl.render({})
+                    presentation["document"] = {"text": data.decode("utf-8"),
+                                                "digest": core_hitl.digest(data)}
+                elif kind == "unsupported-question":
+                    data = core_hitl.render({"question": "other"})
+                    presentation["document"] = {"text": data.decode("utf-8"),
+                                                "digest": core_hitl.digest(data)}
+            return mutate
+        for kind in ("absent", "digest-mismatch", "text-not-a-string", "short-digest",
+                     "empty-document", "unsupported-question"):
+            with self.subTest(document=kind):
+                self.setUp()
+                self.initialize({"elicitation": {"form": {}}})
+                presents = []
+                real_ingress = self.mediator.decision_ingress
+                def decision_probe(_p, r, v):
+                    if v.get("outcome") == "present":
+                        presents.append(v)
+                    return real_ingress(_p, r, v)
+                self.mediator.decision_ingress = decision_probe
+                real_context = self.mediator.context_ingress
+                def context_probe(_p, r, v):
+                    response = real_context(_p, r, v)
+                    mutant(kind)(response["result"]["presentation"])
+                    return response
+                self.mediator.context_ingress = context_probe
+                self.mediator.elicit = lambda *_: (_ for _ in ()).throw(AssertionError("never elicit"))
+                result = self.propose()["result"]["structuredContent"]
+                self.assertEqual(result["type"], "Block")
+                self.assertEqual(result["reasons"][0]["code"], "governance.approval_unavailable")
+                self.assertEqual(presents, [])
+                self.assertEqual(len(self._stored_receipts()), 0)
+                self.assertIsNone(result["run"]["governance"]["approved_digest"])
+
+    def test_a_sidecar_write_failure_is_unavailable_before_any_present(self):
+        """Storage cannot lie into presenting: any write error names the refusal, nothing spent."""
+        class Broken:
+            def write(self, _key, _data):
+                raise OSError(28, "no space left")
+        class Mismatched:
+            def write(self, _key, _data):
+                raise DocumentMismatch("different bytes already published")
+        for store, label in ((Broken(), "oserror"), (Mismatched(), "document-mismatch")):
+            with self.subTest(error=label):
+                self.setUp()
+                self.initialize({"elicitation": {"form": {}}})
+                self.mediator.documents = store
+                presents = []
+                real_ingress = self.mediator.decision_ingress
+                def decision_probe(_p, r, v):
+                    if v.get("outcome") == "present":
+                        presents.append(v)
+                    return real_ingress(_p, r, v)
+                self.mediator.decision_ingress = decision_probe
+                self.mediator.elicit = lambda *_: (_ for _ in ()).throw(AssertionError("never elicit"))
+                result = self.propose()["result"]["structuredContent"]
+                self.assertEqual(result["type"], "Block")
+                self.assertEqual(result["reasons"][0]["code"], "governance.approval_unavailable")
+                self.assertEqual(presents, [])
+                self.assertEqual(len(self._stored_receipts()), 0)
+                self.assertEqual(self.service._coordinator.last_snapshot.state.budgets["passes_used"], 0)
+
+    def test_a_document_mismatch_block_reaches_the_result_unchanged(self):
+        """The core's own refusal is never retried or reworded by the adapter (ADR-0072): a
+        present bound to another document's digest comes back as governance.document_mismatch."""
+        self.initialize({"elicitation": {"form": {}}})
+        real_ingress = self.mediator.decision_ingress
+        def tamper(_profile, run_id, payload):
+            if payload.get("outcome") == "present" and payload.get("document_digest"):
+                document_digest = payload["document_digest"]
+                payload = {**payload,
+                           "document_digest": document_digest[:-1] + ("0" if document_digest[-1] != "0" else "1")}
+            return real_ingress(_profile, run_id, payload)
+        self.mediator.decision_ingress = tamper
+        self.mediator.elicit = lambda *_: (_ for _ in ()).throw(AssertionError("never elicit"))
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual(result["reasons"][0]["code"], "governance.document_mismatch")
+        self.assertEqual(len(self._stored_receipts()), 0)
+        self.assertIsNone(result["run"]["governance"]["approved_digest"])
+
+    def test_pre_approval_amend_shows_the_core_owned_priors_in_the_confirm_form(self):
+        """The confirm form's (was …) values come from the document's amendment priors (run/4's
+        superseded ceilings reached through the core), and the confirm document is written
+        beside the run before the confirmation is asked."""
+        self.initialize({"elicitation": {"form": {}}})
+        seen = []
+        def answer(message, _schema):
+            seen.append(message)
+            if len(seen) == 1:
+                return {"action": "accept", "content": {"max_passes": 6}}
+            return {"action": "accept", "content": {}}
+        self.mediator.elicit = answer
+        result = self.propose()["result"]["structuredContent"]
+        self.assertEqual(result["run"]["governance"]["state"], "approved")
+        self.assertEqual(len(seen), 2)
+        confirm = seen[1]
+        self.assertIn("passes 6 (was 8)", confirm)
+        self.assertNotIn(SIZED_RATIONALE, confirm)
+        lines = confirm.splitlines()
+        document_line = next(index for index, line in enumerate(lines)
+                             if line.startswith("Document sha256:"))
+        self.assertIsNotNone(re.fullmatch(r"Document sha256:[0-9a-f]{12}", lines[document_line]))
+        self.assertTrue(lines[document_line + 1].startswith("File: /"),
+                        "the fallback keeps the confirm document's exact absolute path (A11)")
+        files = sorted(Path(self.document_home).glob("**/hitl/*.json"))
+        self.assertEqual(len(files), 2,
+                         "the approve document and the confirm document are both written")
+        amend = next(receipt for receipt in self._stored_receipts()
+                     if receipt["outcome"] == "amend")
+        self.assertEqual(amend["superseded_budgets"]["max_passes"], 8)
+        # the confirm document's (was …) priors equal those core-owned superseded ceilings
+        confirm_path = next(path for path in files
+                            if json.loads(path.read_bytes())["question"] == "confirm_amendment")
+        confirm_document = json.loads(confirm_path.read_bytes())
+        self.assertEqual(confirm_document["amendment"]["budgets"]["max_passes"]["was"], 8)
+        # and the receipt that finalises names exactly the confirm document the human judged
+        final = next(receipt for receipt in self._stored_receipts()
+                     if receipt["outcome"] == "approve")
+        self.assertEqual(final["document_digest"], core_hitl.digest(confirm_path.read_bytes()))
+        self.assertEqual(result["run"]["governance"]["budgets"]["max_passes"], 6)
+
+    def test_the_form_follows_the_documents_question_after_a_dismissed_confirm(self):
+        """M1 (review 2): the form is chosen by the core-derived document question, never by the
+        adapter's own recursion flag. Amend 8→6, dismiss the confirm form, then re-propose the
+        amended values (a no-op revision): the next mediation must show the CONFIRM form, with
+        its (was 8) priors and the amendment warning, bound to the confirm_amendment document."""
+        self.initialize({"elicitation": {"form": {}}})
+        answers = iter([{"action": "accept", "content": {"max_passes": 6}},
+                        {"action": "cancel"}, {"action": "cancel"}])
+        seen = []
+        self.mediator.elicit = lambda message, schema: (seen.append((message, schema)), next(answers))[1]
+        first = self.propose()["result"]["structuredContent"]
+        self.assertEqual(first["type"], "Block")
+        self.assertEqual(first["run"]["governance"]["state"], "pending")
+        self.assertEqual(first["run"]["governance"]["proposal"]["budgets"]["max_passes"], 6)
+        # the no-op re-proposal of the same values: the epoch's document is a confirm_amendment
+        # document (the amend receipt is the epoch's own), so the next mediation shows the
+        # confirm form the record says the human is answering
+        self.mediator(self.dispatch({"type": "ObserveAction", "run_id": self.run,
+            "action": {"kind": "configure_run", "budgets": {"max_passes": 6, "max_spawns": 1,
+                           "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE}})["result"])
+        self.assertEqual(len(seen), 3)
+        confirm, schema = seen[2]
+        self.assertIn("confirm edited configuration", confirm)
+        self.assertIn("passes 6 (was 8)", confirm)
+        self.assertIn("not regenerated for these", confirm)  # the amendment warning
+        self.assertNotIn(SIZED_RATIONALE, confirm)
+        self.assertEqual(schema["properties"], {})  # buttons-only, no editable fields
+        # the form the human saw is the one document the epoch bound: confirm_amendment
+        files = sorted(Path(self.document_home).glob("**/hitl/*.json"))
+        questions = [json.loads(path.read_bytes())["question"] for path in files]
+        self.assertEqual(questions.count("confirm_amendment"), len(questions) - 1)
+        # the re-proposal's confirm document is byte-identical to the first one, so the
+        # write-once publish is idempotent: approve + one confirm document, two files
+        self.assertEqual(len(files), 2)
+        confirm_document = json.loads(next(
+            path.read_bytes() for path in files
+            if json.loads(path.read_bytes())["question"] == "confirm_amendment"))
+        self.assertEqual(confirm_document["amendment"]["budgets"]["max_passes"]["was"], 8)
+
     def test_interactive_auto_dialog_once_then_lower_auto_without_dialog(self):
         auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto task",
                               "invocation": {**TEST_INVOCATION, "delegation": True},
@@ -312,7 +710,8 @@ class GovernanceHostTests(unittest.TestCase):
         mediator = HostGovernance(self.profile, elicit=lambda message, schema: (
             calls.append((message, schema)) or {"action": "accept", "content": {}}),
             context_ingress=lambda _p, r, v: self.service.trusted_governance_context(run_id=r, payload=v),
-            decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v))
+            decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v),
+            documents=self.documents)
         initial = self.dispatch({"type": "ObserveAction", "run_id": auto,
             "action": {"kind": "configure_run", "budgets": {
                 "max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
@@ -571,7 +970,7 @@ class GovernanceHostTests(unittest.TestCase):
         from core.projection import governance_dialog
         dialog = governance_dialog(view["goal"], view["governance"],
                                    _proto.projection_controls(), view.get("invocation"))
-        form_message, _ = review_form(dialog, 900)
+        form_message, _ = review_form(dialog, TEST_DOCUMENT, 900)
         self.assertNotIn(view["governance"]["proposal_digest"], form_message)
 
 
@@ -598,7 +997,7 @@ class GovernancePresentationTests(unittest.TestCase):
         graph = view["governance"]["scope"]
         graph["claims"][0]["text"] = "work graph is not approvable"
         dialog = governance_dialog(view["goal"], view["governance"], _proto.projection_controls())
-        message, _ = review_form(dialog, 900)
+        message, _ = review_form(dialog, TEST_DOCUMENT, 900)
         self.assertIn("Goal:", message)
         self.assertIn("Exact goal", message)
         self.assertNotIn(view["governance"]["proposal_digest"], message)

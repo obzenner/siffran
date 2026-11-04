@@ -73,6 +73,8 @@ AUTHOR_GUIDANCE = {
     "governance.revision_exhausted": "Auto's material-revision allowance is spent: start a fresh run with a larger approved size, or use deliberative mode.",
     "governance.budget_invalid": "A proposed ceiling is below what is already used: resubmit `configure_run` with ceilings at least equal to usage.",
     "governance.stale_proposal": "The decision was bound to an older revision: read the run, then resubmit the current proposal for a new decision.",
+    "governance.document_mismatch": "The host's dialog named a configuration document that no longer matches the run's state: resubmit a task-sized configure_run so the host shows you the current one; a refused present spent nothing, and a re-present after a refused decision costs one review unit (3 per configuration).",
+    "evidence.document_mismatch": "The evidence presentation, its confirmation or the consent to end the run named a different document than this batch renders, and nothing was spent. Report again (`report_convergence`) to have the same batch shown again with the document the host binds then — a batch already shown is recovered only by that fresh showing, never by repeating the refused call's own step — or stop with the residual.",
     "governance.receipt_replay": "A superseded or conflicting decision was replayed and changed nothing: read the current proposal and act on that.",
     "governance.interaction_limit": "The dialog allowance is spent (3 per configuration, 128 per run): stop honestly or start a fresh run.",
     "governance.decision_conflict": "The submitted control and edited fields disagreed and nothing was approved: use one explicit decision path.",

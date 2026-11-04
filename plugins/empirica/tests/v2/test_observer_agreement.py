@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import contextlib
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -36,6 +37,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts"))  # the 
 
 from adapters.confirmation import HostConfirmation
 from adapters.governance import HostGovernance
+from adapters.state.hitl import HitlDocuments
 from core import governance
 from core.confirmation import presentable
 from governance_setup import AUDITOR, invocation_for
@@ -87,9 +89,10 @@ def _human_owned():
     """The only approved claim is a human's decision: nothing was produced, so nobody is independent of anything."""
     b, run = _begin("human-owned", [("C0", "needs-decision", "Ship the cache")])
     digest = b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"][0]["wording_digest"]
-    b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
+    _, document_digest = b._present(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
     b.drv.trusted_evidence_confirmation(run, {"run_id": run, "receipt_id": "d1", "decisions": [
-        {"subject": "claim", "claim_id": "C0", "claim_digest": digest, "outcome": "approve"}]})
+        {"subject": "claim", "claim_id": "C0", "claim_digest": digest, "outcome": "approve"}],
+        "document_digest": document_digest})
     b.audit(run, "pass")
     return b, run
 
@@ -163,7 +166,20 @@ def _evidence_waiting(**kw):
 def _evidence_shown_and_left_open():
     b, run = _begin("shown")
     b.cite(run, "C0", "web", "https://example.invalid/spec", "External support")
-    b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "p1", "key": b.batch_key(run)})
+    # X7 (Copilot #54): the presentation names its batch's document — the PR 13 digest flow
+    # via ``_present`` — never the legacy bare payload, which silently faulted with the older
+    # request schema and left the scenario unshown. The call must reach a real state, never a
+    # request fault: shown and left open where interactions remain (and the batch then says it
+    # was already presented), or refused by the exhausted interaction ceiling underneath the
+    # limit variant — whose configuration approval already spent the one mocked interaction.
+    shown, digest = b._present(run, {"run_id": run, "receipt_id": "p1", "key": b.batch_key(run)})
+    if shown["type"] in ("Allow", "Inert"):
+        assert digest is not None, "the shown batch names its bound document"
+        batch = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["confirmation_batch"]
+        assert batch["prompt_error"] == "already_presented", batch
+    else:
+        assert shown["type"] == "Block" and any(
+            reason["code"] == "governance.interaction_limit" for reason in shown.get("reasons", [])), shown
     return b, run
 
 
@@ -310,28 +326,34 @@ def _mediate(b, run, *, can_present):
         proposed = b.a.dispatch(drv, observe_action(run_id=run, action={
             "kind": "configure_run", "budgets": g["proposal"]["budgets"], "rationale": g["proposal"]["rationale"]}))
         service = drv._service
-        HostGovernance(PROFILE, elicit=later if can_present else None,
-                       context_ingress=lambda _p, run_id, payload: service.trusted_governance_context(run_id=run_id, payload=payload),
-                       decision_ingress=lambda _p, run_id, payload: service.trusted_governance_decision(run_id=run_id, payload=payload)
-                       )(proposed["result"])
+        with tempfile.TemporaryDirectory(prefix="observer-home-") as machine_home:
+            HostGovernance(PROFILE, elicit=later if can_present else None,
+                           context_ingress=lambda _p, run_id, payload: service.trusted_governance_context(run_id=run_id, payload=payload),
+                           decision_ingress=lambda _p, run_id, payload: service.trusted_governance_decision(run_id=run_id, payload=payload),
+                           documents=HitlDocuments(home=Path(machine_home)))(proposed["result"])
         if forms:
             return len(forms), True
-    host = HostConfirmation(PROFILE, elicit=later if can_present else None, timeout=lambda: 900,
-                            dispatch=lambda request, _profile: b.drv.request(request),
-                            presentation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_presentation(run_id, payload),
-                            confirmation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_confirmation(run_id, payload),
-                            surface_ingress=lambda _p, run_id, payload: b.drv.trusted_human_surface(run_id, payload["surface"]))
-    host.observe(run)
-    result = b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"]
-    # The owner's own answer once the host has looked (the snapshot of this very report): is its batch one that is presented,
-    # and does the core admit a human's batch at all? It admits none before the run has investigated: the core's own
-    # bootstrap obligations (route, graph, approval, investigation) are then not all satisfied, and the presentation is
-    # refused (``investigation.required``), so the host shows nothing.
-    seen = result.get("run") or {}
-    bootstrapped = all(o["status"] == "satisfied" for o in (seen.get("obligations") or {}).get("active", ())
-                       if o["id"] in BOOTSTRAP)
-    after_looking = presentable(seen.get("confirmation_batch")) and bootstrapped
-    host(result, lambda failure=None: b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"])
+    # PR 11 isolates the evidence mediator's own machine home the same way the governance one above does:
+    # the shared write-first present publishes the batch's document through the store, and nothing a
+    # test mediates may write the developer's real ~/.empirica-plugin.
+    with tempfile.TemporaryDirectory(prefix="observer-evidence-home-") as evidence_home:
+        host = HostConfirmation(PROFILE, elicit=later if can_present else None, timeout=lambda: 900,
+                                dispatch=lambda request, _profile: b.drv.request(request),
+                                presentation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_presentation(run_id, payload),
+                                confirmation_ingress=lambda _p, run_id, payload: b.drv.trusted_evidence_confirmation(run_id, payload),
+                                surface_ingress=lambda _p, run_id, payload: b.drv.trusted_human_surface(run_id, payload["surface"]),
+                                documents=HitlDocuments(home=Path(evidence_home)))
+        host.observe(run)
+        result = b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"]
+        # The owner's own answer once the host has looked (the snapshot of this very report): is its batch one that is
+        # presented, and does the core admit a human's batch at all? It admits none before the run has investigated: the
+        # core's own bootstrap obligations (route, graph, approval, investigation) are then not all satisfied, and the
+        # presentation is refused (``investigation.required``), so the host shows nothing.
+        seen = result.get("run") or {}
+        bootstrapped = all(o["status"] == "satisfied" for o in (seen.get("obligations") or {}).get("active", ())
+                           if o["id"] in BOOTSTRAP)
+        after_looking = presentable(seen.get("confirmation_batch")) and bootstrapped
+        host(result, lambda failure=None: b.a.dispatch(b.drv, evaluate(run_id=run, intent="report_convergence"))["result"])
     return len(forms), after_looking
 
 
@@ -370,9 +392,19 @@ def _decision_rejected():
     b, run = _begin("decision-no", [("C0", "ordinary", "Root"), ("C1", "needs-decision", "Ship the cache")], [("C0", "C1")])
     digest = next(c["wording_digest"] for c in b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"]
                   if c["claim_id"] == "C1")
-    b.drv.trusted_evidence_presentation(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
-    b.drv.trusted_evidence_confirmation(run, {"run_id": run, "receipt_id": "d1", "decisions": [
-        {"subject": "claim", "claim_id": "C1", "claim_digest": digest, "outcome": "reject"}]})
+    # X7 (Copilot #54): presentation and confirmation both bind the batch's document — the PR 13
+    # digest flow via ``_present`` — never the legacy bare payloads, which silently fault and
+    # record nothing. The scenario's decision must actually be rejected: assert the calls
+    # succeeded and the human's rejection stands in the argument's own rows.
+    presented, document_digest = b._present(run, {"run_id": run, "receipt_id": "d1", "key": b.batch_key(run)})
+    confirmed = b.drv.trusted_evidence_confirmation(run, {"run_id": run, "receipt_id": "d1", "decisions": [
+        {"subject": "claim", "claim_id": "C1", "claim_digest": digest, "outcome": "reject"}],
+        "document_digest": document_digest})["result"]
+    assert presented["type"] in ("Allow", "Inert"), presented
+    assert confirmed["type"] == "Allow", confirmed
+    rows = b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"]
+    decided = next(c for c in rows if c["claim_id"] == "C1")
+    assert decided["state"] == "discarded" and decided["human_decision"]["outcome"] == "reject", decided
     return b, run
 
 
@@ -467,6 +499,53 @@ NO_SURFACE = {"evidence_nobody_to_ask", "auto_delegated", "unobserved_without_di
 #: Variants whose host has not looked for a dialog yet: whether a human can be asked is unknown until it does.
 UNOBSERVED = {"unobserved_with_dialog", "unobserved_without_dialog", "unobserved_record_with_dialog", "unobserved_record_without_dialog"}
 LIMIT = {"evidence_interaction_limit"}
+
+
+class ServedDocumentAgreementTests(unittest.TestCase):
+    """PR 15 (operator finding F2): the served ``document`` members are the owners' own bindings -
+    every row names the ``document_digest`` the core recorded for that presentation (governance
+    receipts, presentation and confirmation artifacts), and the body served beside a verified
+    document is what the human was shown, pinned byte for byte: re-rendering it gives the exact
+    bound text, and its digest is the digest the row names. A sheet read twice answers the same."""
+
+    def test_the_served_body_re_renders_byte_for_byte_to_its_recorded_digest(self):
+        b = _Builder()
+        run = b.begin("atlas", "s-docs", "Show the document the human decided.", _graph(
+            "C0", [("C0", "ordinary", "The export reads one documented path."),
+                   ("C1", "ordinary", "The nightly log shows no other read.")], [("C0", "C1")]))
+        b.research(run, "C0", ref="docs/path.md")
+        b.cite(run, "C1", "runtime", "nightly log", "0 reads outside the index",
+               spike_unavailable="Only runs nightly.")
+        b.evaluate(run, "report_convergence")
+        batch = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["confirmation_batch"]
+        pair = b.drv.trusted_evidence_presentation(
+            run, {"run_id": run, "receipt_id": "bound-pair", "key": batch["key"],
+                  "document_digest": None})["result"]["document"]
+        b.publish_document(run, pair)
+        b.present_and_answer(run, "pair-answered", [
+            {"subject": "research", "artifact_id": b.record_ids(run)["C1"], "outcome": "confirm"}])
+        from application.location import decode_handle
+        from application.observer import run_key
+        from core import hitl as core_hitl
+        key = run_key(decode_handle(run))
+        observer = Observer(DriverSource(b.store))
+        sheet = observer.sheet(key)
+        row = next(d for d in sheet["decisions"] if d["asked"] == "confirm_source")
+        document = row["document"]
+        self.assertEqual((document["digest"], document["status"]), (pair["digest"], "verified"))
+        self.assertEqual(core_hitl.render(document["body"]).decode("utf-8"), pair["text"],
+                         "the served body re-renders to the exact bytes the host bound")
+        self.assertEqual(core_hitl.document_digest(document["body"]), document["digest"])
+        self.assertEqual(document["body"]["kind"], "evidence", document["body"]["schema"])
+        # each configuration row of the same sheet names the digest its own receipt recorded
+        # (ADR-0072's binding, PR 07) - the reader is never without the identity it can ask for
+        state = b.drv._runs.read(decode_handle(run)).value
+        recorded = {r["document_digest"] for r in state["governance"]["receipts"]}
+        configured = [d for d in sheet["decisions"] if d["plan"] is not None]
+        self.assertTrue(configured)
+        self.assertTrue({d["document"]["digest"] for d in configured} <= recorded)
+        # a sheet read twice answers the same (no read disturbs the store it read)
+        self.assertEqual(observer.sheet(sheet["row"]["key"]), sheet)
 
 
 class ObserverAgreementTests(unittest.TestCase):

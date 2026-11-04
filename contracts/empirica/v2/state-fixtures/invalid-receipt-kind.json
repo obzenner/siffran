@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/3",
+  "state_schema": "empirica.run/4",
   "goal": "Prove strict v2 state codec roundtrip with terminal children.",
   "invocation": {
     "host": "test",
@@ -120,6 +120,8 @@
         "fingerprint": "sha256:8888888888888888888888888888888888888888888888888888888888888888",
         "presentation_fingerprint": "sha256:9999999999999999999999999999999999999999999999999999999999999999",
         "outcome": "approve",
+        "document_digest": null,
+        "superseded_budgets": null,
         "plan_revision": 1,
         "proposal_digest": "sha256:b8ac41179cdf99e474e4ddbfad1f888738a03669b67c588ffd556ecb9879c226",
         "approval_kind": "unknown_kind"

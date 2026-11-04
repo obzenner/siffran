@@ -22,6 +22,8 @@ links:
   kind: Amended by
 - target: 69
   kind: Amended by
+- target: 72
+  kind: Amended by
 ---
 
 # Verify every research record by its class and surface every confirmation it still needs

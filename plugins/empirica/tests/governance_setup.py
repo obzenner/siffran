@@ -76,6 +76,12 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
     decision = {"run_id": run_id, "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                 "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
     if decision["approval_kind"] == "host_ui":
+        # PR 13: a host_ui envelope names its core-verified document — the context answer
+        # IS the fetch (the rendered pair rides its private presentation), and this helper
+        # stands in for a host whose byte-write is not what these tests exercise.
+        document = (response["result"].get("presentation") or {}).get("document")
+        assert document is not None, "a host approval needs its bound configuration document"
+        decision["document_digest"] = document["digest"]
         presented = transact(c, run_id, {**decision, "outcome": "present"})
         assert presented["result"]["type"] == "Allow", presented
         decision["submission"] = {"action": "approve", "configuration": {
@@ -98,10 +104,21 @@ def end_with_consent(coordinator, run_id, intent="stop"):
         return response
     c.trusted_human_surface(run_id, {"run_id": run_id, "surface": "human"})
     batch = evaluate()["result"]["run"]["confirmation_batch"]
-    shown = c.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "test-end", "key": batch["key"]})
+    # PR 13 (ADR-0072): the presentation names its batch's core-rendered document — ``null``
+    # first: the fetch refusal carries the rendered pair, then the same presentation bound.
+    # This helper stands in for a host whose byte-write is not what these tests exercise.
+    fetch = c.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "test-end",
+                                                    "key": batch["key"], "document_digest": None})
+    assert fetch["result"]["type"] == "Block", fetch
+    assert fetch["result"]["reasons"][0]["code"] == "evidence.document_mismatch", fetch
+    digest = fetch["result"]["document"]["digest"]
+    shown = c.trusted_evidence_presentation(run_id, {"run_id": run_id, "receipt_id": "test-end",
+                                                   "key": batch["key"], "document_digest": digest})
     assert shown["result"]["type"] == "Allow", shown
     decision = {"subject": "claim", "claim_id": batch["terminal"]["status"],
                 "claim_digest": batch["terminal"]["digest"], "outcome": "approve"}
-    answered = c.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "test-end", "decisions": [decision]})
+    answered = c.trusted_evidence_confirmation(run_id, {"run_id": run_id, "receipt_id": "test-end",
+                                                       "decisions": [decision],
+                                                       "document_digest": digest})
     assert answered["result"]["type"] == "Allow", answered
     return evaluate()

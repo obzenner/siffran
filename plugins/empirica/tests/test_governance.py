@@ -21,7 +21,7 @@ from application.run_state import classify_and_decode
 from application.snapshot import traverse_history
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from governance_setup import (AUTHOR, AUDITOR, TEST_INVOCATION, SIZED_RATIONALE,
-                              sized_configure_run)
+                              approve_current, sized_configure_run)
 from application.protocol import host_profile_id  # noqa: E402
 PI_PROFILE = host_profile_id("pi")
 
@@ -31,6 +31,7 @@ GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied uncertainty", "
 CONTEXT = {"author": AUTHOR, "ingress": "pi_ui"}
 # ADR-0063: configure_run must carry all three ceilings and a nonblank rationale.
 SIZED_BUDGETS = {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}
+DIGEST_A = "sha256:" + "a" * 64
 DELEGATED_INVOCATION = {"host": "test", "interactive": False,
                         "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
 
@@ -352,9 +353,109 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
                    "proposal_digest": gov["proposal_digest"]}
         gov["receipts"] = [{**receipt, "approval_kind": "host_ui"}]
         self.assertFalse(governance.invariant(_invariant_doc(gov)))
-        # a correct auto receipt at the exact approved revision and digest passes
-        gov["receipts"] = [{**receipt, "approval_kind": "auto"}]
+        # A correct auto receipt at the exact approved revision and digest passes.
+        gov["receipts"] = [{**receipt, "approval_kind": "auto", "superseded_budgets": None}]
         self.assertTrue(governance.invariant(_invariant_doc(gov)))
+
+    # --- the recorded document binding rides the receipt (ADR-0072, PR 07) ---
+
+    def test_document_digest_invariant(self):
+        """A recorded document binding is null exactly where no document was verified: an
+        auto receipt answers no human's question, and a recorded digest is sha256-prefixed."""
+        gov = _sized(_capable(_placeholder()), SIZED_BUDGETS, SIZED_RATIONALE)
+        # a real present binds its payload: fingerprint and presentation fingerprint are one,
+        # and the receipt records the document the core verified against its own recomputation
+        base = {"id": "doc-1", "fingerprint": "sha256:" + "a" * 64,
+                "presentation_fingerprint": "sha256:" + "a" * 64,
+                "outcome": "present", "plan_revision": 1,
+                "proposal_digest": gov["proposal_digest"], "approval_kind": "host_ui",
+                "superseded_budgets": None,
+                "document_digest": "sha256:" + "c" * 64}
+        gov["receipts"] = [dict(base)]
+        self.assertTrue(governance.invariant(_invariant_doc(gov)))
+        for label, digest in ((
+                "a receipt recording an unprefixed digest", "c" * 64), (
+                "a receipt recording a malformed digest", "sha256:" + "x" * 64), (
+                "a receipt recording a non-string digest", 5)):
+            with self.subTest(case=label):
+                gov["receipts"] = [{**base, "document_digest": digest}]
+                self.assertFalse(governance.invariant(_invariant_doc(gov)), label)
+        # auto answers no human's question: an auto receipt cannot claim a document binding,
+        # and its control with none recorded passes (the kind-forged shape, delegated auto)
+        gov = _sized(_placeholder("auto", {"interactive": False, "delegation": True}),
+                     SIZED_BUDGETS, SIZED_RATIONALE)
+        gov = governance.plain(gov)
+        gov.update(state="approved", approved_digest=gov["proposal_digest"],
+                   approval_kind="auto", first_approval=True)
+        fields = {"id": "doc-auto", "fingerprint": "f", "presentation_fingerprint": None,
+                  "outcome": "approve", "plan_revision": gov["plan_revision"],
+                  "proposal_digest": gov["proposal_digest"],
+                  "approval_kind": "auto", "superseded_budgets": None}
+        gov["receipts"] = [{**fields, "document_digest": "sha256:" + "c" * 64}]
+        self.assertFalse(governance.invariant(_invariant_doc(gov)))
+        gov["receipts"] = [{**fields, "document_digest": None}]
+        self.assertTrue(governance.invariant(_invariant_doc(gov)))
+
+    def test_a_host_ui_receipt_without_a_verified_document_impossible_of_decoding(self):
+        """The contract step (PR 13): every host_ui decision was shown a core-verified document,
+        so the recorded digest is never null and never absent on a host receipt — a run file whose
+        receipt claims a human approval without the binding classifies corrupt, exactly like
+        any other state the invariant refuses."""
+        gov = _sized(_capable(_placeholder()), SIZED_BUDGETS, SIZED_RATIONALE)
+        base = {"id": "doc-2", "fingerprint": "sha256:" + "a" * 64,
+                "presentation_fingerprint": "sha256:" + "a" * 64,
+                "outcome": "present", "plan_revision": 1,
+                "proposal_digest": gov["proposal_digest"], "approval_kind": "host_ui",
+                "superseded_budgets": None}
+        for label, digest in (("a host_ui receipt recording no binding", None),
+                              ("a host_ui receipt that omits the member", "absent")):
+            with self.subTest(case=label):
+                receipt = dict(base)
+                if digest != "absent":
+                    receipt["document_digest"] = digest
+                gov["receipts"] = [receipt]
+                self.assertFalse(governance.invariant(_invariant_doc(gov)),
+                                  f"a human approval must name its verified document: {label}")
+
+    # --- the amendment's superseded ceilings ride the receipt (ADR-0072, run/4) ---
+    def test_amend_receipt_superseded_ceilings_invariant(self):
+        gov = _sized(_capable(_placeholder()), SIZED_BUDGETS, SIZED_RATIONALE)
+        submission = {"action": "approve", "configuration": {"budgets": {"max_passes": 6,
+                        "max_spawns": 1, "max_audit_spawns": 2}}}
+        resolved, reason = governance.resolve_submission(gov, submission, _APPROVE_ACTIONS)
+        self.assertIsNone(reason)
+        self.assertEqual(resolved["outcome"], "amend")
+        amended = governance.revise("goal", gov, proposal=resolved["configuration"])
+        self.assertEqual(amended["plan_revision"], gov["plan_revision"] + 1)  # the amend's heirs
+        fields = {"id": "amend-1", "fingerprint": "sha256:" + "a" * 64,
+                  "presentation_fingerprint": "sha256:" + "b" * 64,  # a human's presentation reservation
+                  "proposal_digest": gov["proposal_digest"], "approval_kind": "host_ui"}
+        superseded = {"max_passes": SIZED_BUDGETS["max_passes"],
+                      "max_spawns": SIZED_BUDGETS["max_spawns"],
+                      "max_audit_spawns": SIZED_BUDGETS["max_audit_spawns"]}
+        good = {**fields, "outcome": "amend", "plan_revision": gov["plan_revision"],
+                "superseded_budgets": superseded,
+                "document_digest": "sha256:" + "c" * 64}  # a human amend names its document
+        amended["receipts"] = [good]
+        self.assertTrue(governance.invariant(_invariant_doc(amended)))
+        cases = [
+            ("an amend receipt without its priors",
+             {k: v for k, v in good.items() if k != "superseded_budgets"}),
+            ("an amend receipt with null priors",
+             {**good, "superseded_budgets": None}),
+            ("an amend receipt naming the wrong ceilings",
+             {**good, "superseded_budgets": {"max_passes": 6, "max_spawns": 1,
+                                              "max_audit_spawns": 2, "extra": 1}}),
+            ("an amend receipt at the amended revision itself",
+             {**good, "plan_revision": amended["plan_revision"]}),
+            ("a non-amend receipt carrying priors",
+             {**good, "outcome": "approve",
+              "superseded_budgets": superseded, "plan_revision": amended["plan_revision"]}),
+        ]
+        for label, receipt in cases:
+            with self.subTest(case=label):
+                forged = {**amended, "receipts": [receipt]}
+                self.assertFalse(governance.invariant(_invariant_doc(forged)), "must fail: " + label)
 
     # --- a zero-audit proposal is a valid sized proposal ---
     def test_zero_audit_proposal_is_sized(self):
@@ -402,6 +503,9 @@ class GovernanceServiceTests(unittest.TestCase):
         g = self.view()["governance"]
         payload = {"run_id": self.run_id, "receipt_id": receipt + "-" + str(g["plan_revision"]), "proposal_digest": g["proposal_digest"],
                    "plan_revision": g["plan_revision"], "approval_kind": kwargs.pop("approval_kind", "host_ui")}
+        if payload["approval_kind"] == "host_ui":
+            # PR 13: every host_ui envelope names its document — the fetch is the context ask
+            payload["document_digest"] = self._context_document()["digest"]
         if payload["approval_kind"] == "auto" or outcome in {"present", "dismiss"}:
             payload.update(outcome=outcome, **kwargs)
         else:
@@ -428,6 +532,439 @@ class GovernanceServiceTests(unittest.TestCase):
             budgets=SIZED_BUDGETS, rationale=SIZED_RATIONALE))["type"], "Allow")
         result = self.service.trusted_governance_context(run_id=self.run_id, payload=copy.deepcopy(CONTEXT))
         self.assertEqual(result["result"]["type"], "Allow", result)
+
+    # --- the amendment's superseded ceilings ride the receipt (ADR-0072, PR 06) ---
+
+    def _receipts(self):
+        self.view()  # reassemble, so the coordinator's latest snapshot holds the last write
+        return self.service._coordinator.last_snapshot.state.governance["receipts"]
+
+    def test_pre_approval_amend_records_the_superseded_ceilings(self):
+        """The confirm_amendment form's ``(was …)`` priors cannot be derived from state after the
+        amendment commits — run/4 records them on the receipt, read from the proposal the human
+        amended (before ``revise`` replaced it)."""
+        self.prepare()
+        amended = {"max_passes": SIZED_BUDGETS["max_passes"] - 1, "max_spawns": 1,
+                   "max_audit_spawns": 2}
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(self.admit(self.decision("pre-approval-amend", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["outcome"], "amend")
+        self.assertEqual(receipts[-1]["superseded_budgets"], superseded)
+
+    def test_post_approval_amend_records_the_superseded_ceilings(self):
+        self.prepare()
+        self.assertEqual(self.admit(self.decision("first-approve"))["type"], "Allow")
+        revised = {k: v for k, v in SIZED_BUDGETS.items()}
+        revised["max_passes"] = SIZED_BUDGETS["max_passes"] - 2
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets=revised, rationale="a later authored revision"))["type"], "Allow")
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(superseded["max_passes"], revised["max_passes"])
+        amended = {k: v for k, v in revised.items()}
+        amended["max_passes"] = revised["max_passes"] - 1
+        self.assertEqual(self.admit(self.decision("post-approval-amend", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        receipts = self._receipts()
+        self.assertEqual(receipts[-1]["outcome"], "amend")
+        self.assertEqual(receipts[-1]["superseded_budgets"], superseded)
+
+    def test_every_non_amend_outcome_records_null_priors(self):
+        """Only an amendment supersedes ceilings: present, dismiss and reject write null priors,
+        and so does the first approval (asserted over the whole receipt log each step)."""
+        self.prepare()
+        for label in ("present", "dismiss", "reject"):
+            self.assertIn(self.admit(self.decision(f"null-{label}", outcome=label))["type"],
+                          {"Allow", "Inert"})
+            for receipt in self._receipts():
+                self.assertIsNone(receipt["superseded_budgets"])
+        # a fresh run for the approvals: an approve receipt carries null priors too
+        self.setUp()
+        self.prepare()
+        self.assertIn(self.admit(self.decision("null-approve"))["type"], {"Allow", "Inert"})
+        for receipt in self._receipts():
+            self.assertIsNone(receipt["superseded_budgets"])
+
+    def test_amend_priors_are_the_amended_proposal_not_the_effective_ceilings(self):
+        """``state.budgets`` holds seed or approved ceilings — never what the dialog showed —
+        so the receipt's priors must be the amended proposal's own ceilings, read from the state
+        before ``revise`` replaced them, even when those ceilings differ from the effective ones."""
+        self.prepare()
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"],
+                         SIZED_BUDGETS["max_passes"])
+        # a pre-approval proposal may raise above the seed ceilings in deliberative mode:
+        amended = {"max_passes": SIZED_BUDGETS["max_passes"] + 1, "max_spawns": 1,
+                   "max_audit_spawns": 2}
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(self.admit(self.decision("amend-above", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        receipt = self._receipts()[-1]
+        self.assertEqual(receipt["superseded_budgets"], superseded)
+
+    # --- Copilot round on #47..#54: admission and the amendment path ---
+
+    def _float_proposal(self):
+        """A sized proposal whose wire-integer ceilings arrive as integral floats."""
+        self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets={"max_passes": 8.0, "max_spawns": 1, "max_audit_spawns": 2},
+            rationale=SIZED_RATIONALE))["type"], "Allow")
+        return self.service.trusted_governance_context(
+            run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]
+
+    def test_an_auto_amend_that_changes_nothing_is_refused_before_commit(self):
+        """Copilot X1 (#47): a delegated auto amend naming the standing proposal's own ceilings
+        commits an amend receipt whose revision never advanced — ``revise`` refuses a no-op — and
+        run/4's invariant then classifies the whole run corrupt. The decision gate refuses it as
+        ``governance.receipt_replay`` (no refusal reason for a no-op host_ui amend exists to
+        mirror: the human effort resolves an unchanged edit to ``approve`` through
+        ``resolve_submission``), nothing committed, before any mutation. An auto amend that
+        changes a ceiling still commits as a real revision."""
+        self._prepare_auto(DELEGATED_INVOCATION)
+        before = copy.deepcopy(self._receipts())
+        g = self.view()["governance"]
+        payload = {"run_id": self.run_id, "receipt_id": "noop-auto-amend",
+                   "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
+                   "approval_kind": "auto", "outcome": "amend",
+                   "amendment": {"budgets": copy.deepcopy(g["proposal"]["budgets"])}}
+        refused = self.admit(payload)
+        self.assertEqual(refused["type"], "Block", refused)
+        self.assertEqual(refused["reasons"][0]["code"], "governance.receipt_replay")
+        self.assertEqual(self._receipts(), before, "nothing was committed")
+        self.assertEqual(self.view()["governance"]["plan_revision"], g["plan_revision"])
+        key = decode_handle(self.run_id)
+        self.assertEqual(classify_and_decode(self.runs.data[key].value).kind, "valid",
+                         "the no-op amend left a readable run, not a corrupt one")
+        amended = {**g["proposal"]["budgets"],
+                   "max_passes": g["proposal"]["budgets"]["max_passes"] - 1}
+        self.assertEqual(self.admit({**payload, "receipt_id": "real-auto-amend",
+                                     "amendment": {"budgets": amended}})["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["proposal"]["budgets"], amended)
+
+    def test_integral_float_ceilings_admit_as_ints_and_both_context_fetches_answer(self):
+        """Copilot X2 (#48): the wire's ``integer`` admits ``8.0``, but run/4 stores each ceiling
+        as the exact ``int`` the HITL document renders: an admitted ``8.0`` made the unchanged
+        context fetch Fault with ``invalid_request`` and, once the context changed, raised after
+        its own commit. Integral numbers are normalized at admission, so state, dialog rows and
+        the document hold one representation and neither fetch path faults or raises."""
+        self.assertIn(self._float_proposal()["type"], {"Allow", "Inert"})
+        g = self.view()["governance"]
+        self.assertEqual(g["proposal"]["budgets"],
+                         {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                         "integral floats admit as the ints they render as")
+        # the unchanged-context fetch: no revision to commit, the document beside the dialog
+        result = self.service.trusted_governance_context(
+            run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]
+        self.assertIn(result["type"], {"Allow", "Inert"}, result)
+        parsed = json.loads(result["presentation"]["document"]["text"])
+        self.assertEqual([row["value"] for row in parsed["budgets"]], [8, 1, 2])
+        self.assertTrue(all(type(row["value"]) is int for row in parsed["budgets"]))
+        # the changed-context fetch: the observation commits, the answer still carries the pair
+        from adapters.identity import observe
+        changed = copy.deepcopy(CONTEXT)
+        changed["author"] = {**observe("anthropic", "claude-opus-4-6", source="test-host"),
+                             "observed_by": "host"}
+        committed = self.service.trusted_governance_context(run_id=self.run_id, payload=changed)["result"]
+        self.assertIn(committed["type"], {"Allow", "Inert"}, committed)
+        self.assertEqual(self.view()["governance"]["context"]["author"],
+                         changed["author"], "the changed observation committed, nothing raised")
+        # the run is approvable: the document the human is to decide on binds and installs
+        self.assertEqual(self.admit(self.decision("float-ceiling-approve"))["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 8)
+
+    # --- the decision binds to its HITL document (ADR-0072, PR 07) ---
+
+    def _context_document(self):
+        """The private ``governance_context`` answer's rendered ``document: {text, digest}``
+        (ADR-0072 Q1) - the pair the core hands the adapter, never a dict it re-renders."""
+        result = self.service.trusted_governance_context(run_id=self.run_id,
+                                                         payload=copy.deepcopy(CONTEXT))
+        self.assertIn(result["result"]["type"], {"Allow", "Inert"}, result)
+        return result["result"]["presentation"].get("document")
+
+    def _present_payload(self, receipt="bound", digest=None):
+        """One present envelope; the digest is bound into the payload when the host has it."""
+        payload = self.decision(receipt, outcome="present", reserve=False)
+        if digest is not None:
+            payload["document_digest"] = digest
+        return payload
+
+    def test_the_placeholder_has_no_document_until_the_author_has_sized_a_proposal(self):
+        """(review-2 m2) The unsized StartRun placeholder's judgment is not a human's: the
+        context ask carries no document until an author-sized proposal exists, so no host writes
+        or shows a document for a form that could never be answered. After a sized proposal the
+        same ask carries the rendered pair."""
+        asked = self.service.trusted_governance_context(run_id=self.run_id,
+                                                        payload=copy.deepcopy(CONTEXT))
+        self.assertIn(asked["result"]["type"], {"Allow", "Inert"}, asked)
+        presentation = asked["result"].get("presentation")
+        placeholder = self.view()["governance"]
+        self.assertFalse(placeholder["display_ready"], "the run is still the unsized placeholder")
+        if presentation is not None:
+            self.assertNotIn("document", presentation,
+                              "the placeholder has no document for a host to fetch")
+        # the same ask over an author-sized proposal carries the rendered pair
+        self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+        self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets=SIZED_BUDGETS, rationale=SIZED_RATIONALE))["type"], "Allow")
+        sized = self.service.trusted_governance_context(run_id=self.run_id,
+                                                        payload=copy.deepcopy(CONTEXT))
+        self.assertIn(sized["result"]["type"], {"Allow", "Inert"}, sized)
+        document = (sized["result"].get("presentation") or {}).get("document")
+        self.assertIsNotNone(document, "a sized proposal's ask carries the pair")
+        self.assertEqual(set(document), {"text", "digest"})
+
+    def test_context_returns_the_core_rendered_document_pair(self):
+        """The context answer's document is exactly what ``core.hitl`` renders: the pair's text
+        is the deterministic bytes and its digest names them, so the private answer is the fetch."""
+        self.prepare()
+        document = self._context_document()
+        self.assertIsNotNone(document)
+        self.assertEqual(set(document), {"text", "digest"})
+        parsed = json.loads(document["text"])
+        from core import hitl
+        self.assertEqual(document["text"].encode("utf-8"), hitl.render(parsed))
+        self.assertEqual(document["digest"], hitl.digest(hitl.render(parsed)))
+        self.assertEqual(document["digest"],
+                         hitl.document_digest(hitl.configuration_for(
+                             run_id=self.run_id, snapshot=self.service._coordinator.last_snapshot)))
+
+    def test_the_document_does_not_change_when_the_present_receipt_lands(self):
+        """Nothing volatile is digested, so the recomputation at the decision cannot be refused by
+        the present itself: the same derivation before and after the receipt is in state."""
+        from core import hitl
+        self.prepare()
+        self.view()
+        before = hitl.document_digest(hitl.configuration_for(
+            run_id=self.run_id, snapshot=self.service._coordinator.last_snapshot))
+        self.assertEqual(self.admit(self._present_payload("presenter"))["type"], "Allow")
+        self.view()
+        after = hitl.document_digest(hitl.configuration_for(
+            run_id=self.run_id, snapshot=self.service._coordinator.last_snapshot))
+        self.assertEqual(after, before)
+        self.assertEqual(self._context_document()["digest"], before)
+
+    def test_present_with_the_right_digest_binds_the_decision_through_a_surface_flip(self):
+        """The review's end-to-end soundness path: fetch, present, a surface observation flips,
+        and the decision with the same digest still admits - the document is run-fixed."""
+        self.prepare()
+        document = self._context_document()
+        payload = self._present_payload("approved-through-document", digest=document["digest"])
+        self.assertEqual(self.admit(payload)["type"], "Allow")
+        self.assertEqual(self._receipts()[-1]["document_digest"], document["digest"])
+        self.assertEqual(self.service.trusted_human_surface(
+            run_id=self.run_id, payload={"run_id": self.run_id, "surface": "human"})["result"]["type"],
+            "Allow")
+        governed = self.view()["governance"]
+        decided = {"run_id": self.run_id, "receipt_id": payload["receipt_id"],
+                   "proposal_digest": governed["proposal_digest"],
+                   "plan_revision": governed["plan_revision"], "approval_kind": "host_ui",
+                   "document_digest": document["digest"],
+                   "submission": {"action": "approve", "configuration": {
+                       "budgets": governed["proposal"]["budgets"]}}}
+        self.assertEqual(self.admit(decided)["type"], "Allow")
+
+    def test_a_present_digest_one_hex_off_spends_nothing_and_writes_no_receipt(self):
+        """A document bound to another state never writes a receipt (ADR-0072 Q3): the mismatch
+        refusal at the present spends nothing - no review unit, no receipt."""
+        self.prepare()
+        document = self._context_document()
+        self.assertIsNotNone(document)
+        right = document["digest"]
+        forged = right[:-1] + ("0" if right[-1] != "0" else "1")
+        self.assertNotEqual(forged, right)
+        receipts_before = len(self._receipts())
+        views = self.view()["governance"]["interactions_remaining"]
+        result = self.admit(self._present_payload("forged", digest=forged))
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual(result["reasons"][0]["code"], "governance.document_mismatch")
+        self.assertEqual(len(self._receipts()), receipts_before)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"], views)
+
+    def test_a_stale_proposal_refusal_wins_over_the_document_mismatch(self):
+        """Q3 ordering: the stale gates come first, so a wrong digest with a wrong revision is
+        reported as the stale refusal, never as the mismatch."""
+        self.prepare()
+        document = self._context_document()
+        payload = self._present_payload("stale-with-junk", digest=document["digest"][:-1] + "2")
+        payload["plan_revision"] += 1
+        result = self.admit(payload)
+        self.assertEqual(result["type"], "Block")
+        self.assertEqual(result["reasons"][0]["code"], "governance.stale_proposal")
+
+    def test_a_deciding_digest_must_equal_its_present_receipts_recorded_one(self):
+        """The decision names the document its own present receipt bound (ADR-0072): a decision
+        carrying a digest that differs from the present payload's is refused - by the
+        pre-existing replay gate, because every payload member must reconstruct the present
+        exactly (Q3: existing checks first); the mismatch reason is reserved for a digest that
+        disagrees with the state's own recomputation."""
+        self.prepare()
+        document = self._context_document()
+        payload = self._present_payload("rebound", digest=document["digest"])
+        self.assertEqual(self.admit(payload)["type"], "Allow")
+        governed = self.view()["governance"]
+        wrong = document["digest"][:-1] + ("0" if document["digest"][-1] != "0" else "1")
+        diverged = {"run_id": self.run_id, "receipt_id": payload["receipt_id"],
+                    "proposal_digest": governed["proposal_digest"],
+                    "plan_revision": governed["plan_revision"], "approval_kind": "host_ui",
+                    "document_digest": wrong,
+                    "submission": {"action": "approve", "configuration": {
+                        "budgets": copy.deepcopy(governed["proposal"]["budgets"])}}}
+        refused = self.admit(diverged)
+        self.assertEqual(refused["type"], "Block")
+        self.assertEqual(refused["reasons"][0]["code"], "governance.receipt_replay")
+        # and a refused decision changes nothing: the present's recorded binding still stands
+        self.assertEqual(self._receipts()[-1]["document_digest"], document["digest"])
+
+    def test_a_digest_diverging_from_its_own_present_is_a_plain_replay_that_spends_nothing(self):
+        """(review-2 m3, 7a) A decision naming another document than the one its own present
+        bound is a forged or mixed envelope — the replay gate's own case, refused before the
+        mismatch in Q3 order, leaving the state exactly as it was: no new interaction spent, no
+        receipt written, and the present's recorded binding intact."""
+        self.prepare()
+        document = self._context_document()
+        payload = self._present_payload("replay-pin", digest=document["digest"])
+        self.assertEqual(self.admit(payload)["type"], "Allow")
+        governed = self.view()["governance"]
+        views = governed["interactions_remaining"]
+        receipts = len(self._receipts())
+        wrong = document["digest"][:-1] + ("0" if document["digest"][-1] != "0" else "1")
+        diverged = {"run_id": self.run_id, "receipt_id": payload["receipt_id"],
+                    "proposal_digest": governed["proposal_digest"],
+                    "plan_revision": governed["plan_revision"], "approval_kind": "host_ui",
+                    "document_digest": wrong,
+                    "submission": {"action": "approve", "configuration": {
+                        "budgets": copy.deepcopy(governed["proposal"]["budgets"])}}}
+        refused = self.admit(diverged)
+        self.assertEqual(refused["type"], "Block")
+        self.assertEqual(refused["reasons"][0]["code"], "governance.receipt_replay",
+                         "the replay gate refuses the mixed envelope before any document check")
+        self.assertEqual(self.view()["governance"]["interactions_remaining"], views)
+        self.assertEqual(len(self._receipts()), receipts)
+        self.assertEqual(self._receipts()[-1]["document_digest"], document["digest"],
+                         "the recorded binding stands; the refusal is a replay, not a re-bind")
+
+    # --- the contract step (PR 13): the member is required for host_ui ---
+
+    def test_the_schema_binds_the_digest_to_the_approval_kind(self):
+        """The request conditional: a `host_ui` envelope (present, dismiss or a submission) must
+        name the document it was shown; an `auto` envelope must not carry one — auto answers no
+        human's question, so the wire refuses a digest that claims one."""
+        validator = protocol.schema_validator("request", "governanceDecisionPayload")
+        base = {"run_id": self.run_id, "receipt_id": "wire", "proposal_digest": DIGEST_A,
+                "plan_revision": 1, "approval_kind": "host_ui", "outcome": "present"}
+        self.assertFalse(validator.is_valid(base), "host_ui without the member: refused")
+        self.assertTrue(validator.is_valid({**base, "document_digest": DIGEST_A}),
+                        "host_ui names its document")
+        self.assertFalse(validator.is_valid({**base, "document_digest": None}),
+                         "null is not a governance fetch: refused for host_ui")
+        auto = {**base, "approval_kind": "auto", "outcome": "approve"}
+        self.assertTrue(validator.is_valid(auto), "auto carries none")
+        self.assertFalse(validator.is_valid({**auto, "document_digest": DIGEST_A}),
+                         "auto may not claim a document")
+
+    def test_a_host_ui_envelope_without_the_digest_is_refused_at_the_wire(self):
+        """The legacy shape is gone: a host_ui present, dismissal or submission without
+        `document_digest` is a Fault of the request schema (`invalid_request`) raised before any
+        domain logic — no receipt, nothing spent, and the run keeps its unapproved state."""
+        self.prepare()
+        document = self._context_document()
+        self.assertIsNotNone(document)
+        receipts_before = len(self._receipts())
+        views = self.view()["governance"]["interactions_remaining"]
+        for payload in (self._present_payload("absent"),
+                        {**self._present_payload("absent-dismiss"), "outcome": "dismiss"},
+                        self.decision("absent-approve", reserve=False)):
+            payload.pop("document_digest", None)  # the legacy shape: an absent member
+            refused = self.admit(payload)
+            self.assertEqual(refused, {"type": "Fault", "code": "invalid_request",
+                                      "fail_direction": "closed"}, payload["receipt_id"])
+        self.assertEqual(len(self._receipts()), receipts_before)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"], views)
+
+    def test_an_amend_decides_its_confirm_document_through_the_real_flow(self):
+        """The pre-approval amend's confirm document (ADR-0072): the context answer after the
+        amendment asks ``confirm_amendment`` with ``(was ...)`` priors equal to the superseded
+        ceilings PR 06 recorded on the amend receipt."""
+        self.prepare()
+        amended = {"max_passes": SIZED_BUDGETS["max_passes"] + 1, "max_spawns": 1,
+                   "max_audit_spawns": 2}
+        superseded = copy.deepcopy(self.view()["governance"]["proposal"]["budgets"])
+        self.assertEqual(self.admit(self.decision("confirm-me", outcome="amend",
+            amendment={"configuration": {"budgets": amended}}))["type"], "Allow")
+        document = self._context_document()
+        self.assertIsNotNone(document)
+        parsed = json.loads(document["text"])
+        self.assertEqual(parsed["schema"], "empirica.hitl/1")
+        self.assertEqual(parsed["kind"], "configuration")
+        self.assertEqual(parsed["question"], "confirm_amendment")
+        self.assertEqual(parsed["amendment"]["budgets"]["max_passes"]["value"],
+                         amended["max_passes"])
+        for ceiling, value in superseded.items():
+            self.assertEqual(parsed["amendment"]["budgets"][ceiling]["was"], value)
+
+    def test_auto_approval_records_no_document_digest(self):
+        """Auto answers no human's question, so its receipt records no document binding."""
+        auto_id = self.request({"type": "StartRun", "control_mode": "auto", "goal": "auto flow",
+                                 "invocation": {**TEST_INVOCATION, "interactive": False,
+                                                 "delegation": True}, "selector": {
+                                     "project": "p", "session": "auto-approval"}})["run"]["id"]
+        for action in ({"kind": "route", "reason": "supplied context"},
+                       {"kind": "graph", "payload": copy.deepcopy(GRAPH)},
+                       {"kind": "configure_run", "budgets": copy.deepcopy(SIZED_BUDGETS),
+                        "rationale": SIZED_RATIONALE}):
+            observed = self.request({"type": "ObserveAction", "run_id": auto_id,
+                                      "action": action})
+            self.assertEqual(observed["type"], "Allow", observed)
+        approve_current(self.service._coordinator, auto_id)
+        approved = self.service._coordinator.last_snapshot.state.governance["receipts"][-1]
+        self.assertEqual(approved["approval_kind"], "auto")
+        self.assertIsNone(approved["document_digest"])
+        # the wire itself refuses an auto decision that claims a document binding: auto
+        # answers no human's question, so the request schema rejects the member outright
+        governed = self.service._coordinator.last_snapshot.state.governance
+        claiming = {"run_id": auto_id, "receipt_id": "auto-claiming",
+                    "proposal_digest": governed["proposal_digest"],
+                    "plan_revision": governed["plan_revision"],
+                    "approval_kind": "auto", "outcome": "approve",
+                    "document_digest": "sha256:" + "c" * 64}
+        refused = self.service.trusted_governance_decision(run_id=auto_id, payload=claiming)["result"]
+        self.assertEqual(refused["type"], "Fault")
+        self.assertEqual(refused["code"], "invalid_request")
+
+    def test_public_results_never_carry_the_document(self):
+        """The document is private to the governance presentation (ADR-0072 Q1): the author view,
+        the argument and the evaluation results are public and never mention it, and no public
+        response definition even names the presentation."""
+        self.prepare()
+        self._context_document()  # present on the private presentation
+        for command in ({"type": "GetRun", "run_id": self.run_id},
+                        {"type": "GetArgument", "run_id": self.run_id},
+                        {"type": "EvaluateRun", "run_id": self.run_id, "intent": "continue"}):
+            with self.subTest(command=command["type"]):
+                public = json.dumps(self.request(command))
+                self.assertNotIn('"document"', public)
+                self.assertNotIn('"presentation"', public)
+        from pathlib import Path
+        vendored = json.loads((Path(__file__).resolve().parents[1] / "vendor" / "contracts"
+                                / "empirica" / "v2" / "response.schema.json")
+                               .read_text(encoding="utf-8"))
+        # the presentation (and so the document) is named only by the private definitions;
+        # the member itself lives in one private-only shared definition
+        users = {name for name, member in vendored["$defs"].items()
+                 if "governancePresentation" in json.dumps(member)}
+        self.assertEqual(users, {"privateAllowPresented", "privateBlockPresented",
+                                "privateInertPresented"})
+        carriers = {name for name, member in vendored["$defs"].items()
+                    if '"document"' in json.dumps(member)}
+        # the three carriers are all private definitions (PR 10/12): the governance
+        # presentation's rendered pair and the two private evidence answers — the presentation
+        # answer's bound {digest, path} and the refusal's carried {text, digest}
+        self.assertEqual(carriers, {"governancePresentation", "privateEvidenceResponse",
+                                    "privateEvidenceRefusal"})
 
     def test_escaped_rationale_bound_survives_private_response_validation(self):
         self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
@@ -459,11 +996,23 @@ class GovernanceServiceTests(unittest.TestCase):
                        "budgets": g["proposal"]["budgets"]}}}
         before = copy.deepcopy(self.runs.data)
         blocked = self.admit(payload)
-        self.assertEqual(blocked["type"], "Block")
-        self.assertEqual(blocked["reasons"][0]["code"],
-                         "governance.approval_required")
-        self.assertFalse(blocked["run"]["governance"]["display_ready"])
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one, so the
+        # member-less envelope is refused by shape (invalid_request) — that cell stays above. A
+        # wrong-but-well-formed digest is constructible and reaches the domain (the placeholder
+        # fetch answers with no presentation to name at all, so no host could honestly learn a
+        # digest; the check is shape-only there): the domain's approval_required outranks
+        # governance.document_mismatch, and nothing is spent or written. The premises PR 10
+        # called "unconstructible" were false — only the member-less envelope was.
+        self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
+                                  "fail_direction": "closed"})
         self.assertEqual(self.runs.data, before)
+        wrong = {**payload, "document_digest": "sha256:" + "0" * 64}
+        before = copy.deepcopy(self.runs.data)
+        domained = self.admit(wrong)
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "governance.approval_required")
+        self.assertEqual(self.runs.data, before,
+                         "the domain refusal spends nothing and orders the digest check last")
 
     def test_configure_run_schema_rejects_reviewer_field(self):
         before = copy.deepcopy(self.runs.data)
@@ -495,8 +1044,24 @@ class GovernanceServiceTests(unittest.TestCase):
                      "outcome": "present"}
         before = copy.deepcopy(self.runs.data)
         blocked = self.admit(presented)
-        self.assertEqual(blocked["type"], "Block")
-        self.assertEqual(blocked["reasons"][0]["code"], "graph.missing")
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one — the
+        # member-less envelope is a shape refusal (invalid_request), that cell stays; a wrong-but-
+        # well-formed digest is constructible (a graphless state renders no configuration document
+        # to name, and the fetch answers with no presentation at all, so an honest host has nothing
+        # true to say — but the wire check is shape-only): it reaches the domain, whose
+        # graph.missing Block outranks governance.document_mismatch, still spending and writing
+        # nothing. The premises PR 10 called "unconstructible" were false — only the member-less
+        # envelope was.
+        self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
+                                  "fail_direction": "closed"})
+        self.assertEqual(self.runs.data, before)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"],
+                         {"proposal": 3, "total": 128})
+        before = copy.deepcopy(self.runs.data)
+        domained = self.admit({**presented, "document_digest": "sha256:" + "0" * 64})
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "graph.missing")
+        self.assertEqual(domained["reasons"][0]["next_actions"], ["graph.record"])
         self.assertEqual(self.runs.data, before)
         self.assertEqual(self.view()["governance"]["interactions_remaining"],
                          {"proposal": 3, "total": 128})
@@ -670,10 +1235,17 @@ class GovernanceServiceTests(unittest.TestCase):
         self.prepare()
         decision = self.decision()
         before = copy.deepcopy(self.runs.data)
-        for changed in [{"run_id": "other"}, {"plan_revision": 900}, {"approval_kind": "auto"},
+        # the kind-forgery cell strips the document digest: an auto envelope may not carry one
+        # (the wire refuses that itself, asserted in test_the_schema_binds_the_digest_to_the-
+        # approval_kind), so this cell keeps testing the domain replay comparison
+        raw_kind = {k: v for k, v in decision.items() if k != "document_digest"}
+        for changed in [{"run_id": "other"}, {"plan_revision": 900},
                         {"proposal_digest": "sha256:" + "a" * 64}]:
             self.assertEqual(self.admit({**decision, **changed})["type"], "Block")
             self.assertEqual(self.runs.data, before)
+        forged_kind = self.admit({**raw_kind, "approval_kind": "auto"})
+        self.assertEqual(forged_kind["type"], "Block")
+        self.assertEqual(forged_kind["reasons"][0]["code"], "governance.receipt_replay")
         self.runs.conflicts = 1
         self.assertEqual(self.admit(decision)["type"], "Allow")
         after = copy.deepcopy(self.runs.data)
@@ -746,7 +1318,8 @@ class GovernanceServiceTests(unittest.TestCase):
         g = self.view()["governance"]
         payload = {"run_id": self.run_id, "receipt_id": "missing-submission",
                    "proposal_digest": g["proposal_digest"], "plan_revision": g["plan_revision"],
-                   "approval_kind": "host_ui", "outcome": "approve"}
+                   "approval_kind": "host_ui", "outcome": "approve",
+                   "document_digest": self._context_document()["digest"]}
         conflict = self.admit(payload)
         self.assertEqual(conflict["type"], "Block")
         self.assertEqual(conflict["reasons"][0]["code"], "governance.decision_conflict")
@@ -1089,7 +1662,16 @@ class GovernanceServiceTests(unittest.TestCase):
             self.assertEqual(len(self.view()["children"]), 0)
             self.assertEqual(self.view()["governance"]["budgets"]["audit_spawns_used"], 0)
             batch = self.view()["confirmation_batch"]
-            shown = c.trusted_evidence_presentation(self.run_id, {"run_id": self.run_id, "receipt_id": "p1", "key": batch["key"]})
+            # PR 13: the presentation names its batch's core-rendered document — null first
+            # (the fetch refusal carries the pair), then the same presentation bound
+            fetch = c.trusted_evidence_presentation(self.run_id, {"run_id": self.run_id, "receipt_id": "p1",
+                                                                 "key": batch["key"],
+                                                                 "document_digest": None})
+            self.assertEqual(fetch["result"]["type"], "Block", fetch)
+            digest = fetch["result"]["document"]["digest"]
+            shown = c.trusted_evidence_presentation(self.run_id, {"run_id": self.run_id, "receipt_id": "p1",
+                                                                 "key": batch["key"],
+                                                                 "document_digest": digest})
             self.assertEqual(shown["result"]["type"], "Allow", shown)
             self.assertEqual(prepare()["type"], "audit_plan")  # the batch was shown: a report would not ask again
 
@@ -1244,7 +1826,11 @@ class GovernanceServiceTests(unittest.TestCase):
         for changed in ({"run_id": "other"}, {"plan_revision": 1000}, {"proposal_digest": "sha256:" + "a" * 64}):
             self.assertEqual(self.admit({**final, **changed})["type"], "Block")
             self.assertEqual(self.runs.data, before)
-        forged_kind = self.admit({**final, "approval_kind": "auto"})
+        # a kind forgery stays a domain replay refusal — an auto envelope may not carry a
+        # document either (the wire's own refusal, asserted below), so the forged cell strips
+        # the digest to keep testing the core's replay comparison, not the wire's
+        raw_kind = {k: v for k, v in final.items() if k != "document_digest"}
+        forged_kind = self.admit({**raw_kind, "approval_kind": "auto"})
         self.assertEqual(forged_kind["type"], "Block")
         self.assertEqual(forged_kind["reasons"][0]["code"], "governance.receipt_replay")
         self.assertEqual(self.runs.data, before)
@@ -1318,7 +1904,8 @@ class GovernanceServiceTests(unittest.TestCase):
         self.prepare()
         g = self.view()["governance"]
         envelope = {"run_id": self.run_id, "receipt_id": "raw", "proposal_digest": g["proposal_digest"],
-                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui"}
+                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
+                    "document_digest": self._context_document()["digest"]}
         self.assertEqual(self.admit({**envelope, "outcome": "present"})["type"], "Allow")
         conflict = {**envelope, "submission": {"action": "approve", "feedback": "approved",
             "configuration": {"budgets": g["proposal"]["budgets"]}}}
@@ -1828,17 +2415,28 @@ class GovernanceServiceTests(unittest.TestCase):
                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
                    "outcome": "present"}
         blocked = self.admit(payload)
-        self.assertEqual(blocked["type"], "Block")
-        self.assertEqual(blocked["reasons"][0]["code"], "governance.approval_unavailable")
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one — the
+        # member-less envelope is a shape refusal (invalid_request), that cell stays; a wrong-but-
+        # well-formed digest is constructible (when no human can be asked, the fetch answers with
+        # no presentation to name, and the wire check is shape-only): it reaches the domain, whose
+        # approval_unavailable Block outranks governance.document_mismatch, still spending and
+        # approving nothing. The premises PR 10 called "unconstructible" were false.
+        self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
+                                  "fail_direction": "closed"})
+        self.assertIsNone(self.view()["governance"]["approved_digest"])
+        domained = self.admit({**payload, "document_digest": "sha256:" + "0" * 64})
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "governance.approval_unavailable")
         self.assertIsNone(self.view()["governance"]["approved_digest"])
 
     def test_dismissal_and_rejection_grant_no_consent(self):
         """Timeout is host-adapter mediation owned by G2; core covers dismiss/reject here."""
         self.prepare()
         g = self.view()["governance"]
+        digest = self._context_document()["digest"]
         dismiss = {"run_id": self.run_id, "receipt_id": "d", "proposal_digest": g["proposal_digest"],
                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
-                   "outcome": "dismiss"}
+                   "outcome": "dismiss", "document_digest": digest}
         # Dismissal finalizes the exact prior presentation reservation.
         self.assertEqual(self.admit({**dismiss, "outcome": "present"})["type"], "Allow")
         self.assertEqual(self.admit(dismiss)["type"], "Allow")
@@ -1846,8 +2444,10 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertIsNone(self.view()["governance"]["approved_digest"])
         self.action(**sized_configure_run(budgets=SIZED_BUDGETS, rationale=SIZED_RATIONALE))  # refresh the reservation epoch
         g = self.view()["governance"]
+        digest = self._context_document()["digest"]
         reject = {"run_id": self.run_id, "receipt_id": "r", "proposal_digest": g["proposal_digest"],
                   "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
+                  "document_digest": digest,
                   "submission": {"action": "reject", "configuration": {"budgets": g["proposal"]["budgets"]}}}
         presentation = {k: v for k, v in reject.items() if k != "submission"}
         presentation["outcome"] = "present"
@@ -1940,9 +2540,20 @@ class GovernanceServiceTests(unittest.TestCase):
                    "plan_revision": g["plan_revision"], "approval_kind": "host_ui",
                    "outcome": "present"}
         blocked = self.admit(present)
-        self.assertEqual(blocked["type"], "Block")
-        self.assertEqual(blocked["reasons"][0]["code"],
-                         "governance.approval_unavailable")
+        # PR 13: the wire requires a well-FORMED document_digest member, not the right one — the
+        # member-less envelope is a shape refusal (invalid_request), that cell stays; a wrong-but-
+        # well-formed digest is constructible (a lost UI cannot present the document it re-binds,
+        # and the wire check is shape-only): it reaches the domain, whose approval_unavailable
+        # Block outranks governance.document_mismatch, so the human episode stays closed — nothing
+        # is spent or approved. The premises PR 10 called "unconstructible" were false.
+        self.assertEqual(blocked, {"type": "Fault", "code": "invalid_request",
+                                  "fail_direction": "closed"})
+        before = copy.deepcopy(self.runs.data)
+        domained = self.admit({**present, "document_digest": "sha256:" + "0" * 64})
+        self.assertEqual(domained["type"], "Block", domained)
+        self.assertEqual(domained["reasons"][0]["code"], "governance.approval_unavailable")
+        self.assertEqual(self.runs.data, before,
+                         "nothing is spent or approved by either refusal")
 
     def test_human_amendment_consumes_preapproval_allowance_without_renewal(self):
         interactive = {"host": "test", "interactive": True,

@@ -23,11 +23,17 @@ Pi and Claude async promotion remains separate and unsupported.
 The exact Claude Code and Pi foreground profiles were promoted from installed-host observations;
 release evidence is the long-running scenarios (same file).
 
-## Empirica 6 spike authority
+Claude Code 2.1.304 shows only the first three lines of an elicitation message — the rest is
+folded — while rendering field descriptions in full, so every Claude form front-loads the
+heading, the bound document's `Details:` line and its copy surface, and each field's
+description repeats what is being decided in full: the quote, the decision claim's text and the
+terminal consent's residual count ([ADR-0072](adr/0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md), PR 19); Pi is unchanged.
 
-Empirica **6.0.0** is the plugin major; its public wire remains `empirica/v2`, current run storage is
-`empirica.run/3`, and the observer model remains `empirica-ui-view/v1`. See the
-[upgrade guide](upgrading-empirica-6.md), [ADR-0071](adr/0071-bind-spikes-to-qualified-docker-authority-per-run.md), and the
+## Empirica 7 spike authority
+
+Empirica **7.0.0** is the plugin major; its public wire remains `empirica/v2`, current run storage is
+`empirica.run/4`, and the observer model remains `empirica-ui-view/v1`. See the
+[upgrade guide](upgrading-empirica-7.md) (and [the 6 guide](upgrading-empirica-6.md)), [ADR-0071](adr/0071-bind-spikes-to-qualified-docker-authority-per-run.md), and the
 [normative Docker support contract](../contracts/empirica-docker-spike/v1/README.md). The support contract's internal `/1` does not add a legacy runtime surface.
 
 An operator separately qualifies one exact local Unix Docker authority after the final tree is clean and committed.
