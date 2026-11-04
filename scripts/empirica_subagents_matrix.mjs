@@ -9,7 +9,13 @@
 //   inventory   `gen_pi_subagents_inventory.mjs --check` — the generated launch/action inventory equals
 //               the checked-in compat/pi-subagents-<version>.json
 //   schema      every parameter the adapter writes on the audit launch (`auditLaunchInput`) is declared
-//               by the package's own `subagent` parameter schema
+//               by the package's own `subagent` parameter schema, in the place the record says (top level, or for a
+//               compact 0.77+ package the keys of its `options` object, `SUBAGENT_OPTION_KEYS`)
+//   launch      (compact packages) the placed launch the adapter sends, lowered by the package's own
+//               `flattenSubagentToolOptions`, equals the flat request exactly, and no field is in both places
+//   toolSchema  (compact packages) the published tool schema equals the checked-in fixture
+//   resultPreview (packages that preview long child output, 0.77+) the package's own preview of a long auditor report
+//               equals the checked-in fixture the adapter's result reading is tested on
 //   preflight   a live `pi-subagents/preflight` capture equals the checked-in fixture, modulo masked paths
 //   classifier  the call classifier, given this version's inventory, admits exactly the reviewed surface:
 //               each launch form alone is executable, two are malformed, every action outside the
@@ -86,7 +92,7 @@ export function reviewCommands(version, root) {
     `npm install ${PACKAGE}@${version} --prefix ${dir}/install --ignore-scripts --omit=peer --omit=dev --no-package-lock --cache ${root}/npm-cache`,
     `make pi-subagents-inventory PACKAGE_ROOT=${dir}/install/node_modules/${PACKAGE}`,
     `make pi-preflight-fixture PACKAGE_ROOT=${dir}/install/node_modules/${PACKAGE}`,
-    `# review the two generated files and add the classifier cases; "${version}" is reviewed once its compat record is checked in (it must lie in the profile's range)`,
+    `# review the generated files (the fixtures dir also gets tool-schema-<version>.json and result-preview-<version>.json for a 0.77+ package) and add the classifier cases; "${version}" is reviewed once its compat record is checked in (it must lie in the profile's range)`,
     "make contract-schemas vendor-contracts contract-check && make empirica-subagents-matrix",
   ];
 }
@@ -95,15 +101,46 @@ export function reviewCommands(version, root) {
  * The four checks of one version, from evidence already read. Pure: every input is data.
  * `expected` is the checked-in evidence, `observed` what the package serves now.
  */
-export function evaluateCell({ version, request, properties, inventory, liveFixture, checkedFixture, classify, managementActions, retrieval }) {
+export function evaluateCell({ version, request, properties, optionKeys, placement, placed, flattened, liveToolSchema, checkedToolSchema,
+  livePreview, checkedPreview, inventory, liveFixture, checkedFixture, classify, managementActions, retrieval }) {
   const checks = {};
-  const missing = Object.keys(request).filter((key) => !properties.includes(key));
-  checks.schema = missing.length === 0 ? { ok: true } : { ok: false, detail: `parameters not declared by the package: ${missing.join(", ")}` };
+  const declaredAt = (key) => (placement?.[key] === "options" ? optionKeys ?? [] : properties).includes(key);
+  const missing = Object.keys(request).filter((key) => !declaredAt(key));
+  checks.schema = missing.length === 0 ? { ok: true } : { ok: false, detail: `parameters not declared by the package where the record places them: ${missing.join(", ")}` };
+  if (placed !== undefined) checks.launch = launchVerdict(version, { request, placed, flattened });
+  if (liveToolSchema !== undefined || checkedToolSchema !== undefined)
+    checks.toolSchema = canonicalJson(liveToolSchema) === canonicalJson(checkedToolSchema) ? { ok: true }
+      : { ok: false, detail: "the published tool schema differs from the checked-in fixture" };
+  if (livePreview !== undefined || checkedPreview !== undefined)
+    checks.resultPreview = canonicalJson(livePreview) === canonicalJson(checkedPreview) ? { ok: true }
+      : { ok: false, detail: "the package's long-report preview differs from the checked-in fixture" };
   const same = JSON.stringify(maskMachineDigests(liveFixture)) === JSON.stringify(maskMachineDigests(checkedFixture));
   checks.preflight = same ? { ok: true } : { ok: false, detail: "live preflight differs from the checked-in fixture" };
   checks.classifier = classifierVerdict({ version, inventory, classify, managementActions });
   if (retrieval !== undefined) checks.retrieval = retrievalVerdict(version, retrieval);
   return checks;
+}
+
+/** JSON with object keys sorted, so equality ignores key order and nothing else. */
+export function canonicalJson(value) {
+  const sort = (node) => Array.isArray(node) ? node.map(sort)
+    : node !== null && typeof node === "object" ? Object.fromEntries(Object.keys(node).sort().map((key) => [key, sort(node[key])])) : node;
+  return JSON.stringify(sort(value));
+}
+
+/**
+ * A compact package must accept the placed launch and read it as the flat request: `flattened` is what its own
+ * `flattenSubagentToolOptions` makes of `placed`. Equality is exact (a dropped, changed or added field fails), and a field
+ * written both at the top level and inside `options` is a defect even when the package would tolerate equal values.
+ */
+export function launchVerdict(version, { request, placed, flattened }) {
+  const options = placed.options ?? {};
+  const both = Object.keys(options).filter((key) => key in placed);
+  if (both.length > 0) return { ok: false, detail: `${version}: ${both.join(", ")} placed in both the top level and options` };
+  const sent = { ...Object.fromEntries(Object.entries(placed).filter(([key]) => key !== "options")), ...options };
+  if (canonicalJson(sent) !== canonicalJson(request)) return { ok: false, detail: `${version}: the placed launch does not carry exactly the flat request` };
+  return canonicalJson(flattened) === canonicalJson(request) ? { ok: true }
+    : { ok: false, detail: `${version}: the package lowers the placed launch to ${canonicalJson(flattened)}, not the flat request` };
 }
 
 /** The retrieval kinds every reviewed pi-subagents version is pinned to give the canonical auditor: it reads files, never the web. */
@@ -116,8 +153,10 @@ export function retrievalVerdict(version, { observed, reviewed = REVIEWED_RETRIE
 }
 
 /** The launch-contract members that are hashes over path-bearing content (verified: the same package
- *  installed in two directories yields two values, and nothing in the adapter reads either). */
-export const PATH_BEARING_DIGESTS = ["digest", "launchContractDigest"];
+ *  installed in two directories yields two values, and nothing in the adapter reads any of them).
+ *  `definitionDigest` hashes the projected agent definition, whose `filePath` is the auditor's absolute path in this
+ *  checkout (`projectAgentDefinition`, src/shared/launch-contract.js), so it differs between checkouts of the repository. */
+export const PATH_BEARING_DIGESTS = ["digest", "launchContractDigest", "definitionDigest"];
 
 /**
  * A contract digest hashes the launch contract with its machine-specific paths, so it differs between
@@ -203,13 +242,14 @@ function localVersion() {
 
 /** The per-version child: gather the evidence for one package and print the checks as JSON. */
 async function cellMain(argv) {
-  const { generateInventory } = await import("./gen_pi_subagents_inventory.mjs");
-  const { captureFixture, fixturePath, FIXTURE_DIR } = await import("./capture_pi_preflight_fixture.mjs");
+  const { generateInventory, subagentOptionKeys } = await import("./gen_pi_subagents_inventory.mjs");
+  const { captureFixture, captureResultPreview, captureToolSchema, fixturePath, resultPreviewPath, toolSchemaPath, FIXTURE_DIR } = await import("./capture_pi_preflight_fixture.mjs");
   const { subagentParamProperties } = await import("./gen_pi_subagents_inventory.mjs");
-  const { auditLaunchInput } = await import("../plugins/empirica/adapters/pi/src/audit-launch.ts");
+  const { importInternal, makeLoader, readPackage } = await import("./lib/pi_subagents_package.mjs");
+  const { auditLaunchInput, placeAuditLaunch } = await import("../plugins/empirica/adapters/pi/src/audit-launch.ts");
   const { AUDIT_LAUNCH_POLICY } = await import("../plugins/empirica/adapters/pi/src/host-profile.ts");
   const { classifySubagentCall, MANAGEMENT_ACTIONS } = await import("../plugins/empirica/adapters/pi/src/translate.ts");
-  const { loadInventory } = await import("../plugins/empirica/adapters/pi/src/subagent-inventory.ts");
+  const { launchPlacement, loadInventory } = await import("../plugins/empirica/adapters/pi/src/subagent-inventory.ts");
   const value = (flag) => argv[argv.indexOf(flag) + 1];
   const [version, packageRoot] = [value("--version"), value("--package-root")];
   const generated = await generateInventory(packageRoot);
@@ -219,9 +259,24 @@ async function cellMain(argv) {
   const { auditRetrievalFrom } = await import("../plugins/empirica/adapters/pi/src/audit-retrieval.ts");
   const liveFixture = await captureFixture(packageRoot);
   const allowlist = liveFixture.cases.canonical_auditor?.response?.contract?.tools?.effectiveAllowlist;
-  const request = { agent: "empirica.empirica-auditor", ...auditLaunchInput({ task: "t", model: "audit/reviewer", agentScope: "user", policy: AUDIT_LAUNCH_POLICY }) };
+  const flat = auditLaunchInput({ task: "t", model: "audit/reviewer", agentScope: "user", policy: AUDIT_LAUNCH_POLICY });
+  const request = { agent: "empirica.empirica-auditor", ...flat };
+  const optionKeys = await subagentOptionKeys(packageRoot);
+  const compact = {};
+  if (optionKeys !== undefined) {
+    // A compact package: the placed launch, lowered by the package's own flattenSubagentToolOptions, is the flat request.
+    const pkg = readPackage(packageRoot);
+    const options = await importInternal(makeLoader(path.join(pkg.root, "package.json")), pkg, "src/extension/subagent-options", ["flattenSubagentToolOptions"]);
+    compact.optionKeys = optionKeys;
+    compact.placed = { agent: request.agent, ...placeAuditLaunch(flat, inventory) };
+    compact.flattened = options.flattenSubagentToolOptions(structuredClone(compact.placed));
+    compact.liveToolSchema = await captureToolSchema(packageRoot);
+    compact.checkedToolSchema = readJson(toolSchemaPath(FIXTURE_DIR, version));
+  }
+  const livePreview = await captureResultPreview(packageRoot);
   const checks = evaluateCell({
-    version, request, properties: await subagentParamProperties(packageRoot), inventory,
+    version, request, properties: await subagentParamProperties(packageRoot), inventory, placement: launchPlacement(inventory), ...compact,
+    livePreview, checkedPreview: livePreview === undefined ? undefined : readJson(resultPreviewPath(FIXTURE_DIR, version)),
     liveFixture, checkedFixture: readJson(fixturePath(FIXTURE_DIR, version)),
     classify: classifySubagentCall, managementActions: MANAGEMENT_ACTIONS,
     // A preflight that reports no allowlist derives nothing, which never equals the reviewed set.

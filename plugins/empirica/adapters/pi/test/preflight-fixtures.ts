@@ -31,3 +31,25 @@ export function fixtureFor(version: string): PreflightFixture {
 export function bound(captured: Captured): Record<string, any> {
   return JSON.parse(JSON.stringify(captured.response).replaceAll("{{AUDITOR_FILE}}", AUDITOR));
 }
+
+/**
+ * The `subagent` tool's published parameter schema as a compact (0.77+) package serves it, captured by
+ * scripts/capture_pi_preflight_fixture.mjs (test/fixtures/tool-schema-<version>.json); `option_keys` is the
+ * package's own `SUBAGENT_OPTION_KEYS`.
+ */
+export interface ToolSchemaFixture { version: string; option_keys: string[]; parameters: Record<string, any> }
+
+export const TOOL_SCHEMAS: ToolSchemaFixture[] = readdirSync(path.join(HERE, "fixtures"))
+  .filter((name) => /^tool-schema-.*\.json$/.test(name)).sort()
+  .map((name) => JSON.parse(readFileSync(path.join(HERE, "fixtures", name), "utf8")) as ToolSchemaFixture);
+
+export function toolSchemaFor(version: string): ToolSchemaFixture {
+  const found = TOOL_SCHEMAS.find((fixture) => fixture.version === version);
+  if (found === undefined) throw new Error(`no tool-schema fixture for ${version}`);
+  return found;
+}
+
+/** A fresh copy of a captured tool schema, ready to be broken by a test. */
+export function schemaCopy(version: string): Record<string, any> {
+  return JSON.parse(JSON.stringify(toolSchemaFor(version).parameters));
+}

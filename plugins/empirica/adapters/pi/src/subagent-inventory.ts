@@ -6,6 +6,12 @@
 // the admission rule is owned by ADR-0069 and HX-ADM-02 and is not restated here. Its action list is the union of
 // the reviewed versions' (`reviewedActionNames`) and its launch-contract version comes from the live
 // preflight. This module validates, loads and observes; it never classifies a call.
+//
+// Where the audit-launch parameters are declared. pi-subagents before 0.77.0 publishes every parameter at the top level of
+// the `subagent` tool's schema. From 0.77.0 it publishes `agent, task, workflow, args, async, model, cwd, worktree, output,
+// action, id, message` there and every other field inside one opaque `options` object (the package's own
+// `SUBAGENT_OPTION_KEYS`, validated by `SubagentOptionParams`). A reviewed record of such a package carries
+// `launch_parameter_placement`; a record without it keeps its old meaning, every parameter top-level.
 
 import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
@@ -17,10 +23,21 @@ import { EXACT_VERSION } from "./host-profile.ts";
 export const LAUNCH_FORMS = ["agent", "workflowScript", "workflowScriptPath", "workflow", "resume"] as const;
 export type LaunchForm = typeof LAUNCH_FORMS[number];
 
+/** Where a launch parameter is declared in the tool's published schema: at the top level, or inside `options`. */
+export type LaunchPlacement = "top-level" | "options";
+
+/** The audit-launch parameter names, each mapped to the place the package declares it. */
+export type LaunchPlacements = Readonly<Record<typeof AUDIT_LAUNCH_PARAMETERS[number], LaunchPlacement>>;
+
 /** What the adapter consumes of any inventory, reviewed or observed. */
 interface InventoryFacts {
   readonly version: string;
   readonly launch_forms: readonly LaunchForm[];
+  /**
+   * Where each audit-launch parameter is declared. Absent: every parameter is top-level (a flat package, and every record
+   * written before 0.77.0 was reviewed). Present only for a package that publishes the compact schema.
+   */
+  readonly launch_parameter_placement?: LaunchPlacements;
   readonly actions: readonly string[];
   readonly supports: {
     readonly toolBudget: boolean;
@@ -48,6 +65,8 @@ export interface ReviewedInventory extends InventoryFacts {
  * its schema (not observed to be enforced) and `validateOffline` is false because nothing documents it as offline. */
 export interface ObservedInventory extends InventoryFacts {
   readonly reviewed: false;
+  /** Always recorded for an observed version: derived from the schema the owner's tool declares. */
+  readonly launch_parameter_placement: LaunchPlacements;
   /** Unknown until the live preflight answers; the seam accepts any version it knows. */
   readonly launch_contract_version: null;
 }
@@ -64,9 +83,9 @@ function record(value: unknown, where: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function exactKeys(value: Record<string, unknown>, keys: readonly string[], where: string): void {
+function exactKeys(value: Record<string, unknown>, keys: readonly string[], where: string, optional: readonly string[] = []): void {
   for (const key of Object.keys(value))
-    if (!keys.includes(key)) throw new Error(`pi-subagents inventory: ${where} has unknown field ${JSON.stringify(key)}`);
+    if (!keys.includes(key) && !optional.includes(key)) throw new Error(`pi-subagents inventory: ${where} has unknown field ${JSON.stringify(key)}`);
   for (const key of keys)
     if (!(key in value)) throw new Error(`pi-subagents inventory: ${where} is missing ${JSON.stringify(key)}`);
 }
@@ -81,7 +100,8 @@ function stringList(value: unknown, where: string): string[] {
 /** Validate a parsed inventory document (closed shape); throws on the first deviation. */
 export function parseInventory(document: unknown): Omit<ReviewedInventory, "reviewed"> {
   const doc = record(document, "document");
-  exactKeys(doc, ["version", "peer_pi_ai", "launch_contract_version", "launch_forms", "actions", "supports"], "document");
+  exactKeys(doc, ["version", "peer_pi_ai", "launch_contract_version", "launch_forms", "actions", "supports"],
+    "document", ["launch_parameter_placement"]);
   if (typeof doc.version !== "string" || !EXACT_VERSION.test(doc.version))
     throw new Error("pi-subagents inventory: version must be an exact MAJOR.MINOR.PATCH release");
   if (typeof doc.peer_pi_ai !== "string" || doc.peer_pi_ai === "")
@@ -103,6 +123,7 @@ export function parseInventory(document: unknown): Omit<ReviewedInventory, "revi
     throw new Error("pi-subagents inventory: supports.workflow must be absent, string, or boolean|string");
   if (supports.validateOffline === true && !actions.includes("validate"))
     throw new Error("pi-subagents inventory: validateOffline requires the validate action");
+  if ("launch_parameter_placement" in doc) parsePlacement(doc.launch_parameter_placement);
   return doc as unknown as Omit<ReviewedInventory, "reviewed">;
 }
 
@@ -113,11 +134,51 @@ export function parseInventory(document: unknown): Omit<ReviewedInventory, "revi
 export const AUDIT_LAUNCH_PARAMETERS = [
   "agent", "task", "model", "agentScope", "async", "context", "acceptance", "timeoutMs", "toolBudget",
 ] as const;
+export type AuditLaunchParameter = typeof AUDIT_LAUNCH_PARAMETERS[number];
+
+/**
+ * The parameters a compact package always declares at the top level (its published `agent, task, model, async`): the
+ * ones a model call needs before `options` is read. A record may never place these under `options`.
+ */
+export const CORE_AUDIT_PARAMETERS: readonly AuditLaunchParameter[] = ["agent", "task", "model", "async"];
+
+/** Validate a `launch_parameter_placement` value (closed shape); throws on the first deviation. */
+function parsePlacement(value: unknown): LaunchPlacements {
+  const placement = record(value, "launch_parameter_placement");
+  exactKeys(placement, AUDIT_LAUNCH_PARAMETERS, "launch_parameter_placement");
+  for (const name of AUDIT_LAUNCH_PARAMETERS) {
+    const where = placement[name];
+    if (where !== "top-level" && where !== "options")
+      throw new Error(`pi-subagents inventory: launch_parameter_placement.${name} must be top-level or options`);
+    if (where === "options" && CORE_AUDIT_PARAMETERS.includes(name))
+      throw new Error(`pi-subagents inventory: launch_parameter_placement.${name} must be top-level`);
+  }
+  return placement as unknown as LaunchPlacements;
+}
+
+const ALL_TOP_LEVEL: LaunchPlacements = Object.freeze(Object.fromEntries(
+  AUDIT_LAUNCH_PARAMETERS.map((name) => [name, "top-level" as const])) as unknown as LaunchPlacements);
+
+/** Where each audit-launch parameter is declared for this inventory (every one top-level when the record says nothing). */
+export function launchPlacement(inventory: Pick<InventoryFacts, "launch_parameter_placement">): LaunchPlacements {
+  return inventory.launch_parameter_placement ?? ALL_TOP_LEVEL;
+}
+
+/** True when the inventory's package carries any audit-launch parameter inside `options` (the compact schema). */
+export function usesOptions(inventory: Pick<InventoryFacts, "launch_parameter_placement">): boolean {
+  return Object.values(launchPlacement(inventory)).includes("options");
+}
 
 /**
  * Admit a version that has no compat record from what the owner's tool declares. Returns the observed
  * inventory (its actions are `knownActions`, the names some reviewed version has), or the name of the first
  * audit-launch parameter the tool's schema does not declare.
+ *
+ * Two shapes are admitted, and only these. The flat shape declares every audit-launch parameter at the top level. The
+ * compact shape (pi-subagents 0.77.0 and later) declares `agent`, `task`, `model` and `async` at the top level and
+ * `options` as an object schema; `options` is an opaque bag in the published schema, so each remaining parameter is
+ * placed there and left to the live preflight and the seam, which confirm the context, model, tools and foreground
+ * run the launch depends on. Any other shape is refused, naming the parameter or the shape.
  */
 export function observeInventory(version: string, parameters: unknown, knownActions: readonly string[]):
   { readonly ok: true; readonly inventory: ObservedInventory } | { readonly ok: false; readonly detail: string } {
@@ -126,12 +187,25 @@ export function observeInventory(version: string, parameters: unknown, knownActi
   if (properties === null || typeof properties !== "object" || Array.isArray(properties))
     return { ok: false, detail: "the subagent tool declares no parameter schema" };
   const declared = properties as Record<string, unknown>;
-  const missing = AUDIT_LAUNCH_PARAMETERS.find((name) => !(name in declared));
-  if (missing !== undefined) return { ok: false, detail: `the subagent tool's schema does not declare \`${missing}\`` };
+  const options = declared.options;
+  const optionsIsObject = options !== null && typeof options === "object" && !Array.isArray(options)
+    && (options as { type?: unknown }).type === "object";
+  const placement: Record<string, LaunchPlacement> = {};
+  for (const name of AUDIT_LAUNCH_PARAMETERS) {
+    if (name in declared) { placement[name] = "top-level"; continue; }
+    if (CORE_AUDIT_PARAMETERS.includes(name))
+      return { ok: false, detail: `the subagent tool's schema does not declare \`${name}\`` };
+    if (!("options" in declared))
+      return { ok: false, detail: `the subagent tool's schema does not declare \`${name}\` (nor an \`options\` object that could carry it)` };
+    if (!optionsIsObject)
+      return { ok: false, detail: `the subagent tool's schema declares \`options\` but not as an object schema, so \`${name}\` has no place (unrecognised shape)` };
+    placement[name] = "options";
+  }
   return { ok: true, inventory: {
     reviewed: false, version, launch_contract_version: null,
     launch_forms: LAUNCH_FORMS.filter((form) => form in declared), actions: [...knownActions],
-    // The schema declares both bound fields (AUDIT_LAUNCH_PARAMETERS); `validate` is never taken as offline.
+    launch_parameter_placement: placement as unknown as LaunchPlacements,
+    // The schema places both bound fields (AUDIT_LAUNCH_PARAMETERS); `validate` is never taken as offline.
     supports: { toolBudget: true, timeoutMs: true, validateOffline: false },
   } };
 }

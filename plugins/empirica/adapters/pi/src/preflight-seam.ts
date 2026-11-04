@@ -6,7 +6,7 @@
 // real packages (test/fixtures/preflight-<version>.json), not against hand-written shapes.
 //
 // Consumed fields, and what the captured fixtures show per launch-contract version:
-//   contract.version                 v2 (0.50.0, 0.64.0) | v3 (0.74.0, 0.75.0, 0.76.1); must be one the
+//   contract.version                 v2 (0.50.0, 0.64.0) | v3 (0.74.0 through 0.84.0, every reviewed release since); must be one the
 //                                    bound inventory records (when it records one) AND one listed in ACCEPTED_LAUNCH_CONTRACT_VERSIONS
 //   contract.protocol.packageVersion must equal the bound owner's exact version
 //   contract.agent.filePath          must be the packaged canonical auditor file (canonicalised)

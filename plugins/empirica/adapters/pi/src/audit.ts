@@ -15,6 +15,27 @@ function resultRows(event: ToolResultEvent): unknown[] | null {
   return Array.isArray(results) ? results : [];
 }
 
+/**
+ * The pointer pi-subagents 0.77.0 and later append to a long child report whose content it previews
+ * (`capInlineOutput`, src/runs/shared/single-output.js): the report's first 2,000 characters, `\n…`, then either
+ * `Full output: <file> (<size>, <n> lines). Read it if needed.` or, when the run also saved its output, the
+ * `Output saved to: <file> (...). Read this file if needed.` line. Text with that marker is a preview, not the report.
+ */
+const PREVIEW_POINTER = /\n…\n\n?(?:Full output|Output saved to): [^\n]*\. Read (?:it|this file) if needed\./;
+
+/**
+ * The audit child's report as the verdict is read from it: `resultText`, except that a preview of a longer report is
+ * never returned. The verdict fence may be cut, or a complete fence may be followed by text that makes the whole report
+ * ambiguous, so a preview is no verdict source. The file a preview points to is not read either; nothing here opens a
+ * path a child's text names. The full report is the exact `finalOutput` of the single result row (pi-subagents keeps it
+ * whole in inline mode; only `content` is previewed).
+ */
+export function reportText(event: ToolResultEvent): string {
+  const text = resultText(event);
+  return PREVIEW_POINTER.test(text) ? "" : text;
+}
+
+/** The result text as the single result row (or, with no rows, the content) carries it, previews included. */
 export function resultText(event: ToolResultEvent): string {
   let value = event.content ?? event.details ?? "";
   const rows = resultRows(event);

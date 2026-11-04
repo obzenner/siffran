@@ -4,6 +4,9 @@
 // the pinned pi-subagents' own schema, and that no bound pi-subagents dropped (turn budgets) appears.
 
 import { auditLaunchFields, type AuditLaunchPolicy } from "./host-profile.ts";
+import {
+  AUDIT_LAUNCH_PARAMETERS, launchPlacement, type AuditLaunchParameter, type SubagentInventory,
+} from "./subagent-inventory.ts";
 
 /** What the adapter resolved for this audit: the host-built task, the preflight-vouched model and scope. */
 export interface AuditLaunchDecision {
@@ -45,4 +48,27 @@ export function auditLaunchInput(decision: AuditLaunchDecision): Record<string, 
       reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." },
     ...auditLaunchFields(decision.policy),
   };
+}
+
+/**
+ * The fields of `auditLaunchInput`, written where the bound owner's schema declares each one: at the top level of the
+ * `subagent` call, or inside its one `options` object (pi-subagents 0.77.0 and later publish the compact schema; a flat
+ * package declares everything at the top level and gets the flat fields unchanged).
+ *
+ * Each field is written once, in exactly one place: pi-subagents rejects a field given in both places with different
+ * values, and an `options` key it does not know (`SUBAGENT_OPTION_KEYS`) with the closest valid name, so a field a
+ * future package moved or renamed fails loudly instead of being ignored. `agent` stays the author's own top-level key.
+ * The flat view of the placed call is `auditLaunchInput`: that is what the launch preflight is asked and what
+ * `flattenSubagentToolOptions` lowers the placed call to (matrix check `launch`).
+ */
+export function placeAuditLaunch(fields: Record<string, unknown>, inventory: SubagentInventory): Record<string, unknown> {
+  const placement = launchPlacement(inventory);
+  const topLevel: Record<string, unknown> = {};
+  const options: Record<string, unknown> = {};
+  for (const [name, value] of Object.entries(fields)) {
+    if (!(AUDIT_LAUNCH_PARAMETERS as readonly string[]).includes(name))
+      throw new Error(`the audit launch sets ${JSON.stringify(name)}, which is not a known audit-launch parameter`);
+    (placement[name as AuditLaunchParameter] === "options" ? options : topLevel)[name] = value;
+  }
+  return Object.keys(options).length === 0 ? topLevel : { ...topLevel, options };
 }

@@ -19,7 +19,7 @@ import {
   resolvePiAuditorModel,
 } from "../src/index.ts";
 import { AUDIT_LAUNCH_PARAMETERS, loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
-import { bound, FIXTURES, fixtureFor } from "./preflight-fixtures.ts";
+import { bound, FIXTURES, fixtureFor, schemaCopy } from "./preflight-fixtures.ts";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isDeepStrictEqual } from "node:util";
@@ -1393,6 +1393,46 @@ test("subagent: canonical auditor is reserved, bound, attributed, and prompt-inj
     ["classify_identity", "classify_identity", "audit_prepare"]);
   assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
 });
+
+async function compactLaunch(version: string) {
+  const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };
+  const owner = makeSubagentsPackage(tempParent(), { version, parameters: schemaCopy(version) }).tool();
+  const w = await wire((req) => req.command.type === "ObserveAction"
+    ? envelope({ type: "Allow", converged: false, run: { ...run(), children: [child] } as never })
+    : req.command.type === "GetArgument"
+      ? envelope({ type: "Allow", converged: false, run: run(), argument: { artifacts: [] } } as never)
+      : envelope({ type: "Allow", converged: false, run: run() }), true, undefined, { owners: [owner] });
+  await startRun(w);
+  const input: Record<string, unknown> = { agent: "empirica.empirica-auditor", task: "AUTHOR_TASK_IS_NOT_AUTHORITY" };
+  assert.equal(await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-compact", input }, fakeCtx()), undefined);
+  assert.deepEqual(Object.keys(input).sort(), ["agent", "async", "model", "options", "task"]);
+  assert.equal(input.async, false);
+  assert.equal(input.model, "bedrock/auditor-model");
+  assert.match(String(input.task), /AUDIT DOSSIER/);
+  assert.deepEqual(input.options, {
+    agentScope: "project", context: "fresh",
+    acceptance: { level: "none", reason: "Empirica's bound canonical auditor is read-only and has its own verdict contract." },
+    timeoutMs: 900_000, toolBudget: { soft: 20, hard: 30, block: ["read", "grep", "find", "ls"] } });
+  assert.equal(w.auditResolutions[0].inventoryVersion, version);
+  assert.equal(w.pi.entries.at(-1)?.customType, "empirica.audit");
+}
+
+async function compactAuthorOptionsRefused(version: string) {
+  const owner = makeSubagentsPackage(tempParent(), { version, parameters: schemaCopy(version) }).tool();
+  const w = await wire(auditResponder, true, undefined, { owners: [owner] });
+  await startRun(w);
+  for (const extra of [{ options: { context: "fork" } }, { options: {} }, { options: { script: "x" } }]) {
+    const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "tc-opt",
+      input: { agent: "empirica.empirica-auditor", task: "audit", ...extra } }, fakeCtx());
+    assert.equal(decision?.block, true, JSON.stringify(extra));
+  }
+  assert.equal(w.auditResolutions.length, 0);
+}
+
+test("subagent: on pi-subagents 0.84.0 (compact schema) the bound fields travel under options, once, and nowhere else", () => compactLaunch("0.84.0"));
+test("subagent: on pi-subagents 0.77.0 (compact schema) the bound fields travel under options, once, and nowhere else", () => compactLaunch("0.77.0"));
+test("subagent: on pi-subagents 0.84.0 an author-supplied options object (or any extra key) is refused before admission", () => compactAuthorOptionsRefused("0.84.0"));
+test("subagent: on pi-subagents 0.77.0 an author-supplied options object (or any extra key) is refused before admission", () => compactAuthorOptionsRefused("0.77.0"));
 
 test("canonical auditor blocks equal normalized identity classes", async () => {
   const child = { child_id: "ch-1", purpose: "audit", resource_class: "audit", state: "reserved" };

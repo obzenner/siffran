@@ -81,7 +81,9 @@ class HostsDocRuntimeTests(unittest.TestCase):
     def test_the_requires_pi_column_is_the_declared_peer_raised_to_the_floor_of_the_pi_interval(self):
         minimum = activation.PI_PROFILE["compatibility"]["minimum"]
         self.assertEqual(minimum, "1.0.0")  # ADR-0069: nothing older than Pi 1.0.0 is supported
-        self.assertEqual({v: self.requires(v) for v in self.versions()}, {v: ">=1.0.0" for v in self.versions()})
+        # Releases through 0.79.2 declare a pi-ai peer below the floor; 0.80.0 and later declare >=1.2.0 (their own manifests).
+        expected = {v: ">=1.2.0" if activation._semver(v) >= activation._semver("0.80.0") else ">=1.0.0" for v in self.versions()}
+        self.assertEqual({v: self.requires(v) for v in self.versions()}, expected)
         self.assertEqual(activation.pi_requirement(">=1.2.0", minimum), ">=1.2.0")  # a peer above the floor wins
 
     def test_a_row_below_the_pi_floor_is_named(self):
@@ -91,7 +93,7 @@ class HostsDocRuntimeTests(unittest.TestCase):
                 problems = activation.hosts_doc_runtime_problems(text, activation.PI_PROFILE)
                 self.assertEqual(len(problems), 1, problems)
                 self.assertIn(f"pi-subagents {version} requires Pi '>=0.99.0'", problems[0])
-                self.assertIn("'>=1.0.0'", problems[0])
+                self.assertIn(f"'{self.requires(version)}'", problems[0])
 
     def test_a_row_without_the_requirement_column_is_rejected(self):
         old = "\n".join(f"| `{v}` | reviewed |" for v in self.versions())

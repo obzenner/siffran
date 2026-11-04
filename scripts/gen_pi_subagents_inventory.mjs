@@ -12,6 +12,11 @@
 //     built-in agent; its `contract.version` is the version the package emits.
 //   * launch forms, supports   — the package's own TypeBox parameter schema
 //     (`src/extension/schemas`: `createSubagentParamsSchema`). PRIVATE: pi-subagents exports no schema.
+//   * launch_parameter_placement — only for a package that publishes the compact schema (0.77.0 and later: the
+//     top level lists `agent, task, workflow, args, async, model, cwd, worktree, output, action, id, message` and
+//     every other field goes in one `options` object): where each audit-launch parameter is declared, read from the
+//     package's own `SUBAGENT_OPTION_KEYS` (same module, validated by `SubagentOptionParams`) and the top-level
+//     properties. A flat package has no such export and its record carries no such field, so its output is unchanged.
 //   * actions                  — the package's own dispatch list (`src/shared/types`:
 //     `SUBAGENT_ACTIONS`, which `subagent-executor` validates `action` against; since 0.74 the schema
 //     declares `action` as a free string). PRIVATE for the same reason.
@@ -32,8 +37,8 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { importExport, makeLoader, readPackage } from "./lib/pi_subagents_package.mjs";
-import { LAUNCH_FORMS } from "../plugins/empirica/adapters/pi/src/subagent-inventory.ts";
+import { importExport, importInternal, makeLoader, readPackage } from "./lib/pi_subagents_package.mjs";
+import { AUDIT_LAUNCH_PARAMETERS, CORE_AUDIT_PARAMETERS, LAUNCH_FORMS } from "../plugins/empirica/adapters/pi/src/subagent-inventory.ts";
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 export const COMPAT_DIR = path.join(repo, "plugins", "empirica", "adapters", "pi", "compat");
@@ -85,21 +90,63 @@ async function observedLaunchContractVersion(packageRoot) {
   }
 }
 
-/** Does disabling the `tool-budgets` feature remove `toolBudget` from the schema? (false: no such feature) */
-async function disabledFeaturesPrune(loader, root, createSchema) {
-  const file = ["js", "ts"].map((ext) => path.join(root, "src", "shared", `disabled-features.${ext}`)).find(existsSync);
-  if (file === undefined) return false;
-  const module = await loader.import(file);
+/**
+ * Does disabling the `tool-budgets` feature take `toolBudget` off the schema's enabled surface? A flat package drops it from
+ * the top-level properties; a compact one (`optionKeys` given) refuses it as an option, which its feature surface records.
+ */
+async function disabledFeaturesPrune(loader, pkg, createSchema, optionKeys) {
+  const module = await importInternal(loader, pkg, "src/shared/disabled-features", ["resolveDisabledFeatureSurface"]);
+  if (module === undefined) return false;
   const surface = module.resolveDisabledFeatureSurface({ disabledFeatures: ["tool-budgets"] });
+  if (optionKeys !== undefined) return optionKeys.includes("toolBudget") && surface.params.has("toolBudget");
   return !("toolBudget" in createSchema(surface).properties);
 }
 
 /** The tool-call parameter names the package's own schema declares (`createSubagentParamsSchema`). */
 export async function subagentParamProperties(packageRoot) {
+  const { schemas } = await loadSchemas(packageRoot);
+  return Object.keys(schemas.createSubagentParamsSchema().properties);
+}
+
+/** The package's schema module as the package runs it (`src/extension/schemas`, or the bundle chunk that exports it). */
+async function loadSchemas(packageRoot) {
   const pkg = readPackage(packageRoot);
   const loader = makeLoader(path.join(pkg.root, "package.json"));
-  const schemas = await loader.import(path.join(pkg.root, "src", "extension", "schemas"));
-  return Object.keys(schemas.createSubagentParamsSchema().properties);
+  const schemas = await importInternal(loader, pkg, "src/extension/schemas", ["createSubagentParamsSchema", "SUBAGENT_OPTION_KEYS"]);
+  if (schemas === undefined) throw new Error(`${pkg.root} has no src/extension/schemas`);
+  return { pkg, loader, schemas };
+}
+
+/**
+ * The keys the package accepts inside the `options` object of a `subagent` call (its own `SUBAGENT_OPTION_KEYS`), or
+ * `undefined` for a flat package, which has no such export.
+ */
+export async function subagentOptionKeys(packageRoot) {
+  const { schemas } = await loadSchemas(packageRoot);
+  if (schemas.SUBAGENT_OPTION_KEYS === undefined) return undefined;
+  if (!Array.isArray(schemas.SUBAGENT_OPTION_KEYS) || !schemas.SUBAGENT_OPTION_KEYS.every((key) => typeof key === "string"))
+    throw new Error("SUBAGENT_OPTION_KEYS is not a list of strings");
+  return [...schemas.SUBAGENT_OPTION_KEYS];
+}
+
+/**
+ * Where each audit-launch parameter is declared: `top-level` when the schema's top-level properties list it, otherwise
+ * `options` when the package's option keys do. `undefined` for a flat package (no option keys). A parameter declared in
+ * neither place, a core one (`agent, task, model, async`) that is not top-level, or option keys without a top-level
+ * `options` object, throws: the package cannot carry the launch.
+ */
+export function auditLaunchPlacement(topLevel, optionKeys) {
+  if (optionKeys === undefined) return undefined;
+  const placement = {};
+  for (const name of AUDIT_LAUNCH_PARAMETERS) {
+    if (topLevel.includes(name)) placement[name] = "top-level";
+    else if (CORE_AUDIT_PARAMETERS.includes(name)) throw new Error(`the core audit-launch parameter ${name} is not a top-level property`);
+    else if (optionKeys.includes(name)) placement[name] = "options";
+    else throw new Error(`the audit-launch parameter ${name} is declared neither at the top level nor in the package's option keys`);
+  }
+  if (Object.values(placement).includes("options") && !topLevel.includes("options"))
+    throw new Error("the package carries audit-launch parameters in options but declares no top-level options object");
+  return placement;
 }
 
 /** The package's declared peer range on the Pi model layer; a package that declares none cannot be reviewed as data. */
@@ -112,11 +159,17 @@ export function peerPiAi(manifest) {
 
 /** The inventory of the installed pi-subagents at `packageRoot`. */
 export async function generateInventory(packageRoot) {
-  const pkg = readPackage(packageRoot);
-  const loader = makeLoader(path.join(pkg.root, "package.json"));
-  const schemas = await loader.import(path.join(pkg.root, "src", "extension", "schemas"));
-  const properties = schemas.createSubagentParamsSchema().properties;
-  const types = await loader.import(path.join(pkg.root, "src", "shared", "types"));
+  const { pkg, loader, schemas } = await loadSchemas(packageRoot);
+  const schema = schemas.createSubagentParamsSchema();
+  const properties = schema.properties;
+  const optionKeys = await subagentOptionKeys(pkg.root);
+  const placement = auditLaunchPlacement(Object.keys(properties), optionKeys);
+  if (placement !== undefined && properties.options?.type !== "object")
+    throw new Error("the package's top-level options parameter is not an object schema");
+  // What the schema declares for a call: the top-level properties, and for a compact package the keys of `options` too.
+  const declared = new Set([...Object.keys(properties), ...(optionKeys ?? [])]);
+  const types = await importInternal(loader, pkg, "src/shared/types", ["SUBAGENT_ACTIONS"]);
+  if (types === undefined) throw new Error(`${pkg.root} has no src/shared/types`);
   const docs = readFileSync(path.join(pkg.root, "docs", "tool-reference.md"), "utf8");
   if (!Array.isArray(types.SUBAGENT_ACTIONS) || !types.SUBAGENT_ACTIONS.every((a) => typeof a === "string"))
     throw new Error("SUBAGENT_ACTIONS is not a list of strings");
@@ -126,13 +179,14 @@ export async function generateInventory(packageRoot) {
     launch_contract_version: await observedLaunchContractVersion(pkg.root),
     // Top-level parameters that start an execution; whichever the schema declares is a launch form.
     launch_forms: LAUNCH_FORMS.filter((form) => form in properties),
+    ...(placement === undefined ? {} : { launch_parameter_placement: placement }),
     actions: [...types.SUBAGENT_ACTIONS],
     supports: {
-      turnBudget: "turnBudget" in properties,
-      toolBudget: "toolBudget" in properties,
-      timeoutMs: "timeoutMs" in properties,
+      turnBudget: declared.has("turnBudget"),
+      toolBudget: declared.has("toolBudget"),
+      timeoutMs: declared.has("timeoutMs"),
       workflow: workflowShape(properties.workflow),
-      disabledFeatures: await disabledFeaturesPrune(loader, pkg.root, schemas.createSubagentParamsSchema),
+      disabledFeatures: await disabledFeaturesPrune(loader, pkg, schemas.createSubagentParamsSchema, optionKeys),
       validateOffline: types.SUBAGENT_ACTIONS.includes("validate") && /Offline workflow `validate`/.test(docs),
     },
   };

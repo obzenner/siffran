@@ -631,7 +631,8 @@
         "EHB-AUDLAUNCH-03",
         "EHB-AUDLAUNCH-04",
         "EHB-AUDLAUNCH-05",
-        "EHB-AUDLAUNCH-06"
+        "EHB-AUDLAUNCH-06",
+        "EHB-AUDLAUNCH-07"
       ],
       "sources": "ADR-51, ADR-52 (explicit read-only acceptance exemption), ADR-49, D1H §3–4, PROGRESS \"S5\" (S5-R3, S5-R2), G1 B2/B3, `P/adapters/pi/src/audit-launch.ts:32-42`, `P/adapters/claude/lifecycle.py:327-388`; tests `CT/test_claude_adapter.py::test_auditor_reservation_replaces_author_prompt_and_defers_lifecycle`, `::test_auditor_preflight_failure_does_not_reserve`, `PT/gate.test.ts` (\"subagent: canonical auditor is reserved, bound, attributed, and prompt-injected\"), `PT/preflight-seam.test.ts` (\"the seam refuses forced-async, non-foreground, and non-inline launch requests\")."
     },
@@ -650,7 +651,8 @@
         "EHB-AUDRES-06",
         "EHB-INT-04",
         "EHB-AUDRES-07",
-        "EHB-AUDRES-08"
+        "EHB-AUDRES-08",
+        "EHB-AUDRES-09"
       ],
       "sources": "D1H §3 items 5–7, §4 items 3–5, §6; ADR-60; `P/adapters/pi/src/audit.ts`, `audit-identity.ts`, `index.ts:766-830`; PS 0.76.1 `src/runs/foreground/execution.js:1130-1137,1405-1406,1480-1512`, `subagent-executor.js:3900-3904`; tests `PT/gate.test.ts` (\"tool_result redacts before privately admitting the correlated verdict\", \"errored auditor output is redacted and cannot admit a fenced verdict\", \"malformed auditor result returns a propagated redacted replacement\", \"missing native session keeps auditor identity unverified\"), `PT/audit-identity.test.ts`."
     },
@@ -883,15 +885,20 @@
       "control_modes": [
         "any"
       ],
-      "setup": "Pi with pi-subagents inside the range but with no compat record (e.g. `0.99.0`), whose parameter schema declares every audit-launch field",
+      "setup": "Pi with pi-subagents inside the range but with no compat record (e.g. `0.99.0`), whose parameter schema declares every audit-launch field, flat or in the compact 0.77+ shape (`agent`, `task`, `model` and `async` at the top level and an `options` object schema)",
       "action": "session start, `/empirica`, `subagent` actions during the run, the run view",
-      "expected": "P: admitted; the recorded runtime has `reviewed: false`; the run view shows `host: pi-subagents 0.99.0 (not reviewed; preflight passed)`; a `subagent` action is allowed during a run only if some reviewed version has its name and the classifier calls it read-only management (`list`, `status`, `models`, `children.list`, `doctor`); every other name is refused with `host.subagents_launch_unsupported`; a schema missing an audit-launch field is refused (`host.subagents_version_unsupported`)",
+      "expected": "P: admitted; the recorded runtime has `reviewed: false`; the run view shows `host: pi-subagents 0.99.0 (not reviewed; preflight passed)`; a `subagent` action is allowed during a run only if some reviewed version has its name and the classifier calls it read-only management (`list`, `status`, `models`, `children.list`, `doctor`); every other name is refused with `host.subagents_launch_unsupported`; a schema missing an audit-launch field, or a compact schema missing `options` (or declaring it other than as an object schema) or one of `agent`, `task`, `model`, `async`, is refused (`host.subagents_version_unsupported`) naming the parameter or the shape",
       "covered_by": [
         "plugins/empirica/adapters/pi/test/gate.test.ts::subagent: a version in range with no compat record is refused unless its own schema declares the audit launch (ADR-0069)",
         "plugins/empirica/adapters/pi/test/gate.test.ts::subagent: a version in range with no compat record starts a run, records reviewed:false, and allows only the reviewed read-only actions",
         "plugins/empirica/adapters/pi/test/runtime-owner.test.ts::resolveOwnerInventory admits a version in range with no compat record when its schema declares every audit-launch field",
         "plugins/empirica/adapters/pi/test/runtime-owner.test.ts::resolveOwnerInventory refuses a version in range whose schema is missing, malformed, or lacks an audit-launch field",
-        "plugins/empirica/tests/test_host_runtime.py::HostRuntimeBridgeTests::test_a_version_in_range_without_a_compat_record_starts_and_the_run_view_says_so"
+        "plugins/empirica/tests/test_host_runtime.py::HostRuntimeBridgeTests::test_a_version_in_range_without_a_compat_record_starts_and_the_run_view_says_so",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::observed admission: the real compact schema is admitted, each parameter placed where the schema declares it",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::a compact schema is refused when it lacks options, or an object-typed options, naming the shape",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::a compact schema is refused when it lacks agent, task, model or async, naming the missing one",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::a flat schema missing agentScope is refused naming it (the negative control)",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::a reviewed record whose agentScope is declared under options is admitted by the owner resolution"
       ],
       "ledger_rows": []
     },
@@ -1702,8 +1709,8 @@
       "covered_by": [
         "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing",
         "plugins/empirica/tests/v2/test_evidence_hosts.py::MediatorTests::test_a_dialog_that_raises_grants_nothing",
-        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::PR 18 (\u00a71): a cancel, a wrong label or a past deadline at the FIRST item submits nothing — there is no earlier answer to keep",
-        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::PR 18 (\u00a71, \u00a74-1): Esc at item 2's select keeps item 1's answer — item 2 and the rest are sent as Later",
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::PR 18 (§1): a cancel, a wrong label or a past deadline at the FIRST item submits nothing — there is no earlier answer to keep",
+        "plugins/empirica/adapters/pi/test/evidence-ui.test.ts::PR 18 (§1, §4-1): Esc at item 2's select keeps item 1's answer — item 2 and the rest are sent as Later",
         "plugins/empirica/adapters/pi/test/live-bridge-evidence-partial.test.ts::live bridge: a cancelled second item submits the first — the observer reads item 2 as Not answered (PR 18)"
       ],
       "live_only": "form_level_decline",
@@ -2018,6 +2025,25 @@
       ]
     },
     {
+      "id": "EHB-AUDLAUNCH-07",
+      "boundary": "HB-AUD-LAUNCH",
+      "control_modes": [
+        "any"
+      ],
+      "setup": "Pi with pi-subagents 0.77.0 or later (compact `subagent` schema: `task`, `model`, `async` at the top level, every other field inside `options`), reviewed or observed",
+      "action": "canonical audit launch",
+      "expected": "P: the call carries `task`, `model`, `async` at the top level and `agentScope`, `context`, `acceptance`, `timeoutMs`, `toolBudget` once, inside `options`, never in both places; a flat package (0.50.0 to 0.76.1) gets the unchanged flat payload; an author-supplied `options`, or a launch form (`script`, `workflowScript`, `resume`) inside `options`, is refused",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the launch payload for a compact version is exact: core fields top-level, the rest under options, never both",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the launch payload for a flat version is the unchanged flat payload (0.50.0..0.76.1)",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the seam refuses the captured 0.84.0 preflight when it is tampered: agent file, model, tools, async, context",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::a compact version: a launch form hidden in options, or options that is not an object, is malformed",
+        "plugins/empirica/adapters/pi/test/gate.test.ts::subagent: on pi-subagents 0.84.0 (compact schema) the bound fields travel under options, once, and nowhere else",
+        "plugins/empirica/adapters/pi/test/gate.test.ts::subagent: on pi-subagents 0.84.0 an author-supplied options object (or any extra key) is refused before admission"
+      ],
+      "ledger_rows": []
+    },
+    {
       "id": "EHB-AUDRES-01",
       "boundary": "HB-AUD-RES",
       "control_modes": [
@@ -2140,6 +2166,23 @@
       "ledger_rows": [
         "auditor_contact_supervisor"
       ]
+    },
+    {
+      "id": "EHB-AUDRES-09",
+      "boundary": "HB-AUD-RES",
+      "control_modes": [
+        "any"
+      ],
+      "setup": "Pi with pi-subagents 0.77.0 or later, an auditor report longer than 2,000 characters (CHANGELOG 0.77.0, #2774: `content` is a preview plus a file path)",
+      "action": "result",
+      "expected": "P: the verdict is read from the exact `details.results[0].finalOutput`; text that is a preview (it ends in the `Full output:` or `Output saved to:` pointer) is never a verdict source, whether the fence is cut or complete, and the file the pointer names is never read",
+      "covered_by": [
+        "plugins/empirica/adapters/pi/test/audit-preview.test.ts::a long auditor report is previewed in content; the verdict is read in full from finalOutput",
+        "plugins/empirica/adapters/pi/test/audit-preview.test.ts::a preview is never a verdict source: no rows, or a finalOutput that is itself a preview, give no text",
+        "plugins/empirica/adapters/pi/test/audit-preview.test.ts::a complete fence in the first 2,000 characters of a long report is not admitted from the preview",
+        "plugins/empirica/adapters/pi/test/audit-preview.test.ts::the pointer in a preview is only text: the adapter reads no file it names"
+      ],
+      "ledger_rows": []
     },
     {
       "id": "EHB-FAIL-01",

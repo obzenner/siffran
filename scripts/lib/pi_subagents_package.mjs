@@ -10,13 +10,13 @@
 // devDependency copies, and the Pi packages that are not installed here are replaced by stubs that throw on use. The launch preflight touches the peer only for
 // `context: "fork"` (SessionManager); a stubbed peer therefore cannot change a `context: "fresh"` answer.
 import { createJiti } from "jiti";
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const PI_PEER = "@earendil-works/pi-coding-agent";
 /** Peers pi-subagents expects its host to provide; the repository's own devDependency copy stands in. */
-const REAL_PEERS = ["@earendil-works/pi-tui", "typebox"];
+const REAL_PEERS = ["@earendil-works/pi-tui", "typebox", "typebox/compile", "typebox/value"];
 /** Peers with no installed copy here: loading succeeds, any use throws (see `peerStub`). */
 const STUBBED_PEERS = [PI_PEER, "@earendil-works/pi-ai", "@earendil-works/pi-agent-core"];
 
@@ -48,6 +48,35 @@ export function exportFile(pkg, subpath) {
   const target = typeof entry === "string" ? entry : entry?.default;
   if (typeof target !== "string") throw new Error(`${pkg.root} does not export ${subpath}`);
   return path.join(pkg.root, target);
+}
+
+/** Does this package ship its extension as a bundle (`exports["."]` under `./bundle/`, pi-subagents 0.81.0 and later)? */
+export function isBundled(pkg) {
+  const entry = pkg.manifest.exports?.["."];
+  const target = typeof entry === "string" ? entry : entry?.default;
+  return typeof target === "string" && target.startsWith("./bundle/");
+}
+
+/**
+ * Import a private module of the package the way the package runs it. A source layout (before 0.81.0) has the file under
+ * `src/`: `srcSubpath` (without extension). A bundled one (0.81.0 and later) ships `bundle/chunk-<hash>.js` files whose
+ * export blocks list the same names under the same spelling, with hashed file names that change from release to release,
+ * so the chunk is found by what it exports: the first (by name) whose export block lists every one of `names`.
+ * `undefined` when a source layout has no such file; a bundle with no such chunk throws.
+ */
+export async function importInternal(loader, pkg, srcSubpath, names) {
+  if (isBundled(pkg)) {
+    const dir = path.join(pkg.root, "bundle");
+    const chunk = readdirSync(dir).filter((file) => file.endsWith(".js")).sort().find((file) => {
+      const text = readFileSync(path.join(dir, file), "utf8");
+      const exported = text.slice(text.lastIndexOf("\nexport {") + 1);
+      return exported.startsWith("export {") && names.every((name) => new RegExp(`^  ${name},?$`, "m").test(exported));
+    });
+    if (chunk === undefined) throw new Error(`no chunk of ${dir} exports ${names.join(", ")}`);
+    return loader.import(path.join(dir, chunk));
+  }
+  const file = ["js", "ts"].map((ext) => path.join(pkg.root, `${srcSubpath}.${ext}`)).find(existsSync);
+  return file === undefined ? undefined : loader.import(file);
 }
 
 /** A jiti loader with no caches (a fixture must observe the package on disk, not a stale compile). */

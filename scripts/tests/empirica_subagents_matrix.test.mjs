@@ -86,6 +86,60 @@ test("a parameter the package no longer declares fails the schema check alone", 
   assert.match(checks.schema.detail, /toolBudget/);
 });
 
+// A compact (0.77+) package: the audit's bound fields are declared as `options` keys, not as top-level properties.
+const COMPACT = () => ({
+  ...GOOD(), version: "0.84.0", inventory: loadInventory("0.84.0"),
+  request: { agent: "a", task: "t", async: false, agentScope: "user", toolBudget: { soft: 1 } },
+  properties: ["agent", "task", "async", "model", "options"], optionKeys: ["agentScope", "toolBudget", "context"],
+  placement: { agent: "top-level", task: "top-level", async: "top-level", agentScope: "options", toolBudget: "options" },
+  placed: { agent: "a", task: "t", async: false, options: { agentScope: "user", toolBudget: { soft: 1 } } },
+  flattened: { agent: "a", task: "t", async: false, agentScope: "user", toolBudget: { soft: 1 } },
+  liveToolSchema: { type: "object", properties: { options: { type: "object" } } },
+  checkedToolSchema: { type: "object", properties: { options: { type: "object" } } },
+});
+
+test("a good compact version passes every check, including that the package flattens the placed launch to the flat request", () => {
+  const checks = evaluateCell(COMPACT());
+  assert.deepEqual(failing(checks), []);
+  assert.ok(checks.launch.ok && checks.toolSchema.ok);
+});
+
+test("a compact version without the compact fields is checked as before (a flat package has no launch or toolSchema check)", () => {
+  const checks = evaluateCell(GOOD());
+  assert.equal("launch" in checks, false);
+  assert.equal("toolSchema" in checks, false);
+});
+
+test("an options key the package no longer accepts fails the schema check alone, and a top-level one is checked top-level", () => {
+  const missing = evaluateCell({ ...COMPACT(), optionKeys: ["agentScope", "context"] });
+  assert.deepEqual(failing(missing), ["schema"]);
+  assert.match(missing.schema.detail, /toolBudget/);
+  const notTop = evaluateCell({ ...COMPACT(), properties: ["agent", "task", "model", "options"] });
+  assert.deepEqual(failing(notTop), ["schema"]);
+  assert.match(notTop.schema.detail, /async/);
+  assert.deepEqual(failing(evaluateCell({ ...COMPACT(), placement: { ...COMPACT().placement, agentScope: "top-level" } })), ["schema"],
+    "a parameter recorded as top-level that the schema declares only under options");
+});
+
+test("a package that does not flatten the placed launch to the flat request fails the launch check alone", () => {
+  for (const flattened of [
+    { agent: "a", task: "t", async: false, agentScope: "user" },
+    { agent: "a", task: "t", async: false, agentScope: "other", toolBudget: { soft: 1 } },
+    { agent: "a", task: "t", async: false, agentScope: "user", toolBudget: { soft: 1 }, extra: 1 },
+  ]) {
+    const checks = evaluateCell({ ...COMPACT(), flattened });
+    assert.deepEqual(failing(checks), ["launch"], JSON.stringify(flattened));
+  }
+  const both = evaluateCell({ ...COMPACT(), placed: { ...COMPACT().placed, agentScope: "user" } });
+  assert.deepEqual(failing(both), ["launch"]);
+  assert.match(both.launch.detail, /both/);
+});
+
+test("a changed tool schema fails the toolSchema check alone", () => {
+  const checks = evaluateCell({ ...COMPACT(), liveToolSchema: { type: "object", properties: {} } });
+  assert.deepEqual(failing(checks), ["toolSchema"]);
+});
+
 test("a changed preflight answer fails the preflight check alone; a different machine digest does not", () => {
   const drift = GOOD();
   drift.liveFixture.cases.x.response.contract.message = "changed";
@@ -120,10 +174,11 @@ test("a changed auditor allowlist fails the retrieval check alone, and the fixtu
 });
 
 test("maskMachineDigests masks the path-bearing digests only, recursively, without mutating its input", () => {
-  const input = { digest: "a".repeat(64), launchContractDigest: "a".repeat(64), version: 3, deep: [{ digest: "b".repeat(64) }] };
+  const input = { digest: "a".repeat(64), launchContractDigest: "a".repeat(64), definitionDigest: "c".repeat(64), version: 3, deep: [{ digest: "b".repeat(64) }] };
   const masked = maskMachineDigests(input);
   assert.equal(masked.digest, "<path-bearing digest>");
   assert.equal(masked.launchContractDigest, "<path-bearing digest>");
+  assert.equal(masked.definitionDigest, "<path-bearing digest>", "it hashes the auditor's absolute path, which differs between checkouts");
   assert.equal(masked.version, 3, "every other member is compared as it is");
   assert.equal(masked.deep[0].digest, "<path-bearing digest>");
   assert.equal(input.digest, "a".repeat(64));

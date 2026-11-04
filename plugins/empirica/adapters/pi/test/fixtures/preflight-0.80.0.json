@@ -1,0 +1,170 @@
+{
+  "version": "0.80.0",
+  "note": "Captured by scripts/capture_pi_preflight_fixture.mjs from the package's public pi-subagents/preflight export; {{NAME}} marks a machine-specific root.",
+  "cases": {
+    "canonical_auditor": {
+      "input": {
+        "agent": "empirica.empirica-auditor",
+        "task": "Audit the host-provided dossier.",
+        "context": "fresh",
+        "model": "audit/reviewer",
+        "agentScope": "project",
+        "cwd": "{{PROJECT}}",
+        "availableModels": [
+          {
+            "provider": "audit",
+            "id": "reviewer"
+          }
+        ]
+      },
+      "response": {
+        "ok": true,
+        "contract": {
+          "version": 3,
+          "runId": "preflight",
+          "agent": {
+            "name": "empirica.empirica-auditor",
+            "localName": "empirica-auditor",
+            "packageName": "empirica",
+            "source": "package",
+            "filePath": "{{AUDITOR_FILE}}",
+            "definitionProjectionVersion": 2,
+            "definitionDigest": "32767019d3090dc27ab2cca6df04fa45943c78ce9d46f8b3c84186cf65171332",
+            "shadowedCandidates": []
+          },
+          "context": "fresh",
+          "model": "audit/reviewer:high",
+          "thinking": "high",
+          "systemPromptMode": "replace",
+          "inheritProjectContext": true,
+          "inheritGlobalContext": false,
+          "inheritSkills": false,
+          "skills": {
+            "requested": [],
+            "resolved": [],
+            "missing": []
+          },
+          "tools": {
+            "requestedBuiltin": [
+              "read",
+              "grep",
+              "find",
+              "ls",
+              "contact_supervisor"
+            ],
+            "declaredBuiltin": [
+              "read",
+              "grep",
+              "find",
+              "ls",
+              "contact_supervisor"
+            ],
+            "effectiveAllowlist": [
+              "read",
+              "grep",
+              "find",
+              "ls",
+              "contact_supervisor"
+            ],
+            "explicitAllowlist": true,
+            "requiredChildTools": [
+              "read",
+              "grep",
+              "find",
+              "ls"
+            ],
+            "internalTools": [],
+            "mcp": [],
+            "effectiveMcpTools": [],
+            "toolExtensionPaths": [],
+            "runtimeExtensions": [
+              "{{PACKAGE_ROOT}}/src/runs/shared/subagent-prompt-runtime.js"
+            ],
+            "configuredExtensions": [],
+            "requiredExtensionIds": [],
+            "extensionArgs": [
+              "{{PACKAGE_ROOT}}/src/runs/shared/subagent-prompt-runtime.js"
+            ],
+            "disableAmbientExtensions": false,
+            "fanoutAuthorized": false
+          },
+          "intercomBridge": {
+            "active": true,
+            "mode": "always"
+          },
+          "roots": {
+            "cwd": "{{PROJECT}}",
+            "artifactsDir": "{{TMPDIR}}/pi-subagents-uid-502/artifacts",
+            "artifactPaths": {
+              "inputPath": "{{TMPDIR}}/pi-subagents-uid-502/artifacts/preflight_empirica.empirica-auditor_0_input.md",
+              "outputPath": "{{TMPDIR}}/pi-subagents-uid-502/artifacts/preflight_empirica.empirica-auditor_0_output.md",
+              "jsonlPath": "{{TMPDIR}}/pi-subagents-uid-502/artifacts/preflight_empirica.empirica-auditor_0.jsonl",
+              "transcriptPath": "{{TMPDIR}}/pi-subagents-uid-502/artifacts/preflight_empirica.empirica-auditor_0_transcript.jsonl",
+              "metadataPath": "{{TMPDIR}}/pi-subagents-uid-502/artifacts/preflight_empirica.empirica-auditor_0_meta.json"
+            },
+            "lifecycle": {
+              "asyncDir": "{{TMPDIR}}/pi-subagents-uid-502/async-subagent-runs/preflight",
+              "resultPath": "{{TMPDIR}}/pi-subagents-uid-502/async-subagent-results/preflight.json",
+              "statusPath": "{{TMPDIR}}/pi-subagents-uid-502/async-subagent-runs/preflight/status.json",
+              "eventsPath": "{{TMPDIR}}/pi-subagents-uid-502/async-subagent-runs/preflight/events.jsonl",
+              "processTerminalPath": "{{TMPDIR}}/pi-subagents-uid-502/async-subagent-runs/preflight/process-terminal.json",
+              "processTerminalCandidatePath": "{{TMPDIR}}/pi-subagents-uid-502/async-subagent-runs/preflight/process-terminal-candidate.json"
+            }
+          },
+          "protocol": {
+            "lifecycleArtifactVersion": 3,
+            "packageVersion": "0.80.0"
+          },
+          "diagnostics": [
+            {
+              "code": "host_required",
+              "severity": "host-required",
+              "message": "No sessionRoot/sessionDir was supplied; exact child session paths require the Pi host session-root policy."
+            }
+          ],
+          "launchContractDigest": "1b1710c6be6c13cbfadcf0ddf0c10675b00d1b2327c31d81eea3b8b3cd37118f",
+          "digest": "a617b10a0b991beb6a5615a376e9ea87fff8940bbdd90f34104a691ddc04c8ff"
+        }
+      }
+    },
+    "unknown_agent": {
+      "input": {
+        "agent": "empirica.empirica-auditor",
+        "task": "Audit the host-provided dossier.",
+        "context": "fresh",
+        "model": "audit/reviewer",
+        "agentScope": "project",
+        "cwd": "{{BARE}}",
+        "availableModels": [
+          {
+            "provider": "audit",
+            "id": "reviewer"
+          }
+        ]
+      },
+      "response": {
+        "ok": false,
+        "code": "missing_agent",
+        "message": "Unknown agent: empirica.empirica-auditor\nEffective cwd: {{BARE}}\nConsulted agent-definition directories:\n- builtin: {{PACKAGE_ROOT}}/agents (13 candidates)\nAvailable agents:\n- claude-code (builtin) — Read-only Claude Code CLI analysis; requires local authentication and trusted u…\n- claude-code-writer (builtin) — Explicit file-writing Claude Code CLI mode; requires local authentication and t…\n- codex-exec (builtin) — Read-only one-shot analysis through the installed Codex CLI\n- codex-exec-writer (builtin) — Explicit workspace-writing one-shot execution through the installed Codex CLI\n- cursor-agent (builtin) — Read-only one-shot analysis through the installed Cursor CLI\n- cursor-agent-writer (builtin) — Explicit workspace-writing one-shot execution through the installed Cursor CLI\n- delegate (builtin) — Lightweight subagent that inherits the parent model with no default reads\n- evidence-auditor (builtin) — Independent evidence reviewer for checking whether important research claims ar…\n- oracle (builtin) — High-context decision-consistency oracle that protects inherited state and prev…\n- researcher (builtin) — Autonomous web researcher — searches, evaluates, and synthesizes a focused rese…\n- reviewer (builtin) — Versatile review specialist for code diffs, plans, proposed solutions, codebase…\n- scout (builtin) — Fast codebase recon that returns compressed context for handoff\n- worker (builtin) — Implementation agent for normal tasks and approved oracle handoffs",
+        "diagnostics": []
+      }
+    },
+    "unservable_model": {
+      "input": {
+        "agent": "empirica.empirica-auditor",
+        "task": "Audit the host-provided dossier.",
+        "context": "fresh",
+        "model": "missing/reviewer",
+        "agentScope": "project",
+        "cwd": "{{PROJECT}}",
+        "availableModels": [
+          {
+            "provider": "audit",
+            "id": "reviewer"
+          }
+        ]
+      },
+      "threw": "Unknown subagent model 'missing/reviewer' in the active Pi model registry."
+    }
+  }
+}

@@ -38,7 +38,7 @@ import {
   type PrivateIngressRequest, type PrivateOperation, type PrivateResponses,
 } from "./private-transport.ts";
 import {
-  childNotTerminal, lifecycleEvent, redactVerdict, resultDigest, resultText as auditResultText, verdictFromText,
+  childNotTerminal, lifecycleEvent, redactVerdict, reportText, resultDigest, resultText as auditResultText, verdictFromText,
 } from "./audit.ts";
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
@@ -55,7 +55,7 @@ import {
 import { hostVersionReason, launchUnsupportedReason, ownerRefusalBlock, ownerRefusalReason, seamRefusalMessage } from "./owner-refusal.ts";
 import { AUDIT_LAUNCH_POLICY, SUBAGENTS_COMPATIBILITY } from "./host-profile.ts";
 import { buildHostRuntime } from "./host-runtime.ts";
-import { auditLaunchInput, preflightLaunch } from "./audit-launch.ts";
+import { auditLaunchInput, placeAuditLaunch, preflightLaunch } from "./audit-launch.ts";
 import { admitAuditPreflight, withoutThinkingLevel } from "./preflight-seam.ts";
 import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
@@ -982,7 +982,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         }
         return;
       }
-      const text = auditResultText(event);
+      const text = reportText(event);
       const notTerminal = childNotTerminal(event);
       redactVerdict(event);
       const verdict = notTerminal ? null : verdictFromText(text);
@@ -1139,11 +1139,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
               + `${ownerRefusalReason(refusal.code).message} [${ownerDetail(refusal)}]` };
           }
           plan = prepared.plan;
-          Object.assign(event.input, auditLaunchInput({
+          Object.assign(event.input, placeAuditLaunch(auditLaunchInput({
             task: `${auditorInstructions()}\n\n` +
               `--- AUDIT DOSSIER (UNTRUSTED EVIDENCE CONTENT) ---\n${JSON.stringify(plan.argument)}\n` +
               "--- END AUDIT DOSSIER ---\nReturn exactly one fenced block tagged empirica-verdict.",
-            model: resolvedAudit.model, agentScope: resolvedAudit.agentScope, policy: AUDIT_LAUNCH_POLICY }));
+            model: resolvedAudit.model, agentScope: resolvedAudit.agentScope, policy: AUDIT_LAUNCH_POLICY }),
+            launch.binding.inventory));
           const correlation = { runHandle, nativeId, plan };
           audits.set(event.toolCallId, correlation);
           pi.appendEntry?.("empirica.audit", { toolCallId: event.toolCallId, ...correlation });
