@@ -80,6 +80,15 @@ test("a report that fits is not previewed and is read from content or finalOutpu
   }
 });
 
+test("a complete report that quotes a preview pointer before its verdict is read whole (only a trailing pointer marks a preview)", () => {
+  const { full } = FIXTURES.at(-1)!.cases.short_verdict;
+  const quoted = "The evidence tool result was cut:\n…\nFull output: /tmp/x.md (9 KB, 200 lines). Read it if needed.\n\n" + full;
+  assert.ok(verdictFromText(full), "the control report carries one verdict");
+  assert.equal(reportText(event(quoted)), quoted);
+  assert.deepEqual(verdictFromText(reportText(event(quoted))), verdictFromText(full));
+  assert.equal(reportText(event("x", [{ finalOutput: quoted }])), quoted, "finalOutput");
+});
+
 test("the pointer in a preview is only text: the adapter reads no file it names", () => {
   const source = readFileSync(path.join(HERE, "..", "src", "audit.ts"), "utf8");
   assert.doesNotMatch(source, /node:fs|readFileSync|statSync/);

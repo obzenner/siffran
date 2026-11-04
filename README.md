@@ -23,6 +23,8 @@ Requires Claude Code `>=2.1.278,<2.2.0` and `python3` (see [host support](doc/ho
 ### Pi
 
 Requires Pi `>=1.0.0,<2.0.0` and an exact [`pi-subagents`](doc/hosts.md#pi-and-pi-subagents) version in `>=0.74.0,<1.0.0`, installed first.
+The command below pins 0.84.0, which needs Pi `>=1.2.0`; on Pi 1.0.x or 1.1.x install `npm:pi-subagents@0.79.2` instead
+(see the "Requires Pi" column in `doc/hosts.md`).
 
 ```sh
 pi install npm:pi-subagents@0.84.0

@@ -19,9 +19,10 @@ function resultRows(event: ToolResultEvent): unknown[] | null {
  * The pointer pi-subagents 0.77.0 and later append to a long child report whose content it previews
  * (`capInlineOutput`, src/runs/shared/single-output.js): the report's first 2,000 characters, `\n…`, then either
  * `Full output: <file> (<size>, <n> lines). Read it if needed.` or, when the run also saved its output, the
- * `Output saved to: <file> (...). Read this file if needed.` line. Text with that marker is a preview, not the report.
+ * `Output saved to: <file> (...). Read this file if needed.` line, as the text's last line. Text ending with that marker is a
+ * preview, not the report; a complete report that merely quotes such a pointer earlier is read whole.
  */
-const PREVIEW_POINTER = /\n…\n\n?(?:Full output|Output saved to): [^\n]*\. Read (?:it|this file) if needed\./;
+const PREVIEW_POINTER = /\n…\n\n?(?:Full output|Output saved to): [^\n]*\. Read (?:it|this file) if needed\.\s*$/;
 
 /**
  * The audit child's report as the verdict is read from it: `resultText`, except that a preview of a longer report is
