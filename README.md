@@ -33,7 +33,7 @@ pi install git:github.com/obzenner/siffran
 
 Then restart Pi, or run `/reload` in an existing session.
 
-Empirica `7.0.1` uses wire `empirica/v2` and exact `empirica.run/4` state. Deterministic spikes
+Empirica `7.0.2` uses wire `empirica/v2` and exact `empirica.run/4` state. Deterministic spikes
 are closed single-container `empirica.spike-plan-draft/2` workloads bound once to an operator-qualified
 `docker-isolated-v1` or `docker-networked-v1` authority, with no command-string or ambient
 host-shell fallback. Any tool can be the argv; every limit an agent sees is the public-contract clause
@@ -54,7 +54,7 @@ See the [Empirica skill](plugins/empirica/skills/empirica/SKILL.md) for how a ru
 | Plugin | Version | Description |
 |--------|---------|-------------|
 | `methodologist` | 0.10.1 | Formal reasoning catalog — lets users choose and execute evidence-backed CS/math methodologies with traced phases and structured output. |
-| `empirica` | 7.0.1 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
+| `empirica` | 7.0.2 | Host-neutral empirical-convergence workflow — requires exact run-configuration approval (or provenance-bound auto), cited research before spikes, per-artifact producer attribution, and a current distinct host-observed audit. Unknown or mixed identity evidence fails closed. |
 <!-- END GENERATED: plugins -->
 
 ## Documentation

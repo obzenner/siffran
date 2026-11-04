@@ -9,6 +9,7 @@ honest native unsupported/fail-closed.
 from __future__ import annotations
 
 import json
+import os
 import uuid
 import sys
 import unittest
@@ -28,6 +29,7 @@ from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 import jsonschema  # noqa: E402
 
 from adapters import bridge  # noqa: E402
+from adapters.audit import child_event  # noqa: E402
 from core import spike_plan  # noqa: E402
 from adapters.claude import (  # noqa: E402
     CLAUDE_PROFILE_ID,
@@ -1204,9 +1206,8 @@ class SpawnLifecycleTests(unittest.TestCase):
         self.assertNotIn("author-controlled prompt", updated["prompt"])
         self.assertEqual(updated["subagent_type"], "empirica:empirica-auditor")
         self.assertIs(updated["run_in_background"], True)
-        self.assertEqual(updated["max_turns"], 8)
         self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
-                                        "run_in_background", "max_turns", "model"})
+                                        "run_in_background", "model"})
         self.assertEqual(updated["model"], "fable")
 
     def test_auditor_preflight_failure_does_not_reserve(self) -> None:
@@ -1870,6 +1871,428 @@ class TurnEndPredicateParityTests(unittest.TestCase):
         self.assertFalse(_async_audit_wait(result))
         child.child_id = "ch-1"
         self.assertTrue(_async_audit_wait(result))
+
+
+AUDITOR_ROLE = "empirica:empirica-auditor"
+
+
+class _AuditedRun:
+    """A real in-memory coordinator for the Claude profile that the Claude hooks are wired to.
+
+    The hooks run their production code; only the bridge below them (the single-process service
+    seam) is replaced by this coordinator, so reservation, refund, binding and verdict admission are
+    the core's own, not a mock's.
+    """
+
+    def __init__(self, test: unittest.TestCase, *, max_audit_spawns: int = 2) -> None:
+        from contextlib import ExitStack
+        from adapters.audit_protocol import AuditProtocol
+        from application.run_state import decode_state
+        from application.transaction import Coordinator
+        from governance_setup import approve_current, invocation_for
+        from test_d7_transactions import (
+            Artifacts, Harness, Runs, Workspace, activate_investigation)
+        self.test, self._decode_state = test, decode_state
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.coordinator = Coordinator(
+            Workspace(), Harness(), self.runs, self.artifacts, CLAUDE_PROFILE, {})
+        started = self.coordinator.handle({
+            "type": "StartRun", "control_mode": "deliberative",
+            "invocation": invocation_for(CLAUDE_PROFILE), "selector": {
+                "project": "auto-mode", "session": "audit"}, "goal": "auto-mode audit launch",
+            "budgets": {"max_spawns": 1, "max_audit_spawns": max_audit_spawns}},
+            "start")["result"]
+        self.run_id = started["run"]["id"]
+        self.key = next(iter(self.runs.data))
+        self.action({"kind": "graph", "payload": {"root": "G0", "claims": [
+            {"id": "G0", "text": "tested", "gating": True, "kind": "ordinary"}], "edges": []}})
+        approve_current(self.coordinator, self.run_id)
+        activate_investigation(self.coordinator, self.run_id)
+        self.action({"kind": "research", "claim_id": "G0", "source_kind": "code",
+                     "result": "supports", "payload": {"source_ref": "notes.md",
+                                                       "citation": "tested"}})
+        self.native: dict[str, str] = {}
+        self.protocols = AuditProtocol
+        self._stack = ExitStack()
+        self._wire()
+        test.addCleanup(self._stack.close)
+
+    # -- wiring -----------------------------------------------------------------------------------
+    def _attribution(self, run: str, payload: dict) -> dict:
+        from adapters.identity import POLICY_VERSION, observe
+        normalized = observe(payload.get("provider_id"), payload.get("model_id"),
+                             source=payload["source"])
+        identity = normalized or {
+            "identity": None, "provider_id": payload.get("provider_id"),
+            "model_id": payload.get("model_id"), "policy_version": POLICY_VERSION,
+            "source": payload["source"]}
+        return self.coordinator.trusted_attribution(
+            run, {**payload, **identity, "observed_by": "host"})
+
+    def _protocol(self, profile_id: str, *, execution: str = "foreground"):
+        return self.protocols(
+            profile_id, execution=execution, audit_retrieval=["local", "workspace"],
+            dispatch=lambda request, _profile: self.coordinator.handle(
+                request["command"], "protocol"),
+            child_event_ingress=lambda _p, run, child, event:
+                self.coordinator.trusted_child_event(run, child, event),
+            attribution_ingress=lambda _p, run, payload: self._attribution(run, payload),
+            verdict_ingress=lambda _p, run, child, payload:
+                self.coordinator.trusted_audit_verdict(run, child, payload),
+            plan_ingress=lambda _p, run, child: self.coordinator.trusted_audit_plan(run, child),
+            exclusions_ingress=lambda _p, run: self.coordinator.trusted_audit_exclusions(run))
+
+    def _resolve(self, payload, *, strict=False):
+        envelope = self.coordinator.handle(
+            {"type": "GetRun", "run_id": self.run_id}, "claude-resolve")
+        response = Response.from_envelope({"request_id": "claude-resolve"}, envelope)
+        return self.run_id, response.result
+
+    def _resolve_child(self, _profile, run_id, native_id):
+        children = self.state().children
+        matches = [c["child_id"] for c in children
+                   if c["resource_class"] == "audit" and c.get("native_id") == native_id]
+        return matches[0] if len(matches) == 1 else None
+
+    def _wire(self) -> None:
+        push = self._stack.enter_context
+        push(patch.object(lifecycle, "_resolve", self._resolve))
+        push(patch.object(lifecycle, "AuditProtocol", self._protocol))
+        push(patch.object(lifecycle, "dispatch_investigation",
+                          return_value=_typed(_active_result(), "investigate")))
+        push(patch.object(lifecycle, "_governance_context"))
+        push(patch.object(lifecycle, "_auditor_alias", return_value="fable"))
+        push(patch.object(lifecycle, "_effective_identity", return_value=None))
+        push(patch.object(lifecycle.application_bridge, "trusted_audit_plan",
+                          lambda _p, run, child: self.coordinator.trusted_audit_plan(run, child)))
+        push(patch.object(lifecycle.application_bridge, "trusted_resolve_child",
+                          self._resolve_child))
+        push(patch.dict("os.environ", {}, clear=False))
+        os.environ.pop("CLAUDE_CODE_SUBAGENT_MODEL", None)
+
+    # -- the run ----------------------------------------------------------------------------------
+    def action(self, action: dict) -> dict:
+        return self.coordinator.handle({"type": "ObserveAction", "run_id": self.run_id,
+                                        "action": action}, "action")["result"]
+
+    def state(self):
+        return self._decode_state(self.runs.data[self.key].value)
+
+    def audits(self) -> list[dict]:
+        return [dict(child) for child in self.state().children
+                if child["resource_class"] == "audit"]
+
+    def states(self) -> list[str]:
+        return [child["state"] for child in self.audits()]
+
+    def verdicts(self) -> list[dict]:
+        self.coordinator.handle({"type": "GetArgument", "run_id": self.run_id}, "argument")
+        return [item for item in self.coordinator.last_snapshot.history
+                if item.get("kind") == "audit_verdict"]
+
+    def snapshot_bytes(self):
+        return (self.runs.data[self.key], self.artifacts.append_calls)
+
+    # -- the hooks, as Claude would call them -------------------------------------------------------
+    def _run(self, hook: str, payload: dict) -> tuple[int, str, str]:
+        out, err = StringIO(), StringIO()
+        with patch("sys.stdin", new=StringIO(json.dumps({
+                "session_id": "auto-mode", "cwd": ".", **payload}))), \
+                patch("sys.stdout", new=out), patch("sys.stderr", new=err):
+            code = getattr(lifecycle, hook)()
+        return code, out.getvalue(), err.getvalue()
+
+    def launch(self, tool_input: dict | None = None) -> tuple[int, str, str]:
+        return self._run("spawn_main", {"tool_name": "Agent", "tool_input": tool_input or {
+            "subagent_type": AUDITOR_ROLE, "prompt": "audit please"}})
+
+    def denied(self, tool_input: dict | None = None) -> tuple[int, str, str]:
+        return self._run("permission_denied_main", {
+            "hook_event_name": "PermissionDenied", "tool_name": "Agent", "tool_use_id": "toolu_1",
+            "reason": "a hook changed this call's input after auto mode reviewed it",
+            "tool_input": tool_input or {
+                "subagent_type": AUDITOR_ROLE, "prompt": "audit please"}})
+
+    def failed(self) -> tuple[int, str, str]:
+        return self._run("agent_failure_main", {"tool_name": "Agent", "tool_input": {
+            "subagent_type": AUDITOR_ROLE, "prompt": "audit please"}})
+
+    def started(self, native_id: str) -> tuple[int, str, str]:
+        return self._run("subagent_start_main", {
+            "agent_type": AUDITOR_ROLE, "agent_id": native_id})
+
+    def stopped(self, native_id: str) -> tuple[int, str, str]:
+        self.coordinator.handle({"type": "GetArgument", "run_id": self.run_id}, "argument")
+        from core.evaluation import audit_binding
+        verdict = {"verdict": "pass", "findings": [],
+                   **audit_binding(self.coordinator.last_snapshot)}
+        with patch.object(lifecycle, "_audit_outcome",
+                          return_value=(verdict, "claude-opus-4-6")):
+            return self._run("subagent_stop_main", {
+                "agent_type": AUDITOR_ROLE, "agent_id": native_id,
+                "agent_transcript_path": "auditor.jsonl"})
+
+
+class AutoModeAuditLaunchTests(unittest.TestCase):
+    """Issue #69: the audit launches under Claude Code auto mode and never strands a reservation."""
+
+    # ---- 1. an explicit allow on the auditor launch ---------------------------------------------
+    def _launch_output(self, tool_input: dict) -> tuple[int, str]:
+        from adapters.audit_protocol import AuditLaunchPlan
+        plan = AuditLaunchPlan(CLAUDE_PROFILE, "active-run", "ch-audit", AUDITOR_ROLE,
+                               {"argument_digest": "sha256:" + "1" * 64, "claims": []})
+        out = StringIO()
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation",
+                   return_value=_typed(_active_result(), "investigate")), \
+             patch("adapters.claude.lifecycle.dispatch_child_reserve",
+                   return_value=_typed(_active_result(), "reserve")), \
+             patch("adapters.claude.lifecycle.AuditProtocol.prepare", return_value=plan), \
+             patch("adapters.claude.lifecycle._auditor_alias", return_value="fable"), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("sys.stdin", new=StringIO(json.dumps({
+                 "session_id": "s", "cwd": ".", "tool_name": "Agent", "tool_input": tool_input}))), \
+             patch("sys.stdout", new=out):
+            return lifecycle.spawn_main(), out.getvalue()
+
+    def test_the_auditor_launch_allows_explicitly_with_a_reason_and_the_host_built_input(self):
+        code, stdout = self._launch_output({"subagent_type": AUDITOR_ROLE, "prompt": "author text"})
+        self.assertEqual(code, 0)
+        output = json.loads(stdout)["hookSpecificOutput"]
+        self.assertEqual(output["hookEventName"], "PreToolUse")
+        self.assertEqual(output["permissionDecision"], "allow")
+        self.assertIsInstance(output["permissionDecisionReason"], str)
+        self.assertTrue(output["permissionDecisionReason"].strip())
+        self.assertEqual(set(output), {"hookEventName", "permissionDecision",
+                                       "permissionDecisionReason", "updatedInput"})
+        updated = output["updatedInput"]
+        self.assertEqual(set(updated), {"subagent_type", "description", "prompt",
+                                        "run_in_background", "model"})
+        self.assertEqual(updated["subagent_type"], AUDITOR_ROLE)
+        self.assertIs(updated["run_in_background"], True)
+        self.assertIn("AUDIT DOSSIER", updated["prompt"])
+        self.assertNotIn("author text", updated["prompt"])
+        self.assertNotIn("max_turns", updated)
+
+    def test_the_auditor_definition_declares_no_turn_cap(self):
+        """No qualified run ever capped the auditor's turns (``max_turns`` was never an Agent-tool input).
+
+        A cap would end a long retrieval in partial output and ``audit.failed``, so adding one is a decision
+        of its own: it must change this test, not slip in with a patch release.
+        """
+        path = Path(lifecycle.__file__).resolve().parents[2] / "agents" / "empirica-auditor.md"
+        frontmatter = path.read_text(encoding="utf-8").split("---", 2)[1]
+        keys = {line.split(":", 1)[0].strip() for line in frontmatter.splitlines() if ":" in line}
+        self.assertEqual(keys, {"name", "description", "tools", "effort"})
+        self.assertNotIn("maxTurns", keys)
+
+    def test_a_non_auditor_launch_still_writes_nothing(self):
+        code, stdout = self._launch_output({"subagent_type": "worker", "prompt": "do work"})
+        self.assertEqual((code, stdout), (0, ""))
+
+    def test_a_denied_launch_still_exits_two_with_a_reason_and_no_output(self):
+        out, err = StringIO(), StringIO()
+        with patch("adapters.claude.lifecycle._resolve", return_value=("active-run", {})), \
+             patch("adapters.claude.lifecycle.dispatch_investigation",
+                   return_value=_typed(_active_result(), "investigate")), \
+             patch("adapters.claude.lifecycle._governance_context"), \
+             patch("sys.stdin", new=StringIO(json.dumps({
+                 "session_id": "s", "cwd": ".", "tool_name": "Agent",
+                 "tool_input": {"subagent_type": AUDITOR_ROLE, "prompt": "x", "model": "opus"}}))), \
+             patch("sys.stdout", new=out), patch("sys.stderr", new=err):
+            self.assertEqual(lifecycle.spawn_main(), 2)
+        self.assertEqual(out.getvalue(), "")
+        self.assertIn("model overrides", err.getvalue())
+
+    def test_the_real_launch_output_carries_the_allow_and_the_plan_it_reserved(self):
+        run = _AuditedRun(self)
+        code, stdout, stderr = run.launch()
+        self.assertEqual((code, stderr), (0, ""))
+        output = json.loads(stdout)["hookSpecificOutput"]
+        self.assertEqual(output["permissionDecision"], "allow")
+        self.assertEqual(run.states(), ["reserved"])
+
+    # ---- 2. PermissionDenied releases an unstarted audit ------------------------------------------
+    def test_permission_denied_releases_a_reserved_unstarted_audit_and_refunds_it(self):
+        run = _AuditedRun(self)
+        run.launch()
+        self.assertEqual(run.states(), ["reserved"])
+        self.assertEqual(run.state().budgets["audit_spawns_used"], 1)
+        code, stdout, stderr = run.denied()
+        self.assertEqual((code, stdout, stderr), (0, "", ""))
+        self.assertEqual(run.states(), ["launch_rejected"])
+        self.assertEqual(run.state().budgets["audit_spawns_used"], 0)
+
+    def test_permission_denied_is_inert_with_no_reservation(self):
+        run = _AuditedRun(self)
+        before = run.snapshot_bytes()
+        self.assertEqual(run.denied(), (0, "", ""))
+        self.assertEqual(run.snapshot_bytes(), before)
+
+    def test_permission_denied_is_inert_for_a_non_auditor_launch(self):
+        run = _AuditedRun(self)
+        run.launch()
+        before = run.snapshot_bytes()
+        for tool_input in ({"subagent_type": "worker", "prompt": "x"}, {"prompt": "x"}, "x", None):
+            with self.subTest(tool_input=tool_input):
+                self.assertEqual(run.denied(tool_input if tool_input is not None else "x"),
+                                 (0, "", ""))
+        self.assertEqual(run.snapshot_bytes(), before)
+        self.assertEqual(run.states(), ["reserved"])
+
+    def test_permission_denied_never_touches_a_started_audit(self):
+        run = _AuditedRun(self)
+        run.launch()
+        run.started("native-1")
+        self.assertEqual(run.states(), ["pending"])
+        before = run.snapshot_bytes()
+        self.assertEqual(run.denied(), (0, "", ""))
+        self.assertEqual(run.snapshot_bytes(), before)
+
+    def test_permission_denied_is_inert_when_no_run_is_active(self):
+        err, out = StringIO(), StringIO()
+        response = _typed({"type": "Inert", "reason": "no_run"}, "claude-resolve")
+        with patch.object(lifecycle, "dispatch_resolve", return_value=response), \
+             patch("sys.stdin", new=StringIO(json.dumps({"tool_input": {
+                 "subagent_type": AUDITOR_ROLE}}))), \
+             patch("sys.stderr", new=err), patch("sys.stdout", new=out):
+            self.assertEqual(lifecycle.permission_denied_main(), 0)
+        self.assertEqual((out.getvalue(), err.getvalue()), ("", ""))
+
+    def test_permission_denied_failure_is_one_stderr_line_and_exit_zero(self):
+        err, out = StringIO(), StringIO()
+        with patch.object(lifecycle, "_resolve", side_effect=RuntimeError("boom\nwith   spaces")), \
+             patch("sys.stdin", new=StringIO(json.dumps({"tool_input": {
+                 "subagent_type": AUDITOR_ROLE}}))), \
+             patch("sys.stderr", new=err), patch("sys.stdout", new=out):
+            self.assertEqual(lifecycle.permission_denied_main(), 0)
+        self.assertEqual(out.getvalue(), "")
+        self.assertEqual(err.getvalue(),
+                         "empirica PermissionDenied hook failed: RuntimeError: boom with spaces\n")
+
+    def test_permission_denied_failure_while_rejecting_is_one_stderr_line_and_exit_zero(self):
+        run = _AuditedRun(self)
+        run.launch()
+        with patch.object(run.protocols, "reject", side_effect=RuntimeError("bridge down")):
+            code, stdout, stderr = run.denied()
+        self.assertEqual((code, stdout), (0, ""))
+        self.assertEqual(stderr, "empirica PermissionDenied hook failed: RuntimeError: bridge down\n")
+
+    def test_permission_denied_does_not_ask_the_model_to_retry(self):
+        run = _AuditedRun(self)
+        run.launch()
+        self.assertEqual(run.denied()[1], "")
+
+    def test_the_failure_hook_releases_the_same_way(self):
+        run = _AuditedRun(self)
+        run.launch()
+        self.assertEqual(run.failed(), (0, "", ""))
+        self.assertEqual(run.states(), ["launch_rejected"])
+
+    def test_the_entrypoint_is_a_thin_wrapper_of_permission_denied_main(self):
+        path = Path(lifecycle.__file__).resolve().parents[2] / "hooks" / "permission_denied.py"
+        text = path.read_text(encoding="utf-8")
+        self.assertIn("from adapters.claude.lifecycle import permission_denied_main", text)
+        self.assertIn("raise SystemExit(permission_denied_main())", text)
+        self.assertLessEqual(len([line for line in text.splitlines() if line.strip()]), 12)
+
+    def test_the_hook_registration_is_permission_denied_for_agent_only(self):
+        hooks = json.loads((Path(lifecycle.__file__).resolve().parents[2] / "hooks"
+                            / "hooks.json").read_text(encoding="utf-8"))["hooks"]
+        groups = hooks["PermissionDenied"]
+        self.assertEqual([group["matcher"] for group in groups], ["Agent"])
+        (hook,) = groups[0]["hooks"]
+        self.assertEqual(hook["args"], ["${CLAUDE_PLUGIN_ROOT}/hooks/permission_denied.py"])
+
+    # ---- 3. overlapping auditor launches stay refused (7.0.1 behaviour) -----------------------------
+    # A ``reserved`` child cannot be told apart from an allowed launch still waiting for
+    # ``SubagentStart`` (its payload has no ``tool_use_id`` and the core child has no launch owner), so a
+    # second launch never releases it: only the owner's denial, a failure or ``/compact`` does.
+    def _assert_refused_with_audit_pending(self, run, states):
+        before = run.snapshot_bytes()
+        code, stdout, stderr = run.launch()
+        self.assertEqual((code, stdout), (2, ""))
+        self.assertIn("Audit child is pending", stderr)
+        self.assertEqual(run.snapshot_bytes(), before)
+        self.assertEqual(run.states(), states)
+
+    def test_a_second_launch_while_a_child_is_reserved_is_refused_with_audit_pending(self):
+        run = _AuditedRun(self)
+        run.launch()
+        self.assertEqual(run.states(), ["reserved"])
+        self._assert_refused_with_audit_pending(run, ["reserved"])
+
+    def test_a_launching_audit_still_refuses_with_audit_pending(self):
+        run = _AuditedRun(self)
+        run.launch()
+        (child,) = run.audits()
+        run.coordinator.trusted_child_event(
+            run.run_id, child["child_id"], child_event("launching", "native-1"))
+        self.assertEqual(run.states(), ["launching"])
+        self._assert_refused_with_audit_pending(run, ["launching"])
+
+    def test_a_pending_audit_still_refuses_with_audit_pending(self):
+        run = _AuditedRun(self)
+        run.launch()
+        run.started("native-1")
+        self.assertEqual(run.states(), ["pending"])
+        self._assert_refused_with_audit_pending(run, ["pending"])
+
+    def test_two_launches_in_one_response_the_second_is_refused_and_one_verdict_is_admitted(self):
+        run = _AuditedRun(self)
+        self.assertEqual(run.launch()[0], 0)
+        (first,) = run.audits()
+        self._assert_refused_with_audit_pending(run, ["reserved"])  # the second launch of the response
+        self.assertEqual(run.started("native-first"), (0, "", ""))  # binds the only reservation
+        (bound,) = run.audits()
+        self.assertEqual((bound["child_id"], bound["state"], bound["native_id"]),
+                         (first["child_id"], "pending", "native-first"))
+        self.assertEqual(run.verdicts(), [])
+        self.assertEqual(run.stopped("native-first"), (0, "", ""))
+        self.assertEqual([v["child_id"] for v in run.verdicts()], [first["child_id"]])
+        self.assertEqual(run.states(), ["completed"])
+
+    def test_the_first_launchs_denial_releases_its_own_reservation_and_a_fresh_launch_follows(self):
+        run = _AuditedRun(self)
+        run.launch()
+        (first,) = run.audits()
+        self._assert_refused_with_audit_pending(run, ["reserved"])
+        self.assertEqual(run.denied(), (0, "", ""))  # auto mode denied the first launch
+        self.assertEqual(run.states(), ["launch_rejected"])
+        self.assertEqual(run.state().budgets["audit_spawns_used"], 0)  # refunded
+        code, stdout, stderr = run.launch()
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(json.loads(stdout)["hookSpecificOutput"]["permissionDecision"], "allow")
+        released, fresh = run.audits()
+        self.assertEqual((released["child_id"], released["state"]), (first["child_id"], "launch_rejected"))
+        self.assertEqual(fresh["state"], "reserved")
+
+    def test_a_denial_refunds_the_audit_spawn_so_the_ceiling_is_never_spent_by_it(self):
+        """Core semantics (unchanged): ``launch_rejected`` refunds, so repeated denied launches never exhaust the ceiling."""
+        run = _AuditedRun(self, max_audit_spawns=1)
+        for _ in range(3):
+            self.assertEqual(run.launch()[0], 0)
+            self.assertEqual(run.state().budgets["audit_spawns_used"], 1)
+            self.assertEqual(run.denied(), (0, "", ""))
+            self.assertEqual(run.state().budgets["audit_spawns_used"], 0)
+        self.assertEqual(run.state().budgets["max_audit_spawns"], 1)
+        self.assertEqual(run.states(), ["launch_rejected"] * 3)
+
+    def test_a_reserved_child_stuck_before_the_fix_is_released_by_compact(self):
+        """The 7.0.0/7.0.1 workaround: ``SessionStart`` ``compact`` orphans a ``reserved`` child, then a launch works."""
+        run = _AuditedRun(self)
+        run.launch()  # the denial of an old build left this child behind
+        self._assert_refused_with_audit_pending(run, ["reserved"])
+        with patch.object(lifecycle, "dispatch_restore",
+                          return_value=_typed(_active_result(), "restore")):
+            code, _, stderr = run._run("restore_main", {"hook_event_name": "SessionStart"})
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(run.states(), ["orphaned"])
+        code, stdout, stderr = run.launch()
+        self.assertEqual((code, stderr), (0, ""))
+        self.assertEqual(run.states(), ["orphaned", "reserved"])
+        # An orphaned child is not refunded: the workaround costs the audit spawn it held.
+        self.assertEqual(run.state().budgets["audit_spawns_used"], 2)
 
 
 if __name__ == "__main__":

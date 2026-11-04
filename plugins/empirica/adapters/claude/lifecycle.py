@@ -323,6 +323,9 @@ def run_start_main() -> int:
     return 0
 
 
+_AUDIT_LAUNCH_REASON = "Empirica host-bound audit launch"
+
+
 def spawn_main() -> int:
     """PreToolUse:Agent: reserve a real launch via ``child_reserve``, else inert.
 
@@ -371,16 +374,21 @@ def spawn_main() -> int:
         target = alias or override  # exactly one of them is set: an override disables the pick
         plan = audit_protocol.prepare(handle, role_profile="empirica:empirica-auditor",
                                       auditor_identity=_effective_identity(target, os.environ, excluded) if target else None)
+        # No ``max_turns``: it is not an Agent-tool input, and Claude Code drops unknown ``updatedInput`` keys.
         updated = {
             "subagent_type": "empirica:empirica-auditor",
             "description": "Bound Empirica audit",
             "prompt": child_prompt(plan.argument),
             "run_in_background": True,
-            "max_turns": 8,
         }
         if alias is not None:
             updated["model"] = alias
+        # The hook builds the whole input, so it approves it explicitly. Without a decision, auto
+        # mode (whose server-side classifier reviewed the input Claude wrote, not this one) can deny
+        # the changed call; deny and ask rules are still evaluated against the returned input.
         json.dump({"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                          "permissionDecision": "allow",
+                                          "permissionDecisionReason": _AUDIT_LAUNCH_REASON,
                                           "updatedInput": updated}}, sys.stdout)
         sys.stdout.write("\n")
     except Exception as exc:  # noqa: BLE001 - every active-run launch failure must deny
@@ -497,6 +505,26 @@ def _reserved_plan(handle: str, result: Result) -> AuditLaunchPlan | None:
     return _parse_durable_plan(handle, reserved[0].child_id)
 
 
+def _release_unstarted_audit(payload: Mapping[str, object]) -> None:
+    """Reject the reserved audit child of an auditor launch that never reached ``SubagentStart``.
+
+    Shared by the two host events that end a launch before it starts. Inert for a non-auditor
+    ``tool_input``, no active run, or no ``reserved`` child.
+    """
+    tool_input = payload.get("tool_input")
+    if not isinstance(tool_input, Mapping):
+        return
+    _, role = _agent_identity(tool_input)
+    if role != "empirica:empirica-auditor":
+        return
+    handle, result = _resolve(payload)
+    if handle is None or result is None:
+        return
+    plan = _reserved_plan(handle, result)
+    if plan is not None:
+        AuditProtocol(CLAUDE_PROFILE_ID).reject(plan)
+
+
 def agent_failure_main() -> int:
     """PostToolUseFailure reconciles an admitted auditor that never reached SubagentStart.
 
@@ -504,20 +532,24 @@ def agent_failure_main() -> int:
     """
     payload = _payload()
     try:
-        tool_input = payload.get("tool_input")
-        if not isinstance(tool_input, Mapping):
-            return 0
-        _, role = _agent_identity(tool_input)
-        if role != "empirica:empirica-auditor":
-            return 0
-        handle, result = _resolve(payload)
-        if handle is None or result is None:
-            return 0
-        plan = _reserved_plan(handle, result)
-        if plan is not None:
-            AuditProtocol(CLAUDE_PROFILE_ID).reject(plan)
+        _release_unstarted_audit(payload)
     except Exception as exc:  # noqa: BLE001 - observational; Stop still fails closed on an open audit
         return _observational_failure("PostToolUseFailure", exc)
+    return 0
+
+
+def permission_denied_main() -> int:
+    """PermissionDenied (auto mode denied the call) releases an auditor that never started.
+
+    Auto mode can deny the launch after the reservation (``PostToolUseFailure`` does not fire for a
+    permission denial). Observational: exit 0, nothing on stdout (never ``retry``), a failure writes one
+    diagnostic line to stderr.
+    """
+    payload = _payload()
+    try:
+        _release_unstarted_audit(payload)
+    except Exception as exc:  # noqa: BLE001 - observational; Stop still fails closed on an open audit
+        return _observational_failure("PermissionDenied", exc)
     return 0
 
 

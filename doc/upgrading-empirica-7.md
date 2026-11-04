@@ -128,6 +128,40 @@ at the top level, every other field inside one `options` object), and the adapte
 - **Matrix.** `make empirica-subagents-matrix` now masks `definitionDigest` with the other path-bearing digests, so it
   no longer depends on the directory the repository is checked out in.
 
+## Claude Code auto mode: the audit launch (7.0.2)
+
+Empirica 7.0.0 and 7.0.1 could not launch the audit under Claude Code **auto mode** (#69). From Claude Code
+2.1.278 auto mode reviews tool calls with a server-side classifier by default on Amazon Bedrock, Google Cloud,
+Microsoft Foundry and LLM gateways (a direct Anthropic API connection is being rolled out). The server reviews the
+input Claude wrote, not the one a hook returns, so the `PreToolUse` rewrite of the audit launch was denied with "a hook
+changed this call's input after auto mode reviewed it". That denial fires `PermissionDenied`, not
+`PostToolUseFailure`, so the reserved audit child was never released; every retry was refused with `audit.pending`
+and the run stayed in `audit: reserved`. 7.0.2 fixes it:
+
+- **The launch is approved explicitly.** The hook returns `permissionDecision: "allow"` (reason "Empirica host-bound
+  audit launch") with the host-built input, so auto mode no longer denies it. Deny and ask rules are still evaluated
+  against that input. Non-auditor launches are unchanged.
+- **A denied launch releases its reservation.** `PermissionDenied` for `Agent` is registered and rejects a
+  `reserved`, unstarted audit child (the core refunds the audit spawn). It never asks the model to retry.
+- **Overlapping audit launches are still refused.** While an audit child is `reserved`, `launching` or `pending`, a
+  second audit launch is refused with `audit.pending`, as in 7.0.1. A reserved child cannot be told apart from a
+  launch that is allowed and still starting, so a later launch never releases it; only its own denial or failure does.
+  A run already stuck in `audit: reserved` by 7.0.0 or 7.0.1 does not recover by itself (see the workaround below).
+- **The unused `max_turns` key is removed.** The Agent tool has no `max_turns` input (Claude Code 2.1.300 drops unknown
+  `updatedInput` keys), so the old key never applied and is removed. The auditor's turns stay uncapped, as in every
+  qualified run; a cap is a separate decision.
+
+If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
+
+- **New runs:** switch to Manual mode (not auto) before the audit launch.
+- **A run already stuck in `audit: reserved`:** run `/compact`, switch Claude Code to Manual mode, then launch the
+  audit again. The `SessionStart` hook for `compact` reconciles orphans and releases a `reserved` audit child. It is
+  closed as `orphaned`, so the audit spawn it held is not refunded. The new launch then needs audit capacity left: if
+  the stuck child held the last approved audit spawn (for example `max_audit_spawns: 1`), it is refused with
+  `budget.exhausted`. A deliberative run then needs a human-approved `configure_run` that raises `max_audit_spawns`;
+  an Empirica auto run needs a fresh run. 7.0.2 does not need this: its own denial releases and refunds the
+  reservation.
+
 ## Qualified hosts
 
 The host versions 7.0.0 was qualified on are recorded here after the operator's native

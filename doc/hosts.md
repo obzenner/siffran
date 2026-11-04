@@ -14,6 +14,8 @@ Host versions: Pi's range (`>=1.0.0,<2.0.0`) is enforced at `/empirica` start (a
 | Pi print and JSON (`pi -p`, `--mode json`) | Refused: nobody can approve | Refused: auto needs the delegation | Supported; notices go to stderr, the command waits for the run it started, a refusal exits 1; nobody can confirm evidence |
 | Codex | Not available | Not available | Not available |
 
+Claude Code's own *auto permission mode* (a server-side classifier reviews tool calls; `/status` shows `Auto mode server: Enabled`) is unrelated to Empirica's auto control mode above. From Empirica 7.0.2 the audit launches under it in every Claude control mode; 7.0.0 and 7.0.1 could not (see the [upgrade guide](upgrading-empirica-7.md#claude-code-auto-mode-the-audit-launch-702)).
+
 A refusal in print mode is written to stderr and exits 1. Rows qualified only by deterministic tests (Claude Esc mid-turn,
 the Pi auditor calling `contact_supervisor`, Pi compaction failure) are listed in
 [`.agents/skills/native-qualification/references/scenarios.md`](../.agents/skills/native-qualification/references/scenarios.md), section C.
