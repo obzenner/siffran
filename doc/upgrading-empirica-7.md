@@ -154,9 +154,13 @@ and the run stayed in `audit: reserved`. 7.0.2 fixes it:
 If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
 
 - **New runs:** switch to Manual mode (not auto) before the audit launch.
-- **A run already stuck in `audit: reserved`:** run `/compact`, then launch the audit again. The `SessionStart` hook
-  for `compact` reconciles orphans and releases a `reserved` audit child (it is closed as `orphaned`, so the audit
-  spawn it held is not refunded). 7.0.2 does not need this: its own denial releases and refunds the reservation.
+- **A run already stuck in `audit: reserved`:** run `/compact`, switch Claude Code to Manual mode, then launch the
+  audit again. The `SessionStart` hook for `compact` reconciles orphans and releases a `reserved` audit child. It is
+  closed as `orphaned`, so the audit spawn it held is not refunded. The new launch then needs audit capacity left: if
+  the stuck child held the last approved audit spawn (for example `max_audit_spawns: 1`), it is refused with
+  `budget.exhausted`. A deliberative run then needs a human-approved `configure_run` that raises `max_audit_spawns`;
+  an Empirica auto run needs a fresh run. 7.0.2 does not need this: its own denial releases and refunds the
+  reservation.
 
 ## Qualified hosts
 
