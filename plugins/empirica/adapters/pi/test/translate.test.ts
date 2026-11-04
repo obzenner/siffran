@@ -192,15 +192,15 @@ for (const c of START_NOTICE_CASES) {
 //
 // Each row is proven for every reviewed inventory it names: the expectation differs by version only
 // where the package's surface differs (0.74 removed workflowScript/workflowScriptPath and made
-// `workflow` boolean|path|name; 0.50 has a top-level `resume` and no `validate`/`lane.status`).
+// `workflow` boolean|path|name; 0.50 had a top-level `resume`, no longer supported).
 
 const inventory = (version: string): ReviewedInventory => {
   const found = loadInventory(version);
   assert.ok(found, `no reviewed inventory for ${version}`);
   return found;
 };
-// Versions at which a surface changed (see the rows); any later reviewed version inherits the nearest earlier entry.
-const V050 = "0.50.0", V064 = "0.64.0", V074 = "0.74.0";
+// A row's `expected` is one kind for every supported version (>=0.74.0), or a map keyed by the version at which the kind
+// changes; any later reviewed version inherits the nearest earlier entry.
 /** A reviewed version for the single-inventory tests below (the newest). */
 const NEWEST = reviewedVersions().at(-1)!;
 /** Every reviewed version: the checked-in records, so a new record is tested with no edit here. */
@@ -215,15 +215,15 @@ const CLASSIFY_CASES: Array<{
   { label: "agent + task launch", input: { agent: "scout", task: "look" }, expected: "executable" },
   { label: "agent alone", input: { agent: "empirica.empirica-auditor" }, expected: "executable" },
   { label: "agent with a null action", input: { agent: "scout", action: null }, expected: "executable" },
-  { label: "workflow: true", input: { workflow: true }, expected: { [V050]: "malformed", [V064]: "executable" } },
-  { label: "workflow by path", input: { workflow: "./w/review.js" }, expected: { [V050]: "malformed", [V064]: "executable" } },
-  { label: "workflow by name", input: { workflow: "run-ci", args: { command: "npm test" } }, expected: { [V050]: "malformed", [V064]: "executable" } },
-  { label: "workflowScript (removed in 0.74)", input: { workflowScript: "return 1" }, expected: { [V050]: "executable", [V074]: "malformed" } },
-  { label: "workflowScriptPath (removed in 0.74)", input: { workflowScriptPath: "w.js" }, expected: { [V050]: "malformed", [V064]: "executable", [V074]: "malformed" } },
-  { label: "top-level resume (0.50 only)", input: { resume: "child-1" }, expected: { [V050]: "executable", [V064]: "malformed" } },
-  { label: "agent + workflow is two launch forms", input: { agent: "x", workflow: true }, expected: { [V050]: "executable", [V064]: "malformed" } },
-  { label: "agent + workflowScript is two launch forms", input: { agent: "x", workflowScript: "y" }, expected: { [V050]: "malformed", [V074]: "executable" } },
-  { label: "agent + resume (0.50)", input: { agent: "x", resume: "c" }, expected: { [V050]: "malformed", [V064]: "executable" } },
+  { label: "workflow: true", input: { workflow: true }, expected: "executable" },
+  { label: "workflow by path", input: { workflow: "./w/review.js" }, expected: "executable" },
+  { label: "workflow by name", input: { workflow: "run-ci", args: { command: "npm test" } }, expected: "executable" },
+  { label: "workflowScript (removed in 0.74)", input: { workflowScript: "return 1" }, expected: "malformed" },
+  { label: "workflowScriptPath (removed in 0.74)", input: { workflowScriptPath: "w.js" }, expected: "malformed" },
+  { label: "top-level resume (removed before 0.74)", input: { resume: "child-1" }, expected: "malformed" },
+  { label: "agent + workflow is two launch forms", input: { agent: "x", workflow: true }, expected: "malformed" },
+  { label: "agent + workflowScript is two launch forms", input: { agent: "x", workflowScript: "y" }, expected: "executable" },
+  { label: "agent + resume (removed before 0.74)", input: { agent: "x", resume: "c" }, expected: "executable" },
   { label: "null launch forms do not count", input: { agent: "x", workflow: null, resume: null }, expected: "executable" },
   { label: "empty input", input: {}, expected: "malformed" },
   { label: "input that is not an object", input: undefined, expected: "malformed" },
@@ -239,24 +239,24 @@ const CLASSIFY_CASES: Array<{
   { label: "action doctor", input: { action: "doctor" }, expected: "management" },
   { label: "action children.list", input: { action: "children.list" }, expected: "management" },
   { label: "action project.status", input: { action: "project.status" }, expected: "management" },
-  { label: "action lane.status (absent in 0.50)", input: { action: "lane.status", laneId: "l" }, expected: { [V050]: "unsupported", [V064]: "management" } },
+  { label: "action lane.status", input: { action: "lane.status", laneId: "l" }, expected: "management" },
   { label: "action watchdog.status", input: { action: "watchdog.status" }, expected: "management" },
   { label: "action inspector.status", input: { action: "inspector.status" }, expected: "management" },
   { label: "action refine.show takes its agent as target", input: { action: "refine.show", agent: "reviewer" }, expected: "management" },
   { label: "action list with surrounding whitespace", input: { action: " list " }, expected: "management" },
   // A field the version's schema no longer declares is not a launch form for it (the executor rejects it).
-  { label: "validate a workflow script (offline; absent in 0.50)", input: { action: "validate", workflowScript: "return 1" },
-    expected: { [V050]: "unsupported", [V064]: "management" } },
+  { label: "validate a workflow script (offline)", input: { action: "validate", workflowScript: "return 1" },
+    expected: "management" },
   { label: "validate workflow: true (0.74 form)", input: { action: "validate", workflow: true },
-    expected: { [V050]: "unsupported", [V064]: "management" } },
+    expected: "management" },
   { label: "validate a script path", input: { action: "validate", workflowScriptPath: "w.js" },
-    expected: { [V050]: "unsupported", [V064]: "management" } },
+    expected: "management" },
   // --- a launch form beside an action is ambiguous
   { label: "list beside an agent (not a target-taking action)", input: { action: "list", agent: "x" }, expected: "malformed" },
-  { label: "validate beside an agent", input: { action: "validate", agent: "x", workflow: true }, expected: { [V050]: "unsupported", [V064]: "malformed" } },
-  { label: "status beside workflow", input: { action: "status", workflow: true }, expected: { [V050]: "management", [V064]: "malformed" } },
-  { label: "refine.show beside a workflow", input: { action: "refine.show", agent: "x", workflow: "w" }, expected: { [V050]: "management", [V064]: "malformed" } },
-  { label: "status beside the 0.50 top-level resume", input: { action: "status", resume: "c" }, expected: { [V050]: "malformed", [V064]: "management" } },
+  { label: "validate beside an agent", input: { action: "validate", agent: "x", workflow: true }, expected: "malformed" },
+  { label: "status beside workflow", input: { action: "status", workflow: true }, expected: "malformed" },
+  { label: "refine.show beside a workflow", input: { action: "refine.show", agent: "x", workflow: "w" }, expected: "malformed" },
+  { label: "status beside a top-level resume", input: { action: "status", resume: "c" }, expected: "management" },
   // --- everything else is unsupported, never inert
   ...["steer", "stop", "interrupt", "resume", "reset", "schedule.create", "schedule.run-due", "mission.create", "mission.close",
     "worktree.discard", "worktree.cleanup", "project.open", "project.close", "inspector.open", "inspector.command",

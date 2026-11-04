@@ -35,7 +35,9 @@ test("the matrix checks exactly the versions with a checked-in compat record, al
 test("reviewedFrom refuses a compat record outside the profile's range", () => {
   const withPolicy = profiles.profiles.find((profile) => profile.subagents_compatibility);
   const narrowed = { profiles: [{ ...withPolicy, subagents_compatibility: { ...withPolicy.subagents_compatibility, maximum_exclusive: "0.76.1" } }] };
-  assert.throws(() => reviewedFrom(narrowed), /compat records outside the supported range \[0\.50\.0, 0\.76\.1\): 0\.76\.1/);
+  assert.throws(() => reviewedFrom(narrowed), /compat records outside the supported range \[0\.74\.0, 0\.76\.1\): 0\.76\.1/);
+  const raised = { profiles: [{ ...withPolicy, subagents_compatibility: { ...withPolicy.subagents_compatibility, minimum: "0.75.0" } }] };
+  assert.throws(() => reviewedFrom(raised), /compat records outside the supported range \[0\.75\.0, 1\.0\.0\): 0\.74\.0/);
 });
 
 test("reviewedFrom refuses a document with no profile, two profiles, or another package", () => {
@@ -46,14 +48,14 @@ test("reviewedFrom refuses a document with no profile, two profiles, or another 
 });
 
 test("the version the devDependency pins runs in place; every other reviewed version comes from the registry", () => {
-  assert.deepEqual(planCells(["0.50.0", "0.75.0"], "0.75.0"), [
-    { version: "0.50.0", source: "registry" }, { version: "0.75.0", source: "local" }]);
-  assert.deepEqual(planCells(["0.50.0"], undefined), [{ version: "0.50.0", source: "registry" }]);
+  assert.deepEqual(planCells(["0.74.0", "0.75.0"], "0.75.0"), [
+    { version: "0.74.0", source: "registry" }, { version: "0.75.0", source: "local" }]);
+  assert.deepEqual(planCells(["0.74.0"], undefined), [{ version: "0.74.0", source: "registry" }]);
 });
 
 test("only exact releases newer than the newest reviewed are proposed, oldest first", () => {
   const registry = ["0.49.0", "0.75.0", "0.76.0-beta.1", "0.100.0", "0.76.1", "0.9.0", "next"];
-  assert.deepEqual(newerThanReviewed(registry, ["0.50.0", "0.75.0"]), ["0.76.1", "0.100.0"]);
+  assert.deepEqual(newerThanReviewed(registry, ["0.74.0", "0.75.0"]), ["0.76.1", "0.100.0"]);
   assert.deepEqual(newerThanReviewed(["0.75.0"], ["0.75.0"]), []);
 });
 

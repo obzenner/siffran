@@ -35,7 +35,7 @@ function descriptor(version: string, overrides: Partial<AuditPreflightDescriptor
 const refusal = (admission: ReturnType<typeof admitAuditPreflight>) =>
   admission.kind === "refuse" ? admission.code : `accepted ${JSON.stringify(admission.contract)}`;
 
-test("fixtures exist for both launch-contract generations, each with a reviewed inventory", () => {
+test("a fixture exists for every reviewed version, each with a reviewed inventory", () => {
   assert.deepEqual(VERSIONS, reviewedVersions(), "a fixture for exactly every reviewed version");
   for (const fixture of FIXTURES) {
     assert.ok(loadInventory(fixture.version), `no inventory for ${fixture.version}`);
@@ -45,16 +45,17 @@ test("fixtures exist for both launch-contract generations, each with a reviewed 
     VERSIONS.map((version) => `pi-subagents-${version}.json`));
 });
 
-test("launch contract v2 (0.50, 0.64) and v3 (0.74, 0.75) differ exactly where the seam branches", () => {
+test("every captured contract (0.74.0 and later) is launch contract v3: contract.model, no modelCandidates", () => {
+  assert.deepEqual([...ACCEPTED_LAUNCH_CONTRACT_VERSIONS], [3], "launch contract v2 (pi-subagents before 0.74.0) is not accepted");
   for (const fixture of FIXTURES) {
     const contract = bound(fixture.cases.canonical_auditor).contract;
-    const v3 = contract.version === 3;
+    assert.equal(contract.version, 3, fixture.version);
     assert.equal(contract.version, loadInventory(fixture.version)!.launch_contract_version, fixture.version);
-    assert.equal("modelCandidates" in contract, !v3, `${fixture.version}: modelCandidates is v2-only`);
-    assert.equal("intercomBridge" in contract, v3, `${fixture.version}: intercomBridge is v3-only`);
-    assert.equal(contract.agent.definitionProjectionVersion, v3 ? 2 : 1, fixture.version);
+    assert.equal("modelCandidates" in contract, false, `${fixture.version}: modelCandidates is v2-only`);
+    assert.equal("intercomBridge" in contract, true, `${fixture.version}: intercomBridge is v3-only`);
+    assert.equal(contract.agent.definitionProjectionVersion, 2, fixture.version);
     assert.equal(contract.protocol.packageVersion, fixture.version);
-    assert.equal(contract.model, "audit/reviewer:high", "both generations append the auditor's thinking level");
+    assert.equal(contract.model, "audit/reviewer:high", "the auditor's thinking level is appended");
   }
 });
 
@@ -66,12 +67,10 @@ test("the canonical auditor is accepted from every captured package, thinking le
   }
 });
 
-test("a v3 contract has no modelCandidates and the seam reads contract.model; v2 reads modelCandidates[0]", () => {
+test("the seam reads contract.model and never modelCandidates", () => {
   for (const fixture of FIXTURES) {
     const response = bound(fixture.cases.canonical_auditor);
-    const v2 = response.contract.version === 2;
-    if (v2) { response.contract.model = "decoy/model:high"; response.contract.modelCandidates = ["audit/reviewer:xhigh"]; }
-    else { response.contract.model = "audit/reviewer:xhigh"; response.contract.modelCandidates = ["decoy/model:high"]; }
+    response.contract.model = "audit/reviewer:xhigh"; response.contract.modelCandidates = ["decoy/model:high"];
     assert.deepEqual(admitAuditPreflight(descriptor(fixture.version), response),
       { kind: "accept", contract: { agent_file_path: AUDITOR, model: "audit/reviewer",
         audit_retrieval: ["local", "workspace"] } }, fixture.version);
@@ -135,20 +134,28 @@ test("the seam refuses a missing or unreviewed owner version and an inventory fo
   assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version, { version: undefined }), response)), "owner-unverified");
   assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version, { version: "" }), response)), "owner-unverified");
   assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version, { inventory: undefined }), response)), "owner-unverified");
-  assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version, { inventory: loadInventory("0.64.0") }), response)),
+  assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version, { inventory: loadInventory("0.75.0") }), response)),
     "owner-unverified");
 });
 
 test("the seam refuses a launch contract the inventory does not vouch for", () => {
-  const v2 = FIXTURES[0], v3 = FIXTURES.at(-1)!;
-  // A v3 answer from a package reviewed as v2, a v2 answer from one reviewed as v3, and unknown versions.
-  const v3Response = bound(v3.cases.canonical_auditor);
-  v3Response.contract.protocol.packageVersion = v2.version;
-  assert.equal(refusal(admitAuditPreflight(descriptor(v2.version), v3Response)), "launch-contract-version");
-  const v2Response = bound(v2.cases.canonical_auditor);
-  v2Response.contract.protocol.packageVersion = v3.version;
-  assert.equal(refusal(admitAuditPreflight(descriptor(v3.version), v2Response)), "launch-contract-version");
-  for (const version of [1, 4, "3", null, undefined]) {
+  const v3 = FIXTURES.at(-1)!;
+  // Every captured fixture, rewritten as launch contract v2 (what pi-subagents before 0.74.0 emits), is refused: with the
+  // reviewed inventory's v3 and with an observed one that records none (only ACCEPTED_LAUNCH_CONTRACT_VERSIONS = [3] stands).
+  for (const fixture of FIXTURES) {
+    const response = bound(fixture.cases.canonical_auditor);
+    response.contract.version = 2;
+    assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version), response)), "launch-contract-version", fixture.version);
+    const observed = observeInventory(fixture.version, schemaDeclaring(AUDIT_LAUNCH_PARAMETERS), reviewedActionNames());
+    assert.equal(observed.ok, true);
+    assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version, { inventory: observed.ok ? observed.inventory : undefined }), response)),
+      "launch-contract-version", `${fixture.version} observed`);
+    response.contract.modelCandidates = [response.contract.model];
+    delete response.contract.model;
+    assert.equal(refusal(admitAuditPreflight(descriptor(fixture.version), response)), "launch-contract-version", `${fixture.version} v2 shape`);
+  }
+  // Unknown versions.
+  for (const version of [1, 2, 4, "3", null, undefined]) {
     const response = bound(v3.cases.canonical_auditor);
     response.contract.version = version;
     assert.equal(refusal(admitAuditPreflight(descriptor(v3.version), response)), "launch-contract-version", String(version));
@@ -201,17 +208,11 @@ test("the seam refuses responses that are not a preflight answer", () => {
   const fixture = FIXTURES.at(-1)!;
   const noModel = bound(fixture.cases.canonical_auditor);
   delete noModel.contract.model;
-  const noCandidates = bound(FIXTURES[0].cases.canonical_auditor);
-  delete noCandidates.contract.modelCandidates;
-  const emptyCandidates = bound(FIXTURES[0].cases.canonical_auditor);
-  emptyCandidates.contract.modelCandidates = [];
   for (const [label, response, version] of [
     ["null", null, fixture.version], ["array", [], fixture.version], ["string", "ok", fixture.version],
     ["no ok", { contract: {} }, fixture.version], ["ok true without contract", { ok: true }, fixture.version],
     ["contract is a list", { ok: true, contract: [] }, fixture.version],
     ["v3 without model", noModel, fixture.version],
-    ["v2 without modelCandidates", noCandidates, FIXTURES[0].version],
-    ["v2 with empty modelCandidates", emptyCandidates, FIXTURES[0].version],
   ] as const)
     assert.equal(refusal(admitAuditPreflight(descriptor(version), response)), "malformed-response", label);
 });

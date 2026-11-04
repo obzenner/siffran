@@ -6,12 +6,12 @@
 // real packages (test/fixtures/preflight-<version>.json), not against hand-written shapes.
 //
 // Consumed fields, and what the captured fixtures show per launch-contract version:
-//   contract.version                 v2 (0.50.0, 0.64.0) | v3 (0.74.0 through 0.84.0, every reviewed release since); must be one the
-//                                    bound inventory records (when it records one) AND one listed in ACCEPTED_LAUNCH_CONTRACT_VERSIONS
+//   contract.version                 v3 (0.74.0 and every release since; launch contract v2 is pi-subagents before 0.74.0, which is
+//                                    outside the supported range); must be one the bound inventory records (when it records one)
+//                                    AND one listed in ACCEPTED_LAUNCH_CONTRACT_VERSIONS
 //   contract.protocol.packageVersion must equal the bound owner's exact version
 //   contract.agent.filePath          must be the packaged canonical auditor file (canonicalised)
-//   contract.modelCandidates[0]      v2 only - the resolved launch model, thinking level appended
-//   contract.model                   v3 only (v3 drops modelCandidates) - same spelling
+//   contract.model                   the resolved launch model, thinking level appended (v3 has no modelCandidates)
 //   contract.tools.effectiveAllowlist  must be a subset of the profile's audit_child_tools (read-only, ADR-0069)
 // The response does not report async/outputMode/forceTopLevelAsync, so those are checked on the
 // launch request the adapter is about to send (`descriptor.launch`), not read from the response.
@@ -21,7 +21,7 @@ import { THINKING_LEVELS } from "./host-profile.ts";
 import type { SubagentInventory } from "./subagent-inventory.ts";
 
 /** Launch-contract versions proven equivalent, for the consumed fields, by captured fixtures. */
-export const ACCEPTED_LAUNCH_CONTRACT_VERSIONS: readonly number[] = [2, 3];
+export const ACCEPTED_LAUNCH_CONTRACT_VERSIONS: readonly number[] = [3];
 
 /** `model` without one trailing reasoning level; only the contract's exact levels, never a generic suffix. */
 export function withoutThinkingLevel(model: string, levels: ReadonlySet<string> = THINKING_LEVELS): string {
@@ -131,9 +131,7 @@ export function admitAuditPreflight(descriptor: AuditPreflightDescriptor, respon
   if (descriptor.canonical(agent.filePath) !== descriptor.canonical(descriptor.expected.agent_file_path))
     return refuse("agent-not-canonical", `the resolved auditor is ${agent.filePath}, not ${descriptor.expected.agent_file_path}`);
 
-  const resolvedModel = contractVersion === 2
-    ? (Array.isArray(contract.modelCandidates) ? contract.modelCandidates[0] : undefined)
-    : contract.model;
+  const resolvedModel = contract.model;
   if (typeof resolvedModel !== "string" || resolvedModel === "")
     return refuse("malformed-response", `the v${contractVersion} contract carries no resolved launch model`);
   const model = withoutThinkingLevel(resolvedModel);

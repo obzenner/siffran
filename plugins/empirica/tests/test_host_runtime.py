@@ -64,7 +64,7 @@ class HostRuntimeRuleTests(unittest.TestCase):
         for label, observed in (
                 ("absent", None), ("not an object", "x"), ("empty", {}),
                 ("another policy", {**good, "policy_id": "other-v1"}),
-                ("another version", {**good, "subagents": {**good["subagents"], "version": "0.64.0"}}),
+                ("another version", {**good, "subagents": {**good["subagents"], "version": "0.76.1"}}),
                 ("another root", {**good, "subagents": {**good["subagents"], "package_root": "/x"}}),
                 ("an extra member", {**good, "subagents": {**good["subagents"], "extra": 1}}),
                 ("a dropped member", {**good, "subagents": {k: v for k, v in good["subagents"].items() if k != "source"}})):

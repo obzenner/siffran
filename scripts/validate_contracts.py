@@ -62,7 +62,7 @@ VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve"
 AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
 # The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
 # canonical value requires updating it deliberately.
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:d4915422e2b04b6d6d44f4ff480d7134d69b81a94dfec0c6f4d52878868bfc14"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:689db72b8157d408b5e6278696d1b93ccf03f565634981d179823430777f3966"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "6.0.0"
@@ -3325,7 +3325,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     # (g) external-runtime policy: dropped, unreviewed inventory, missing inventory, order, id encoding.
     # Hermetic baseline: pretend exactly the reviewed versions are installed, so each mutant changes one fact
     # (the real directory is compared in main()).
-    installed = frozenset({"0.50.0", "0.76.1"})
+    installed = frozenset({"0.74.0", "0.76.1"})
 
     def pi_mutant(mutate):
         doc = copy.deepcopy(host_profiles_doc)
@@ -3336,15 +3336,15 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         ("foreground host without subagents_compatibility",
          lambda p: p.pop("subagents_compatibility"), "must declare subagents_compatibility"),
         ("a compat record above the range",
-         lambda p: p["subagents_compatibility"].update(maximum_exclusive="0.76.1"), "compat records outside the supported range [0.50.0, 0.76.1): ['0.76.1']"),
+         lambda p: p["subagents_compatibility"].update(maximum_exclusive="0.76.1"), "compat records outside the supported range [0.74.0, 0.76.1): ['0.76.1']"),
         ("a compat record below the range",
-         lambda p: p["subagents_compatibility"].update(minimum="0.51.0"), "compat records outside the supported range [0.51.0, 1.0.0): ['0.50.0']"),
+         lambda p: p["subagents_compatibility"].update(minimum="0.75.0"), "compat records outside the supported range [0.75.0, 1.0.0): ['0.74.0']"),
         ("an inverted range",
-         lambda p: p["subagents_compatibility"].update(minimum="1.0.0", maximum_exclusive="0.50.0"), "minimum must be below maximum_exclusive"),
+         lambda p: p["subagents_compatibility"].update(minimum="1.0.0", maximum_exclusive="0.74.0"), "minimum must be below maximum_exclusive"),
         ("a prerelease as the maximum",
          lambda p: p["subagents_compatibility"].update(maximum_exclusive="1.0.0-beta.1"), "must be exact MAJOR.MINOR.PATCH"),
         ("a retired exact-version list",
-         lambda p: p["subagents_compatibility"].update(reviewed_versions=["0.50.0"]), "unknown fields ['reviewed_versions']"),
+         lambda p: p["subagents_compatibility"].update(reviewed_versions=["0.74.0"]), "unknown fields ['reviewed_versions']"),
         ("a profile id that encodes a version",
          lambda p: p.update(profile_id="pi@1.1.0+pi-subagents-foreground-audit-v1"), "profile_id must be '<host_id>+<policy_id>'"),
     ):

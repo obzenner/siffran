@@ -40,8 +40,8 @@ export function auditLaunchInput(decision: AuditLaunchDecision): Record<string, 
     model: decision.model,
     agentScope: decision.agentScope,
     async: false,
-    // pi-subagents resolves an omitted `context` from the operator's `defaultSubagentContext` (0.64.0 and
-    // later), which can be `fork`: the auditor would then inherit the author's transcript. Every reviewed
+    // pi-subagents resolves an omitted `context` from the operator's `defaultSubagentContext` (every supported
+    // version), which can be `fork`: the auditor would then inherit the author's transcript. Every reviewed
     // version declares `context`, so the pin is explicit. The author may not send it (canonicalAuditorInputError).
     context: "fresh",
     acceptance: { level: "none",

@@ -115,7 +115,7 @@ tool, when the session's slash commands show more than one loaded `pi-subagents`
 only the first `subagent` registration, so a second copy is seen through its commands, not its tool),
 or when the owner's package or version cannot be verified. A second copy is detected only while its
 extension registers commands; Pi runs and reports the first registrant, and that is the one bound.
-Supported `pi-subagents` versions are a range, `>=0.50.0,<1.0.0`, under the policy
+Supported `pi-subagents` versions are a range, `>=0.74.0,<1.0.0`, under the policy
 `pi-subagents-foreground-audit-v1` (Pi `>=1.0.0,<2.0.0`). A version outside the supported range fails closed:
 `/empirica` and `configure_run` are refused with `host.subagents_version_unsupported` before any run is
 created. Inside the range a version is admitted by what the adapter observes of it, not by a list: its own
@@ -131,12 +131,10 @@ From 0.77.0 `pi-subagents` publishes the compact `subagent` schema: `agent, task
 at the top level and every other field inside one `options` object. For a package that does, the record names where each audit-launch parameter is declared
 (`launch_parameter_placement`, read from the package's own `SUBAGENT_OPTION_KEYS`), and the audit launch writes each parameter in that one place and never
 in both: `task`, `model`, `async` at the top level, `agentScope`, `context`, `acceptance`, `timeoutMs` and `toolBudget` inside `options`. An author-supplied
-`options`, or a launch form hidden in `options` (`script`, `workflowScript`, `resume`, ...), is refused during a run. Versions `0.50.0`-`0.76.1` are unchanged.
+`options`, or a launch form hidden in `options` (`script`, `workflowScript`, `resume`, ...), is refused during a run. Versions `0.74.0`-`0.76.1` are unchanged.
 
 | `pi-subagents` | Pi floor (supported) | Status |
 |---|---|---|
-| `0.50.0` | `>=1.0.0` | reviewed |
-| `0.64.0` | `>=1.0.0` | reviewed |
 | `0.74.0` | `>=1.0.0` | reviewed |
 | `0.75.0` | `>=1.0.0` | reviewed |
 | `0.76.1` | `>=1.0.0` | reviewed; the repository's development pin |

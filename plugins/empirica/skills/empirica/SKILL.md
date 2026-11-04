@@ -40,7 +40,7 @@ Identify the exact active host surface from the tools and lifecycle already pres
   injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
   and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact
   version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
-  (the range and the reviewed versions are listed in the README); one inside it with no compat record is admitted
+  (`>=0.74.0,<1.0.0`; the range and the reviewed versions are listed in `doc/hosts.md`); one inside it with no compat record is admitted
   and shown as not reviewed. Any other state is a `host.subagents_*`
   refusal.
 - **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a

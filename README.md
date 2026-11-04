@@ -22,7 +22,7 @@ Requires Claude Code `>=2.1.278,<2.2.0` and `python3` (see [host support](doc/ho
 
 ### Pi
 
-Requires Pi `>=1.0.0,<2.0.0` and an exact [`pi-subagents`](doc/hosts.md#pi-and-pi-subagents) version, installed first.
+Requires Pi `>=1.0.0,<2.0.0` and an exact [`pi-subagents`](doc/hosts.md#pi-and-pi-subagents) version in `>=0.74.0,<1.0.0`, installed first.
 
 ```sh
 pi install npm:pi-subagents@0.84.0

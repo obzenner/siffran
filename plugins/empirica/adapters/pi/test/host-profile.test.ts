@@ -83,7 +83,7 @@ test("the external-runtime policy is the contract's: a version range, one policy
   assert.deepEqual(SUBAGENTS_COMPATIBILITY, profile.subagents_compatibility);
   assert.equal(HOST_PROFILE_ID, `${profile.host_id}+${SUBAGENTS_COMPATIBILITY.policy_id}`);
   assert.deepEqual({ ...SUBAGENTS_COMPATIBILITY }, { package: "pi-subagents", policy_id: "pi-subagents-foreground-audit-v1",
-    minimum: "0.50.0", maximum_exclusive: "1.0.0" });
+    minimum: "0.74.0", maximum_exclusive: "1.0.0" });
   assert.equal(HOST_PROFILE_ID, contractProfileId("pi"), "read from the contract, never a copy");
   assert.ok(!/\d+\.\d+\.\d+/.test(HOST_PROFILE_ID), "a profile id never carries a version");
   for (const version of reviewedVersions())
@@ -92,8 +92,8 @@ test("the external-runtime policy is the contract's: a version range, one policy
 
 test("the range is half-open, numeric, and exact-version only", () => {
   const range = SUBAGENTS_COMPATIBILITY;
-  for (const inside of ["0.50.0", "0.76.1", "0.100.0", "0.999.9"]) assert.equal(inSubagentsRange(range, inside), true, inside);
-  for (const outside of ["0.49.9", "1.0.0", "1.2.3", "0.76.1-beta.1", "0.76", "v0.76.1", "", undefined, 76])
+  for (const inside of ["0.74.0", "0.76.1", "0.100.0", "0.999.9"]) assert.equal(inSubagentsRange(range, inside), true, inside);
+  for (const outside of ["0.50.0", "0.64.0", "0.73.0", "0.73.9", "0.49.9", "1.0.0", "1.2.3", "0.76.1-beta.1", "0.76", "v0.76.1", "", undefined, 76])
     assert.equal(inSubagentsRange(range, outside), false, String(outside));
 });
 
@@ -141,11 +141,11 @@ const REJECTED: Array<[string, (doc: any) => void, RegExp]> = [
   ["an unknown subagents field", (d) => { pi(d).subagents_compatibility.latest = "0.75.0"; }, /unknown field "latest"/],
   ["a missing minimum", (d) => { delete pi(d).subagents_compatibility.minimum; }, /missing "minimum"/],
   ["a missing maximum", (d) => { delete pi(d).subagents_compatibility.maximum_exclusive; }, /missing "maximum_exclusive"/],
-  ["a range as the minimum", (d) => { pi(d).subagents_compatibility.minimum = ">=0.50.0"; }, /exact versions with minimum below maximum_exclusive/],
+  ["a range as the minimum", (d) => { pi(d).subagents_compatibility.minimum = ">=0.74.0"; }, /exact versions with minimum below maximum_exclusive/],
   ["a prerelease as the maximum", (d) => { pi(d).subagents_compatibility.maximum_exclusive = "1.0.0-beta.1"; }, /exact versions/],
   ["an empty range", (d) => { pi(d).subagents_compatibility.maximum_exclusive = pi(d).subagents_compatibility.minimum; }, /minimum below maximum_exclusive/],
   ["an inverted range", (d) => { pi(d).subagents_compatibility.minimum = "2.0.0"; }, /minimum below maximum_exclusive/],
-  ["a retired reviewed list", (d) => { pi(d).subagents_compatibility.reviewed_versions = ["0.50.0"]; }, /unknown field "reviewed_versions"/],
+  ["a retired reviewed list", (d) => { pi(d).subagents_compatibility.reviewed_versions = ["0.74.0"]; }, /unknown field "reviewed_versions"/],
   ["a malformed policy id", (d) => { pi(d).subagents_compatibility.policy_id = "Pi Audit"; }, /policy_id must look like name-v1/],
 ];
 

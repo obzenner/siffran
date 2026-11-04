@@ -1725,7 +1725,7 @@ class GovernanceServiceTests(unittest.TestCase):
             before = copy.deepcopy(self.runs.data)
             children = len(self.view()["children"])
             for label, payload in (
-                    ("a reviewed version other than the recorded one", {"host_runtime": other(version="0.64.0")}),
+                    ("a reviewed version other than the recorded one", {"host_runtime": other(version="0.76.1")}),
                     ("another package root", {"host_runtime": other(package_root="/opt/other/pi-subagents")}),
                     ("another preflight module", {"host_runtime": other(preflight_path=recorded["subagents"]["package_root"] + "/src/api/other.js")}),
                     ("no runtime observed", {}),

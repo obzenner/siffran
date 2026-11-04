@@ -8,7 +8,7 @@
 // no user configuration is read; absolute paths are replaced by placeholders so the file is stable.
 //
 // Two more fixtures are written for a package that needs them, and none for a package that does not (so a flat
-// 0.50.0-0.76.1 package yields exactly the one file it always did):
+// 0.74.0-0.76.1 package yields exactly the one file it always did):
 //   tool-schema-<version>.json     the `subagent` tool's published parameter schema and the package's own
 //                                  `SUBAGENT_OPTION_KEYS`, for a package that publishes the compact schema (0.77.0 and later)
 //   result-preview-<version>.json  what the package's own `capInlineOutput` (src/runs/shared/single-output.js) makes of a long

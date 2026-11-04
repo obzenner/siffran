@@ -2032,10 +2032,10 @@
       ],
       "setup": "Pi with pi-subagents 0.77.0 or later (compact `subagent` schema: `task`, `model`, `async` at the top level, every other field inside `options`), reviewed or observed",
       "action": "canonical audit launch",
-      "expected": "P: the call carries `task`, `model`, `async` at the top level and `agentScope`, `context`, `acceptance`, `timeoutMs`, `toolBudget` once, inside `options`, never in both places; a flat package (0.50.0 to 0.76.1) gets the unchanged flat payload; an author-supplied `options`, or a launch form (`script`, `workflowScript`, `resume`) inside `options`, is refused",
+      "expected": "P: the call carries `task`, `model`, `async` at the top level and `agentScope`, `context`, `acceptance`, `timeoutMs`, `toolBudget` once, inside `options`, never in both places; a flat package (0.74.0 to 0.76.1) gets the unchanged flat payload; an author-supplied `options`, or a launch form (`script`, `workflowScript`, `resume`) inside `options`, is refused",
       "covered_by": [
         "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the launch payload for a compact version is exact: core fields top-level, the rest under options, never both",
-        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the launch payload for a flat version is the unchanged flat payload (0.50.0..0.76.1)",
+        "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the launch payload for a flat version is the unchanged flat payload (0.74.0..0.76.1)",
         "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::the seam refuses the captured 0.84.0 preflight when it is tampered: agent file, model, tools, async, context",
         "plugins/empirica/adapters/pi/test/compact-subagents.test.ts::a compact version: a launch form hidden in options, or options that is not an object, is malformed",
         "plugins/empirica/adapters/pi/test/gate.test.ts::subagent: on pi-subagents 0.84.0 (compact schema) the bound fields travel under options, once, and nowhere else",

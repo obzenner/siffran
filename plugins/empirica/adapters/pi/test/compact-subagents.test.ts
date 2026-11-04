@@ -215,8 +215,8 @@ test("the launch payload for an observed compact version is the same exact paylo
     placeAuditLaunch(auditLaunchInput(DECISION), loadInventory("0.84.0")!));
 });
 
-test("the launch payload for a flat version is the unchanged flat payload (0.50.0..0.76.1)", () => {
-  for (const version of ["0.50.0", "0.64.0", "0.74.0", "0.75.0", "0.76.1"]) {
+test("the launch payload for a flat version is the unchanged flat payload (0.74.0..0.76.1)", () => {
+  for (const version of ["0.74.0", "0.75.0", "0.76.1"]) {
     const flat = auditLaunchInput(DECISION);
     const placed = placeAuditLaunch(flat, loadInventory(version)!);
     assert.deepEqual(placed, flat, version);

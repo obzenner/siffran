@@ -103,7 +103,7 @@
       "subagents_compatibility": {
         "package": "pi-subagents",
         "policy_id": "pi-subagents-foreground-audit-v1",
-        "minimum": "0.50.0",
+        "minimum": "0.74.0",
         "maximum_exclusive": "1.0.0"
       }
     },

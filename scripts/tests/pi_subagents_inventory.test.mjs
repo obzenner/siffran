@@ -3,7 +3,7 @@
 //
 // The devDependency copy (node_modules/pi-subagents) is a hard requirement: its inventory must equal
 // a fresh generation and must not be skipped. Older reviewed versions are verified when their
-// package roots are supplied as PI_SUBAGENTS_ROOTS='{"0.50.0":"/path","0.64.0":"/path"}'; the test
+// package roots are supplied as PI_SUBAGENTS_ROOTS='{"0.74.0":"/path","0.75.0":"/path"}'; the test
 // log names which were verified.
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -82,12 +82,14 @@ test("every checked-in inventory names its own version, is canonical JSON, and u
 
 test("the fixed inventories record what each version's schema declares (observed differences)", () => {
   const read = (version) => JSON.parse(readFileSync(inventoryPath(COMPAT_DIR, version), "utf8"));
-  assert.deepEqual(read("0.50.0").launch_forms, ["agent", "workflowScript", "resume"]);
-  assert.equal(read("0.50.0").supports.turnBudget, true);
-  assert.equal(read("0.64.0").supports.turnBudget, false);
-  assert.deepEqual(read("0.64.0").launch_forms, ["agent", "workflowScript", "workflowScriptPath", "workflow"]);
-  assert.deepEqual(read(declared).launch_forms, ["agent", "workflow"]);
-  for (const version of ["0.50.0", "0.64.0", declared]) assert.equal(read(version).supports.toolBudget, true, version);
+  for (const version of ["0.74.0", declared]) {
+    assert.deepEqual(read(version).launch_forms, ["agent", "workflow"], version);
+    assert.equal(read(version).supports.turnBudget, false, version);
+    assert.equal(read(version).supports.toolBudget, true, version);
+    assert.equal(read(version).launch_contract_version, 3, version);
+  }
+  assert.equal(readdirSync(COMPAT_DIR).some((name) => /pi-subagents-0\.(50|64)\.0\.json/.test(name)), false,
+    "launch contract v2 (before 0.74.0) is out of the supported range");
 });
 
 test("every field the audit launch sets is declared by the devDependency's own parameter schema", async () => {
