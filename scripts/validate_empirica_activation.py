@@ -16,6 +16,7 @@ ENTRYPOINTS = {
     "convergence_gate.py": "completion_main",
     "state_restore.py": "restore_main",
     "agent_failure.py": "agent_failure_main",
+    "permission_denied.py": "permission_denied_main",
     "subagent_start.py": "subagent_start_main",
     "subagent_stop.py": "subagent_stop_main",
 }
@@ -149,6 +150,30 @@ def normal_runtime_files() -> list[Path]:
     return files
 
 
+HOOK_EVENTS = frozenset({
+    "UserPromptExpansion", "PreToolUse", "PostToolUseFailure", "PermissionDenied",
+    "Stop", "SubagentStart", "SubagentStop", "SessionStart", "PostModelSwitch"})
+
+
+def hook_event_problems(hooks: dict) -> list[str]:
+    """The Claude hook set is closed, and every hook is a registered thin entrypoint.
+
+    Validates the invariant (only registered thin entrypoints) rather than freezing hook config.
+    """
+    if set(hooks["hooks"]) != HOOK_EVENTS:
+        return ["hooks.json lifecycle events changed"]
+    problems = []
+    for groups in hooks["hooks"].values():
+        for group in groups:
+            for hook in group.get("hooks", []):
+                parts = [hook.get("command"), *hook.get("args", [])]
+                names = [match.group(1) for part in parts if isinstance(part, str)
+                         for match in [re.search(r"hooks/([^/]+\.py)", part)] if match]
+                if len(names) != 1 or names[0] not in ENTRYPOINTS:
+                    problems.append(f"hooks.json bypasses a registered thin entrypoint: {hook}")
+    return problems
+
+
 def main() -> int:
     quarantine = ROOT / "quarantine"
     if quarantine.exists():
@@ -178,18 +203,8 @@ def main() -> int:
             fail(f"{path} bypasses the Claude lifecycle adapter")
 
     hooks = json.loads((HOOKS / "hooks.json").read_text(encoding="utf-8"))
-    # Validate the invariant (only registered thin entrypoints), rather than freezing hook config.
-    if set(hooks["hooks"]) != {"UserPromptExpansion", "PreToolUse", "PostToolUseFailure",
-                                  "Stop", "SubagentStart", "SubagentStop", "SessionStart", "PostModelSwitch"}:
-        fail("hooks.json lifecycle events changed")
-    for groups in hooks["hooks"].values():
-        for group in groups:
-            for hook in group.get("hooks", []):
-                parts = [hook.get("command"), *hook.get("args", [])]
-                names = [match.group(1) for part in parts if isinstance(part, str)
-                         for match in [re.search(r"hooks/([^/]+\.py)", part)] if match]
-                if len(names) != 1 or names[0] not in ENTRYPOINTS:
-                    fail(f"hooks.json bypasses a registered thin entrypoint: {hook}")
+    for problem in hook_event_problems(hooks):
+        fail(problem)
 
     skill_text = SKILL.read_text(encoding="utf-8")
     if len(skill_text.splitlines()) > 300:

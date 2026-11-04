@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """The activation validator's skill checks reject stale bundled-runtime claims."""
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -112,6 +113,46 @@ class HostsDocRuntimeTests(unittest.TestCase):
     def test_the_skill_claims_no_codex_range(self):
         """G10 (ADR-0069 G10-R1): Empirica does not run on Codex, so the skill is not required to disclose a Codex range."""
         self.assertFalse([t for t in activation.REQUIRED_SKILL_DISCLOSURES if "0.146" in t or "odex" in t])
+
+
+HOOKS_JSON = Path(__file__).resolve().parents[2] / "plugins/empirica/hooks/hooks.json"
+
+
+class HookRegistrationTests(unittest.TestCase):
+    """The Claude hook set is closed, and the auto-mode denial hook is part of it (issue #69)."""
+
+    def hooks(self):
+        return json.loads(HOOKS_JSON.read_text(encoding="utf-8"))
+
+    def test_the_committed_hook_set_is_accepted(self):
+        self.assertEqual(activation.hook_event_problems(self.hooks()), [])
+
+    def test_permission_denied_is_an_expected_event_with_a_registered_thin_entrypoint(self):
+        self.assertIn("PermissionDenied", activation.HOOK_EVENTS)
+        self.assertEqual(activation.ENTRYPOINTS["permission_denied.py"], "permission_denied_main")
+
+    def test_the_old_set_without_permission_denied_is_rejected(self):
+        hooks = self.hooks()
+        del hooks["hooks"]["PermissionDenied"]
+        problems = activation.hook_event_problems(hooks)
+        self.assertEqual(problems, ["hooks.json lifecycle events changed"])
+
+    def test_the_expected_set_is_exactly_the_old_set_plus_permission_denied(self):
+        self.assertEqual(activation.HOOK_EVENTS - {"PermissionDenied"}, {
+            "UserPromptExpansion", "PreToolUse", "PostToolUseFailure", "Stop", "SubagentStart",
+            "SubagentStop", "SessionStart", "PostModelSwitch"})
+
+    def test_an_unexpected_event_is_rejected(self):
+        hooks = self.hooks()
+        hooks["hooks"]["Notification"] = hooks["hooks"]["PermissionDenied"]
+        self.assertEqual(activation.hook_event_problems(hooks), ["hooks.json lifecycle events changed"])
+
+    def test_a_hook_that_bypasses_the_registered_entrypoints_is_rejected(self):
+        hooks = self.hooks()
+        hooks["hooks"]["PermissionDenied"][0]["hooks"][0]["args"] = ["${CLAUDE_PLUGIN_ROOT}/hooks/other.py"]
+        problems = activation.hook_event_problems(hooks)
+        self.assertEqual(len(problems), 1)
+        self.assertIn("bypasses a registered thin entrypoint", problems[0])
 
 
 if __name__ == "__main__":
