@@ -148,8 +148,8 @@ convergence claim. The turn end follows the turn-end table of ADR-0068, acted on
 an auto run is asked to continue with the next obligation while the core's `turn_end_actor` is
 `author`, and the adapter ends an auto chain with the `unattended_continue` notice when the core's
 `run.basis` has not changed since its previous continuation (`no-progress`). An auto run whose
-`turn_end_actor` is `none` ends with the `unattended_residual` notice, which offers
-`report_convergence intent=stop`.
+`turn_end_actor` is `none` continues with the `unattended_residual` notice as its directive, which offers
+`report_convergence intent=stop` or a revised claim graph.
 
 ## Validation
 

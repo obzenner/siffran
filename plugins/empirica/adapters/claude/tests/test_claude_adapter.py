@@ -1078,24 +1078,55 @@ class StopModeTests(unittest.TestCase):
             return self.block(mode, "no_author_step")
         return self.block(mode, "real")
 
-    def test_A7_an_auto_run_whose_author_has_no_step_left_ends_with_the_residual_on_either_stop(self):
-        """``turn_end_actor`` ``none`` (the root claim is refuted or conflicted): in every auto mode the turn ends with the
-        notice that names the core's reason and offers ``report_convergence intent=stop``; deliberative still pauses."""
+    def test_A7_an_auto_run_whose_author_has_no_step_left_continues_with_the_residual_as_its_directive(self):
+        """``turn_end_actor`` ``none`` (the root claim is refuted or conflicted): in every auto mode the turn goes on, and the
+        directive is the notice that names the core's reason and offers ``report_convergence intent=stop`` or a revised
+        graph, on the first turn end and on a later one. Nothing settles, so the agent reads it. Deliberative still pauses."""
         notice = self.notices()["unattended_residual"]
         for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
             for flag in (False, True):
                 with self.subTest(mode=mode, stop_hook_active=flag):
                     got = self.stop(self.block(mode, "no_author_step"), stop_hook_active=flag)
-                    self.assertEqual((got.exit_code, got.stderr), (0, ""))
-                    self.assertEqual(json.loads(got.stdout), {"systemMessage": render_notice(notice, reason=self.REFUTED)})
-                    self.assertIn("intent=stop", got.stdout)
+                    self.assertEqual((got.exit_code, got.stdout), (2, ""))
+                    self.assertEqual(got.stderr, render_notice(notice, reason=self.REFUTED) + "\n")
+                    self.assertIn("intent=stop", got.stderr)
+                    self.assertIn("revise the claim graph", got.stderr)
         for flag in (False, True):
             paused = self.stop(self.block("deliberative", "no_author_step"), stop_hook_active=flag)
             self.assertEqual(json.loads(paused.stdout), self.paused(self.REFUTED), flag)
 
+    def test_A7_a_none_actor_that_does_not_move_the_run_ends_the_turn_on_the_no_progress_rule(self):
+        """The directive is bounded like every auto continuation: the next turn end on the basis the previous one saw settles
+        with ``unattended_continue`` (the core's ``run.basis`` did not change), and a changed basis (a revised graph) goes on."""
+        session = {"session_id": "none-" + uuid.uuid4().hex}
+        view = self.block("auto-delegated", "no_author_step")
+        code, out, err = self.hook({**session}, view)
+        self.assertEqual((code, out, err), (2, "", render_notice(self.notices()["unattended_residual"], reason=self.REFUTED) + "\n"))
+        code, out, err = self.hook({**session, "stop_hook_active": True}, view)  # nothing moved
+        self.assertEqual((code, err), (0, ""))
+        self.assertEqual(json.loads(out), {"systemMessage": render_notice(self.notices()["unattended_continue"], reason=self.REFUTED)})
+        moved = self.block("auto-delegated", "no_author_step")
+        moved["run"]["basis"] = "sha256:" + "9" * 64
+        code, out, err = self.hook({**session, "stop_hook_active": True}, moved)
+        self.assertEqual((code, out), (2, ""))
+
+    def test_F4_a_missing_actor_in_a_view_that_bypassed_the_transport_is_not_the_residual(self):
+        """The transport refuses such a view, so this builds one by hand: ``stop_result`` reads only the literal ``none``,
+        and a missing or foreign actor takes the path it took before the field existed."""
+        from adapters.claude.transport import Response, Result
+        for absent in (None, "someone"):
+            view = self.block("auto-delegated", "no_author_step")
+            if absent is None:
+                del view["run"]["turn_end_actor"]
+            else:
+                view["run"]["turn_end_actor"] = absent
+            got = stop_result(Response({"protocol": PROTOCOL, "request_id": "x", "result": Result.from_mapping(view)}),
+                              stop_hook_active=False)
+            self.assertEqual((got.exit_code, got.stderr), (2, self.REFUTED + "\n"), absent)
+
     def test_A7_only_the_author_and_a_pending_audit_keep_an_auto_turn_going_and_a_human_settles_it(self):
         """The four actors in auto: the author continues, the auditor settles through the pending-audit path, the human
-        settles through the configuration wait, and none ends with the residual."""
+        settles through the configuration wait, and none continues with the residual as its directive."""
         for mode in ("auto-interactive-pre", "auto-interactive-post"):
             with self.subTest(actor="human", mode=mode):
                 got = self.stop(self.block(mode, "human_wait"))
@@ -1103,6 +1134,7 @@ class StopModeTests(unittest.TestCase):
         for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
             with self.subTest(mode=mode):
                 self.assertEqual(self.stop(self.block(mode, "real")).exit_code, 2)  # author
+                self.assertEqual(self.stop(self.block(mode, "no_author_step")).exit_code, 2)  # none: the residual directive
                 waiting = self.stop(self.block(mode, "audit_pending"))  # auditor
                 self.assertEqual((waiting.exit_code, waiting.stderr), (0, ""))
                 self.assertNotIn("systemMessage", waiting.stdout)
@@ -1159,6 +1191,9 @@ class StopModeTests(unittest.TestCase):
                             text = render_notice(notices[name], **({"reason": reason} if "{reason}" in notices[name] else
                                                                    {"resource": "pass"} if "{resource}" in notices[name] else {}))
                             self.assertEqual((got.exit_code, got.stderr, message), (0, "", text))
+                        elif outcome == "continue-with-notice":  # the cell's notice is the directive on every turn end
+                            reason = " ".join(row["message"] for row in result["reasons"])
+                            self.assertEqual((got.exit_code, got.stdout, got.stderr), (2, "", render_notice(notices[name], reason=reason) + "\n"))
                         else:
                             self.assertEqual((got.exit_code, got.stdout), (2, ""))
                             if flag:  # a later turn end of the chain

@@ -111,6 +111,10 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
           const template = NOTICES[name!];
           assert.deepEqual(got, { kind: "notice", notice: fill(template, template.includes("{resource}")
             ? { resource: "pass" } : template.includes("{reason}") ? { reason } : {}) }, where);
+        } else if (expected.outcome === "continue-with-notice") {
+          // the cell's notice is the directive on every turn end of the chain; on an unchanged basis the turn ends as for a continue
+          if (label === "stalled") assert.deepEqual(got, { kind: "no-progress", notice: fill(NOTICES.unattended_continue, { reason }) }, where);
+          else assert.deepEqual(got, { kind: "continue", message: fill(NOTICES[name!], { reason }) }, where);
         } else {
           assert.equal(expected.outcome, "continue", where);
           const later = fill(NOTICES.unattended_continue, { reason });
@@ -124,21 +128,39 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
   assert.ok(checked > 60, `a table that read as empty would pass vacuously (${checked})`);
 });
 
-test("A7: an auto run whose author has no step left ends with the residual at every chain position; deliberative still pauses", () => {
-  const residual = (mode: Mode) => ({ kind: "notice", notice: fill(NOTICES.unattended_residual, { reason: REFUTED }) });
-  for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const)
-    for (const previous of [null, basis(99), "sha256:0"])
-      assert.deepEqual(turnEnd(block(mode, "no_author_step"), previous), residual(mode), `${mode} / ${previous}`);
-  assert.match(NOTICES.unattended_residual, /report_convergence intent=stop/);
+test("A7: an auto run whose author has no step left continues with the residual as its directive; deliberative still pauses", () => {
+  const directive = fill(NOTICES.unattended_residual, { reason: REFUTED });
+  for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const) {
+    for (const previous of [null, basis(99)])  // the first turn end of a chain, and a later one on a changed basis
+      assert.deepEqual(turnEnd(block(mode, "no_author_step"), previous),
+        { kind: "continue", message: directive, basis: "sha256:0" }, `${mode} / ${previous}`);
+    // bounded like every auto continuation: the same basis again settles with the way out
+    assert.deepEqual(turnEnd(block(mode, "no_author_step"), "sha256:0"),
+      { kind: "no-progress", notice: fill(NOTICES.unattended_continue, { reason: REFUTED }) }, mode);
+  }
+  assert.match(directive, /report_convergence intent=stop/);
+  assert.match(directive, /revise the claim graph/);
+  assert.doesNotMatch(directive, /hand the turn back/);
   assert.deepEqual(turnEnd(block("deliberative", "no_author_step"), null),
     { kind: "notice", notice: fill(NOTICES.paused_for_human, { reason: REFUTED }) });
 });
 
-test("A7: the four actors in auto: the author continues, the auditor and a human settle, none ends with the residual", () => {
+test("A7: a none actor reaches the agent through the handler: it continues once, and the same basis again settles", async () => {
+  const w = await wired(() => block("auto-delegated", "no_author_step"));
+  const first = await w.settle();
+  assert.equal(first?.continue, true);
+  assert.equal((first?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_residual, { reason: REFUTED }));
+  const stalled = await w.settle();  // nothing moved
+  assert.equal(stalled?.continue, undefined);
+  assert.equal((stalled?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_continue, { reason: REFUTED }));
+  assert.deepEqual(w.pi.entries.at(-1), { customType: "empirica.turn_end", data: { outcome: "no-progress" } });
+});
+
+test("A7: the four actors in auto: the author and none continue, the auditor and a human settle", () => {
   for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const) {
     assert.equal(turnEnd(block(mode), null).kind, "continue", `${mode}: author`);
     assert.deepEqual(turnEnd(block(mode, "audit"), null), { kind: "nothing" }, `${mode}: auditor`);
-    assert.equal(turnEnd(block(mode, "no_author_step"), null).kind, "notice", `${mode}: none`);
+    assert.equal(turnEnd(block(mode, "no_author_step"), null).kind, "continue", `${mode}: none`);
   }
   for (const mode of ["auto-interactive-pre", "auto-interactive-post"] as const)
     assert.deepEqual(turnEnd(block(mode, "human_wait"), null), { kind: "notice", notice: NOTICES.human_wait }, `${mode}: human`);
@@ -146,7 +168,7 @@ test("A7: the four actors in auto: the author continues, the auditor and a human
 
 test("F4: a view without a turn_end_actor takes the path it took before the field and is never the residual or the author's step", () => {
   // The schema requires the field; a host that meets a view without it (or with a value outside the enum) does not repair it:
-  // it behaves as it did before the field existed. Only the literal `none` ends an auto turn with the residual.
+  // it behaves as it did before the field existed. Only the literal `none` hands an auto turn the residual directive.
   for (const absent of [undefined, "someone", 7, null])
     for (const mode of MODES) for (const kind of ["real", "no_author_step"] as const) for (const previous of [null, basis(99), "sha256:0"]) {
       const view = block(mode, kind) as unknown as { run: Record<string, unknown> };

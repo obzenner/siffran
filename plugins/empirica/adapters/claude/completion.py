@@ -210,10 +210,12 @@ def stop_result(response: object, *, stop_hook_active: bool, no_progress: bool =
             if _evidence_report_directive(result):
                 return _settlement(PAUSED_FOR_EVIDENCE_NOTICE)
             return _settlement(render_notice(PAUSED_FOR_HUMAN_NOTICE, reason=_reason_text(result)))
-        if mode == "auto" and result.run.get("turn_end_actor") == "none":  # nothing the author does moves the run: the honest end
-            return _settlement(render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=_reason_text(result)))
         if mode == "auto" and stop_hook_active and no_progress:  # continued once already and the core's basis did not move
             return _settlement(render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)))
+        if mode == "auto" and result.run.get("turn_end_actor") == "none":
+            # The author has no step that approves the claims as they stand: the agent is handed the residual notice as the
+            # directive (a settled turn would hand the run to nobody), to end honestly or revise the graph.
+            return StopResult(2, stderr=render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=_reason_text(result)) + "\n")
         if mode == "auto" and stop_hook_active:
             return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)) + "\n")
         return StopResult(2, stderr=_reason_text(result) + "\n")

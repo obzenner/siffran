@@ -732,6 +732,16 @@ class GovernanceHostTests(unittest.TestCase):
                 "rationale": "raise the pass allowance back"}})["result"]
         self.assertTrue(raised["run"]["governance"]["raises"])
         self.assertTrue(raised["run"]["governance"]["human_wait"])
+        # What the turn end does with the real raise view: the core's actor is the human, and both hosts' Stop settles with
+        # the configuration wait on the first turn end and on a later one, never a continuation over the dialog.
+        from adapters.claude.completion import stop_result
+        from adapters.claude.transport import Response
+        self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {"kind": "route", "reason": "supplied context"}})
+        envelope = self.dispatch({"type": "EvaluateRun", "run_id": auto, "intent": "report_convergence"})
+        self.assertEqual((envelope["result"]["type"], envelope["result"]["run"]["turn_end_actor"]), ("Block", "human"))
+        for flag in (False, True):
+            stop = stop_result(Response.from_envelope({"request_id": envelope["request_id"]}, envelope), stop_hook_active=flag)
+            self.assertEqual((stop.exit_code, json.loads(stop.stdout)), (0, {"systemMessage": _proto.HUMAN_WAIT_NOTICE}), flag)
         asked = mediator(raised)  # A11d: a raise above the approved ceilings is the human's to approve
         self.assertEqual(asked["run"]["governance"]["approval_kind"], "host_ui")
         self.assertEqual(asked["run"]["governance"]["state"], "approved")

@@ -70,6 +70,21 @@ class TurnEndNoticeTests(unittest.TestCase):
         for message in refused:
             self.assertIn(f"notice '{self.NOTICE}' is not a settlement notice", message)
 
+    def test_the_validator_accepts_an_unreachable_cell_and_refuses_an_outcome_outside_the_vocabulary(self):
+        doc = json.loads(text(CONTRACTS / "host-boundaries.json"))
+        self.assertIn("unreachable", doc["turn_end"]["outcomes"])
+        self.assertIn("continue-with-notice", doc["turn_end"]["outcomes"])
+        state = doc["turn_end"]["states"][0]
+        state["outcomes"]["auto-delegated"] = {"outcome": "unreachable"}
+        accepted: list[str] = []
+        v.check_turn_end(doc, accepted, "doc")
+        self.assertEqual(accepted, [])
+        state["outcomes"]["auto-delegated"] = {"outcome": "never-happens"}
+        refused: list[str] = []
+        v.check_turn_end(doc, refused, "doc")
+        self.assertEqual(len(refused), 1)
+        self.assertIn("'never-happens' is not in the table's vocabulary", refused[0])
+
     def test_the_schema_the_vendored_copy_and_the_tools_file_name_it(self):
         schema = json.loads(text(CONTRACTS / "public-contract.schema.json"))["properties"]["settlement_notices"]
         self.assertIn(self.NOTICE, schema["required"])
@@ -85,6 +100,10 @@ class TurnEndNoticeTests(unittest.TestCase):
         notice = json.loads(text(CONTRACTS / "public-contract.json"))["settlement_notices"][self.NOTICE]
         self.assertIn("{reason}", notice)
         self.assertIn("report_convergence intent=stop", notice)
+        # true for every cause of `none` (a graph revision is a step) and for a turn that goes on (it does not hand the turn back)
+        self.assertIn("revise the claim graph and continue", notice)
+        self.assertNotIn("hand the turn back", notice)
+        self.assertNotIn("No step left", notice)
 
 
 if __name__ == "__main__":

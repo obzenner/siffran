@@ -2817,6 +2817,20 @@ class GovernanceServiceTests(unittest.TestCase):
                 self.assertEqual(reason["code"], "budget.exhausted")
                 self.assertEqual("budget.raise" in reason["next_actions"], offered)
 
+    def test_A7_an_auto_run_has_no_exhausted_budget_before_its_first_approval(self):
+        """Nothing is spent before investigation, so a turn end of an auto run never meets ``budget.exhausted`` while its
+        configuration waits: the turn-end table's budget cells for that mode are ``unreachable``."""
+        for label, invocation in (("interactive", self.INTERACTIVE), ("delegated", DELEGATED_INVOCATION)):
+            with self.subTest(label):
+                self.runs, self.artifacts = Runs(), Artifacts()
+                self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+                self._prepare_auto(invocation, budgets={**SIZED_BUDGETS, "max_passes": 1, "max_audit_spawns": 0})
+                self.assertEqual(self.view()["governance"]["state"], "pending")
+                for _ in range(3):
+                    gate = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"})
+                    self.assertEqual(gate["type"], "Block")
+                    self.assertNotIn("budget.exhausted", [reason["code"] for reason in gate["reasons"]])
+
     def test_unavailable_ingress_fails_closed_for_human_approval(self):
         self.prepare()
         self.service.trusted_governance_context(run_id=self.run_id,

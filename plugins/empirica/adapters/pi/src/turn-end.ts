@@ -84,15 +84,18 @@ export function turnEnd(result: Result, previous: Basis | null): TurnEnd {
   const reason = reasonText(result);
   if (mode === "deliberative")
     return { kind: "notice", notice: evidenceAskable(result) ? NOTICES.paused_for_evidence : fill(NOTICES.paused_for_human, { reason }) };
-  // The core says nothing the author does moves the run (the root claim is refuted or conflicted): the honest end, at every
-  // chain position. Any other value, or none (a view the schema would refuse), is not read as that or as the author's step.
-  if (result.run.turn_end_actor === "none") return { kind: "notice", notice: fill(NOTICES.unattended_residual, { reason }) };
   const basis: Basis = String((result.run as { basis?: unknown }).basis ?? "");
   const wayOut = fill(NOTICES.unattended_continue, { reason });
-  // The first continuation hands the agent the core's own reason; later ones, the way out. An auto run asks no one, so no
-  // directive to report is ever appended.
-  const message = previous === null ? reason : wayOut;
+  // The same basis as the previous continuation: the turn ends with the way out, whoever acts (the no-progress check comes
+  // before any directive).
   if (previous !== null && previous === basis)
     return { kind: "no-progress", notice: wayOut };
-  return { kind: "continue", message, basis };
+  // The core says nothing the author does approves the claims as they stand (the root claim is refuted or conflicted): the
+  // agent is handed the residual notice as the directive, to end honestly or revise the graph. A settled turn would hand the
+  // run to nobody. Any other value, or none (a view the schema would refuse), is not read as that or as the author's step.
+  if (result.run.turn_end_actor === "none")
+    return { kind: "continue", message: fill(NOTICES.unattended_residual, { reason }), basis };
+  // The first continuation hands the agent the core's own reason; later ones, the way out. An auto run asks no one, so no
+  // directive to report is ever appended.
+  return { kind: "continue", message: previous === null ? reason : wayOut, basis };
 }
