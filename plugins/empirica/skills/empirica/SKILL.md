@@ -239,4 +239,4 @@ Apply the folds in order:
 
 ## 9. Preflight the host
 
-Stop before investigation and report the exact unsupported capability when a needed operation is absent, or when the host is unknown or outside its qualified range; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.
+Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.

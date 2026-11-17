@@ -200,7 +200,7 @@ class SkillOrderTests(unittest.TestCase):
                  '   - absent or stale evidence leaves the claim open;\n   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until\n     then it is a human residual.'),
                 ('except a `needs-decision` claim**. Record',
                  "except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record"),
-                ("Stop before investigation and report the exact unsupported capability when a needed operation is absent, or when the host is unknown or outside its qualified range; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.",
+                ("Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.",
                  'If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before\ninvestigation and report the exact unsupported capability. Do not imitate the missing operation\nin prose or write runtime artifacts by hand.'),
                 ('Do not loop on refusal or exhaustion.\n6. Wait',
                  'Do not loop on refusal or exhaustion. The optional\n   [governance reference](references/governance.md) documents host-owned recovery details; it is\n   not a prerequisite read.\n6. Wait'),
@@ -210,7 +210,7 @@ class SkillOrderTests(unittest.TestCase):
                  'through `configure_run`. Freeze'),
                 )
     INLINED = ("- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",)
-    HOST_SENTENCE = "Stop before investigation and report the exact unsupported capability when a needed operation is absent, or when the host is unknown or outside its qualified range; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure."
+    HOST_SENTENCE = "Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure."
     INLINED_SECTION_1 = ("Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted nor attributed to a producer.",)
     REMOVED = ('External actor CLIs are not metered or attributed (ADR 0061).',
                # S8: the host matrix, deleted; host compatibility comes from the host profiles and the start refusals
@@ -301,14 +301,16 @@ class SkillOrderTests(unittest.TestCase):
         self.assertEqual(section.split("\n\n", 1)[1].strip(), self.HOST_SENTENCE, "section 9 is that one paragraph")
         self.assertLess(len(section.strip()), 600)
         # each judgment clause pinned by its exact words
-        for clause in ("Stop before investigation and report the exact unsupported capability when a needed operation is absent",
-                       "or when the host is unknown or outside its qualified range",
+        for clause in ("Stop before investigation and report the exact unsupported capability when one of the three public "
+                       "tools or the auditor launch is absent",
+                       "when the start refuses the host, or when the host is unknown",
                        "never borrow another host's capabilities, imitate a missing operation in prose, "
                        "or write runtime artifacts by hand",
                        "[references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure"):
             self.assertIn(clause, self.HOST_SENTENCE)
         for gone in ("capability profile", "qualified on", "inline bootstrap matrix", "not available on Codex",
-                     "EMPIRICA_AUTO_DELEGATION", "A runnable convergence workflow", "`spikes_unavailable` does"):
+                     "EMPIRICA_AUTO_DELEGATION", "A runnable convergence workflow", "`spikes_unavailable` does",
+                     "qualified range", "a needed operation"):
             self.assertNotIn(gone, text)
 
     def test_the_third_needs_decision_restatement_and_the_optional_link_sentence_are_gone(self):
@@ -373,14 +375,18 @@ class HostLiteralTests(unittest.TestCase):
     def test_a_version_literal_or_range_is_rejected(self):
         for literal in ("qualified on `2.1.296`", "compatible `>=1.0.0,<2.0.0`", "the range `<2.0.0`", "needs >=2.1",
                         "pi-subagents >=0.74.0,<1.0.0", "pi-subagents@0.50.0", "pi-subagents 0.50.0", "`pi-subagents` v0.74",
-                        "a pi-subagents version in (0.74, 1.0)"):
+                        "a pi-subagents version in (0.74, 1.0)",
+                        # S8 review F1: a version that ends a sentence, a two-part version near a host name, \u2265, an interval
+                        "qualified on Claude Code 2.1.296", "Claude Code 2.1 or later", "Pi 1.0 or later", "Pi \u2265 1.0",
+                        "Pi \u2265 1.0.0", "versions \u2264 2.0", "the range [1.0, 2.0)", "the range (1.0.0, 2.0.0]"):
             with self.subTest(literal=literal):
                 self.assertEqual(len(self.problems(f"Text. {literal}. More.")), 1, literal)
 
     def test_other_numbers_and_the_runtime_name_are_accepted(self):
         for text in ("`docker-isolated-v1` and the fixed 8/1/2 envelope", "normally 2: an initial audit and one retry",
                      "a 1\u2013600 character rationale", "`empirica.spike-plan-draft/2`", "section 7", "up to 4,096 characters",
-                     "an external `pi-subagents` owner", "Pi outside its range is refused", "1. read the view;\n2. submit"):
+                     "an external `pi-subagents` owner", "Pi outside its range is refused", "1. read the view;\n2. submit",
+                     "Pi 2 children", "a Claude Code session", "Pi and Claude Code differ", "a [1, 2] list"):
             with self.subTest(text=text):
                 self.assertEqual(self.problems(text), [])
 
@@ -512,6 +518,34 @@ class SkillSizeWiringTests(unittest.TestCase):
 
 
 HOSTS_DOC = Path(__file__).resolve().parents[2] / activation.HOSTS_DOC
+
+
+class DisclosureSourceTests(unittest.TestCase):
+    """S8 review F5, F6: both host ranges the frontmatter check requires come from the profiles; the reference says true things."""
+
+    def test_the_claude_range_is_derived_from_its_profile_like_the_pi_range(self):
+        document = json.loads(activation.HOST_PROFILES.read_text(encoding="utf-8"))
+        claude = activation.claude_profile(document)
+        self.assertEqual(activation.host_interval(claude), ">=2.1.278,<2.2.0")
+        self.assertIn(activation.host_interval(activation.CLAUDE_PROFILE), activation.REQUIRED_SKILL_DISCLOSURES)
+        self.assertIn(activation.pi_interval(activation.PI_PROFILE), activation.REQUIRED_SKILL_DISCLOSURES)
+        moved = json.loads(json.dumps(claude))
+        moved["compatibility"] = {"minimum": "2.3.0", "maximum_exclusive": "2.4.0"}
+        self.assertEqual(activation.host_interval(moved), ">=2.3.0,<2.4.0")
+        source = Path(activation.__file__).read_text(encoding="utf-8")
+        self.assertNotIn('">=2.1.278,<2.2.0"', source, "no retyped Claude range in the validator")
+
+    def test_exactly_one_claude_profile_is_required(self):
+        document = json.loads(activation.HOST_PROFILES.read_text(encoding="utf-8"))
+        with self.assertRaises(ValueError):
+            activation.claude_profile({"profiles": [p for p in document["profiles"] if p["host_id"] != "claude-code"]})
+
+    def test_the_host_capabilities_reference_names_the_refusals_that_exist(self):
+        text = (Path(__file__).resolve().parents[2] / activation.SKILL.parent / "references/host-capabilities.md").read_text(
+            encoding="utf-8")
+        self.assertIn("The registered host profile defines the required surfaces, and Pi's start refusals and the "
+                      "audit-time `host.*` reasons name what is missing.", " ".join(text.split()))
+        self.assertNotIn("each refusal reason names", " ".join(text.split()))
 
 
 class HostsDocRuntimeTests(unittest.TestCase):

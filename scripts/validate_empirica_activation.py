@@ -50,15 +50,28 @@ def pi_profile(document: dict) -> dict:
     return found[0]
 
 
-def pi_interval(profile: dict) -> str:
-    """The Pi compatibility interval as the docs spell it, read from the contract (never retyped)."""
+def claude_profile(document: dict) -> dict:
+    """The one Claude Code profile of ``document`` (parsed host-profiles.json)."""
+    found = [p for p in document["profiles"] if p["host_id"] == "claude-code"]
+    if len(found) != 1:
+        raise ValueError(f"expected exactly one claude-code profile, found {len(found)}")
+    return found[0]
+
+
+def host_interval(profile: dict) -> str:
+    """A host's compatibility interval as the docs spell it, read from the contract (never retyped)."""
     compatibility = profile["compatibility"]
     return f">={compatibility['minimum']},<{compatibility['maximum_exclusive']}"
 
 
-PI_PROFILE = pi_profile(json.loads(HOST_PROFILES.read_text(encoding="utf-8")))
+pi_interval = host_interval
+
+
+_HOST_PROFILES_DOCUMENT = json.loads(HOST_PROFILES.read_text(encoding="utf-8"))
+PI_PROFILE = pi_profile(_HOST_PROFILES_DOCUMENT)
+CLAUDE_PROFILE = claude_profile(_HOST_PROFILES_DOCUMENT)
 REQUIRED_SKILL_DISCLOSURES = (
-    ">=2.1.278,<2.2.0", pi_interval(PI_PROFILE), "external pi-subagents",
+    host_interval(CLAUDE_PROFILE), host_interval(PI_PROFILE), "external pi-subagents",
     "empirica_observe", "empirica_read", "report_convergence",
 )
 
@@ -173,13 +186,19 @@ REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
 
 # The skill body names no host version, range, or `pi-subagents` range: the host profiles
 # (contracts/empirica/v2/host-profiles.json), the start refusals (`host.*`, `host.subagents_*`) and doc/hosts.md own them,
-# so a copy in the skill only drifts. Three shapes: a dotted version of three or more numbers (`2.1.296`), a comparator
-# before a version (`>=1.0`, `<2.0.0`), and a version right after `pi-subagents` (`@0.50.0`, ` 0.74`, ` (0.74, 1.0)`).
+# so a copy in the skill only drifts. Shapes: a dotted version of three or more numbers (`2.1.296`, also at the end of a
+# sentence), a comparator before a version (`>=1.0`, `\u2265 1.0`, `<2.0.0`), a two-part version after a host name
+# (`Claude Code 2.1`), a version right after `pi-subagents` (`@0.50.0`, ` 0.74`), and interval notation (`[1.0, 2.0)`).
 # The frontmatter's `compatibility` field is install metadata, outside this guard.
 _HOST_LITERALS = (
-    re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?![\w.])"),
-    re.compile(r"(?:[<>]=?|~=|\^)\s*v?\d+(?:\.\d+)*"),
+    # a dotted version of three or more numbers; a trailing full stop (a sentence-final version) still counts
+    re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?!\w|\.\d)"),
+    re.compile(r"(?:[<>]=?|[\u2265\u2264]|~=|\^)\s*v?\d+(?:\.\d+)*"),
+    # a two-part version right after a host name (`Claude Code 2.1 or later`, `Pi 1.0`)
+    re.compile(r"\b(?:Claude Code|Pi|pi-subagents)\s+v?\d+\.\d+"),
     re.compile(r"pi-subagents[^\n]{0,40}?(?:@\s*v?\d|\bv?\d+\.\d+)"),
+    # interval notation: `[1.0, 2.0)`, `(1.0.0, 2.0.0]`
+    re.compile(r"[\[(]\s*v?\d+(?:\.\d+)+\s*,\s*v?\d+(?:\.\d+)+\s*[\])]"),
 )
 
 
