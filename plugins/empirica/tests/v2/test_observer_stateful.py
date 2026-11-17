@@ -26,6 +26,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent), str(HERE.parents[1]), str(HERE.parents[3] / "scripts")]
@@ -34,6 +35,8 @@ from hypothesis import HealthCheck, Phase, settings, strategies as st  # noqa: E
 from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, precondition, rule  # noqa: E402
 
 from application.observer import Observer  # noqa: E402
+from core import evaluation, projection  # noqa: E402
+import core.observer as core_observer  # noqa: E402
 from assertions import HarnessDefect, action_graph, action_investigate, evaluate, get_argument, get_run, observe_action  # noqa: E402
 from governance_setup import invocation_for, sized_configure_run  # noqa: E402
 from observer_store import (PROFILE, DriverSource, _Builder, _graph, copy_store, decision_problems, observed, step_problems,  # noqa: E402
@@ -60,6 +63,24 @@ FILES = ("src/probe.py", "src/other.py")
 def _graph_of(claims: list[str], reworded=frozenset()) -> dict:
     words = {c: (kind, text + (" (reworded)" if c in reworded else "")) for c, (kind, text) in CLAIMS.items()}
     return _graph("C0", [(c, *words[c]) for c in claims], [("C0", c) for c in claims if c != "C0"])
+
+
+def _spy_on_requirements() -> None:
+    """For the life of this test module, every ``report_requirements`` answer the gate, the author view and the observer
+    ask for must name, as its first admissible requirement, the row first in its list (the selector changes nothing)."""
+    real = evaluation.report_requirements
+
+    def spy(*args, **kwargs):
+        owed = real(*args, **kwargs)
+        chosen = evaluation.first_admissible(owed)
+        assert chosen is (owed[0] if owed else None), (chosen, owed)
+        return owed
+
+    for module in (evaluation, projection, core_observer):
+        mock.patch.object(module, "report_requirements", spy).start()
+
+
+_spy_on_requirements()
 
 
 class ObserverEqualsCoreMachine(RuleBasedStateMachine):
