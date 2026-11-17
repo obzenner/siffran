@@ -1,7 +1,6 @@
 # Budget, stalls, and freeze
 
-Read this file only when configuring limits, handling a stalled run, or closing a
-bounded scope.
+The rules needed before investigation are in the skill; this reference adds the detail for later.
 
 ## Budget
 

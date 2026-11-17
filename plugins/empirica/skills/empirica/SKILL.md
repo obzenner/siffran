@@ -125,8 +125,6 @@ The user invocation is `$ARGUMENTS`. Leading `--` values are invocation flags, n
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
 resolved goal only from the public run view when that view is available.
 
-External actor CLIs are not metered or attributed (ADR 0061).
-
 Do this before reading files, searching, browsing, or running commands.
 
 1. Restate the goal without invocation flags.
@@ -137,13 +135,11 @@ Do this before reading files, searching, browsing, or running commands.
    `{"kind":"route","reason":"<non-empty routing reason>"}` through the active
    author-action surface; `reason` is a top-level field.
 4. Before investigation, propose the smallest claim graph from supplied context
-   only; claims can name discovery uncertainty. Larger graphs must be
-   root-connected DAGs. Take exact action and graph shapes from the `empirica_observe`
-   tool input schema, which carries every closed action shape (including the graph
-   payload); do not guess field names or nesting. Contract reads are optional
-   explanation, never the source of a shape.
-5. Read `empirica_read(operation="GetRun")`, then size the run from the supplied task and selected graph. Count the gating claims, identify how many need experiments, and allow for expected audit rounds (normally 2: an initial audit and one retry). Propose all three ceilings explicitly with `configure_run`; the author agent chooses these ceilings, never the adapter or core. Include a 1–600 character nonblank rationale explaining that sizing. The rationale is explanation only—not a command, authority claim, evidence, or approvable conclusion. This requests approval of run configuration only: budget ceilings and control mode. The goal is displayed read-only; the claim graph and reviewer are not approvable. Preserve the human's edited values rather than resending stale fields, and note explicit `--auto` has one up-front human approval episode and then stays within approved ceilings. Delegated auto has no dialog and stays within the fixed 8/1/2 envelope.
-   The host-owned timeout and presentation limits are fixed by the contract and displayed read-only.
+   only; claims can name discovery uncertainty. Write it by the rules in section 7.
+   Take exact action and graph shapes from the `empirica_observe`
+   tool input schema, never from contract reads or guesses.
+5. Read `empirica_read(operation="GetRun")`, then size the run from the supplied task and selected graph. Count the gating claims, identify how many need experiments, and allow for expected audit rounds (normally 2: an initial audit and one retry). Propose all three ceilings explicitly with `configure_run`; the author agent chooses these ceilings, never the adapter or core. Include a rationale explaining that sizing. The rationale is explanation only—not a command, authority claim, evidence, or approvable conclusion. This requests approval of run configuration only: budget ceilings and control mode. Preserve the human's edited values rather than resending stale fields, and note explicit `--auto` has one up-front human approval episode and then stays within approved ceilings. Delegated auto has no dialog and stays within the fixed 8/1/2 envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows
+   from the other, so size each for its own work.
    Timeout is dismissal, not rejection. Do not loop on refusal or exhaustion. The optional
    [governance reference](references/governance.md) documents host-owned recovery details; it is
    not a prerequisite read.
@@ -158,20 +154,23 @@ Do this before reading files, searching, browsing, or running commands.
    either witness.
 7. Investigate. Public reads/corrections and explicit honest stop remain available without approval.
 
-If either witness cannot be recorded, the workflow is unsupported. The core and
-supported host adapters fail closed before investigative tools, evidence, child
-budget, or harness execution; do not continue with an unrecorded substitute.
+If either witness cannot be recorded, the workflow is unsupported;
+do not continue with an unrecorded substitute.
 
 ## 7. Refine the claim graph
 
-After approval and investigation admission, read
-[references/claim-graph.md](references/claim-graph.md). Construct the smallest
-closed graph whose root is the goal and whose gating claims cover every material
-unknown.
+Construct the smallest closed graph whose gating root is the goal and whose gating claims cover every material
+unknown. Write the first graph before approval, from the supplied context, by these rules:
 
-Submit the graph through the active author-action surface. Never persist a claim's
-state or confidence: claim state is derived from current evidence on every read.
-A malformed, detached, missing, or corrupt selected graph fails closed.
+- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.
+- `needs-experiment` only when a deterministic spike plan can falsify the claim.
+- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,
+  and where nobody can be asked it stays open and the run can only stop as a residual.
+- Every other claim is `ordinary`.
+- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds.
+
+Submit the graph through the active author-action surface. Once investigation is admitted,
+[references/claim-graph.md](references/claim-graph.md) adds the detail for amending it.
 
 Graph changes do not revoke configuration approval. They do change the argument binding and
 invalidate prior audit coverage, so obtain a fresh bound audit after any graph change. Configuration

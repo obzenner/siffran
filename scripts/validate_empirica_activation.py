@@ -224,6 +224,54 @@ def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] 
     return problems
 
 
+# The three references whose judgment an agent needs before the `investigate` witness, when it cannot read any file: the
+# skill carries that judgment inline, so their header says they only add detail for later.
+PRE_INVESTIGATION_REFERENCES = ("claim-graph.md", "governance.md", "budget-freeze.md")
+REFERENCE_LATER_HEADER = ("The rules needed before investigation are in the skill; "
+                          "this reference adds the detail for later.")
+_LINK = re.compile(r"\]\(references/([A-Za-z0-9._-]+\.md)(?:#([A-Za-z0-9_-]+))?\)")
+_READ_THEN_LINK = re.compile(r"\b[Rr]ead\b[^.]*\]\(references/")
+_BEFORE_ROUTE_HEADER = re.compile(r"\b[Rr]ead\b[^.]*\bbefore\b[^.]*\b(?:seeding|routing|the route)\b")
+
+
+def _slugs(text: str) -> set[str]:
+    return {re.sub(r"[^a-z0-9 _-]", "", line.lstrip("#").strip().lower()).replace(" ", "-")
+            for line in text.splitlines() if line.startswith("#")}
+
+
+def skill_link_problems(skill_text: str, references: Path) -> list[str]:
+    """Every reference link in the skill resolves (file, and heading when an anchor is named), and the route section
+    (6) presents none as a read before investigation is admitted: the agent cannot read any file until then."""
+    problems = []
+    for match in _LINK.finditer(skill_text):
+        name, anchor = match.groups()
+        path = references / name
+        if not path.is_file():
+            problems.append(f"SKILL.md links to references/{name}, which does not exist")
+        elif anchor and anchor not in _slugs(path.read_text(encoding="utf-8")):
+            problems.append(f"SKILL.md links to references/{name}#{anchor}, which has no such heading")
+    start = skill_text.find("\n## 6. ")
+    end = skill_text.find("\n## 7. ", start + 1)
+    if start != -1 and end != -1 and _READ_THEN_LINK.search(skill_text[start:end]):
+        problems.append("SKILL.md section 6 tells the agent to read a reference before investigation is admitted; "
+                        "inline the judgment instead (the read is denied until the `investigate` witness)")
+    return problems
+
+
+def reference_header_problems(references: Path) -> list[str]:
+    """The three pre-investigation references open with the standard sentence, and no reference tells the agent to
+    read it before seeding a graph or routing."""
+    problems = []
+    for path in sorted(references.glob("*.md")):
+        blocks = path.read_text(encoding="utf-8").split("\n\n", 2)
+        header = blocks[1] if len(blocks) > 1 else ""
+        if path.name in PRE_INVESTIGATION_REFERENCES and header != REFERENCE_LATER_HEADER:
+            problems.append(f"references/{path.name} must open with: {REFERENCE_LATER_HEADER}")
+        elif _BEFORE_ROUTE_HEADER.search(header):
+            problems.append(f"references/{path.name} header says to read it before routing: {header!r}")
+    return problems
+
+
 def fail(message: str) -> None:
     print(f"FAIL activation: {message}", file=sys.stderr)
     raise SystemExit(1)
@@ -309,6 +357,8 @@ def main() -> int:
             fail(f"required progressive-disclosure reference is missing: {name}")
         if f"references/{name}" not in skill_text:
             fail(f"SKILL.md does not route to reference: {name}")
+    for problem in [*skill_link_problems(skill_text, references), *reference_header_problems(references)]:
+        fail(problem)
     for term in STALE_SKILL_TERMS:
         if term in skill_text:
             fail(f"SKILL.md retains stale runtime term: {term}")

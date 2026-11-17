@@ -1,5 +1,7 @@
 # Governed initialization (public contract 6.0.0)
 
+The rules needed before investigation are in the skill; this reference adds the detail for later.
+
 ## Prepare without investigating
 
 The default control mode is **deliberative**. Route, then propose a root-connected claim DAG from supplied context. The claim graph defines the work but is not part of human approval. Size the run from that graph and the task: count gating claims, estimate how many need deterministic experiments, and budget the expected audit rounds (normally 2: an initial audit and one retry). The author agent chooses the ceilings; adapters and core only transport, display, and enforce them. The approval digest binds the immutable goal as read-only context plus run configuration: all three budget ceilings, control mode, and the exact rationale.

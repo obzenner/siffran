@@ -176,6 +176,29 @@ class SkillOrderTests(unittest.TestCase):
                  "   investigation and convergence remain blocked. After dismissal, timeout, or rejection, resubmit\n"
                  "   `configure_run` (the same or human-edited ceilings) to reopen the dialog; record `investigate`\n"
                  "   only once the view says `approved`."))
+    # The judgment an agent needs before investigation is inline (the references cannot be read until the `investigate`
+    # witness is admitted): each wording change below, and each paragraph added in INLINED, is pinned by exact text. The
+    # inlined rules are used at invocation, when the whole skill is loaded, so they need not be early anchors.
+    REWRITES += (
+                ('uncertainty. Write it by the rules in section 7.\n   Take exact action',
+                 'uncertainty. Larger graphs must be\n   root-connected DAGs. Take exact action'),
+                ('Include a rationale explaining that sizing.',
+                 'Include a 1–600 character nonblank rationale explaining that sizing.'),
+                ('control mode. Preserve',
+                 'control mode. The goal is displayed read-only; the claim graph and reviewer are not approvable. Preserve'),
+                ('envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows\n   from the other, so size each for its own work.\n   Timeout is dismissal',
+                 'envelope.\n   The host-owned timeout and presentation limits are fixed by the contract and displayed read-only.\n   Timeout is dismissal'),
+                ('Construct the smallest closed graph whose gating root is the goal and whose gating claims cover every material\nunknown. Write the first graph before approval, from the supplied context, by these rules:',
+                 'After approval and investigation admission, read\n[references/claim-graph.md](references/claim-graph.md). Construct the smallest\nclosed graph whose root is the goal and whose gating claims cover every material\nunknown.'),
+                ('Submit the graph through the active author-action surface. Once investigation is admitted,\n[references/claim-graph.md](references/claim-graph.md) adds the detail for amending it.',
+                 "Submit the graph through the active author-action surface. Never persist a claim's\nstate or confidence: claim state is derived from current evidence on every read.\nA malformed, detached, missing, or corrupt selected graph fails closed."),
+                (' and graph shapes from the `empirica_observe`\n   tool input schema, never from contract reads or guesses.',
+                 ' and graph shapes from the `empirica_observe`\n   tool input schema, which carries every closed action shape (including the graph\n   payload); do not guess field names or nesting. Contract reads are optional\n   explanation, never the source of a shape.'),
+                ('is unsupported;\ndo not continue with an unrecorded substitute.',
+                 'is unsupported. The core and\nsupported host adapters fail closed before investigative tools, evidence, child\nbudget, or harness execution; do not continue with an unrecorded substitute.'),
+                )
+    INLINED = ('- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds.',)
+    REMOVED = ('External actor CLIs are not metered or attributed (ADR 0061).',)
     # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
     # may add anchors or reword one only by editing this list, visibly.
     REQUIRED = ("Claude launches `empirica:empirica-auditor`, Pi calls the",
@@ -200,7 +223,11 @@ class SkillOrderTests(unittest.TestCase):
         for new, original in self.REWRITES:
             self.assertEqual(text.count(new), 1, new)
             text = text.replace(new, original)
+        for added in self.INLINED:
+            self.assertEqual(text.count(added), 1, added)
+            text = text.replace(added + "\n\n", "", 1)
         paragraphs = self.paragraphs(text)
+        paragraphs += self.REMOVED
         for lead in lead_ins:
             self.assertEqual(paragraphs.count(lead), 1, lead)
             paragraphs.remove(lead)
@@ -220,6 +247,19 @@ class SkillOrderTests(unittest.TestCase):
         self.assertNotEqual(self.digest(deleted), self.PARAGRAPHS_DIGEST, "a deleted line is caught")
         self.assertNotEqual(self.digest(text + "\n\nOne more sentence.\n"), self.PARAGRAPHS_DIGEST, "an added paragraph is caught")
         self.assertNotEqual(self.digest(text.replace("hypothesis", "guess", 1)), self.PARAGRAPHS_DIGEST, "a rewritten line is caught")
+
+    def test_the_pre_investigation_judgment_is_inline_in_sections_6_and_7(self):
+        text = self.skill()
+        start, end = text.index("\n## 6. "), text.index("\n## 8. ")
+        for rule in (*self.INLINED, "Write it by the rules in section 7.",
+                     "size each for its own work."):
+            self.assertIn(rule, text[start:end], rule)
+        for fact in ("`needs-experiment` only when a deterministic spike plan can falsify the claim.",
+                     "`needs-decision` only for an irreducible human choice",
+                     "One gating claim per material unknown or invariant",
+                     "Every other claim is `ordinary`.",
+                     "Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`"):
+            self.assertEqual(text.count(fact), 1, fact)
 
     def test_the_terminal_call_is_not_called_the_only_call(self):
         text = self.skill()
@@ -257,6 +297,53 @@ class SkillOrderTests(unittest.TestCase):
             with self.subTest(anchor=anchor):
                 self.assertEqual(body.count(anchor), 1)
                 self.assertLessEqual(body.index(anchor) + len(anchor), invocation, "no anchor needs the goal allowance")
+
+
+class ReferenceLinkTests(unittest.TestCase):
+    """The skill's reference links resolve, and no reference is presented as a read before the route."""
+
+    ROOT = Path(__file__).resolve().parents[2]
+    REFERENCES = ROOT / activation.SKILL.parent / "references"
+
+    def skill(self):
+        return (self.ROOT / activation.SKILL).read_text(encoding="utf-8")
+
+    def test_the_committed_skill_and_references_are_accepted(self):
+        self.assertEqual(activation.skill_link_problems(self.skill(), self.REFERENCES), [])
+        self.assertEqual(activation.reference_header_problems(self.REFERENCES), [])
+
+    def test_a_broken_link_is_named(self):
+        text = self.skill().replace("references/claim-graph.md", "references/no-such-file.md")
+        problems = activation.skill_link_problems(text, self.REFERENCES)
+        self.assertTrue(any("no-such-file.md" in problem for problem in problems), problems)
+
+    def test_an_imperative_read_in_the_route_section_is_named(self):
+        text = self.skill().replace("## 6. Invocation, and route before investigating\n",
+                                    "## 6. Invocation, and route before investigating\n\nRead [the graph rules](references/claim-graph.md) first.\n")
+        problems = activation.skill_link_problems(text, self.REFERENCES)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("before investigation is admitted", problems[0])
+
+    def test_a_header_that_says_to_read_before_routing_is_named(self):
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            refs = Path(tmp)
+            for name in activation.REQUIRED_SKILL_REFERENCES:
+                (refs / name).write_text((self.REFERENCES / name).read_text(encoding="utf-8"), encoding="utf-8")
+            path = refs / "claim-graph.md"
+            path.write_text(path.read_text(encoding="utf-8").replace(
+                activation.REFERENCE_LATER_HEADER, "Read this file immediately before seeding or replacing the selected graph."),
+                encoding="utf-8")
+            problems = activation.reference_header_problems(refs)
+        self.assertEqual(len(problems), 1, problems)
+        self.assertIn("claim-graph.md", problems[0])
+
+    def test_the_three_pre_investigation_references_carry_the_header(self):
+        for name in activation.PRE_INVESTIGATION_REFERENCES:
+            head = (self.REFERENCES / name).read_text(encoding="utf-8").split("\n\n", 2)
+            self.assertEqual(head[1], activation.REFERENCE_LATER_HEADER, name)
+        self.assertEqual(activation.REFERENCE_LATER_HEADER,
+                         "The rules needed before investigation are in the skill; this reference adds the detail for later.")
 
 
 class SkillSizeWiringTests(unittest.TestCase):
