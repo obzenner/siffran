@@ -250,7 +250,7 @@ interface WireOptions {
 }
 
 async function wire(
-  responder: (req: Request) => Response,
+  responder: (req: Request) => Response | Promise<Response>,
   echoRequestId = true,
   classify: (provider: unknown, model: unknown) => string | null =
     (provider, model) => `${String(provider)}/${String(model)}`,
@@ -264,13 +264,14 @@ async function wire(
   // What the Python core keeps of the latest StartRun (`invocation.host_runtime`); audit_prepare compares
   // the adapter's current runtime with it exactly (application/host_runtime.py `same_runtime`).
   let recordedRuntime: unknown;
-  const dispatch = (req: Request): Response => {
+  const dispatch = (req: Request): Response | Promise<Response> => {
     requests.push(req);
     if (req.command.type === "StartRun") recordedRuntime = req.command.invocation?.host_runtime;
     const resp = responder(req);
     // Echo the request_id so the guard's correlation check passes. Tests that
     // deliberately test a mismatch pass echoRequestId=false.
-    return echoRequestId ? { ...resp, request_id: req.request_id } : resp;
+    const stamp = (r: Response): Response => echoRequestId ? { ...r, request_id: req.request_id } : r;
+    return resp instanceof Promise ? resp.then(stamp) : stamp(resp);
   };
   createEmpiricaExtension({
     dispatch,
@@ -2458,7 +2459,7 @@ const END = "\n----- END UNTRUSTED EMPIRICA RUN DATA -----";
 const RESTORE_MESSAGE_CEILING = 1800;
 
 /** A restored session whose core answers RestoreRun with `restore`; the handler map and the handle are as after a reload. */
-async function restoredSession(restore: (req: Request) => Response | never, entries = [{ customType: "empirica.run", data: { runHandle: "restored" } }]) {
+async function restoredSession(restore: (req: Request) => Response | Promise<Response>, entries = [{ customType: "empirica.run", data: { runHandle: "restored" } }]) {
   const w = await wire((req) => req.command.type === "RestoreRun" ? restore(req) : envelope({ type: "Allow", converged: false, run: run() }));
   const ctx = fakeCtx("/work", entries);
   await (w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, ctx);
@@ -2557,9 +2558,9 @@ test("with no restore pending the context handler is a no-op", async () => {
 
 test("after compaction a RestoreRun failure sends the handle line only and never throws", async () => {
   for (const restore of [() => { throw new Error("bridge down"); },
-                         () => envelope({ type: "Inert", reason: "no_run" }),
-                         () => envelope({ type: "Allow", converged: false, run: run("paused") }),
-                         () => envelope({ type: "Block", run: run("paused"), reasons: [] } as never)]) {
+                         () => envelope({ type: "Inert", reason: "no_run" })]) {
+    // No valid run-bearing result reaches the handle-only branch by status: every status but `active` is terminal, and
+    // `onTerminal` returns first (response.schema.json runView.status), so only failures and run-less answers get here.
     const s = await restoredSession(restore as never);
     await s.compact();
     const [msg, ...rest] = s.queued();
@@ -2570,6 +2571,36 @@ test("after compaction a RestoreRun failure sends the handle line only and never
     assert.deepEqual(s.w.pi.messageOptions.at(-1), { triggerTurn: false });
     assert.equal(restoreMessages(await s.w.pi.context(HISTORY)).length, 1, "the handle line is bridged too");
   }
+});
+
+test("the bridge is bounded: with no durable entry it is added to requests until the first agent_end, then to none", async () => {
+  const s = await restoredSession(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await s.compact();
+  // Pi has written the held message into the session by the first agent_end; if its entry never becomes visible the
+  // bridge must not re-send the restore on every later request.
+  for (let request = 0; request < 3; request++)
+    assert.equal(restoreMessages(await s.w.pi.context(HISTORY)).length, 1, `request ${request}`);
+  await (s.w.pi.handlers.get("agent_end") as (e: unknown, c: unknown) => unknown)({ type: "agent_end", messages: [] }, {});
+  assert.deepEqual(await s.w.pi.context(HISTORY), HISTORY, "after the bound");
+});
+
+test("a different run taking over during the restore sends nothing", async () => {
+  let release!: (response: Response) => void;
+  let first = true;
+  const s = await restoredSession(() => {
+    if (!first) return envelope({ type: "Allow", converged: false, run: run() });
+    first = false;
+    return new Promise<Response>((resolve) => { release = resolve; });
+  });
+  const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: "restored" } }]);
+  const compacting = (s.w.pi.handlers.get("session_compact") as (e: unknown, c: unknown) => Promise<unknown>)({}, ctx);
+  // While RestoreRun is in flight another run takes over the session.
+  const other = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: "other" } }]);
+  await (s.w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, other);
+  release(envelope({ type: "Allow", converged: false, run: run() }));
+  await compacting;
+  assert.equal(s.queued().length, 0);
+  assert.deepEqual(await s.w.pi.context(HISTORY), HISTORY);
 });
 
 test("after compaction a terminal run, or no handle, sends nothing", async () => {

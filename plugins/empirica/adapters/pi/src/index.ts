@@ -1277,6 +1277,12 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       return { messages: [...event.messages, { role: "custom", customType: "empirica", content: text, display: false,
         details: { restore: marker }, timestamp: Date.now() }] };
     });
+
+    // (agent_end) Bound the bridge. Pi writes a held message into the session at `turn_end` / before settle, both before the
+    // next `agent_end` after `session_compact` (post-run compaction runs after its own `agent_end`; mid-run flushes at
+    // `turn_end`), so by then the durable entry exists. If it never becomes visible (another extension's `context` handler
+    // hides it, or the append failed) the restore must not be re-sent on every request.
+    pi.on("agent_end", () => { pendingRestore = null; });
   };
 }
 
