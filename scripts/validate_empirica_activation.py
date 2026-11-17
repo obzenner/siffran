@@ -152,8 +152,21 @@ SKILL_MAX_HEADROOM = 1_000
 SKILL_TOP_CHARS = 13_300
 GOAL_ALLOWANCE = 2_000
 ARGUMENTS_TOKEN = "$ARGUMENTS"
-# Literal strings that must appear entirely within the rendered top SKILL_TOP_CHARS characters (none chosen yet).
-REQUIRED_EARLY_ANCHORS: tuple[str, ...] = ()
+# Literal strings that must appear exactly once, entirely within the rendered top SKILL_TOP_CHARS characters, and before
+# the `$ARGUMENTS` line (so none needs the goal allowance): the facts an agent needs after compaction. In order: the
+# stance, experiments only through Empirica, no reads before the `investigate` witness, never touch Empirica state, never grade contrary evidence away, the audit
+# launch, `Allow(converged=true)`, the honest `stop`, and the end of the terminal-kinds list.
+REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
+    "Treat training-weight knowledge as hypothesis",
+    "**Experiments go through Empirica only.**",
+    "**Do not read any file, including a skill reference, before the",
+    "Never edit operational state under",
+    "grading contrary evidence away",
+    "Claude launches `empirica:empirica-auditor`, Pi calls the",
+    "`Allow(converged=true)` permits a convergence claim.",
+    "call it once with `intent: \"stop\"`",
+    "**faulted** — state, artifacts, transport, or protocol failed closed.",
+)
 
 
 def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[str]:
@@ -165,7 +178,7 @@ def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[s
                 "move sometimes-needed material to references/ (Claude re-attaches only ~5,000 tokens after compaction)"]
     if limit - size > SKILL_MAX_HEADROOM:
         return [f"SKILL.md is {size:,} characters, {limit - size:,} under the {limit:,}-character ceiling "
-                f"(more than {SKILL_MAX_HEADROOM:,}); lower SKILL_MAX_CHARS to {-(-size // 100) * 100:,}"]
+                f"(more than {SKILL_MAX_HEADROOM:,}); lower SKILL_MAX_CHARS to {-(-(size + 500) // 100) * 100:,}"]
     return []
 
 
@@ -184,9 +197,12 @@ def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] 
     body = rendered_body(skill_text)
     goal_at = body.find(ARGUMENTS_TOKEN)
     problems = []
+    if body.count(ARGUMENTS_TOKEN) > 1 or re.search(r"\$ARGUMENTS\[|\$\{CLAUDE_|\$\d", body):
+        problems.append(f"SKILL.md body has more than one `{ARGUMENTS_TOKEN}` or another substitution form "
+                        "(`$ARGUMENTS[`, `${CLAUDE_`, `$` and a digit): the anchor offsets would move by each substituted value")
     for anchor in REQUIRED_EARLY_ANCHORS if anchors is None else anchors:
-        if not anchor.strip():
-            problems.append(f"SKILL.md early anchor {anchor!r} is empty")
+        if not anchor.strip() or "$" in anchor:
+            problems.append(f"SKILL.md early anchor {anchor!r} is empty or contains `$` (not literal after substitution)")
             continue
         at = body.find(anchor)
         if at == -1:

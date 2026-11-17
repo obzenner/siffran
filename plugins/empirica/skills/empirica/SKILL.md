@@ -16,7 +16,7 @@ The host-neutral `empirica/v2` service owns policy and state. Host adapters only
 translate host events and expose capabilities. Never edit operational state under
 `~/.empirica-plugin/` or knowledge under `refs/empirica/*` directly. Never create Empirica state under `.claude/`, `.codex/`, or `.pi/`.
 
-## 0. Adopt the stance and preflight the host
+## 1. Non-negotiables
 
 Treat training-weight knowledge as hypothesis: discharge load-bearing claims against evidence or surface them as unverified.
 
@@ -26,30 +26,16 @@ including after an unavailable or refused result. An operator's separate approva
 authorize running a workload, and read-only inspection is neither a substitute for one nor an experimental result.
 The binding rules are the public contract's `evidence/spike/isolation` and `evidence/spike/outcomes` clauses (the limits list is `evidence/spike/limits`).
 
-Identify the exact active host surface from the tools and lifecycle already present in context.
 **Do not read any file, including a skill reference, before the `investigate` witness is admitted
-(route → graph → approved configuration).** Use this inline bootstrap matrix:
+(route → graph → approved configuration).**
 
-- **Claude Code capability profile (qualified on `2.1.296`, compatible
-  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and
-  public MCP tools are active and trusted; record route first. Canonical audits
-  are host-owned async children; a current pending audit settles the parent turn
-  until Claude's native completion notification resumes it.
-- **Pi capability profile (qualified on `1.1.0`, compatible
-  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
-  injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
-  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact
-  version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
-  (`>=0.74.0,<1.0.0`; the range and the reviewed versions are listed in `doc/hosts.md`); one inside it with no compat record is admitted
-  and shown as not reviewed. Any other state is a `host.subagents_*`
-  refusal.
-- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a
-  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is
-  refused with the reason on stderr and exit code 1.
-- **Codex:** Empirica is not available on Codex.
-- **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
-  qualification rather than borrowing another profile's capabilities. After admission, consult
-[references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
+Claim discipline; the two folds named here are defined in section 8 below.
+
+Refuted claims are discarded or replaced with narrower claims. Never preserve a
+preferred design by grading contrary evidence away. New claims must attach to the
+root and pass through both folds when applicable.
+
+## 2. The loop: assess one fixed-point pass
 
 The three public tools return one deterministic plain-text author view on Claude and Pi.
 Read its first-line status/governance summary, `Reasons`, `Open obligations`, and rendered `Next`
@@ -59,34 +45,80 @@ validated structured details for host UI only. The host binds and injects the pr
 `missing: <code> via claim:<id>` on an obligation means that descendant claim blocks it: discharge the
 named claim, not the listed one.
 
-A runnable convergence workflow requires all of these capabilities:
+After each evidence batch:
 
-1. read the complete public run view, including obligations;
-2. submit author actions for route, graph, research, spike request, and freeze;
-3. obtain the current audit argument through the host-bound workflow;
-4. launch and observe a bound independent auditor;
-5. submit the observed verdict through private host ingress;
-6. request the guarded convergence decision;
-7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
+1. reread the public run view and obligations;
+2. remove refuted branches and add only claims forced by the evidence;
+3. identify the next unmet witness;
+4. perform that action;
+5. end the pass and let the service evaluate the new snapshot.
 
-The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does
-not disable graph refinement, research, honest residual stopping, reads, or audit of claims that need
-no experiment. Do not submit an unchanged spike request in that state and never fabricate or replace
-spike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or
-`docker-networked-v1` value means this run is bound to the two published digests; it is not a
-claim that Docker is currently healthy.
+Do not loop on unchanged state. Do not infer convergence from confidence-like
+language. When budgets, a stall, or scope closure matter, read
+[references/budget-freeze.md](references/budget-freeze.md).
 
-If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
-investigation and report the exact unsupported capability. Do not imitate the missing operation
-in prose or write runtime artifacts by hand.
+## 3. Obtain independent audit
+
+Once confirmations are done (report first; the core refuses an audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Approval is not convergence: it means the evidence passed the service's rules, not that it
+convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
+and check that each claim follows from its cited sources alone.
+Follow its exact host procedure once: Claude launches `empirica:empirica-auditor`, Pi calls the
+packaged auditor. The host owns dossier
+binding, correlation, identity observation, and verdict admission. Audit may block but cannot
+manufacture deterministic machine evidence.
+
+If the host lacks bound child observation or private verdict ingress, true
+convergence is unsupported. Do not substitute an ordinary model response.
+
+## 4. Request the terminal decision
+
+Call the host's guarded convergence operation exactly once after the graph,
+evidence, and scope are current. On Claude and Pi this is `report_convergence`
+after the bound audit.
+
+- Only a schema-guarded `Allow` permits reporting the result.
+- `Allow(converged=true)` permits a convergence claim.
+- `Allow(converged=false)` permits an honest non-converged terminal report.
+- `Block`, `Inert` with an active handle, `Fault`, malformed output, or transport
+  failure never permits convergence.
+- A terminal run is reported, never re-judged or reopened.
+
+Use the default `report_convergence` intent only for convergence. When explicitly accepting current
+residual/deferred scope or an exhausted pass budget, call it once with `intent: "stop"`; only the
+resulting `Allow(converged=false)` authorizes an honest stopped report.
+
+Do not repeatedly call the gate hoping for a different answer. Follow the typed
+residual obligation or next action returned by the service. A sole `budget.exhausted` blocker on
+an active run settles the turn with a host notice rather than blocking it: stop honestly with
+`intent: "stop"` (or, in deliberative mode, propose a raise for human approval) instead of
+retrying the gate.
+
+For any other reason code, [references/recovery.md](references/recovery.md) gives the next actions and one action to take.
+
+## 5. Finalize and hand off
+
+Read [references/handoff.md](references/handoff.md) before producing the final
+artifact. Distinguish:
+
+- **converged** — current scoped argument and evidence have a passing bound audit;
+- **stopped residual** — unresolved human/data obligations remain;
+- **stopped frozen** — committed scope closed, later claims are deferred;
+- **stopped budget** — the bounded process ended without convergence;
+- **unsupported** — the host lacked a required capability;
+- **faulted** — state, artifacts, transport, or protocol failed closed.
+
+Commit only the goal's product artifacts, tests, and accepted decisions. Runtime
+state, claim history, evidence records, and audit bindings remain in Empirica's
+stores, not in the product tree.
+
+## 6. Invocation, and route before investigating
 
 The user invocation is `$ARGUMENTS`. Leading `--` values are invocation flags, not part
 of the goal. The host adapter owns parsing. Surface unknown flags and read the
 resolved goal only from the public run view when that view is available.
 
 External actor CLIs are not metered or attributed (ADR 0061).
-
-## 1. Route before investigating
 
 Do this before reading files, searching, browsing, or running commands.
 
@@ -123,7 +155,7 @@ If either witness cannot be recorded, the workflow is unsupported. The core and
 supported host adapters fail closed before investigative tools, evidence, child
 budget, or harness execution; do not continue with an unrecorded substitute.
 
-## 2. Refine the claim graph
+## 7. Refine the claim graph
 
 After approval and investigation admission, read
 [references/claim-graph.md](references/claim-graph.md). Construct the smallest
@@ -142,7 +174,7 @@ configuration authority or current audit coverage.
 After the graph is recorded, use the returned open obligations and rendered next actions as the
 worklist. Counts and reason strings are telemetry, not authority.
 
-## 3. Earn or discard every gating claim
+## 8. Earn or discard every gating claim
 
 Read [references/evidence.md](references/evidence.md) before adding evidence.
 Apply the folds in order:
@@ -201,80 +233,53 @@ Apply the folds in order:
    - `needs-decision` is answered by the human at the end of the pass (approve or reject); until
      then it is a human residual.
 
-Refuted claims are discarded or replaced with narrower claims. Never preserve a
-preferred design by grading contrary evidence away. New claims must attach to the
-root and pass through both folds when applicable.
-
 Use only author actions exposed by the current host. Evidence leaves, attribution,
 child events, and audit verdicts are trusted host ingress; the author must never
 submit or fabricate them.
 
-## 4. Assess one fixed-point pass
+## 9. Preflight the host
 
-After each evidence batch:
+Identify the exact active host surface from the tools and lifecycle already present in context.
+Use this inline bootstrap matrix:
 
-1. reread the public run view and obligations;
-2. remove refuted branches and add only claims forced by the evidence;
-3. identify the next unmet witness;
-4. perform that action;
-5. end the pass and let the service evaluate the new snapshot.
+- **Claude Code capability profile (qualified on `2.1.296`, compatible
+  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and
+  public MCP tools are active and trusted; record route first. Canonical audits
+  are host-owned async children; a current pending audit settles the parent turn
+  until Claude's native completion notification resumes it.
+- **Pi capability profile (qualified on `1.1.0`, compatible
+  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
+  injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
+  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact
+  version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
+  (`>=0.74.0,<1.0.0`; the range and the reviewed versions are listed in `doc/hosts.md`); one inside it with no compat record is admitted
+  and shown as not reviewed. Any other state is a `host.subagents_*`
+  refusal.
+- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a
+  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is
+  refused with the reason on stderr and exit code 1.
+- **Codex:** Empirica is not available on Codex.
+- **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
+  qualification rather than borrowing another profile's capabilities. After admission, consult
+[references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
 
-Do not loop on unchanged state. Do not infer convergence from confidence-like
-language. When budgets, a stall, or scope closure matter, read
-[references/budget-freeze.md](references/budget-freeze.md).
+A runnable convergence workflow requires all of these capabilities:
 
-## 5. Obtain independent audit
+1. read the complete public run view, including obligations;
+2. submit author actions for route, graph, research, spike request, and freeze;
+3. obtain the current audit argument through the host-bound workflow;
+4. launch and observe a bound independent auditor;
+5. submit the observed verdict through private host ingress;
+6. request the guarded convergence decision;
+7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
 
-Once confirmations are done (report first; the core refuses an audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
-Approval is not convergence: it means the evidence passed the service's rules, not that it
-convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
-and check that each claim follows from its cited sources alone.
-Follow its exact host procedure once: Claude launches `empirica:empirica-auditor`, Pi calls the
-packaged auditor. The host owns dossier
-binding, correlation, identity observation, and verdict admission. Audit may block but cannot
-manufacture deterministic machine evidence.
+The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does
+not disable graph refinement, research, honest residual stopping, reads, or audit of claims that need
+no experiment. Do not submit an unchanged spike request in that state and never fabricate or replace
+spike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or
+`docker-networked-v1` value means this run is bound to the two published digests; it is not a
+claim that Docker is currently healthy.
 
-If the host lacks bound child observation or private verdict ingress, true
-convergence is unsupported. Do not substitute an ordinary model response.
-
-## 6. Request the terminal decision
-
-Call the host's guarded convergence operation exactly once after the graph,
-evidence, and scope are current. On Claude and Pi this is `report_convergence`
-after the bound audit.
-
-- Only a schema-guarded `Allow` permits reporting the result.
-- `Allow(converged=true)` permits a convergence claim.
-- `Allow(converged=false)` permits an honest non-converged terminal report.
-- `Block`, `Inert` with an active handle, `Fault`, malformed output, or transport
-  failure never permits convergence.
-- A terminal run is reported, never re-judged or reopened.
-
-Use the default `report_convergence` intent only for convergence. When explicitly accepting current
-residual/deferred scope or an exhausted pass budget, call it once with `intent: "stop"`; only the
-resulting `Allow(converged=false)` authorizes an honest stopped report.
-
-Do not repeatedly call the gate hoping for a different answer. Follow the typed
-residual obligation or next action returned by the service. A sole `budget.exhausted` blocker on
-an active run settles the turn with a host notice rather than blocking it: stop honestly with
-`intent: "stop"` (or, in deliberative mode, propose a raise for human approval) instead of
-retrying the gate.
-
-For any other reason code, [references/recovery.md](references/recovery.md) gives the next actions and one action to take.
-
-## 7. Finalize and hand off
-
-Read [references/handoff.md](references/handoff.md) before producing the final
-artifact. Distinguish:
-
-- **converged** — current scoped argument and evidence have a passing bound audit;
-- **stopped residual** — unresolved human/data obligations remain;
-- **stopped frozen** — committed scope closed, later claims are deferred;
-- **stopped budget** — the bounded process ended without convergence;
-- **unsupported** — the host lacked a required capability;
-- **faulted** — state, artifacts, transport, or protocol failed closed.
-
-Commit only the goal's product artifacts, tests, and accepted decisions. Runtime
-state, claim history, evidence records, and audit bindings remain in Empirica's
-stores, not in the product tree.
-
+If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
+investigation and report the exact unsupported capability. Do not imitate the missing operation
+in prose or write runtime artifacts by hand.

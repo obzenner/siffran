@@ -97,21 +97,80 @@ class SkillSizeTests(unittest.TestCase):
         self.assertEqual(activation.skill_anchor_problems(at(activation.SKILL_TOP_CHARS - allowance), ["ANCHOR"]), [])
         problems = activation.skill_anchor_problems(at(activation.SKILL_TOP_CHARS - allowance + 1), ["ANCHOR"])
         self.assertEqual(len(problems), 1)
-        # An anchor before the substitution carries no allowance.
-        before = "ANCHOR" + "y" * 50 + head
+        # An anchor before the substitution carries no allowance: it ends exactly at the cut, `$ARGUMENTS` after it.
+        before = "y" * (activation.SKILL_TOP_CHARS - len("ANCHOR")) + "ANCHOR" + " `$ARGUMENTS`\n"
         self.assertEqual(activation.skill_anchor_problems(before, ["ANCHOR"]), [])
 
     def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
         self.assertLessEqual(activation.SKILL_MAX_CHARS, 20_000)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, activation.SKILL_MAX_CHARS)
-        self.assertEqual(list(activation.REQUIRED_EARLY_ANCHORS), [])
+        self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 9, "the early anchors are chosen")
         limit = activation.SKILL_MAX_CHARS
         self.assertEqual(activation.skill_size_problems("x" * (limit - 1_000)), [], "exactly 1,000 of headroom is allowed")
         problems = activation.skill_size_problems("x" * (limit - 1_001))
         self.assertEqual(len(problems), 1)
         self.assertIn("lower SKILL_MAX_CHARS to", problems[0])
+        self.assertIn(f"to {-(-(limit - 1_001 + 500) // 100) * 100:,}", problems[0], "size plus 500, rounded up to 100")
         self.assertEqual(activation.skill_size_problems(self.committed()), [], "the committed skill is within the headroom")
+
+
+    def test_anchors_with_a_dollar_and_substitution_forms_are_rejected(self):
+        self.assertIn("$", activation.skill_anchor_problems("a $ARGUMENTS b", ["$ARGUMENTS"])[0])
+        self.assertEqual(activation.skill_anchor_problems("goal: `$ARGUMENTS`", []), [], "one `$ARGUMENTS` is the rule")
+        for body in ("`$ARGUMENTS` and `$ARGUMENTS`", "`$ARGUMENTS[0]`", "${CLAUDE_SKILL_DIR}/x", "use $1 here"):
+            with self.subTest(body=body):
+                problems = activation.skill_anchor_problems(body, [])
+                self.assertEqual(len(problems), 1)
+                self.assertIn("substitution", problems[0])
+        self.assertEqual(activation.skill_anchor_problems("---\nname: $ARGUMENTS $ARGUMENTS\n---\n`$ARGUMENTS`", []), [], "frontmatter is not rendered")
+
+
+class SkillOrderTests(unittest.TestCase):
+    """S3: the reorder moved lines and changed none; the anchors are unique and before the goal substitution."""
+
+    # sha256 of the sorted non-blank, non-heading lines (right-stripped, no re-wrapping) of SKILL.md before the reorder.
+    LINES_DIGEST = "483fa149751e31796dec9e9ed020a2883ef12fdcc08691830aa17dcb581f9cc6"
+    # The only lines the reorder added: one lead-in per moved block whose cross-reference would otherwise dangle.
+    LEAD_INS = ("Claim discipline; the two folds named here are defined in section 8 below.",)
+    # The one allowed sentence split: this original line is now two lines (the read-before-route rule moved up as its own
+    # paragraph; "Use this inline bootstrap matrix:" stayed with the host matrix). The digest sees the original line.
+    SPLIT = ("(route → graph → approved configuration).** Use this inline bootstrap matrix:",
+             "(route → graph → approved configuration).**", "Use this inline bootstrap matrix:")
+
+    def skill(self):
+        return (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
+
+    def digest(self, text, lead_ins=LEAD_INS):
+        import hashlib
+        lines = [line.rstrip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
+        for lead in lead_ins:
+            self.assertEqual(lines.count(lead), 1, lead)
+            lines.remove(lead)
+        whole, first, second = self.SPLIT
+        self.assertEqual((lines.count(first), lines.count(second)), (1, 1), "the split lines")
+        lines.remove(first)
+        lines.remove(second)
+        lines.append(whole)
+        return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()
+
+    def test_every_line_is_preserved_and_none_added(self):
+        text = self.skill()
+        self.assertEqual(self.digest(text), self.LINES_DIGEST)
+        lines = text.splitlines()
+        gone = next(i for i, line in enumerate(lines) if line.startswith("Treat training-weight"))
+        deleted = "\n".join(lines[:gone] + lines[gone + 1:])
+        self.assertNotEqual(self.digest(deleted), self.LINES_DIGEST, "a deleted line is caught")
+        self.assertNotEqual(self.digest(text + "\nOne more sentence.\n"), self.LINES_DIGEST, "an added line is caught")
+        self.assertNotEqual(self.digest(text.replace("hypothesis", "guess", 1)), self.LINES_DIGEST, "a rewritten line is caught")
+
+    def test_each_anchor_occurs_exactly_once_and_before_the_invocation(self):
+        body = activation.rendered_body(self.skill())
+        invocation = body.index(activation.ARGUMENTS_TOKEN)
+        for anchor in activation.REQUIRED_EARLY_ANCHORS:
+            with self.subTest(anchor=anchor):
+                self.assertEqual(body.count(anchor), 1)
+                self.assertLessEqual(body.index(anchor) + len(anchor), invocation, "no anchor needs the goal allowance")
 
 
 class SkillSizeWiringTests(unittest.TestCase):
@@ -127,9 +186,9 @@ class SkillSizeWiringTests(unittest.TestCase):
             skill.write_text(skill_text, encoding="utf-8")
             err = io.StringIO()
             with mock.patch.object(activation, "SKILL", skill), contextlib.redirect_stderr(err):
-                for name, value in patches.items():
-                    mock.patch.object(activation, name, value).start()
                 try:
+                    for name, value in patches.items():
+                        mock.patch.object(activation, name, value).start()
                     with self.assertRaises(SystemExit) as raised:
                         activation.main()
                 finally:
