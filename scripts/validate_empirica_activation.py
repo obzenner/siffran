@@ -141,20 +141,21 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
 # older skills can be dropped entirely, so even the top 5,000 tokens are not guaranteed. END TARGET: 7,400 characters,
 # about 2,500 tokens. A ratchet: later changes lower SKILL_MAX_CHARS toward the target and must never raise it;
 # SKILL_MAX_CHARS may exceed the file by at most SKILL_MAX_HEADROOM, so shrinking the skill forces the ceiling down.
+# The rule across revisions: the constants test's upper bound is the CURRENT ceiling, and every PR that lowers
+# SKILL_MAX_CHARS lowers that bound in the same edit, so a later raise needs a visible test edit.
 SKILL_MAX_CHARS = 20_000
 SKILL_MAX_HEADROOM = 1_000
 # SKILL_TOP_CHARS is the early-anchor cut. 5,000 x 2.966 = 14,830; 13,300 is about 90% of that, because the ratio is a
 # whole-file average (a prefix dense in code or identifiers fits fewer characters) and the counter Claude Code uses for
 # the cut is undocumented. The basis is the RENDERED body: the text after the closing frontmatter `---` (Claude strips
-# it), in code points, plus GOAL_ALLOWANCE characters for any anchor that comes after the first `$ARGUMENTS` (Claude
-# substitutes the user's goal before it cuts). The `- len("$ARGUMENTS")` of that substitution is ignored, which only errs
-# safe. The prefix's own ratio is to be measured when the anchors are chosen.
+# it), in code points. Claude substitutes the user's goal (up to 4,096 characters, plus flags) for `$ARGUMENTS` before it
+# cuts, so no fixed allowance is safe: every anchor must end before the first `$ARGUMENTS`, where the offsets are exact.
+# The prefix's own ratio is to be measured when the anchors are chosen.
 SKILL_TOP_CHARS = 13_300
-GOAL_ALLOWANCE = 2_000
 ARGUMENTS_TOKEN = "$ARGUMENTS"
 # Literal strings that must appear exactly once, entirely within the rendered top SKILL_TOP_CHARS characters, and before
-# the `$ARGUMENTS` line (so none needs the goal allowance): the facts an agent needs after compaction. In order: the
-# stance, experiments only through Empirica, no reads before the `investigate` witness, never touch Empirica state, never grade contrary evidence away, the audit
+# the `$ARGUMENTS` line: the facts an agent needs after compaction. In order: the
+# stance, experiments only through Empirica, no reads before the `investigate` witness, never touch Empirica state, never grade contrary evidence away, never fabricate host ingress, the audit
 # launch, `Allow(converged=true)`, the honest `stop`, and the end of the terminal-kinds list.
 REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
     "Treat training-weight knowledge as hypothesis",
@@ -162,6 +163,7 @@ REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
     "**Do not read any file, including a skill reference, before the",
     "Never edit operational state under",
     "grading contrary evidence away",
+    "are trusted host ingress",
     "Claude launches `empirica:empirica-auditor`, Pi calls the",
     "`Allow(converged=true)` permits a convergence claim.",
     "call it once with `intent: \"stop\"`",
@@ -183,11 +185,13 @@ def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[s
 
 
 def rendered_body(skill_text: str) -> str:
-    """The text Claude keeps for the cut: ``skill_text`` without its frontmatter."""
-    if skill_text.startswith("---\n"):
-        end = skill_text.find("\n---\n", 3)
-        if end != -1:
-            return skill_text[end + len("\n---\n"):]
+    """The text Claude keeps for the cut: ``skill_text`` without its frontmatter (delimiter lines are ``strip() == "---"``,
+    as in scripts/validate_skills.py)."""
+    lines = skill_text.splitlines(keepends=True)
+    if lines and lines[0].strip() == "---":
+        for index, line in enumerate(lines[1:], 1):
+            if line.strip() == "---":
+                return "".join(lines[index + 1:])
     return skill_text
 
 
@@ -199,7 +203,8 @@ def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] 
     problems = []
     if body.count(ARGUMENTS_TOKEN) > 1 or re.search(r"\$ARGUMENTS\[|\$\{CLAUDE_|\$\d", body):
         problems.append(f"SKILL.md body has more than one `{ARGUMENTS_TOKEN}` or another substitution form "
-                        "(`$ARGUMENTS[`, `${CLAUDE_`, `$` and a digit): the anchor offsets would move by each substituted value")
+                        "(`$ARGUMENTS[`, `${CLAUDE_`, `$` and a digit): the anchor offsets would move by each substituted value; "
+                        "escape or reword the `$` form")
     for anchor in REQUIRED_EARLY_ANCHORS if anchors is None else anchors:
         if not anchor.strip() or "$" in anchor:
             problems.append(f"SKILL.md early anchor {anchor!r} is empty or contains `$` (not literal after substitution)")
@@ -208,10 +213,14 @@ def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] 
         if at == -1:
             problems.append(f"SKILL.md anchor {anchor!r} is missing")
             continue
-        end = at + len(anchor) + (GOAL_ALLOWANCE if goal_at != -1 and at + len(anchor) > goal_at else 0)
+        end = at + len(anchor)
+        if goal_at != -1 and end > goal_at:
+            problems.append(f"SKILL.md anchor {anchor!r} must end before the first `{ARGUMENTS_TOKEN}` "
+                            f"(ends at {end:,}, `{ARGUMENTS_TOKEN}` at {goal_at:,}): the goal's length would move it")
+            continue
         if end > top_chars:
             problems.append(f"SKILL.md anchor {anchor!r} is not entirely within the first {top_chars:,} rendered characters "
-                            f"(ends at {end:,}, counting {GOAL_ALLOWANCE:,} for the goal after `{ARGUMENTS_TOKEN}`)")
+                            f"(ends at {end:,})")
     return problems
 
 

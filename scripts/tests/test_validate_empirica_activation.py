@@ -2,6 +2,7 @@
 """The activation validator's skill checks reject stale bundled-runtime claims."""
 import json
 import sys
+import re
 import unittest
 from pathlib import Path
 
@@ -89,23 +90,32 @@ class SkillSizeTests(unittest.TestCase):
         in_front = "---\nname: ANCHOR\n---\nbody"
         self.assertIn("missing", activation.skill_anchor_problems(in_front, ["ANCHOR"])[0])
 
-    def test_an_anchor_after_the_arguments_substitution_carries_the_goal_allowance(self):
-        allowance = activation.GOAL_ALLOWANCE
-        head = "The user invocation is `$ARGUMENTS`.\n"
-        def at(end):  # a skill whose ANCHOR ends at body offset `end`
-            return head + "y" * (end - len(head) - len("ANCHOR")) + "ANCHOR"
-        self.assertEqual(activation.skill_anchor_problems(at(activation.SKILL_TOP_CHARS - allowance), ["ANCHOR"]), [])
-        problems = activation.skill_anchor_problems(at(activation.SKILL_TOP_CHARS - allowance + 1), ["ANCHOR"])
+    def test_an_anchor_must_end_before_the_goal_substitution(self):
+        # A goal may be thousands of characters, so no allowance is safe: every anchor ends before the first `$ARGUMENTS`.
+        self.assertFalse(hasattr(activation, "GOAL_ALLOWANCE"), "no fixed goal allowance")
+        head = "Intro. "
+        ok = head + "ANCHOR" + " `$ARGUMENTS`\n"
+        self.assertEqual(activation.skill_anchor_problems(ok, ["ANCHOR"]), [])
+        after = head + "`$ARGUMENTS`\n" + "ANCHOR"
+        problems = activation.skill_anchor_problems(after, ["ANCHOR"])
         self.assertEqual(len(problems), 1)
-        # An anchor before the substitution carries no allowance: it ends exactly at the cut, `$ARGUMENTS` after it.
-        before = "y" * (activation.SKILL_TOP_CHARS - len("ANCHOR")) + "ANCHOR" + " `$ARGUMENTS`\n"
-        self.assertEqual(activation.skill_anchor_problems(before, ["ANCHOR"]), [])
+        self.assertIn("must end before the first `$ARGUMENTS`", problems[0])
+        # An anchor cannot overlap the placeholder: one containing `$` is refused, so none can straddle it.
+        self.assertIn("contains `$`", activation.skill_anchor_problems(ok, ["ANCHOR `$ARG"])[0])
+
+    def test_the_closing_frontmatter_delimiter_may_have_trailing_whitespace(self):
+        # The same rule as scripts/validate_skills.py: a delimiter line is `line.strip() == "---"`.
+        text = "---\nname: x\n--- \nbody ANCHOR `$ARGUMENTS`"
+        self.assertEqual(activation.rendered_body(text), "body ANCHOR `$ARGUMENTS`")
+        self.assertEqual(activation.skill_anchor_problems(text, ["ANCHOR"]), [])
+        self.assertEqual(activation.rendered_body("--- \nname: x\n---\nbody"), "body")
 
     def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
+        # The bound is the CURRENT ceiling: a PR that lowers SKILL_MAX_CHARS lowers this number in the same edit, so a later
+        # raise needs a visible edit here. The cut is a rendered-window size, independent of the file size.
         self.assertLessEqual(activation.SKILL_MAX_CHARS, 20_000)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
-        self.assertLessEqual(activation.SKILL_TOP_CHARS, activation.SKILL_MAX_CHARS)
-        self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 9, "the early anchors are chosen")
+        self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 12, "the early anchors are chosen")
         limit = activation.SKILL_MAX_CHARS
         self.assertEqual(activation.skill_size_problems("x" * (limit - 1_000)), [], "exactly 1,000 of headroom is allowed")
         problems = activation.skill_size_problems("x" * (limit - 1_001))
@@ -123,46 +133,94 @@ class SkillSizeTests(unittest.TestCase):
                 problems = activation.skill_anchor_problems(body, [])
                 self.assertEqual(len(problems), 1)
                 self.assertIn("substitution", problems[0])
+                self.assertIn("escape or reword", problems[0])
         self.assertEqual(activation.skill_anchor_problems("---\nname: $ARGUMENTS $ARGUMENTS\n---\n`$ARGUMENTS`", []), [], "frontmatter is not rendered")
 
 
 class SkillOrderTests(unittest.TestCase):
     """S3: the reorder moved lines and changed none; the anchors are unique and before the goal substitution."""
 
-    # sha256 of the sorted non-blank, non-heading lines (right-stripped, no re-wrapping) of SKILL.md before the reorder.
-    LINES_DIGEST = "483fa149751e31796dec9e9ed020a2883ef12fdcc08691830aa17dcb581f9cc6"
-    # The only lines the reorder added: one lead-in per moved block whose cross-reference would otherwise dangle.
-    LEAD_INS = ("Claim discipline; the two folds named here are defined in section 8 below.",)
-    # The one allowed sentence split: this original line is now two lines (the read-before-route rule moved up as its own
-    # paragraph; "Use this inline bootstrap matrix:" stayed with the host matrix). The digest sees the original line.
-    SPLIT = ("(route → graph → approved configuration).** Use this inline bootstrap matrix:",
-             "(route → graph → approved configuration).**", "Use this inline bootstrap matrix:")
+    # sha256 of the sorted paragraphs (blocks between blank lines, lines right-stripped, headings left out) of SKILL.md as it
+    # was before the reorder (2020801f). A line moved from one paragraph to another changes two paragraphs and is caught.
+    PARAGRAPHS_DIGEST = "aab1b2c44ea4b244e86386286f7766c60c7b0ab0b4ec5b8c764cf03b59e50105"
+    # The only paragraphs the reorder added: a lead-in per moved block whose cross-reference would otherwise dangle, and
+    # the pointer that tells a first read where to start.
+    LEAD_INS = ("Claim discipline; the two folds named here are defined in section 8 below.",
+                "At invocation, begin with section 6 (route, graph, configuration, investigate); "
+                "sections 2\u20135 apply once investigation is admitted.")
+    # The one allowed paragraph split: this original paragraph is now two (the read-before-route rule moved up as its own
+    # paragraph; the host-surface sentence stayed with the matrix). The digest sees the original paragraph.
+    SPLIT = ("Identify the exact active host surface from the tools and lifecycle already present in context.\n"
+             "**Do not read any file, including a skill reference, before the `investigate` witness is admitted\n"
+             "(route \u2192 graph \u2192 approved configuration).** Use this inline bootstrap matrix:",
+             "Identify the exact active host surface from the tools and lifecycle already present in context.\n"
+             "Use this inline bootstrap matrix:",
+             "**Do not read any file, including a skill reference, before the `investigate` witness is admitted\n"
+             "(route \u2192 graph \u2192 approved configuration).**")
+    # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
+    # may add anchors or reword one only by editing this list, visibly.
+    REQUIRED = ("Claude launches `empirica:empirica-auditor`, Pi calls the",
+                "`Allow(converged=true)` permits a convergence claim.",
+                "call it once with `intent: \"stop\"`",
+                "**faulted** \u2014 state, artifacts, transport, or protocol failed closed.",
+                "**Do not read any file, including a skill reference, before the",
+                "**Experiments go through Empirica only.**",
+                "are trusted host ingress")
 
     def skill(self):
         return (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
 
+    @staticmethod
+    def paragraphs(text):
+        blocks = (["\n".join(line.rstrip() for line in block.splitlines() if line.strip())]
+                  for block in re.split(r"\n\s*\n", text))
+        return [block for (block,) in blocks if block and not (block.startswith("#") and "\n" not in block)]
+
     def digest(self, text, lead_ins=LEAD_INS):
         import hashlib
-        lines = [line.rstrip() for line in text.splitlines() if line.strip() and not line.startswith("#")]
+        paragraphs = self.paragraphs(text)
         for lead in lead_ins:
-            self.assertEqual(lines.count(lead), 1, lead)
-            lines.remove(lead)
+            self.assertEqual(paragraphs.count(lead), 1, lead)
+            paragraphs.remove(lead)
         whole, first, second = self.SPLIT
-        self.assertEqual((lines.count(first), lines.count(second)), (1, 1), "the split lines")
-        lines.remove(first)
-        lines.remove(second)
-        lines.append(whole)
-        return hashlib.sha256("\n".join(sorted(lines)).encode()).hexdigest()
+        self.assertEqual((paragraphs.count(first), paragraphs.count(second)), (1, 1), "the split paragraphs")
+        paragraphs.remove(first)
+        paragraphs.remove(second)
+        paragraphs.append(whole)
+        return hashlib.sha256("\n\n".join(sorted(paragraphs)).encode()).hexdigest()
 
-    def test_every_line_is_preserved_and_none_added(self):
+    def test_every_paragraph_is_preserved_and_none_added(self):
         text = self.skill()
-        self.assertEqual(self.digest(text), self.LINES_DIGEST)
+        self.assertEqual(self.digest(text), self.PARAGRAPHS_DIGEST)
         lines = text.splitlines()
         gone = next(i for i, line in enumerate(lines) if line.startswith("Treat training-weight"))
         deleted = "\n".join(lines[:gone] + lines[gone + 1:])
-        self.assertNotEqual(self.digest(deleted), self.LINES_DIGEST, "a deleted line is caught")
-        self.assertNotEqual(self.digest(text + "\nOne more sentence.\n"), self.LINES_DIGEST, "an added line is caught")
-        self.assertNotEqual(self.digest(text.replace("hypothesis", "guess", 1)), self.LINES_DIGEST, "a rewritten line is caught")
+        self.assertNotEqual(self.digest(deleted), self.PARAGRAPHS_DIGEST, "a deleted line is caught")
+        self.assertNotEqual(self.digest(text + "\n\nOne more sentence.\n"), self.PARAGRAPHS_DIGEST, "an added paragraph is caught")
+        self.assertNotEqual(self.digest(text.replace("hypothesis", "guess", 1)), self.PARAGRAPHS_DIGEST, "a rewritten line is caught")
+
+    def test_a_line_moved_between_paragraphs_is_caught(self):
+        lines = self.skill().splitlines()
+        first = next(i for i, line in enumerate(lines) if line.startswith("**Experiments go through Empirica only.**"))
+        end = first + next(i for i, line in enumerate(lines[first:]) if not line.strip())
+        # the last line of the experiments paragraph becomes the second line of the paragraph before it
+        moved = lines[:first - 1] + [lines[end - 1], ""] + lines[first:end - 1] + lines[end:]
+        self.assertEqual(sorted(line for line in moved if line.strip()), sorted(line for line in lines if line.strip()),
+                         "the same lines, so a sorted-line digest would pass")
+        self.assertNotEqual(self.digest("\n".join(moved)), self.PARAGRAPHS_DIGEST)
+
+    def test_the_pointer_names_the_section_that_starts_the_run(self):
+        text = self.skill()
+        self.assertIn("\n## 6. Invocation, and route before investigating\n", text)
+        for number in "2345":
+            self.assertRegex(text, rf"\n## {number}\. ")
+
+    def test_the_required_facts_are_pinned_by_exact_string(self):
+        self.assertLessEqual(set(self.REQUIRED), set(activation.REQUIRED_EARLY_ANCHORS))
+        for anchor in self.REQUIRED:
+            self.assertEqual(activation.skill_anchor_problems(self.skill(), anchors=(anchor,)), [], anchor)
+        without = tuple(a for a in activation.REQUIRED_EARLY_ANCHORS if a != self.REQUIRED[2])
+        self.assertFalse(set(self.REQUIRED) <= set(without), "removing the `stop` anchor must turn this red")
 
     def test_each_anchor_occurs_exactly_once_and_before_the_invocation(self):
         body = activation.rendered_body(self.skill())

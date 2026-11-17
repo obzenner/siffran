@@ -35,7 +35,13 @@ Refuted claims are discarded or replaced with narrower claims. Never preserve a
 preferred design by grading contrary evidence away. New claims must attach to the
 root and pass through both folds when applicable.
 
+Use only author actions exposed by the current host. Evidence leaves, attribution,
+child events, and audit verdicts are trusted host ingress; the author must never
+submit or fabricate them.
+
 ## 2. The loop: assess one fixed-point pass
+
+At invocation, begin with section 6 (route, graph, configuration, investigate); sections 2–5 apply once investigation is admitted.
 
 The three public tools return one deterministic plain-text author view on Claude and Pi.
 Read its first-line status/governance summary, `Reasons`, `Open obligations`, and rendered `Next`
@@ -232,10 +238,6 @@ Apply the folds in order:
    - absent or stale evidence leaves the claim open;
    - `needs-decision` is answered by the human at the end of the pass (approve or reject); until
      then it is a human residual.
-
-Use only author actions exposed by the current host. Evidence leaves, attribution,
-child events, and audit verdicts are trusted host ingress; the author must never
-submit or fabricate them.
 
 ## 9. Preflight the host
 
