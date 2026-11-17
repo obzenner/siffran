@@ -40,8 +40,8 @@
   },
   "decisions_by": {
    "approve_configuration": {
-    "facts": 13,
-    "runs": 13,
+    "facts": 12,
+    "runs": 12,
     "untimed": 0
    },
    "approve_revision": {
@@ -71,13 +71,13 @@
    }
   },
   "facts": {
-   "decisions": 19,
+   "decisions": 18,
    "failed_audits": 1,
    "refutations": 2
   },
   "not_read": 1,
   "runs": {
-   "decisions": 13,
+   "decisions": 12,
    "failed_audits": 1,
    "refutations": 2
   },
@@ -203,7 +203,7 @@
    4,
    4,
    12,
-   6,
+   2,
    5,
    4,
    4,
@@ -294,9 +294,9 @@
    null,
    1790592960.0,
    1790595240.0,
-   1790596500.0,
-   1790601780.0,
-   1790602200.0,
+   1790596440.0,
+   1790601720.0,
+   1790602140.0,
    1790594100.0,
    1790588040.0,
    1790595900.0,
@@ -311,12 +311,12 @@
    null,
    1790594040.0,
    1790595840.0,
-   1790597040.0,
-   1790602140.0,
-   1790603160.0,
+   1790596980.0,
+   1790602080.0,
+   1790603100.0,
    1790595180.0,
    1790589120.0,
-   1790596440.0,
+   1790596380.0,
    1790592900.0,
    1790587200.0,
    1790591760.0,
@@ -333,7 +333,7 @@
    4,
    4,
    12,
-   6,
+   2,
    5,
    4,
    4,
@@ -361,7 +361,7 @@
   },
   {
    "ask": "confirm_source",
-   "asked_at": 1790597040.0,
+   "asked_at": 1790596980.0,
    "host": "pi",
    "id": "6dcdc8c0a41f",
    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
@@ -369,7 +369,7 @@
   },
   {
    "ask": "approve_configuration",
-   "asked_at": 1790602020.0,
+   "asked_at": 1790601960.0,
    "host": "claude",
    "id": "05e9cd035aba",
    "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1",
@@ -474,11 +474,11 @@
    "needs": 2,
    "repo": "/work/quarry",
    "runs": 2,
-   "since": 1790601780.0,
+   "since": 1790601720.0,
    "standings": {
     "needs_human": 2
    }
   }
  ],
- "token": "sha256:dbe82ac87233333213f98ba76570429b5eabbe5fce663155f51f0bd12051cb10"
+ "token": "sha256:8d3fb68e80f1ef42e98b67c9c316161dcfcf54c90b9b93a01539c5e5321e6361"
 }

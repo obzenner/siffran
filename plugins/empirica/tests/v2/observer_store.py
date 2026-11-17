@@ -157,9 +157,11 @@ def step_problems(detail: dict[str, Any], argument: dict[str, Any]) -> tuple[lis
     return problems, seen
 
 
-def decision_problems(row: dict[str, Any], detail: dict[str, Any], argument: dict[str, Any]) -> tuple[list[str], list[str]]:
+def decision_problems(row: dict[str, Any], detail: dict[str, Any], argument: dict[str, Any],
+                      core: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Each ``needs-decision`` claim's decision as the observer reads it, against the public ``GetArgument`` projection of
-    the same run (answer present, scope, state), never the observer: the problems, and the status each claim should
+    the same run (answer present, scope, state) and its public ``GetRun`` (``core``: the run's mode and status), never
+    the observer's own row: the problems, and the status each claim should
     read (approved, rejected, waiting, unanswered, deferred, not_asked, and in auto decided_by_author, rejected_by_evidence)."""
     problems, seen = [], []
     for claim in argument["claims"]:
@@ -171,11 +173,11 @@ def decision_problems(row: dict[str, Any], detail: dict[str, Any], argument: dic
             want = {"approve": "approved", "reject": "rejected"}[answered["outcome"]]
         elif not claim["gating"]:
             want = "deferred"
-        elif row["mode"] == "auto":  # the author's: its evidence decided it, or the agent still owes research
+        elif core["governance"]["control_mode"] == "auto":  # the author's: its evidence decided it, or research is owed
             want = {"approved": "decided_by_author", "discarded": "rejected_by_evidence"}.get(
-                claim["state"], "not_asked" if row["state"] == "active" else "unanswered")
+                claim["state"], "not_asked" if core["status"] == "active" else "unanswered")
         else:
-            want = ("waiting" if row["state"] == "active" else "unanswered") if claim["state"] == "blocked" else "not_asked"
+            want = ("waiting" if core["status"] == "active" else "unanswered") if claim["state"] == "blocked" else "not_asked"
         seen.append(want)
         at = f"{row['key']} {claim['claim_id']}"
         if decision["status"] != want:
@@ -883,7 +885,7 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
                ("C1", "needs-decision", "Serve WebP, as every supported browser reads it."),
                ("C2", "needs-decision", "Keep a JPEG fallback for old browsers.")],
         [("C0", "C1"), ("C0", "C2")]), surface="unavailable", control_mode="auto",
-        invocation=invocation_for(PROFILE, host="claude", delegation=True, human_surface="unavailable",
+        invocation=invocation_for(PROFILE, host="claude", delegation=True, interactive=False, human_surface="unavailable",
                                   signal="v2 harness"))
     b.research(run, "C1", ref="docs/browsers.md")
     b.research(run, "C2", result="refutes", ref="docs/support.md")
