@@ -40,7 +40,8 @@ from .projection import governance_facts, project_runview
 EVIDENCE_KINDS = ("spike", "research", "none")
 REVIEW_STATES = ("passed", "failed", "stale", "changed", "unreviewed", "none")
 ASSURANCE_STATES = ("assured", "awaiting_audit", "audit_failed", "not_approved")
-DECISION_STATUSES = ("approved", "rejected", "waiting", "unanswered", "deferred", "not_asked")
+DECISION_STATUSES = ("approved", "rejected", "waiting", "unanswered", "deferred", "not_asked",
+                     "decided_by_author", "rejected_by_evidence")
 ATTENTION_STATES = ("needs_you", "not_ended", "ended")
 #: Who a pending item waits on, and where it will happen. ``next_report`` and ``explicit_report`` are a host dialog
 #: (the first when the host asks by itself, the second only when the author reports explicitly); ``if_available``: a human
