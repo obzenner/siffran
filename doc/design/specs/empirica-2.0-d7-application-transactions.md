@@ -280,7 +280,7 @@ Block is used for active-run failures requiring Block + RunView (e.g., `run.corr
 
 ### 10.4 Active-evidence derivation (D2C)
 
-Active evidence is derived from complete committed history (§7.2) and the current claim digest on every read/commit. A spike result's `supersedes` names a prior spike result for the same claim; at most one spike result is active per current claim digest. No `last_spike` field, no verdict cache, no latest-request shortcut. Approval follows D1 §5 / D2C §10.13–14: `ordinary` requires active supporting research; `needs-experiment` additionally requires an active passing spike with satisfied prerequisites and no freshness change; `needs-decision` cannot project approved.
+Active evidence is derived from complete committed history (§7.2) and the current claim digest on every read/commit. A spike result's `supersedes` names a prior spike result for the same claim; at most one spike result is active per current claim digest. No `last_spike` field, no verdict cache, no latest-request shortcut. Approval follows D1 §5 / D2C §10.13–14: `ordinary` requires active supporting research; `needs-experiment` additionally requires an active passing spike with satisfied prerequisites and no freshness change; `needs-decision` projects approved only with an approving `human_decision` or active supporting research, and never against a non-approving `human_decision`.
 
 ## 11. MutationPlan and core interfaces
 
