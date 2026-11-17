@@ -104,6 +104,20 @@ class HostFaithful(MediatorFixture):
     def after_research(self, run_id: str, **kw) -> str:
         return self.say(research_call(run_id, **kw))
 
+    def auto_end(self, drv, run_id: str, view: str) -> tuple[str, list[str]]:
+        """The literal agent of an auto run whose only evidence needs a human. An auto run asks no one, so the record is inert
+        (it supports nothing) and the claim reads ``claim.research_missing`` (case ``unconfirmed``): the view directs no report
+        to a human, and the core's reason names the honest end, which the agent takes. Returns ``(outcome, calls)`` as
+        ``literal_agent`` does."""
+        self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
+        reason = self.evaluated(drv, run_id)["reasons"][0]
+        self.assertEqual((reason["code"], reason["parameters"]["support"]), ("claim.research_missing", "unconfirmed"))
+        self.assertIn("an auto run asks no one", reason["message"])
+        self.assertIn("report_convergence intent=stop", reason["message"])
+        action = "report_convergence intent=stop"
+        self.views = [view, self.say(call_of(action, run_id))]
+        return ("stopped" if TERMINAL.match(self.views[-1]) else "open"), [action]
+
 
 class FaithfulFixture(HostFaithful):
     """The fixture itself must be faithful: Claude's own hook decides what the run starts with."""
@@ -150,7 +164,10 @@ class ThirdState(HostFaithful):
         drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", audit_retrieval=[], delegation=True,
                                  interactive=False, human_surface="unobserved")
         self.research(drv, run_id, "web", URL)
-        self.assertEqual(self.route(drv, run_id), "unavailable")
+        # an auto run asks no one: the record is inert, so no reason names a route and there is no batch to ask
+        reason = self.evaluated(drv, run_id)["reasons"][0]
+        self.assertEqual((reason["code"], reason["parameters"]["support"]), ("claim.research_missing", "unconfirmed"))
+        self.assertIsNone(self.batch(drv, run_id))
 
     def test_the_route_is_human_after_the_host_observes_a_surface_and_unavailable_after_it_observes_none(self):
         drv, run_id = self.claude()
@@ -217,10 +234,8 @@ class LiteralAgentOnClaude(HostFaithful):
         for form in (False, True):
             with self.subTest(form=form):
                 drv, run_id = self.claude(form=form, mode="auto")
-                view = self.after_research(run_id)
-                self.assertIn(NO_HUMAN, view)  # an auto run asks no one: said before the host has looked, as after
-                self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
-                outcome, calls = self.literal_agent(run_id, view)
+                view = self.after_research(run_id)  # an auto run asks no one, whatever the client can show: the record is inert
+                outcome, calls = self.auto_end(drv, run_id, view)
                 self.assertEqual((outcome, calls), ("stopped", ["report_convergence intent=stop"]))
                 self.assertEqual(self.human.shown, [])
 
@@ -235,17 +250,14 @@ class LiteralAgentOnClaude(HostFaithful):
     def test_a_delegated_run_ends_in_an_honest_stop_without_pretending_to_look(self):
         drv, run_id = self.claude(delegated=True, mode="auto")
         view = self.after_research(run_id)
-        self.assertIn(NO_HUMAN, view)
-        self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
-        outcome, calls = self.literal_agent(run_id, view)
+        outcome, calls = self.auto_end(drv, run_id, view)
         self.assertEqual((outcome, calls), ("stopped", ["report_convergence intent=stop"]))
         self.assertEqual(self.human.shown, [])
 
     def test_a_non_interactive_run_ends_in_an_honest_stop(self):
         drv, run_id = self.claude(entrypoint="sdk-cli", mode="auto", delegated=True)
         view = self.after_research(run_id)
-        self.assertIn(NO_HUMAN, view)
-        self.assertEqual(self.literal_agent(run_id, view)[0], "stopped")
+        self.assertEqual(self.auto_end(drv, run_id, view)[0], "stopped")
         self.assertEqual(self.human.shown, [])
 
     def test_a_later_answer_stops_the_agent_from_looping_and_an_explicit_report_asks_again(self):
@@ -269,8 +281,8 @@ class LiteralAgentOnClaude(HostFaithful):
     def test_the_surface_going_away_is_followed(self):
         drv, run_id = self.claude(form=False, mode="auto")
         self.surface(drv, run_id, "human")  # an earlier observation
-        view = self.after_research(run_id)
-        outcome, _ = self.literal_agent(run_id, view)
+        view = self.after_research(run_id)  # the surface was a human's, but an auto run asks no one: nothing is shown
+        outcome, _ = self.auto_end(drv, run_id, view)
         self.assertEqual(outcome, "stopped")
         self.assertEqual(self.human.shown, [])
 
@@ -388,14 +400,13 @@ class LiteralAgentOnPi(HostFaithful):
     def test_url_evidence_without_a_ui_ends_in_an_honest_stop(self):
         drv, run_id = self.pi(has_ui=False, mode="auto")
         view = self.after_research(run_id)
-        self.assertIn(NO_HUMAN, view)
-        self.assertEqual(self.literal_agent(run_id, view), ("stopped", ["report_convergence intent=stop"]))
+        self.assertEqual(self.auto_end(drv, run_id, view), ("stopped", ["report_convergence intent=stop"]))
         self.assertEqual(self.human.shown, [])
 
     def test_a_delegated_pi_run_ends_in_an_honest_stop(self):
         drv, run_id = self.pi(delegation=True, mode="auto")
         view = self.after_research(run_id)
-        self.assertEqual(self.literal_agent(run_id, view)[0], "stopped")
+        self.assertEqual(self.auto_end(drv, run_id, view)[0], "stopped")
         self.assertEqual(self.human.shown, [])
 
     def test_a_later_answer_does_not_loop(self):
