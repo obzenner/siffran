@@ -191,13 +191,20 @@ export interface ExtensionAPI {
    */
   getCommands(): SlashCommandInfo[];
   appendEntry?(customType: string, data?: unknown): void;
+  /** Pi ``pi.sendMessage`` (``dist/core/extensions/types.d.ts``, identical in 1.0.0 and 1.5.0): ``options`` choose the delivery. */
   sendMessage?(
-    message: { customType: string; content: string; display: boolean },
+    message: { customType: string; details?: unknown; content: string; display: boolean },
+    options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" },
   ): void;
   sendUserMessage(content: string, options?: { deliverAs?: "steer" | "followUp" }): void;
   on(event: "tool_result", handler: (event: ToolResultEvent, ctx: ExtensionContext) => unknown): void;
   on(event: "resources_discover", handler: ResourcesDiscoverHandler): void;
   on(event: "tool_call", handler: ToolCallHandler): void;
+  /** Before each LLM call: ``messages`` is the conversation without system messages; a returned list replaces it. */
+  on(
+    event: "context",
+    handler: (event: { messages: unknown[] }, ctx: ExtensionContext) => { messages: unknown[] } | void,
+  ): void;
   on(
     event: "session_start",
     handler: (event: unknown, ctx: ExtensionContext) => unknown,

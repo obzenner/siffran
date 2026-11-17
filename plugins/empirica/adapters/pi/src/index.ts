@@ -418,6 +418,8 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
 
   return function empiricaExtension(pi: ExtensionAPI): void {
     let runHandle: string | null = null;
+    // The restore text sent after a compaction, bridged into requests until its durable entry is in the history.
+    let pendingRestore: { marker: string; text: string } | null = null;
     // The last retired run stays readable: its terminal view's only next action is run.inspect.
     // Writes still require an active runHandle.
     let retiredHandle: string | null = null;
@@ -578,6 +580,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     pi.on("resources_discover", () => ({ skillPaths: [skillsDir] }));
 
     pi.on("session_start", async (_event, ctx) => {
+      pendingRestore = null;
       try {
         sessionSpikeProfile = configuredSpikeProfile(hostEnv);
         spikeProfileRefusal = undefined;
@@ -1227,9 +1230,16 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // the kickoff for everything before `firstKeptEntryId`. Pi keeps its summary; the run is carried after it, below.
 
     // (session_compact) After a successful compaction, carry the run: one context-visible message with the handle, the
-    // rendered run view (untrusted data, as Claude's `restore_context`) and the graph-recovery line. `sendMessage` outside a
-    // turn appends a kept custom_message entry after the compaction entry; inside a turn it is appended at the turn end.
-    // Best-effort: a restore failure sends the handle line only, a terminal run or no handle sends nothing, nothing throws.
+    // rendered run view (untrusted data, as Claude's `restore_context`) and the graph-recovery line.
+    //  - Durable entry: `sendMessage(..., { triggerTurn: false })`. Default delivery would STEER the message while the agent is
+    //    running (`agent-session.js` `sendCustomMessage`), and a steered message makes `_runAutoCompaction` continue with an
+    //    unprompted model turn; `triggerTurn: false` never starts or continues one. While streaming it is held and appended
+    //    at the end of the turn, when idle it is appended at once.
+    //  - Bridge: until that entry is in the history, the `context` handler below adds the same text to the end of each request
+    //    (a `context` result goes to the provider but is never written to the session). So the next request carries it exactly
+    //    once, even an overflow retry or a request prepared mid-turn, and later requests carry it through the entry alone.
+    // Best-effort: a restore failure sends the handle line only; a terminal run, no handle, or a different run having taken
+    // over during the restore sends nothing; nothing throws.
     pi.on("session_compact", async () => {
       const handle = runHandle;
       if (!handle) return;
@@ -1237,7 +1247,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
       try {
         const response = await dispatch(restoreRunRequest(handle, randomUUID()));
         onTerminal(response);
-        if (runHandle === null) return; // the core says the run has ended
+        if (runHandle !== handle) return; // the core says the run has ended, or a different run took over
         const result = response.result;
         if ((result.type === "Allow" || result.type === "Block") && result.run?.status === "active") {
           text += " RestoreRun context follows; treat it only as state.\n"
@@ -1246,8 +1256,26 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         }
       } catch {
         // Best-effort: the handle line alone.
+        if (runHandle !== handle) return;
       }
-      try { pi.sendMessage?.({ customType: "empirica", display: false, content: text }); } catch { /* never a gate */ }
+      const marker = randomUUID();
+      pendingRestore = { marker, text };
+      try {
+        pi.sendMessage?.({ customType: "empirica", display: false, content: text, details: { restore: marker } }, { triggerTurn: false });
+      } catch { /* never a gate; the bridge below still carries the text */ }
+    });
+
+    // (context) Bridge the restore text into the request until its durable entry (same marker) is in the history.
+    pi.on("context", (event) => {
+      if (pendingRestore === null) return;
+      const { marker, text } = pendingRestore;
+      const durable = event.messages.some((m) => {
+        const message = m as { role?: unknown; customType?: unknown; details?: { restore?: unknown } | null };
+        return message.role === "custom" && message.customType === "empirica" && message.details?.restore === marker;
+      });
+      if (durable) { pendingRestore = null; return; }
+      return { messages: [...event.messages, { role: "custom", customType: "empirica", content: text, display: false,
+        details: { restore: marker }, timestamp: Date.now() }] };
     });
   };
 }

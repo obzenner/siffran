@@ -52,7 +52,13 @@ export class FakePi implements ExtensionAPI {
   readonly commands = new Map<string, CommandDefinition>();
   readonly handlers = new Map<string, unknown>();
   readonly tools = new Map<string, ToolDefinition>();
-  readonly modelMessages: Array<{ customType: string; content: string }> = [];
+  readonly modelMessages: Array<{ customType: string; content: string; display?: boolean; details?: unknown }> = [];
+  /** The options each `sendMessage` call carried, parallel to `modelMessages` (Pi: `agent-session.js` `sendCustomMessage`). */
+  readonly messageOptions: Array<{ triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" } | undefined> = [];
+  /** While true the host is streaming: a message sent with default options is steered, and a steered message forces a turn. */
+  streaming = false;
+  /** Messages Pi would steer into the running agent: each one makes the host continue with an unprompted turn. */
+  readonly steered: unknown[] = [];
   readonly userMessages: string[] = [];
   readonly userMessageOptions: Array<{ deliverAs?: "steer" | "followUp" } | undefined> = [];
   readonly entries: Array<{ customType: string; data?: unknown }> = [];
@@ -108,8 +114,23 @@ export class FakePi implements ExtensionAPI {
   appendEntry(customType: string, data?: unknown): void {
     this.entries.push({ customType, data });
   }
-  sendMessage(message: { customType: string; content: string; display?: boolean }): void {
+  sendMessage(message: { customType: string; content: string; display?: boolean; details?: unknown },
+              options?: { triggerTurn?: boolean; deliverAs?: "steer" | "followUp" | "nextTurn" }): void {
     this.modelMessages.push(message);
+    this.messageOptions.push(options);
+    // `sendCustomMessage`: streaming with `triggerTurn !== false` and not `nextTurn` is steered, which forces a turn.
+    if (this.streaming && options?.triggerTurn !== false && options?.deliverAs !== "nextTurn") this.steered.push(message);
+  }
+  /**
+   * Run the registered `context` handlers over `messages` as Pi's `emitContext` does: the handler may return a new list or
+   * edit in place; no change means the messages go on unchanged. Returns what the next request would carry.
+   */
+  async context(messages: unknown[]): Promise<unknown[]> {
+    const handler = this.handlers.get("context") as ((e: unknown, c: unknown) => unknown) | undefined;
+    if (handler === undefined) return messages;
+    const visible = messages.slice();
+    const result = await handler({ type: "context", messages: visible }, {}) as { messages?: unknown[] } | undefined;
+    return result?.messages ?? visible;
   }
   sendUserMessage(content: string,
                   options?: { deliverAs?: "steer" | "followUp" }): void {

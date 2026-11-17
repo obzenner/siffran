@@ -600,7 +600,7 @@
       "boundary": "HB-COMPACT",
       "title": "compaction never changes what the run knows",
       "control_mode_dependent": false,
-      "outcomes": "- Claude: `SessionStart` matcher `compact` → `RestoreRun` → bounded run view on stdout, exit 0 always; orphaned pending audits are reconciled first (`reconcile_orphans(…, include_pending=False)`). A restore failure writes one diagnostic line and exits 0. `PreCompact` is not used (it could block compaction, which Empirica does not).\n- Pi: `session_before_compact` is not handled, so Pi keeps its own summary. `session_compact` dispatches `RestoreRun` and queues one `empirica` message: the handle, the rendered run view as untrusted data, and the line saying the claim graph is not in the view and is read with `empirica_read` `GetArgument`. A restore failure sends the handle line only; a terminal run or no handle sends nothing; nothing throws. `session_compact_failed` is not handled.\n- Codex: `SessionStart` source `compact` re-evaluates.",
+      "outcomes": "- Claude: `SessionStart` matcher `compact` → `RestoreRun` → bounded run view on stdout, then one line saying the claim graph is not in the view and is read with `empirica_read` `GetArgument`, exit 0 always; orphaned pending audits are reconciled first (`reconcile_orphans(…, include_pending=False)`). A restore failure writes one diagnostic line and exits 0. `PreCompact` is not used (it could block compaction, which Empirica does not).\n- Pi: `session_before_compact` is not handled, so Pi keeps its own summary. `session_compact` dispatches `RestoreRun` and sends one `empirica` message (`triggerTurn: false`: it never starts or continues a turn), carrying the handle, the rendered run view as untrusted data, and the line saying the claim graph is not in the view and is read with `empirica_read` `GetArgument`. It is delivered in the next model request without starting a turn (a `context` handler adds it once until its entry is in the history) and persisted as one `empirica` message. A restore failure sends the handle line only; a terminal run or no handle sends nothing; nothing throws. `session_compact_failed` is not handled.\n- Codex: `SessionStart` source `compact` re-evaluates.",
       "scenarios": [
         "EHB-COMPACT-01",
         "EHB-COMPACT-02"
@@ -1830,7 +1830,11 @@
       "covered_by": [
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::RestoreCells::*",
         "plugins/empirica/adapters/claude/tests/test_activation_lifecycle.py::test_restore_is_silent_and_exit_zero",
-        "plugins/empirica/adapters/pi/test/gate.test.ts::after compaction one Empirica message carries the handle, the rendered run view and the GetArgument recovery line"
+        "plugins/empirica/adapters/pi/test/gate.test.ts::after compaction one Empirica message carries the handle, the rendered run view and the GetArgument recovery line",
+        "plugins/empirica/adapters/pi/test/gate.test.ts::compaction never forces a turn: the message is sent with triggerTurn:false, never steered, in every reason",
+        "plugins/empirica/adapters/pi/test/gate.test.ts::the next request carries the restore text exactly once; once the durable entry exists the context handler adds nothing",
+        "plugins/empirica/adapters/pi/test/gate.test.ts::after compaction a RestoreRun failure sends the handle line only and never throws",
+        "plugins/empirica/adapters/pi/test/gate.test.ts::after compaction a terminal run, or no handle, sends nothing"
       ],
       "ledger_rows": [
         "restore_after_compaction"
