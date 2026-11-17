@@ -28,7 +28,7 @@ type Mode = (typeof MODES)[number];
 const HANDLE = "run-handle-1";
 const REASON = "Record research for this claim.";
 /** What the core says in auto when a claim rests only on sources that need a human (`claim.research_missing`, `support: unconfirmed`). */
-const UNCONFIRMED = "Claim C0 rests only on research that a human would have to confirm, and an auto run asks no one, so none of it counts.";
+const UNCONFIRMED = "Claim C0 has only research that a human would have to confirm, and an auto run asks no one, so that research does not count.";
 
 function governance(mode: Mode, pending = false) {
   const auto = mode !== "deliberative";

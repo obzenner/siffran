@@ -5,7 +5,7 @@ The rules needed before investigation are in the skill; this reference adds the 
 ## Budget
 
 `configure_run` changes the proposal only. A host approval installs the exact proposed ceilings
-without resetting counters; auto cannot raise them. See [governance.md](governance.md).
+without resetting counters; a delegated auto run cannot raise them, and an interactive one only with its human's approval. See [governance.md](governance.md).
 
 Empirica is bounded by configured pass, investigation-spawn, and mandatory-audit-spawn
 ceilings. Passes are charged only when the current derivation changes; repeated identical

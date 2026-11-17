@@ -43,7 +43,7 @@ AUTHOR_GUIDANCE = {
     "claim.spike_stale": "The spike's inputs changed: request it again against the current research and dependent files.",
     "claim.refuted": "Active evidence refutes the claim: read the run, then discard or restate the claim in a new graph.",
     "evidence.conflict": "Supporting and refuting research both exist for the claim's current text, and more research cannot clear it: revise or discard the contradicted claim (a frozen claim cannot be rewritten) and research the revised claim, or stop with the residual; never edit a claim cosmetically to evade adverse evidence.",
-    "budget.exhausted": "A ceiling is spent: stop honestly with `report_convergence intent=stop`; in deliberative mode you may propose a raise for human approval, in auto mode start a fresh run.",
+    "budget.exhausted": "A ceiling is spent: stop honestly with `report_convergence intent=stop`; in a deliberative or interactive auto run you may propose a raise for human approval, in a delegated auto run start a fresh run.",
     "audit.required": "Make the auditor launch printed on the run view's `next:` line exactly as shown, and never reserve the child yourself; on Codex, end the evidence-complete turn so Stop rejects the unsupported audit.",
     "audit.pending": "Do nothing: the host is settling the audit child; never poll or respawn.",
     "audit.unreadable": "The auditor returned no valid verdict: retry within the audit ceiling (normally once) with the launch on the run view's `next:` line, otherwise stop.",

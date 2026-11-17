@@ -4,7 +4,7 @@ Read this file before recording research or requesting an experiment.
 
 ## Fold 1: research
 
-Every gating claim needs current research before approval, except a `needs-decision` claim, which is human-owned and needs only the human's answer. Research is a concrete
+Every gating claim needs current research before approval. The one exception is a `needs-decision` claim in a deliberative run, which is the human's and needs only the human's answer; in an auto run research decides it (see below). Research is a concrete
 observation from `docs`, `code`, `runtime`, or `web` and must include enough
 provenance to retrieve and check the source.
 
@@ -30,8 +30,8 @@ the service derives the class, you never state it:
 | `source_ref` | class | verified by |
 |---|---|---|
 | a repo-relative file, optionally with lines (`path`, `path:40`, `path:40-63`, `path:40-63,70-72`), any `source_kind` | `verbatim` | the service, when the record is submitted: `citation` must appear there verbatim (whitespace runs compare as one space; join separate excerpts with `…`), else `research.citation_unverified` and nothing is recorded |
-| an `http(s)` URL, or an absolute or `~` path outside the workspace | `retrievable` | the independent audit, only for a kind its host is observed to retrieve (Claude's auditor is not yet credited with the web); otherwise a human, when you report, before the audit |
-| a `runtime` observation with neither of the above | `observed` | a human, always |
+| an `http(s)` URL, or an absolute or `~` path outside the workspace | `retrievable` | the independent audit, only for a kind its host is observed to retrieve (Claude's auditor is not yet credited with the web); otherwise a human, when you report, before the audit in a deliberative run, and inert in an auto run |
+| a `runtime` observation with neither of the above | `observed` | a human, always, in a deliberative run; inert in an auto run |
 
 A `code`, `docs` or `web` ref that is none of these forms is refused (`problem: source_ref_form`),
 and so is an absolute path that names a file inside the workspace (cite the repository-relative
@@ -48,9 +48,15 @@ The check is lexical only; whether a symlink points elsewhere is for the audit t
 Without `spike_unavailable` the record is refused (`problem: spike_reason_missing`). Prefer a spike
 whenever one is possible; the reason is shown to the human verbatim.
 
+### In an auto run, evidence that needs a human is inert
+
+An auto run asks a human once, for its configuration; it asks nothing about evidence or decisions. Evidence that needs a human is inert: a `web` source, a `runtime` note with no workspace path, or a file the auditor's host cannot read. It stays in the dossier and neither approves nor blocks a claim, so a claim resting only on it reads `claim.research_missing` with the text "has only research that a human would have to confirm". Take the next call the view names: cite a workspace file (the service checks it) or a local file your auditor can read; run a spike; or call `report_convergence` with `intent: "stop"` to end with the claim as a residual. A refuting source of that kind still discards the claim. To have a human confirm evidence, start the run in deliberative mode.
+
+A `needs-decision` claim in an auto run is yours to decide through research: supporting research approves it, refuting research discards it, and the auditor judges the choice. Do not wait for a human's answer.
+
 ### What still needs confirming
 
-The view says how each record is verified: `checked by the service`, `for the audit to retrieve`
+In a deliberative run the view says how each record is verified: `checked by the service`, `for the audit to retrieve`
 (the host's auditor retrieves the source; research awaiting audit still approves the claim, and the audit
 gate covers it), `waiting for a human`, `confirmed by a human` or `rejected by a human` (with a `human note:`).
 What waits on a human is listed under `Waiting on a human:`, each record as `source: <kind> <ref> for claim <id>`,
@@ -90,7 +96,7 @@ evidence. A claim whose only support is research awaiting a human is not approve
 waits for every pending human confirmation. Confirmations change the evidence digest, so an earlier
 audit is stale.
 
-A `needs-decision` claim is the exception to "research first": it needs no research, only the human's
+In a deliberative run a `needs-decision` claim is the exception to "research first": it needs no research, only the human's
 answer. The human approves it (it is then approved and human-owned) or rejects it (it is discarded);
 decisions are asked in the same batch as research records. Do not record research to stand in for the
 decision.

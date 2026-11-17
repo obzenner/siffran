@@ -209,11 +209,11 @@ class SkillOrderTests(unittest.TestCase):
         "Then record `{\"kind\":\"investigate\"}` before any native read, search, command, evidence submission, or child launch; approval supplies neither witness.",
         "- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.",
         "- `needs-experiment` only when a deterministic spike plan can falsify the claim.",
-        "- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research, and with nobody to ask it stays open and the run can only stop as a residual.",
+        "- `needs-decision` only for an irreducible choice: in deliberative mode the human answers it when you report, it needs no research, and where nobody can be asked it stays open as a residual; in auto mode research decides it (Fold 1) and nobody is asked.",
         "- Every other claim is `ordinary`.",
         "- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",
         "Apply the folds in order (Fold 1, then Fold 2):",
-        "1. **Fold 1: research first, for every gating claim except a `needs-decision` claim.** Cite a concrete code, docs, runtime, or web source that supports or refutes the exact current claim text; generic precedent is not evidence, and a summary of a source is not a citation.",
+        "1. **Fold 1: research first, for every gating claim except a deliberative `needs-decision` claim.** Cite a concrete code, docs, runtime, or web source that supports or refutes the exact current claim text; generic precedent is not evidence, and a summary of a source is not a citation.",
         "2. **Fold 2: spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.",
     )
     # Every sentence that links a reference, pinned by exact text. The skill's whole rendered body is the headings, JUDGMENT
@@ -292,6 +292,16 @@ class SkillOrderTests(unittest.TestCase):
         sentence = self.JUDGMENT[4]
         for broken in (text.replace(sentence, ""), text.replace("injected a handle", "set a handle")):
             self.assertNotEqual(sum(broken.count(s) == 1 for s in self.JUDGMENT), len(self.JUDGMENT))
+
+    def test_the_needs_decision_rule_is_qualified_by_mode_and_auto_asks_nobody(self):
+        """A12: the human answers a `needs-decision` claim only in deliberative mode; in auto, research decides it (Fold 1) and
+        the auditor judges the choice. The skill says so once, in section 7, and Fold 1 names the same exception."""
+        bullet = next(line for line in self.section(7).splitlines() if line.startswith("- `needs-decision`"))
+        self.assertIn("in deliberative mode the human answers it when you report", bullet)
+        self.assertIn("in auto mode research decides it (Fold 1) and nobody is asked", bullet)
+        self.assertNotIn("irreducible human choice", self.skill())
+        self.assertIn("except a deliberative `needs-decision` claim", self.section(8))
+        self.assertNotIn("human-owned", self.skill())
 
     def test_the_restatements_the_skill_used_to_carry_are_gone(self):
         text = self.skill()

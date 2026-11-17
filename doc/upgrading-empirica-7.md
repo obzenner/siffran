@@ -162,30 +162,35 @@ If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
   an Empirica auto run needs a fresh run. 7.0.2 does not need this: its own denial releases and refunds the
   reservation.
 
-## Auto mode decides its own claims (7.1.0)
+## Auto mode asks once and decides its own claims (7.1.0)
 
-In an auto run, a `needs-decision` claim that no human answered belongs to the agent: supporting research approves it and
-refuting research discards it. The observer shows them as "Decided by the agent" and "Ruled out by evidence". Every auto run
-is read this way, active or ended, and nothing stored is rewritten: terminal statuses, audit verdicts and receipts stay as
-recorded. Two readings change for runs written by an earlier 7.0.x:
+An auto run asks a person once, for its configuration. An interactive auto run asks one more thing after that, a budget raise.
+It asks nothing else. A delegated auto run approves its configuration automatically inside the fixed envelope and has nobody to ask.
+
+- **Evidence.** A source that needs a person to confirm it is inert: a web page, a runtime note with no workspace path, or a file
+  the auditor's host cannot read. It stays in the dossier and neither approves nor blocks a claim, so a claim resting only on such
+  sources stays open (`claim.research_missing`, with the text "has only research that a human would have to confirm") until the
+  agent cites a workspace file or a local file the auditor can read, runs a spike, or ends the run with the claim as a residual. A
+  refuting source of that kind still discards the claim.
+- **Decisions.** A `needs-decision` claim in an auto run is decided by the agent: supporting research approves it, refuting
+  research discards it, and the auditor judges the choice. The observer shows them as "Decided by the agent" and "Ruled out by
+  evidence". A human answer already recorded still decides its claim in every mode.
+- **Budget raise.** After its first approval, an interactive auto run's proposal that raises a ceiling above the approved one waits
+  for the person's approval in the host dialog (`governance.raises` says so); a proposal that raises nothing stays automatic. A
+  delegated auto run has nobody to ask, so an exhausted ceiling ends in the honest stop or a fresh run.
+- **Turn ends.** An auto run's turn end continues the agent's work while the view says the agent has a step. Claude continues a
+  turn once while nothing changed. Pi continues at most two turn ends on one observation basis and fifteen in a chain. With no step
+  left, the run is offered the honest stop (`report_convergence intent=stop`).
+
+Readings that change for a run written by an earlier 7.0.x, active or ended; nothing stored is rewritten, and terminal statuses,
+audit verdicts and receipts stay as recorded. "Raises" is derived from the proposal and the approved ceilings when the run is read,
+so stored runs need no migration:
 
 - An ended auto run may show a decision that read "Undecided when the run stopped" as "Decided by the agent".
-- An active auto run whose decision was left on Later now waits on the agent's research, not on a person.
+- An active auto run whose decision was left on Later, or that was waiting on a confirmation, now waits on the agent's research,
+  not on a person; a dialog left open across the upgrade can no longer land its answer.
 
-An auto run asks a person once: to approve its configuration. After that it asks nothing about evidence. A source that needs
-a person to confirm it (a web page, or a runtime note with no workspace path) no longer waits: it stays in the dossier, supports
-no claim, and a claim resting only on such sources stays open (`claim.research_missing`, with the text "rests only on research
-that a human would have to confirm") until the agent cites a workspace file, runs a spike, or stops. A refuting source of that kind still discards the claim. Two readings change for runs
-written by an earlier 7.0.x: an active auto run that was waiting on a confirmation now waits on the agent's research, and a dialog
-left open across the upgrade can no longer land its answer.
-
-An interactive auto run may ask its person one more thing after the first approval: a budget raise. A proposal that raises a
-ceiling above the approved one waits for the person's approval in the host dialog; `governance.raises` says so. A proposal that
-raises nothing stays automatic, and a delegated auto run still refuses a raise and starts a fresh run instead. Stored runs need no
-migration: "raises" is derived from the proposal and the approved ceilings when the run is read.
-
-A human answer already recorded still decides its claim in every mode. Deliberative runs read as before. To confirm evidence
-yourself, start the run in deliberative mode.
+Deliberative runs read as before. To have a person confirm evidence, start the run in deliberative mode.
 
 ## Qualified hosts
 

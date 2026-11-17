@@ -69,7 +69,7 @@ Build the smallest closed graph whose gating root is the goal and whose gating c
 
 - One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.
 - `needs-experiment` only when a deterministic spike plan can falsify the claim.
-- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research, and with nobody to ask it stays open and the run can only stop as a residual.
+- `needs-decision` only for an irreducible choice: in deliberative mode the human answers it when you report, it needs no research, and where nobody can be asked it stays open as a residual; in auto mode research decides it (Fold 1) and nobody is asked.
 - Every other claim is `ordinary`.
 - Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.
 
@@ -79,5 +79,5 @@ Once investigation is admitted, see [claim-graph](references/claim-graph.md) and
 
 Read [references/evidence.md](references/evidence.md) before adding evidence. Apply the folds in order (Fold 1, then Fold 2):
 
-1. **Fold 1: research first, for every gating claim except a `needs-decision` claim.** Cite a concrete code, docs, runtime, or web source that supports or refutes the exact current claim text; generic precedent is not evidence, and a summary of a source is not a citation.
+1. **Fold 1: research first, for every gating claim except a deliberative `needs-decision` claim.** Cite a concrete code, docs, runtime, or web source that supports or refutes the exact current claim text; generic precedent is not evidence, and a summary of a source is not a citation.
 2. **Fold 2: spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.

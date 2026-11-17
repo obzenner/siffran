@@ -355,7 +355,7 @@ def configuration_error(state, proposed: Mapping) -> str | None:
 
 
 def ceiling_bound(governance: Mapping) -> str:
-    """Which text of ``governance.auto_ceiling`` is true (its ``bound``): ``approved`` once a first approval fixed the ceilings (an interactive
+    """Which text of ``governance.auto_ceiling`` is true (its ``bound``): ``approved`` once a first approval fixed the ceilings (a delegated
     run is held to what it approved), else ``envelope`` (a delegated run is held to the operator's envelope). The core
     chooses; the contract holds one text per case."""
     return "approved" if governance["first_approval"] else "envelope"

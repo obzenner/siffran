@@ -2548,15 +2548,15 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertNotIn("approved ceilings", row["message"])
 
     def test_the_approved_ceilings_case_is_worded_for_the_approved_ceilings(self):
-        """F-Q6-2: after the first approval an interactive run is held to what it approved; it must not be told about a
-        delegated policy envelope it was never under."""
+        """F-Q6-2: after the first approval a delegated run is held to what it approved; it must not be told about the
+        policy envelope of its start (an interactive run raises with its human's approval and never meets this refusal)."""
         self._prepare_auto(DELEGATED_INVOCATION)
         self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
         row = self.action(**sized_configure_run(
             budgets={**SIZED_BUDGETS, "max_passes": 9}, rationale=SIZED_RATIONALE))["reasons"][0]
         self.assertEqual(row["parameters"], {"bound": "approved"})
-        self.assertEqual(row["message"], "Auto cannot raise the approved ceilings; lower or keep them, or start a fresh run "
-                                         "with a larger approved size.")
+        self.assertEqual(row["message"], "A delegated auto run cannot raise its approved ceilings: keep or lower them, or start a "
+                                         "fresh run with a larger approved size.")
 
     def test_every_ceiling_raise_after_approval_is_refused_for_delegated_auto_and_the_humans_for_interactive(self):
         interactive = {"host": "test", "interactive": True,
