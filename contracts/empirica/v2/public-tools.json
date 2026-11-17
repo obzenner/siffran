@@ -139,7 +139,7 @@
     "evidence_report": "This deliberative run's research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
     "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
-    "unattended_continue": "Empirica is not converged: {reason} Nobody is watching this turn end, so act on that reason now.",
+    "unattended_continue": "Empirica is not converged: {reason} Auto mode asks nobody at this turn end, so act on that reason now.",
     "unattended_residual": "Empirica is not converged: {reason} The run cannot converge as its claims stand. End it honestly with report_convergence intent=stop, or, unless the claim graph is frozen, revise the claim graph and continue."
   },
   "author_view": {

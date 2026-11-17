@@ -127,6 +127,8 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
           const later = fill(NOTICES.unattended_continue, { reason });
           if (label === "first") assert.deepEqual(got, { kind: "continue", message: reason }, where);
           else if (label === "stalled") assert.deepEqual(got, { kind: "no-progress", notice: fill(NOTICES.unattended_residual, { reason }) }, where);
+          // the last continuation before the bound (the K - 1-th on one basis) hands the agent the residual, which offers the stop
+          else if (label === "repeat") assert.deepEqual(got, { kind: "continue", message: fill(NOTICES.unattended_residual, { reason }) }, where);
           else assert.deepEqual(got, { kind: "continue", message: later }, where);
         }
       }
@@ -202,8 +204,9 @@ test("F4: a view without a turn_end_actor takes the path it took before the fiel
       const where = `${String(absent)} / ${mode} / ${kind} / ${previous}`;
       if (mode === "deliberative") assert.deepEqual(got, { kind: "notice", notice: fill(NOTICES.paused_for_human, { reason }) }, where);
       else if (previous === null) assert.deepEqual(got, { kind: "continue", message: reason, memory: memory("sha256:0") }, where);
-      else assert.deepEqual(got, { kind: "continue", message: fill(NOTICES.unattended_continue, { reason }),
-        memory: previous.basis === "sha256:0" ? memory("sha256:0", 2) : memory("sha256:0", 1, 2) }, where);
+      else if (previous.basis === "sha256:0") assert.deepEqual(got, { kind: "continue", message: fill(NOTICES.unattended_residual, { reason }),
+        memory: memory("sha256:0", 2) }, where);  // the last continuation before the bound
+      else assert.deepEqual(got, { kind: "continue", message: fill(NOTICES.unattended_continue, { reason }), memory: memory("sha256:0", 1, 2) }, where);
     }
 });
 
@@ -301,12 +304,45 @@ test("A8: the shared chains end where the registry's K says, on Pi as on Claude"
   }
 });
 
+test("A8 fix: the shared sequences hand the model the stop before each bound, on Pi as on Claude", () => {
+  const bounds = JSON.parse(readFileSync(path.resolve(HERE, "..", "..", "..", "..", "..", "contracts", "empirica", "v2",
+    "host-boundaries.json"), "utf8")).turn_end.bounds as { K: number; T: number };
+  const shared = JSON.parse(readFileSync(path.resolve(HERE, "fixtures", "turn-end-chains.json"), "utf8")) as {
+    sequences: Array<{ name: string; actor: "author" | "none"; steps: Array<{ basis: string; turns: string; expect: string }> }>;
+  };
+  const turns = (text: string): number => (text[0] === "K" || text[0] === "T" ? bounds[text[0] as "K" | "T"] - Number(text.slice(2)) : Number(text));
+  assert.ok(shared.sequences.length >= 3);
+  for (const item of shared.sequences) {
+    const reason = item.actor === "none" ? REFUTED : REASON;
+    const residual = fill(NOTICES.unattended_residual, { reason });
+    const later = fill(NOTICES.unattended_continue, { reason });
+    let memory: Memory | null = null;
+    let serial = 0;
+    for (const step of item.steps) {
+      for (let i = 0; i < turns(step.turns); i++) {
+        serial += 1;
+        const view = block("auto-delegated", item.actor === "none" ? "no_author_step" : "real") as unknown as { run: Record<string, unknown> };
+        view.run.basis = step.basis === "fresh" ? `sha256:fresh${serial}` : `sha256:${step.basis}`;
+        const got = turnEnd(view as unknown as Result, memory);
+        let kind: string;
+        if (got.kind === "no-progress") kind = got.notice === residual ? "end" : `?${got.notice}`;
+        else if (got.kind === "continue")
+          kind = got.message === reason ? "reason" : got.message === later ? "continue" : got.message === residual ? "residual-directive" : `?${got.message}`;
+        else kind = got.kind;
+        assert.equal(kind, step.expect, `${item.name} #${serial}`);
+        memory = got.kind === "continue" ? got.memory : null;
+      }
+    }
+  }
+});
+
 test("A8: the notice of a continuation asks the agent to act and never offers the stop; the residual alone does", () => {
   const later = fill(NOTICES.unattended_continue, { reason: REASON });
-  assert.match(later, /Nobody is watching/);
+  assert.match(later, /Auto mode asks nobody/);
   assert.match(later, /act on that reason/);
   assert.doesNotMatch(later, /intent=stop/);
-  const [, two] = chain([() => block("auto-interactive-post"), () => block("auto-interactive-post")]);
+  const moved = () => { const v = block("auto-interactive-post") as unknown as { run: Record<string, unknown> }; v.run.basis = basis(1); return v as never; };
+  const [, two] = chain([() => block("auto-interactive-post"), moved]);  // a changed basis is a count of 1: not yet the last continuation
   assert.equal((two as { message: string }).message, later);
   assert.match(fill(NOTICES.unattended_residual, { reason: REASON }), /report_convergence intent=stop/);
 });
@@ -315,7 +351,8 @@ test("A9: on an unchanged basis continuations 1 and 2 continue and the third end
   const same = () => block("auto-interactive-post");
   const [one, two, three, fresh] = chain([same, same, same, same]);
   assert.deepEqual(one, { kind: "continue", message: REASON, memory: memory("sha256:0", 1, 1) });
-  assert.deepEqual(two, { kind: "continue", message: fill(NOTICES.unattended_continue, { reason: REASON }), memory: memory("sha256:0", 2, 2) });
+  // the second turn end is the last continuation before the K-th: it hands the agent the residual, the notice that offers the stop
+  assert.deepEqual(two, { kind: "continue", message: fill(NOTICES.unattended_residual, { reason: REASON }), memory: memory("sha256:0", 2, 2) });
   assert.deepEqual(three, { kind: "no-progress", notice: fill(NOTICES.unattended_residual, { reason: REASON }) });
   assert.match((three as { notice: string }).notice, /report_convergence intent=stop/);
   assert.deepEqual(fresh, one, "the residual ended the chain: the next one starts at 1");
@@ -327,6 +364,9 @@ test("A9: a changed basis resets the count, and the chain still ends at T with t
   for (let i = 0; i < CONTINUATION_T - 1; i += 1) assert.equal(out[i].kind, "continue", `continuation ${i + 1}`);  // past K = 3 by changing basis
   assert.deepEqual(out[CONTINUATION_T - 1], { kind: "no-progress", notice: fill(NOTICES.unattended_residual, { reason: REASON }) });
   assert.equal((out[CONTINUATION_T - 2] as { memory: Memory }).memory.total, CONTINUATION_T - 1);
+  // the (T - 1)-th continuation hands the agent the residual; those between the first and it carry the notice that asks for action
+  assert.equal((out[CONTINUATION_T - 2] as { message: string }).message, fill(NOTICES.unattended_residual, { reason: REASON }));
+  assert.equal((out[CONTINUATION_T - 3] as { message: string }).message, fill(NOTICES.unattended_continue, { reason: REASON }));
   assert.equal((out[CONTINUATION_T - 2] as { memory: Memory }).memory.count, 1);
   assert.equal(out[CONTINUATION_T].kind, "continue", "after the residual a new chain starts");
   assert.equal((out[CONTINUATION_T] as { memory: Memory }).memory.total, 1);
@@ -347,7 +387,7 @@ test("A9: a memory from 7.0.x (a bare basis) and an unreadable one read as a cha
     assert.deepEqual(turnEnd(view, old as never), { kind: "continue", message: REASON, memory: memory("sha256:0") }, JSON.stringify(old));
   // a readable memory is not mistaken for old: the same basis counts on
   assert.deepEqual(turnEnd(view, memory("sha256:0", 1, 1)),
-    { kind: "continue", message: fill(NOTICES.unattended_continue, { reason: REASON }), memory: memory("sha256:0", 2, 2) });
+    { kind: "continue", message: fill(NOTICES.unattended_residual, { reason: REASON }), memory: memory("sha256:0", 2, 2) });  // K - 1
 });
 
 test("A9: the deliberative run and the human and auditor actors do not depend on the counts", () => {
@@ -492,7 +532,7 @@ test("EHB-STOP-32/33: an auto turn end continues twice on one basis, then ends w
   assert.equal((first?.entries?.[0] as { content: string }).content, REASON);
   const second = await w.settle();  // the agent answered with text only: no tool result, same blocker; the 2nd continuation
   assert.equal(second?.continue, true);
-  assert.equal((second?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_continue, { reason: REASON }));
+  assert.equal((second?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_residual, { reason: REASON }));  // the last continuation
   const stalled = await w.settle();  // the 3rd would be the K-th on this basis
   assert.equal(stalled?.continue, undefined);
   assert.equal((stalled?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_residual, { reason: REASON }));
@@ -542,7 +582,8 @@ async function chained(view: () => Result) {
 }
 const real = () => block("auto-interactive-post");
 const reasonOf = (out: { entries?: unknown[] } | undefined) => (out?.entries?.[0] as { content: string }).content;
-const WAY_OUT = fill(NOTICES.unattended_continue, { reason: REASON });
+/** The second turn end on one basis is the last continuation before the K-th: it hands the agent the residual, which offers the stop. */
+const WAY_OUT = fill(NOTICES.unattended_residual, { reason: REASON });
 
 test("A9 F4: a dispatch that throws during a chain clears the memory, so the next chain starts at 1", async () => {
   const w = await chained(real);

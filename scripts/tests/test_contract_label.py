@@ -68,13 +68,26 @@ class TurnEndBoundsTests(unittest.TestCase):
         """K is the registry's on both hosts: the same number in each adapter's one constant, and both hosts named as counting."""
         bounds = json.loads(text(CONTRACTS / "host-boundaries.json"))["turn_end"]["bounds"]
         self.assertEqual(sorted(bounds["enforced_by"]), ["claude", "pi"])
-        for path, name in ((PLUGIN / "adapters" / "claude" / "completion.py", "CONTINUATION_K"),
-                           (PLUGIN / "adapters" / "pi" / "src" / "turn-end.ts", "CONTINUATION_K")):
-            found = re.search(rf"^(?:export const )?{name} = (\d+)", text(path), re.M)
-            self.assertIsNotNone(found, str(path))
-            self.assertEqual(int(found.group(1)), bounds["K"], str(path))
-        found = re.search(r"^export const CONTINUATION_T = (\d+)", text(PLUGIN / "adapters" / "pi" / "src" / "turn-end.ts"), re.M)
-        self.assertEqual(int(found.group(1)), bounds["T"])
+        for path in (PLUGIN / "adapters" / "claude" / "completion.py", PLUGIN / "adapters" / "pi" / "src" / "turn-end.ts"):
+            for name in ("K", "T"):  # both hosts count both bounds, each with its one constant
+                found = re.search(rf"^(?:export const )?CONTINUATION_{name} = (\d+)", text(path), re.M)
+                self.assertIsNotNone(found, f"{path}: {name}")
+                self.assertEqual(int(found.group(1)), bounds[name], f"{path}: {name}")
+
+    def test_the_schema_says_every_host_in_enforced_by_counts_both_bounds(self):
+        schema = json.loads(text(CONTRACTS / "host-boundaries.schema.json"))
+        description = schema["properties"]["turn_end"]["properties"]["bounds"]["description"]
+        self.assertIn("host in `enforced_by` counts both K and T", description)
+        self.assertNotIn("any other host ends at the first repeat", description)
+
+    def test_no_prose_leans_on_the_hosts_own_cap_to_bound_a_chain(self):
+        """The host's cap of eight resets on every tool call, so it bounds no productive chain: no product file says it does."""
+        adr = next((ROOT / "doc" / "adr").glob("0073-*.md"))
+        for path in (adr, PLUGIN / "adapters" / "claude" / "completion.py", PLUGIN / "adapters" / "pi" / "README.md",
+                     ROOT / "doc" / "design" / "empirica-host-boundary-registry.md", CONTRACTS / "host-boundaries.json"):
+            body = text(path)
+            for phrase in ("bounded by the host's own cap", "Claude does not count T", "bounds a chain's total", "has no T"):
+                self.assertNotIn(phrase, body, f"{path.relative_to(ROOT)}: {phrase}")
 
     def test_no_prose_says_a_host_does_not_count(self):
         """Both hosts count K, so nothing that describes the contract says Claude (or any host) does not count yet."""
@@ -104,7 +117,7 @@ class ContinueNoticeTests(unittest.TestCase):
     def test_the_continue_notice_asks_for_action_and_does_not_offer_the_stop(self):
         notice = self.notices()["unattended_continue"]
         self.assertEqual(notice.count("{reason}"), 1)
-        self.assertIn("Nobody is watching", notice)
+        self.assertIn("Auto mode asks nobody", notice)
         self.assertIn("act on that reason", notice)
         for phrase in ("intent=stop", "report_convergence", "end honestly", "hand the turn back"):
             self.assertNotIn(phrase, notice, phrase)

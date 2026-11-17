@@ -28,8 +28,10 @@ class StopResult:
     exit_code: int
     stdout: str = ""
     stderr: str = ""
-    #: Set only when the turn goes on in an auto chain: the count of turn ends on the run's basis to remember (``count_turn_end``).
+    #: Set only when the turn goes on in an auto chain: the count of turn ends on the run's basis and the chain's total, to
+    #: remember (``count_turn_end``).
     chain_count: int | None = None
+    chain_total: int | None = None
 
 
 def _handle(run_id: object) -> str:
@@ -156,10 +158,11 @@ def _reason_text(result: Result) -> str:
     return text if text[-1] in ".!?" else text + "."
 
 
-#: K: the K-th turn end of a chain on one observation basis ends the chain with the residual notice (K - 1 continuations).
-#: The registry's ``turn_end.bounds`` defines it once; a test reads the registry against this constant, and against Pi's.
-#: Claude has no T: the host's own cap of eight consecutive continuations bounds a chain's total.
+#: The bounds of an auto chain, as the registry's ``turn_end.bounds`` defines them (a test reads the registry against these
+#: two constants and against Pi's): the K-th turn end of a chain on one observation basis, or the T-th in the chain, ends it
+#: with the residual notice.
 CONTINUATION_K = 3
+CONTINUATION_T = 16
 
 
 def _basis_file(payload: Mapping[str, object]) -> Path:
@@ -167,19 +170,20 @@ def _basis_file(payload: Mapping[str, object]) -> Path:
     return Path(tempfile.gettempdir()) / f"empirica-stop-basis-{session}"
 
 
-def _remembered(path: Path) -> tuple[str, int] | None:
-    """The chain's record, ``(basis, count)``, as the adapter wrote it, else ``None``. A 7.0.x file held the bare basis, and
-    anything unreadable (not JSON, the wrong shape, a count that is not a non-negative integer) is read the same way: as a
-    changed basis with count 0."""
+def _remembered(path: Path) -> dict | None:
+    """The chain's record, ``{run, basis, count, total}``, as the adapter wrote it, else ``None``. A 7.0.x file held the bare
+    basis, and anything unreadable (not JSON, the wrong shape, a missing field, a count or total that is not a non-negative
+    integer) is read the same way: as a changed basis with count 0."""
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
     if not isinstance(value, dict):
         return None
-    basis, count = value.get("basis"), value.get("count")
-    if isinstance(basis, str) and type(count) is int and count >= 0:
-        return basis, count
+    run, basis, count, total = (value.get(key) for key in ("run", "basis", "count", "total"))
+    if (isinstance(run, str) and isinstance(basis, str) and type(count) is int and count >= 0
+            and type(total) is int and total >= 0):
+        return {"run": run, "basis": basis, "count": count, "total": total}
     return None
 
 
@@ -188,31 +192,45 @@ def _basis_of(result: Result) -> str | None:
     return basis if isinstance(basis, str) else None
 
 
-def count_turn_end(payload: Mapping[str, object], result: Result, *, stop_hook_active: bool) -> int:
-    """How many turn ends of this chain the core's ``run.basis`` has now seen, this one included (1 on a first turn end and
-    on a changed basis). A chain continues only while Claude sends ``stop_hook_active`` true, so any other Stop starts a new
-    one and the record is not read. The adapter composes nothing: progress is the core's basis
-    (``core.evaluation.progress_basis``), on every host. A view without a basis, or an unreadable record, reads as "changed"."""
-    basis = _basis_of(result)
-    previous = _remembered(_basis_file(payload)) if stop_hook_active and basis is not None else None
-    return previous[1] + 1 if previous is not None and previous[0] == basis else 1
+def _run_of(result: Result) -> str | None:
+    run = result.run.get("id") if result.run is not None else None
+    return run if isinstance(run, str) else None
 
 
-def remember_chain(payload: Mapping[str, object], result: Result | None, count: int | None) -> None:
-    """Keep ``{basis, count}`` after a turn end that continued (``count`` is its ``StopResult.chain_count``); after any other
-    outcome the chain has ended, so the record is removed. The write is atomic (a temporary file in the same directory, then a
-    rename), so a reader never sees half a record. An unwritable record only means the next turn end reads "changed": the
-    continuation is repeated and Claude's own cap bounds it."""
+def count_turn_end(payload: Mapping[str, object], result: Result, *, stop_hook_active: bool) -> tuple[int, int]:
+    """``(count, total)``: how many turn ends of this chain the core's ``run.basis`` has now seen, and how many the chain has
+    had, this one included. A first turn end, or one on a changed basis, has count 1. A chain continues only while Claude sends
+    ``stop_hook_active`` true, so any other Stop starts a new one and the record is not read. The record is read for the run
+    it was written for. The adapter composes nothing: progress is the core's basis (``core.evaluation.progress_basis``), on
+    every host. A view without a basis, or an unreadable record, reads as "changed"."""
+    basis, run = _basis_of(result), _run_of(result)
+    previous = _remembered(_basis_file(payload)) if stop_hook_active and basis is not None and run is not None else None
+    if previous is None or previous["run"] != run:
+        return 1, 1
+    return (previous["count"] + 1 if previous["basis"] == basis else 1), previous["total"] + 1
+
+
+def remember_chain(payload: Mapping[str, object], result: Result | None, count: int | None, total: int | None = None) -> None:
+    """Keep ``{run, basis, count, total}`` after a turn end that continued (``count`` and ``total`` are its ``StopResult``'s);
+    after any other outcome the chain has ended, so the record is removed. The write is atomic: a temporary file in the same
+    directory, then a rename, so a reader never sees half a record, and a failed write leaves no staging file. An unwritable
+    record only means the next turn end reads "changed" and the continuation is repeated."""
     path = _basis_file(payload)
-    basis = _basis_of(result) if result is not None else None
+    basis, run = (_basis_of(result), _run_of(result)) if result is not None else (None, None)
     try:
-        if count is None or basis is None:
+        if count is None or total is None or basis is None or run is None:
             path.unlink(missing_ok=True)
             return
-        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
-            handle.write(json.dumps({"basis": basis, "count": count}, sort_keys=True))
-            staged = Path(handle.name)
-        os.replace(staged, path)
+        staged = None
+        try:
+            with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+                staged = Path(handle.name)
+                handle.write(json.dumps({"run": run, "basis": basis, "count": count, "total": total}, sort_keys=True))
+            os.replace(staged, path)
+            staged = None
+        finally:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
     except OSError:
         return
 
@@ -223,13 +241,14 @@ def _settlement(notice: str) -> StopResult:
         {"systemMessage": notice}, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
 
 
-def stop_result(response: object, *, stop_hook_active: bool, turn_count: int = 1) -> StopResult:
+def stop_result(response: object, *, stop_hook_active: bool, turn_count: int = 1, chain_total: int = 1) -> StopResult:
     """Translate a core evaluation to the Stop hook's process result; a settlement never claims convergence.
 
     The outcome is the cell of the turn-end table (ADR-0068, ``turn_end`` in ``host-boundaries.json``) for the run's control
     mode and state. A deliberative turn end pauses, first or later, so ``stop_hook_active`` has no role there; it only marks
-    a *later* turn end of an auto chain. ``turn_count`` is this turn end's count on the run's basis (``count_turn_end()``): the
-    K-th ends the chain with the residual notice, whoever acts."""
+    a *later* turn end of an auto chain. ``turn_count`` and ``chain_total`` are this turn end's count on the run's basis and in
+    the chain (``count_turn_end()``): the K-th and the T-th end the chain with the residual notice, whoever acts, and the
+    continuation before either carries that notice as its directive, so the model is offered the stop before it is spent."""
     if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response.result
@@ -253,16 +272,19 @@ def stop_result(response: object, *, stop_hook_active: bool, turn_count: int = 1
         if mode == "auto":
             reason = _reason_text(result)
             acts = result.run.get("turn_end_actor")
-            if turn_count >= CONTINUATION_K or (acts == "none" and turn_count > 1):
-                # the K-th turn end on one basis, or the none actor's second: the honest end, the one notice that offers the stop
+            if turn_count >= CONTINUATION_K or chain_total >= CONTINUATION_T or (acts == "none" and turn_count > 1):
+                # the K-th turn end on one basis, the T-th in the chain, or the none actor's second: the honest end, the one
+                # notice that offers the stop
                 return _settlement(render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=reason))
-            if acts == "none":
-                # The author has no step that approves the claims as they stand: the agent is handed the residual notice as the
-                # directive (a settled turn would hand the run to nobody), to end honestly or revise the graph.
-                return StopResult(2, stderr=render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=reason) + "\n", chain_count=turn_count)
+            position = {"chain_count": turn_count, "chain_total": chain_total}
+            if acts == "none" or turn_count == CONTINUATION_K - 1 or chain_total == CONTINUATION_T - 1:
+                # The directive is the residual notice: for the none actor (no step of the author's approves the claims as they
+                # stand, and a settled turn would hand the run to nobody), and for the last continuation before a bound, which is
+                # the only text of the chain the model is sure to read (a settlement's systemMessage is shown to the user).
+                return StopResult(2, stderr=render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=reason) + "\n", **position)
             if stop_hook_active:
-                return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=reason) + "\n", chain_count=turn_count)
-            return StopResult(2, stderr=reason + "\n", chain_count=turn_count)
+                return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=reason) + "\n", **position)
+            return StopResult(2, stderr=reason + "\n", **position)
         return StopResult(2, stderr=_reason_text(result) + "\n")
     if kind == "Fault":
         text = result.message or "empirica completion gate fault"

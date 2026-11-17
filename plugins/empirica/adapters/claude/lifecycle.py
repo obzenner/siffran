@@ -438,9 +438,9 @@ def completion_main() -> int:
         response = dispatch_stop(payload, handle)
         active = payload.get("stop_hook_active") is True
         result = response.result if isinstance(response, Response) else None
-        count = count_turn_end(payload, result, stop_hook_active=active) if result is not None else 1
-        mapped = stop_result(response, stop_hook_active=active, turn_count=count)
-        remember_chain(payload, result, mapped.chain_count)  # a continuation keeps the count; any other outcome ends the chain
+        count, total = count_turn_end(payload, result, stop_hook_active=active) if result is not None else (1, 1)
+        mapped = stop_result(response, stop_hook_active=active, turn_count=count, chain_total=total)
+        remember_chain(payload, result, mapped.chain_count, mapped.chain_total)  # a continuation keeps the count; any other outcome ends the chain
     except SelectorError:
         return 0  # malformed non-session Stop events retain observational behavior
     except Exception as exc:  # noqa: BLE001 - completion is the fail-closed boundary

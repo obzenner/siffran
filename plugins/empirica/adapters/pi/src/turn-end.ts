@@ -121,8 +121,12 @@ export function turnEnd(result: Result, remembered: unknown): TurnEnd {
     if (count > 1) return { kind: "no-progress", notice: fill(NOTICES.unattended_residual, { reason }) };
     return { kind: "continue", message: fill(NOTICES.unattended_residual, { reason }), memory: { basis, count, total } };
   }
-  // The first continuation hands the agent the core's own reason; later ones, the notice that asks it to act on the reason (it
-  // never offers the stop: only the residual does). An auto run asks no one, so no directive to report is ever appended.
-  const message = previous === null ? reason : fill(NOTICES.unattended_continue, { reason });
+  // The first continuation hands the agent the core's own reason; later ones, the notice that asks it to act on the reason, which
+  // never offers the stop. The last continuation before a bound, the (K - 1)-th on one basis or the (T - 1)-th in the chain, hands
+  // it the residual instead: the one notice that offers the stop, read while the agent can still take it. An auto run asks no one,
+  // so no directive to report is ever appended.
+  const last = count === CONTINUATION_K - 1 || total === CONTINUATION_T - 1;
+  const message = last ? fill(NOTICES.unattended_residual, { reason })
+    : previous === null ? reason : fill(NOTICES.unattended_continue, { reason });
   return { kind: "continue", message, memory: { basis, count, total } };
 }

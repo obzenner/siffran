@@ -50,7 +50,7 @@
       "required": ["bounds", "outcomes", "states", "hosts"],
       "properties": {
         "bounds": {
-          "description": "The one definition of how long an auto chain of turn ends may go on: the K-th turn end on one observation basis, or the T-th turn end in a chain, ends it. Hosts in `enforced_by` count; any other host ends at the first repeat on an unchanged basis. The prose of the table, the adapters and the documents cite it and do not restate it.",
+          "description": "The one definition of how long an auto chain of turn ends may go on: the K-th turn end on one observation basis, or the T-th turn end in a chain, ends it. Every host in `enforced_by` counts both K and T, and a host not named there does not count. The prose of the table, the adapters and the documents cite it and do not restate it.",
           "type": "object",
           "additionalProperties": false,
           "required": ["K", "T", "definition", "enforced_by"],

@@ -304,9 +304,9 @@ class StopHookLoopOnClaude(HostFaithful):
         for _ in range(self.CAP):
             response = Response.from_envelope({"request_id": "stop"}, {
                 "protocol": "empirica/v2", "request_id": "stop", "result": self.evaluated(drv, run_id)})
-            count = count_turn_end(session, response.result, stop_hook_active=active)
-            stop = stop_result(response, stop_hook_active=active, turn_count=count)
-            remember_chain(session, response.result, stop.chain_count)
+            count, total = count_turn_end(session, response.result, stop_hook_active=active)
+            stop = stop_result(response, stop_hook_active=active, turn_count=count, chain_total=total)
+            remember_chain(session, response.result, stop.chain_count, stop.chain_total)
             stops.append(stop)
             if stop.exit_code == 0:
                 break
@@ -333,18 +333,22 @@ class StopHookLoopOnClaude(HostFaithful):
         self.assertEqual(json.loads(stops[0].stdout), {"systemMessage": protocol.PAUSED_FOR_EVIDENCE_NOTICE})
         self.assertEqual(self.human.shown, [])
 
-    def test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_ends_at_the_K_th_turn_end_with_no_directive_in_interactive_auto(self):
-        """An auto run asks no one, so the Stop never directs a report: the first turn end gives the core's reason, the next
-        the notice that asks the agent to act, and the K-th (the registry's ``turn_end.bounds``) the residual, which offers the
-        stop. An agent that ignores them reaches that end, never Claude's own cap; nobody is shown a dialog."""
+    def test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_gets_the_stop_at_the_last_continuation_and_ends_at_the_K_th_in_interactive_auto(self):
+        """An auto run asks no one, so the Stop never directs a report: the first turn end gives the core's reason, the last
+        continuation (the K - 1-th of the registry's ``turn_end.bounds``) hands the model the residual, which offers the stop
+        where the model reads it, and the K-th settles with the same notice. An agent that ignores them reaches that end, never
+        Claude's own cap; nobody is shown a dialog."""
         drv, run_id = self.claude(mode="auto")
         self.after_research(run_id)
         stops = self.hook_loop(drv, run_id, lambda text: None)
         k = self.registry_K()
         self.assertEqual([s.exit_code for s in stops], [2] * (k - 1) + [0], [s.stderr or s.stdout for s in stops])
         self.assertFalse(any(protocol.EVIDENCE_REPORT_NOTICE in (s.stderr + s.stdout) for s in stops))
-        self.assertTrue(stops[1].stderr.endswith("Nobody is watching this turn end, so act on that reason now.\n"), stops[1].stderr)
-        self.assertIn("intent=stop", json.loads(stops[-1].stdout)["systemMessage"])  # the residual does
+        for earlier in stops[1:k - 2]:  # a continuation before the last asks for action and offers no stop
+            self.assertTrue(earlier.stderr.endswith("Auto mode asks nobody at this turn end, so act on that reason now.\n"), earlier.stderr)
+        self.assertIn("intent=stop", stops[k - 2].stderr)  # the last continuation: the stop, on stderr, which the model reads
+        self.assertEqual(json.loads(stops[-1].stdout)["systemMessage"].split("The run cannot")[1],
+                         stops[k - 2].stderr.split("The run cannot")[1].rstrip("\n"))  # and the settlement carries the same notice
         self.assertEqual(self.human.shown, [])
 
     @staticmethod
@@ -362,22 +366,19 @@ class StopHookLoopOnClaude(HostFaithful):
                 calls.append("report_convergence intent=stop")
                 self.say(call_of(calls[-1], run_id))
         stops = self.hook_loop(drv, run_id, agent)
-        if stops[-1].exit_code == 0 and stops[-1].stdout.startswith("{"):  # the residual settles the turn: the agent reads it next
-            agent(json.loads(stops[-1].stdout)["systemMessage"])
         return drv, run_id, stops, calls
 
-    def test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_residuals_intent_stop(self):
+    def test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_residual_the_last_continuation_hands_the_model(self):
         for label, session in (("interactive auto after the first approval", {}), ("delegated auto", {"delegated": True})):
             with self.subTest(label):
                 drv, run_id, stops, calls = self.unattended(**session)
                 self.assertEqual([s.exit_code for s in stops], [2, 2, 0], [s.stderr or s.stdout for s in stops])
                 self.assertEqual(stops[0].stderr.strip(), "Record research for claim C0.")  # an auto first turn end gives the core's reason
                 self.assertIn("Record research for claim C0.", stops[1].stderr)
-                self.assertTrue(stops[1].stderr.endswith("act on that reason now.\n"))  # the continuation asks the agent to act, no stop
-                self.assertNotIn("intent=stop", stops[1].stderr)
-                self.assertIn("intent=stop", stops[2].stdout)  # the K-th turn end is the residual, the notice that does
-                self.assertIn("Record research for claim C0.", stops[2].stdout)
+                # the last continuation hands the model the residual on stderr, where it reads it, and the literal agent takes the stop
+                self.assertIn("intent=stop", stops[1].stderr)
                 self.assertEqual(calls, ["report_convergence intent=stop"])
+                self.assertEqual((stops[2].exit_code, stops[2].stderr), (0, ""))  # the next Stop finds a stopped run, not a settlement
                 self.assertTrue(self.run_view(drv, run_id)["status"].startswith("stopped_"), self.run_view(drv, run_id)["status"])
                 self.assertEqual(self.human.shown, [])
 
