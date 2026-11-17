@@ -229,7 +229,7 @@ def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] 
 PRE_INVESTIGATION_REFERENCES = ("claim-graph.md", "governance.md", "budget-freeze.md")
 REFERENCE_LATER_HEADER = ("The rules needed before investigation are in the skill; "
                           "this reference adds the detail for later.")
-_LINK = re.compile(r"\]\((?:\./)?references/([A-Za-z0-9._-]+\.md)(?:#([A-Za-z0-9_-]+))?\)")
+_LINK = re.compile(r"\]\((?:\./)?references/([A-Za-z0-9._-]+\.md)(?:#([^)]*))?\)")
 # The one way a reference link may stand in section 6: its own sentence says the read is optional.
 OPTIONAL_READ_MARK = "not a prerequisite read"
 _BEFORE_ROUTE_HEADER = re.compile(r"\b[Rr]ead\b[^.]*\bbefore\b[^.]*\b(?:seeding|routing|the route)\b")

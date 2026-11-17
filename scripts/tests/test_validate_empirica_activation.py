@@ -361,6 +361,23 @@ class ReferenceLinkTests(unittest.TestCase):
         mixed = "See [the graph rules](references/claim-graph.md) first. Nothing here is a prerequisite read."
         self.assertEqual(len(activation.skill_link_problems(self.route_section_with(mixed), self.REFERENCES)), 1)
 
+    def test_a_punctuated_anchor_is_validated_against_the_headings(self):
+        """The whole fragment is read, so punctuation in an anchor cannot hide a mistyped link (a heading's slug has none)."""
+        for anchor in ("no.such.heading", "construction.rules", "no/such", "a:b", "x%20y", "no_such_heading!"):
+            with self.subTest(anchor=anchor):
+                text = self.skill() + f"\n\nSee [rules](references/claim-graph.md#{anchor}).\n"
+                problems = activation.skill_link_problems(text, self.REFERENCES)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn(f"claim-graph.md#{anchor}", problems[0])
+
+    def test_a_valid_anchor_is_accepted_including_one_to_a_heading_that_has_punctuation(self):
+        # "Governed initialization (public contract 6.0.0)": its slug drops the parentheses and the dots
+        for target in ("claim-graph.md#construction-rules", "governance.md#governed-initialization-public-contract-600",
+                       "governance.md#timeout-and-recovery"):
+            with self.subTest(target=target):
+                text = self.skill() + f"\n\nSee [rules](references/{target}).\n"
+                self.assertEqual(activation.skill_link_problems(text, self.REFERENCES), [])
+
     def test_a_dot_slash_link_to_a_missing_file_is_named(self):
         text = self.skill().replace("## 9. Preflight the host",
                                     "## 9. Preflight the host\n\nSee [x](./references/missing.md).")
