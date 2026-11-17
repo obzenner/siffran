@@ -1528,7 +1528,10 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
         #   ordinary: active supporting research, no active refuting/failing evidence.
         #   needs-experiment: additionally requires an active passing spike with satisfied
         #     prerequisites and no RunView freshness change for its bindings.
-        #   needs-decision: can never project approved.
+        #   needs-decision: approved when (a) its human_decision approves it, or (b) it has
+        #     active supporting research and no active refuting research (the ordinary fold-1
+        #     rule). Neither is invalid. The view carries no control mode, so this is structural:
+        #     the core owns the rule that (b) without (a) approves only in auto.
         if claim.get("state") == "approved":
             active_arts = [artifact_by_id[a] for a in ae if a in artifact_by_id]
             has_supporting = any(a.get("kind") == "research"
@@ -1543,10 +1546,12 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             has_failing_spike = any(a.get("kind") == "spike"
                                   and a.get("outcome") == "fail"
                                   for a in active_arts)
-            if ck == "needs-decision":
-                errors.append(f"{where}: argument.claims[{i}] needs-decision claim "
-                              f"cannot project approved")
-            if not has_supporting:
+            human = claim.get("human_decision")
+            human_approved = isinstance(human, dict) and human.get("outcome") == "approve"
+            if ck == "needs-decision" and not human_approved and not has_supporting:
+                errors.append(f"{where}: argument.claims[{i}] needs-decision approved with neither "
+                              f"an approving human_decision nor active supporting research")
+            elif not has_supporting and not (ck == "needs-decision" and human_approved):
                 errors.append(f"{where}: argument.claims[{i}] approved but no active "
                               f"supporting research in active_evidence_ids")
             if has_refuting:
@@ -4176,7 +4181,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # D2C invariant 13 conditional approval negatives and positives: claim kind drives the
     # requirement. ordinary approved requires supporting research only; needs-experiment
-    # additionally requires a passing spike; needs-decision can never be approved.
+    # additionally requires a passing spike; needs-decision needs an approving human_decision
+    # or active supporting research.
 
     # ordinary approved research-only POSITIVE (must pass).
     _ord_ed = registry_digest([R1])
@@ -4215,12 +4221,48 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
            "needs-experiment approved but no active passing spike",
            "needs-experiment approved without spike")
 
-    # needs-decision approved NEGATIVE.
-    arg = _d2c_arg()
-    arg["claims"][0]["kind"] = "needs-decision"
-    expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "needs-decision claim cannot project approved",
-           "needs-decision approved")
+    # needs-decision approved: valid with (a) an approving human_decision or (b) active supporting
+    # research and no refuting research; invalid with neither.
+    def _nd_arg(supported: bool, human: dict | None = None) -> dict:
+        nd = _d2c_arg()
+        nd["claims"][0]["kind"] = "needs-decision"
+        if human is not None:
+            nd["claims"][0]["human_decision"] = human
+        if not supported:
+            for art in nd["artifacts"]:
+                if "active" in art:
+                    art["active"] = False
+            nd["claims"][0]["active_evidence_ids"] = []
+            nd["claims"][0]["evidence_digest"] = registry_digest([])
+            nd["audit"]["reviewed_claims"][0]["evidence_digest"] = registry_digest([])
+        return nd
+
+    def _nd_errors(nd: dict) -> list[str]:
+        local: list[str] = []
+        check_argument_view(_arg_env(nd), registry, local, "neg")
+        return local
+
+    _approve = {"outcome": "approve", "answer": None}
+    expect(lambda e: check_argument_view(_arg_env(_nd_arg(False)), registry, e, "neg"),
+           "needs-decision approved with neither an approving human_decision nor active supporting research",
+           "needs-decision approved with neither")
+    expect(lambda e: check_argument_view(_arg_env(_nd_arg(False, {"outcome": "reject", "answer": None})),
+                                         registry, e, "neg"),
+           "needs-decision approved with neither an approving human_decision nor active supporting research",
+           "needs-decision approved with a rejecting human_decision")
+    for label, nd in (("(a) human_decision", _nd_arg(False, _approve)), ("(b) supporting research", _nd_arg(True))):
+        if _nd_errors(nd):
+            errors.append(f"NEG needs-decision approved with {label} must pass but produced: {_nd_errors(nd)}")
+    nd = _nd_arg(True)
+    nd["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "9" * 64,
+        "claim_id": "G0", "claim_digest": d64, "kind": "research", "statement_digest": d64,
+        "active": True, "outcome": "refuting", "source_kind": "web",
+        "source_ref": "https://example.test/refutes", "citation": "Observed refutation."})
+    nd["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "9" * 64, P1]
+    nd["claims"][0]["evidence_digest"] = registry_digest(nd["claims"][0]["active_evidence_ids"])
+    nd["audit"]["reviewed_claims"][0]["evidence_digest"] = nd["claims"][0]["evidence_digest"]
+    expect(lambda e: check_argument_view(_arg_env(nd), registry, e, "neg"),
+           "approved but active refuting research", "needs-decision approved with refuting research")
 
     # identical-digest distinct-claim leakage NEGATIVE: two claims share one wording
     # digest; each must have its own active set and must not share artifacts.
