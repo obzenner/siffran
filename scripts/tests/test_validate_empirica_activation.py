@@ -31,6 +31,51 @@ class SkillRuntimeTests(unittest.TestCase):
         self.assertEqual(len(activation.skill_runtime_problems(text)), 1)
 
 
+class SkillSizeTests(unittest.TestCase):
+    """The size ratchet: SKILL.md is measured in characters, whole and at the top (Claude re-attaches ~5,000 tokens)."""
+
+    def committed(self):
+        return (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
+
+    def test_the_committed_skill_is_accepted(self):
+        text = self.committed()
+        self.assertEqual(activation.skill_size_problems(text), [])
+        self.assertEqual(activation.skill_anchor_problems(text), [])
+
+    def test_a_skill_of_ceiling_plus_one_characters_is_rejected_naming_both_numbers(self):
+        limit = activation.SKILL_MAX_CHARS
+        self.assertEqual(activation.skill_size_problems("x" * limit), [])
+        problems = activation.skill_size_problems("x" * (limit + 1))
+        self.assertEqual(len(problems), 1)
+        self.assertIn(f"{limit + 1:,}", problems[0])
+        self.assertIn(f"{limit:,}", problems[0])
+        self.assertIn("references/", problems[0])
+
+    def anchored(self, position):
+        text = "x" * (activation.SKILL_TOP_CHARS + 100)
+        return text[:position] + "ANCHOR" + text[position + len("ANCHOR"):]
+
+    def test_an_anchor_only_after_the_cut_is_rejected(self):
+        text = self.anchored(activation.SKILL_TOP_CHARS - 5)  # starts before the cut but ends after it
+        problems = activation.skill_anchor_problems(text, ["ANCHOR"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("ANCHOR", problems[0])
+        self.assertIn(f"{activation.SKILL_TOP_CHARS:,}", problems[0])
+
+    def test_an_anchor_missing_entirely_is_rejected(self):
+        problems = activation.skill_anchor_problems("x" * 100, ["ANCHOR"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("ANCHOR", problems[0])
+
+    def test_an_anchor_before_the_cut_is_accepted(self):
+        text = self.anchored(activation.SKILL_TOP_CHARS - len("ANCHOR"))  # ends exactly at the cut
+        self.assertEqual(activation.skill_anchor_problems(text, ["ANCHOR"]), [])
+
+    def test_the_ratchet_constants_are_the_recorded_ones(self):
+        self.assertEqual((activation.SKILL_MAX_CHARS, activation.SKILL_TOP_CHARS), (20_000, 14_800))
+        self.assertEqual(list(activation.REQUIRED_EARLY_ANCHORS), [])
+
+
 HOSTS_DOC = Path(__file__).resolve().parents[2] / activation.HOSTS_DOC
 
 

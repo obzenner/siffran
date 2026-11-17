@@ -134,6 +134,39 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
     return problems
 
 
+# The size ratchet for SKILL.md, measured in characters (frontmatter included) as a proxy for tokens.
+# Measured: 19,502 characters = 6,576 tokens (Bedrock Sonnet 5.5, `usage.input_tokens`), 2.966 characters per token.
+# After compaction Claude Code re-attaches only the first 5,000 tokens of an invoked skill
+# (https://code.claude.com/docs/en/skills, "skill content lifecycle"), so what matters most must sit in the top
+# SKILL_TOP_CHARS (5,000 tokens x 2.966, rounded down). END TARGET: 7,400 characters, about 2,500 tokens.
+# A ratchet: later changes lower SKILL_MAX_CHARS toward the target and must never raise it.
+SKILL_MAX_CHARS = 20_000
+SKILL_TOP_CHARS = 14_800
+# Literal strings that must appear entirely within the first SKILL_TOP_CHARS characters (none chosen yet).
+REQUIRED_EARLY_ANCHORS: tuple[str, ...] = ()
+
+
+def skill_size_problems(skill_text: str, max_chars: int = SKILL_MAX_CHARS) -> list[str]:
+    """Whether the whole SKILL.md (frontmatter included) is within the character ceiling."""
+    if len(skill_text) <= max_chars:
+        return []
+    return [f"SKILL.md is {len(skill_text):,} characters, over the {max_chars:,}-character ceiling; "
+            "move sometimes-needed material to references/ (Claude re-attaches only ~5,000 tokens after compaction)"]
+
+
+def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] = REQUIRED_EARLY_ANCHORS,
+                          top_chars: int = SKILL_TOP_CHARS) -> list[str]:
+    """Anchors absent from SKILL.md, or not entirely within its first ``top_chars`` characters."""
+    top = skill_text[:top_chars]
+    problems = []
+    for anchor in anchors:
+        if anchor in top:
+            continue
+        problems.append(f"SKILL.md anchor {anchor!r} appears only after the first {top_chars:,} characters"
+                        if anchor in skill_text else f"SKILL.md anchor {anchor!r} is missing")
+    return problems
+
+
 def fail(message: str) -> None:
     print(f"FAIL activation: {message}", file=sys.stderr)
     raise SystemExit(1)
@@ -211,6 +244,8 @@ def main() -> int:
         fail("SKILL.md exceeds the 300-line progressive-disclosure budget")
     if len(skill_text.split()) > 3500:
         fail("SKILL.md exceeds the conservative 3,500-word context budget")
+    for problem in [*skill_size_problems(skill_text), *skill_anchor_problems(skill_text)]:
+        fail(problem)
     references = SKILL.parent / "references"
     for name in REQUIRED_SKILL_REFERENCES:
         if not (references / name).is_file():
