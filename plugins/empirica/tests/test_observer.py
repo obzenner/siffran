@@ -475,7 +475,7 @@ class HumanPendingActionTests(unittest.TestCase):
         view, details = observed(Observer(DriverSource(b.store)))
         row, detail = next(iter(_rows(view).values())), next(iter(details.values()))
         g = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]["governance"]  # the author view's governance
-        core_wait = governance.human_wait(g, g["prompt_error"])
+        core_wait = governance.human_wait(g, g["prompt_error"], g["raises"])
         return row, detail, core_wait, b.evaluate(run, "report_convergence")["result"]
 
     def _case(self, outcome=None, *, sized=True, revise=False):

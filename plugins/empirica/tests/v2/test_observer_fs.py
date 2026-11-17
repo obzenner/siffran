@@ -137,7 +137,7 @@ class DecisionDocumentFsTests(unittest.TestCase):
         self.assertIsNotNone(published, "the pair published beside the run")
         g = asked["run"]["governance"]
         decision = {"run_id": run_id, "receipt_id": receipt, "proposal_digest": g["proposal_digest"],
-                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g),
+                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g, g["raises"]),
                     "document_digest": pair["digest"]}
         with mock.patch.dict(os.environ, environment):
             service = bridge.build_service(profile)

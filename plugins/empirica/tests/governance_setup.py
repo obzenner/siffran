@@ -72,7 +72,7 @@ def approve_current(coordinator, run_id, *, author=None, auditor=None):
     response = transact(c, run_id, context, context=True)
     assert response["result"]["type"] in {"Allow", "Inert"}, response
     g = response["result"]["run"]["governance"]
-    approval_kind = expected_approval_kind(g)
+    approval_kind = expected_approval_kind(g, g["raises"])
     decision = {"run_id": run_id, "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                 "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
     if decision["approval_kind"] == "host_ui":

@@ -336,7 +336,7 @@ class HostGovernance:
         expected = (g["plan_revision"], g["proposal_digest"])
         if run["status"] != "active" or g["state"] == "approved":
             return result
-        approval_kind = expected_approval_kind(g)
+        approval_kind = expected_approval_kind(g, g["raises"])
         approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
         if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
             # Report what this host can do NOW, so the run's own facts (and its Next) say nobody can be asked,

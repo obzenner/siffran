@@ -777,8 +777,8 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             # configuration is shown out and no change is allowed any more (the revision allowance is spent).
             confirmations = confirmation.interactions(snapshot)
             if (governance.interactions_remaining(governed, confirmations)["total"] == 0
-                    or governance.nobody_to_ask(governed)
-                    or governance.configuration_stuck(governed, confirmations)):
+                    or governance.nobody_to_ask(governed, state.budgets)
+                    or governance.configuration_stuck(governed, confirmations, state.budgets)):
                 actions.append("residual.accept")
             else:
                 actions.append("governance.propose")
@@ -1572,8 +1572,9 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
     # (then the agent keeps working until the human tells it to stop again).
     approval = next(o for p, o, _ in snapshot.bootstrap_requirements if p == "governance.approved")
     configuration_waits = governance.human_wait(
-        {**snapshot.state.governance, "raises": governance.raises(snapshot.state.governance, snapshot.state.budgets)},
-        governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
+        snapshot.state.governance,
+        governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)),
+        governance.raises(snapshot.state.governance, snapshot.state.budgets))
     requirements = []
     for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
         human = ((reason in HUMAN_WAITING_REASONS and not (reason == TERMINAL_STOP_REASON
