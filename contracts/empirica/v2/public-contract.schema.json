@@ -646,6 +646,22 @@
             "ended_message": {
               "type": "string",
               "minLength": 1
+            },
+            "ui_case_messages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minProperties": 1
+            },
+            "ended_case_messages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minProperties": 1
             }
           }
         }

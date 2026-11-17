@@ -80,7 +80,7 @@
     "started": 1790602140.0,
     "state": "active",
     "updated": 1790603100.0,
-    "version": "sha256:feedc8796f2580007079092798ee84931e3286f31ca1e92d5fc21fe4b512c6d3"
+    "version": "sha256:6ffab209a790d83b85a9ee7713096f26f811552a6d28b782b229473f74a52eb7"
    }
   ],
   "audit": {
@@ -271,7 +271,7 @@
    "started": 1790602140.0,
    "state": "active",
    "updated": 1790603100.0,
-   "version": "sha256:feedc8796f2580007079092798ee84931e3286f31ca1e92d5fc21fe4b512c6d3"
+   "version": "sha256:6ffab209a790d83b85a9ee7713096f26f811552a6d28b782b229473f74a52eb7"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -352,7 +352,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:feedc8796f2580007079092798ee84931e3286f31ca1e92d5fc21fe4b512c6d3"
+  "version": "sha256:6ffab209a790d83b85a9ee7713096f26f811552a6d28b782b229473f74a52eb7"
  },
  "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1": {
   "attempts": [
@@ -418,7 +418,7 @@
     "started": 1790601720.0,
     "state": "active",
     "updated": 1790602080.0,
-    "version": "sha256:f682504f4c1adb6eddff6119a9014424f62903e16547bf8dc0a12b4f65ddea49"
+    "version": "sha256:86dcef57e83536597c9f87dac46e6fcb871bcb172c69df50c9c21affab09d720"
    }
   ],
   "audit": {
@@ -631,7 +631,7 @@
    "started": 1790601720.0,
    "state": "active",
    "updated": 1790602080.0,
-   "version": "sha256:f682504f4c1adb6eddff6119a9014424f62903e16547bf8dc0a12b4f65ddea49"
+   "version": "sha256:86dcef57e83536597c9f87dac46e6fcb871bcb172c69df50c9c21affab09d720"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -664,7 +664,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:f682504f4c1adb6eddff6119a9014424f62903e16547bf8dc0a12b4f65ddea49"
+  "version": "sha256:86dcef57e83536597c9f87dac46e6fcb871bcb172c69df50c9c21affab09d720"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1": {
   "attempts": [
@@ -763,7 +763,7 @@
     "started": 1790595900.0,
     "state": "active",
     "updated": 1790596380.0,
-    "version": "sha256:3aa09ef30dd9162147e447d591f901e2ac06510ecdf4a2f3477e97f12b59c3c3"
+    "version": "sha256:e545f33f5a462c4b684904b6b9fb8bc6eb29b9d9ec4f2a3f795e3f21b56cb467"
    }
   ],
   "audit": {
@@ -999,7 +999,7 @@
    "started": 1790595900.0,
    "state": "active",
    "updated": 1790596380.0,
-   "version": "sha256:3aa09ef30dd9162147e447d591f901e2ac06510ecdf4a2f3477e97f12b59c3c3"
+   "version": "sha256:e545f33f5a462c4b684904b6b9fb8bc6eb29b9d9ec4f2a3f795e3f21b56cb467"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1056,7 +1056,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:3aa09ef30dd9162147e447d591f901e2ac06510ecdf4a2f3477e97f12b59c3c3"
+  "version": "sha256:e545f33f5a462c4b684904b6b9fb8bc6eb29b9d9ec4f2a3f795e3f21b56cb467"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
   "attempts": [
@@ -1122,7 +1122,7 @@
     "started": 1790595240.0,
     "state": "active",
     "updated": 1790595840.0,
-    "version": "sha256:3c2c577ec73f26afbeae87bc3b2ef64313ce013aeacfa8f9079b8993df3d6f66"
+    "version": "sha256:0cb705785d899bd5f1a68427d63adf09f36d77a07ddf2b01ed23ff62b4d66e45"
    }
   ],
   "audit": {
@@ -1283,7 +1283,7 @@
    "started": 1790595240.0,
    "state": "active",
    "updated": 1790595840.0,
-   "version": "sha256:3c2c577ec73f26afbeae87bc3b2ef64313ce013aeacfa8f9079b8993df3d6f66"
+   "version": "sha256:0cb705785d899bd5f1a68427d63adf09f36d77a07ddf2b01ed23ff62b4d66e45"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1328,7 +1328,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:3c2c577ec73f26afbeae87bc3b2ef64313ce013aeacfa8f9079b8993df3d6f66"
+  "version": "sha256:0cb705785d899bd5f1a68427d63adf09f36d77a07ddf2b01ed23ff62b4d66e45"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
   "attempts": [
@@ -1407,7 +1407,7 @@
     "started": 1790591040.0,
     "state": "stopped_residual",
     "updated": 1790591760.0,
-    "version": "sha256:f1fcdf69e9e1e08197810686cee3709c7f1c8b9ae7f16419f666a98bca9ccbda"
+    "version": "sha256:34ed62ab0df52f1b37aceadd54210ca6b22899b293a602cfff5b66ba76d195ad"
    },
    {
     "ask": null,
@@ -1488,7 +1488,7 @@
     "started": 1790591820.0,
     "state": "active",
     "updated": 1790592900.0,
-    "version": "sha256:d2186e692c5d3461a586bb0b634d31af4168c4007582811b0e2c964812be1089"
+    "version": "sha256:305dac8c5ea899b5fc442668f506e115438d7005d66649ae12b042b928226dd8"
    }
   ],
   "audit": {
@@ -1680,7 +1680,7 @@
    "started": 1790591040.0,
    "state": "stopped_residual",
    "updated": 1790591760.0,
-   "version": "sha256:f1fcdf69e9e1e08197810686cee3709c7f1c8b9ae7f16419f666a98bca9ccbda"
+   "version": "sha256:34ed62ab0df52f1b37aceadd54210ca6b22899b293a602cfff5b66ba76d195ad"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1758,7 +1758,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:f1fcdf69e9e1e08197810686cee3709c7f1c8b9ae7f16419f666a98bca9ccbda"
+  "version": "sha256:34ed62ab0df52f1b37aceadd54210ca6b22899b293a602cfff5b66ba76d195ad"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
   "attempts": [
@@ -1837,7 +1837,7 @@
     "started": 1790591040.0,
     "state": "stopped_residual",
     "updated": 1790591760.0,
-    "version": "sha256:f1fcdf69e9e1e08197810686cee3709c7f1c8b9ae7f16419f666a98bca9ccbda"
+    "version": "sha256:34ed62ab0df52f1b37aceadd54210ca6b22899b293a602cfff5b66ba76d195ad"
    },
    {
     "ask": null,
@@ -1918,7 +1918,7 @@
     "started": 1790591820.0,
     "state": "active",
     "updated": 1790592900.0,
-    "version": "sha256:d2186e692c5d3461a586bb0b634d31af4168c4007582811b0e2c964812be1089"
+    "version": "sha256:305dac8c5ea899b5fc442668f506e115438d7005d66649ae12b042b928226dd8"
    }
   ],
   "audit": {
@@ -2230,7 +2230,7 @@
    "started": 1790591820.0,
    "state": "active",
    "updated": 1790592900.0,
-   "version": "sha256:d2186e692c5d3461a586bb0b634d31af4168c4007582811b0e2c964812be1089"
+   "version": "sha256:305dac8c5ea899b5fc442668f506e115438d7005d66649ae12b042b928226dd8"
   },
   "spike_backend": {
    "backend": "docker",
@@ -2351,7 +2351,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:d2186e692c5d3461a586bb0b634d31af4168c4007582811b0e2c964812be1089"
+  "version": "sha256:305dac8c5ea899b5fc442668f506e115438d7005d66649ae12b042b928226dd8"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
   "attempts": [
@@ -2434,7 +2434,7 @@
     "started": 1790596440.0,
     "state": "active",
     "updated": 1790596980.0,
-    "version": "sha256:5aa92a9e510a11a8f8aad4b9bf21788cd54374b0a77e222383c94d5d2046ce44"
+    "version": "sha256:dd894600f82a8525b3aaf670b46cbe65c01c583efaf256e01d40a86c2d736621"
    }
   ],
   "audit": {
@@ -2630,7 +2630,7 @@
    "started": 1790596440.0,
    "state": "active",
    "updated": 1790596980.0,
-   "version": "sha256:5aa92a9e510a11a8f8aad4b9bf21788cd54374b0a77e222383c94d5d2046ce44"
+   "version": "sha256:dd894600f82a8525b3aaf670b46cbe65c01c583efaf256e01d40a86c2d736621"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -2675,7 +2675,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:5aa92a9e510a11a8f8aad4b9bf21788cd54374b0a77e222383c94d5d2046ce44"
+  "version": "sha256:dd894600f82a8525b3aaf670b46cbe65c01c583efaf256e01d40a86c2d736621"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "attempts": [
@@ -2770,7 +2770,7 @@
     "started": 1790587260.0,
     "state": "stopped_residual",
     "updated": 1790587980.0,
-    "version": "sha256:f66783ce5db7627d3a2a3a11cd8b306a241a6adf23e6070eb21d4d1f7a050276"
+    "version": "sha256:d64734532b655c941b7f60b55261812563d47641be025d374dc54ecee19dc182"
    }
   ],
   "audit": {
@@ -2781,7 +2781,7 @@
   "author": "anthropic/claude-sonnet-4-6",
   "claims": [
    {
-    "blocker_message": "No research that counts was recorded for claim C0 before the run stopped.",
+    "blocker_message": "No research was recorded for claim C0 before the run stopped.",
     "decision": null,
     "id": "C0",
     "proof": [],
@@ -2810,7 +2810,7 @@
     "research": 0
    },
    {
-    "blocker_message": "No research that counts was recorded for claim C2 before the run stopped.",
+    "blocker_message": "No research was recorded for claim C2 before the run stopped.",
     "decision": null,
     "id": "C2",
     "proof": [],
@@ -2898,7 +2898,7 @@
      "C0"
     ],
     "code": "claim.research_missing",
-    "message": "No research that counts was recorded for claim C0 before the run stopped."
+    "message": "No research was recorded for claim C0 before the run stopped."
    },
    {
     "claims": [
@@ -2912,7 +2912,7 @@
      "C2"
     ],
     "code": "claim.research_missing",
-    "message": "No research that counts was recorded for claim C2 before the run stopped."
+    "message": "No research was recorded for claim C2 before the run stopped."
    }
   ],
   "row": {
@@ -3006,7 +3006,7 @@
    "started": 1790587260.0,
    "state": "stopped_residual",
    "updated": 1790587980.0,
-   "version": "sha256:f66783ce5db7627d3a2a3a11cd8b306a241a6adf23e6070eb21d4d1f7a050276"
+   "version": "sha256:d64734532b655c941b7f60b55261812563d47641be025d374dc54ecee19dc182"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -3085,7 +3085,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:f66783ce5db7627d3a2a3a11cd8b306a241a6adf23e6070eb21d4d1f7a050276"
+  "version": "sha256:d64734532b655c941b7f60b55261812563d47641be025d374dc54ecee19dc182"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
   "attempts": [
@@ -3180,7 +3180,7 @@
     "started": 1790586000.0,
     "state": "converged",
     "updated": 1790587200.0,
-    "version": "sha256:5b89f4774be9d6fbfbff31ec3ba0c2b91ad4c0215d78559e1330fc1f30437862"
+    "version": "sha256:88550b84affe713117fb74fbb97ea7644439a738921ea72117bd845126ea1c4f"
    }
   ],
   "audit": {
@@ -3515,7 +3515,7 @@
    "started": 1790586000.0,
    "state": "converged",
    "updated": 1790587200.0,
-   "version": "sha256:5b89f4774be9d6fbfbff31ec3ba0c2b91ad4c0215d78559e1330fc1f30437862"
+   "version": "sha256:88550b84affe713117fb74fbb97ea7644439a738921ea72117bd845126ea1c4f"
   },
   "spike_backend": {
    "backend": "docker",
@@ -3658,7 +3658,7 @@
    ],
    "status": "converged"
   },
-  "version": "sha256:5b89f4774be9d6fbfbff31ec3ba0c2b91ad4c0215d78559e1330fc1f30437862"
+  "version": "sha256:88550b84affe713117fb74fbb97ea7644439a738921ea72117bd845126ea1c4f"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1": {
   "attempts": [
@@ -3741,7 +3741,7 @@
     "started": 1790594100.0,
     "state": "active",
     "updated": 1790595180.0,
-    "version": "sha256:23a73afc1658ac2a66a17c0fc9227faa0e5775065fe4b28ec2dd36786fc69ff0"
+    "version": "sha256:13f895a82cdf98ad67db5a0a23b2e8a980de701a5712251b6cdac4c8550cc17d"
    }
   ],
   "audit": {
@@ -3939,7 +3939,7 @@
    "started": 1790594100.0,
    "state": "active",
    "updated": 1790595180.0,
-   "version": "sha256:23a73afc1658ac2a66a17c0fc9227faa0e5775065fe4b28ec2dd36786fc69ff0"
+   "version": "sha256:13f895a82cdf98ad67db5a0a23b2e8a980de701a5712251b6cdac4c8550cc17d"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -4020,7 +4020,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:23a73afc1658ac2a66a17c0fc9227faa0e5775065fe4b28ec2dd36786fc69ff0"
+  "version": "sha256:13f895a82cdf98ad67db5a0a23b2e8a980de701a5712251b6cdac4c8550cc17d"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
   "attempts": [
@@ -4199,7 +4199,7 @@
     "started": 1790592960.0,
     "state": "active",
     "updated": 1790594040.0,
-    "version": "sha256:48d899dee40136bf50870295d50438c92c2234a874829833e210f7ea064ea108"
+    "version": "sha256:d2553ee548da318bb0faf50ba545bc2d456f1c18c484cd67f3f557534b814c52"
    }
   ],
   "audit": {
@@ -5008,7 +5008,7 @@
    "started": 1790592960.0,
    "state": "active",
    "updated": 1790594040.0,
-   "version": "sha256:48d899dee40136bf50870295d50438c92c2234a874829833e210f7ea064ea108"
+   "version": "sha256:d2553ee548da318bb0faf50ba545bc2d456f1c18c484cd67f3f557534b814c52"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5173,7 +5173,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:48d899dee40136bf50870295d50438c92c2234a874829833e210f7ea064ea108"
+  "version": "sha256:d2553ee548da318bb0faf50ba545bc2d456f1c18c484cd67f3f557534b814c52"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
   "attempts": [
@@ -5288,7 +5288,7 @@
     "started": 1790588040.0,
     "state": "active",
     "updated": 1790589120.0,
-    "version": "sha256:021b20036e222e69b2793c28092b8b4704592bb67f0cf25cd0bed83241c1a544"
+    "version": "sha256:48355c0a4d411258c717c460c330503eeeecf1180a180b5168473f649670eefb"
    }
   ],
   "audit": {
@@ -5572,7 +5572,7 @@
    "started": 1790588040.0,
    "state": "active",
    "updated": 1790589120.0,
-   "version": "sha256:021b20036e222e69b2793c28092b8b4704592bb67f0cf25cd0bed83241c1a544"
+   "version": "sha256:48355c0a4d411258c717c460c330503eeeecf1180a180b5168473f649670eefb"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5689,7 +5689,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:021b20036e222e69b2793c28092b8b4704592bb67f0cf25cd0bed83241c1a544"
+  "version": "sha256:48355c0a4d411258c717c460c330503eeeecf1180a180b5168473f649670eefb"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
   "attempts": [
@@ -5768,7 +5768,7 @@
     "started": 1790590140.0,
     "state": "stopped_frozen",
     "updated": 1790590980.0,
-    "version": "sha256:332aeec0527852f2df084a19f6d34a496be2851e7e954518e939d66ff1356dcc"
+    "version": "sha256:197be5b55e527623d6ad0c04956350cf80896d65afcfdfe1c0ef4e99c2fdfcd4"
    }
   ],
   "audit": {
@@ -5957,7 +5957,7 @@
    "started": 1790590140.0,
    "state": "stopped_frozen",
    "updated": 1790590980.0,
-   "version": "sha256:332aeec0527852f2df084a19f6d34a496be2851e7e954518e939d66ff1356dcc"
+   "version": "sha256:197be5b55e527623d6ad0c04956350cf80896d65afcfdfe1c0ef4e99c2fdfcd4"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -6048,7 +6048,7 @@
    ],
    "status": "stopped_frozen"
   },
-  "version": "sha256:332aeec0527852f2df084a19f6d34a496be2851e7e954518e939d66ff1356dcc"
+  "version": "sha256:197be5b55e527623d6ad0c04956350cf80896d65afcfdfe1c0ef4e99c2fdfcd4"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
   "attempts": [
@@ -6189,7 +6189,7 @@
     "started": 1790589180.0,
     "state": "stopped_budget",
     "updated": 1790590080.0,
-    "version": "sha256:aef34c103c013e6115f0165037412a4fee144caa0e44e00884f60ca0baeb4b70"
+    "version": "sha256:91b9650eed8f468aef14a4f111eb361c70b6ebbcd31bc85e04dc56f1f0ddf6cf"
    }
   ],
   "audit": {
@@ -6460,7 +6460,7 @@
    "started": 1790589180.0,
    "state": "stopped_budget",
    "updated": 1790590080.0,
-   "version": "sha256:aef34c103c013e6115f0165037412a4fee144caa0e44e00884f60ca0baeb4b70"
+   "version": "sha256:91b9650eed8f468aef14a4f111eb361c70b6ebbcd31bc85e04dc56f1f0ddf6cf"
   },
   "spike_backend": {
    "backend": "docker",
@@ -6577,6 +6577,6 @@
    ],
    "status": "stopped_budget"
   },
-  "version": "sha256:aef34c103c013e6115f0165037412a4fee144caa0e44e00884f60ca0baeb4b70"
+  "version": "sha256:91b9650eed8f468aef14a4f111eb361c70b6ebbcd31bc85e04dc56f1f0ddf6cf"
  }
 }

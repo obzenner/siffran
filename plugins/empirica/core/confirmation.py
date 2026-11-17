@@ -246,16 +246,23 @@ def terminal_case(prompt_error: str | None, declined: bool) -> str:
     return "declined" if declined else "ask"
 
 
-def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any], *, ended: bool = False) -> str:
+def reason_text(spec: Mapping[str, Any], parameters: Mapping[str, Any], *, ended: bool = False, ui: bool = False) -> str:
     """The text of a reason: the contract's ``message``, or, when the reason has ``case_messages`` and its parameters name a
     ``case`` (or the parameter the reason's ``case_parameter`` names), that case's text with the parameters filled in.
-    For a run that has ended (``ended``) a reason that is still unresolved reads in the past, as ``ended_message`` words it:
-    nothing is asked or waited for any more. The one place the text is chosen; nothing in an adapter or the observer
-    words it."""
+    For a run that has ended (``ended``) a reason that is still unresolved reads in the past, as ``ended_message`` words it
+    (``ended_case_messages`` for a case that needs its own past wording): nothing is asked or waited for any more. The
+    observer shows the text to a person (``ui``), and a case may have a plainer wording there (``ui_case_messages``) than
+    the instruction the author reads. The one place the text is chosen; nothing in an adapter or the observer words it."""
     templates = spec.get("case_messages")
     case = parameters.get(spec.get("case_parameter", "case"))
-    text = (spec["ended_message"] if ended and "ended_message" in spec
-            else templates[case] if templates and case in templates else spec["message"])
+
+    def case_text(field: str) -> str | None:
+        table = spec.get(field)
+        return table[case] if table and case in table else None
+
+    text = ((case_text("ended_case_messages") or spec.get("ended_message")) if ended else None) \
+        or (case_text("ui_case_messages") if ui or ended else None) \
+        or (templates[case] if templates and case in templates else spec["message"])
     # Only ``{name}`` of a string parameter is filled; any other brace stays as written.
     return re.sub(r"\{(\w+)\}", lambda m: parameters[m.group(1)] if isinstance(parameters.get(m.group(1)), str) else m.group(0), text)
 

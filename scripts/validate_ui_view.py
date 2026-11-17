@@ -225,10 +225,14 @@ def fits(template: str, message: str) -> bool:
 
 
 def _wordings(spec: dict, ended: bool) -> list[str]:
-    """Every text ``confirmation.reason_text`` may choose for a reason (the ended wording alone for a stopped run)."""
-    if ended and "ended_message" in spec:
-        return [spec["ended_message"]]
-    return [spec["message"], *(spec.get("case_messages") or {}).values()]
+    """Every text ``confirmation.reason_text`` may choose for the observer (a stopped run reads its ended wordings, else
+    the ones of a run that goes on)."""
+    ui = spec.get("ui_case_messages") or {}
+    now = [spec["message"], *ui.values(), *(t for case, t in (spec.get("case_messages") or {}).items() if case not in ui)]
+    if ended:
+        return [*([spec["ended_message"]] if "ended_message" in spec else []),
+                *(spec.get("ended_case_messages") or {}).values(), *now]
+    return now
 
 
 def _worded(spec: dict, text: str, ended: bool) -> bool:

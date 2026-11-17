@@ -27,6 +27,8 @@ const MODES = ["deliberative", "auto-interactive-pre", "auto-interactive-post", 
 type Mode = (typeof MODES)[number];
 const HANDLE = "run-handle-1";
 const REASON = "Record research for this claim.";
+/** What the core says in auto when a claim rests only on sources that need a human (`claim.research_missing`, `support: unconfirmed`). */
+const UNCONFIRMED = "Claim C0 rests only on research that a human would have to confirm, and an auto run asks no one, so none of it counts.";
 
 function governance(mode: Mode, pending = false) {
   const auto = mode !== "deliberative";
@@ -44,9 +46,11 @@ function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "hum
     confirmation_batch: null, children: [] };
   let reason: Record<string, unknown> = { code: "claim.research_missing", message: REASON };
   if (kind === "budget") reason = { code: "budget.exhausted", parameters: { resource: "pass" }, message: "pass budget exhausted." };
-  if (kind === "evidence") {
-    run.confirmation_batch = { key: "sha256:b", record_ids: [], claim_ids: [], records: [],
-      prompt_error: mode === "deliberative" ? null : "unavailable" };  // an auto run asks no one: the core's route is unavailable
+  if (kind === "evidence" && mode !== "deliberative") {
+    // an auto run asks no one: the claim's own reason, with no batch and no human reason
+    reason = { code: "claim.research_missing", parameters: { claim_id: "C0", support: "unconfirmed" }, message: UNCONFIRMED };
+  } else if (kind === "evidence") {
+    run.confirmation_batch = { key: "sha256:b", record_ids: [], claim_ids: [], records: [], prompt_error: null };
     reason = { code: "evidence.confirmation_required", parameters: { route: "human" }, message: "Research waits on a human." };
   }
   if (kind === "audit") {
@@ -287,7 +291,7 @@ test("EHB-STOP-32: an auto run asks no one: every auto mode is handed the core's
   for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const) {
     const out = await (await wired(() => block(mode, "evidence"))).settle();
     assert.equal(out?.continue, true, mode);
-    assert.equal((out?.entries?.[0] as { content: string }).content, "Research waits on a human.", mode);
+    assert.equal((out?.entries?.[0] as { content: string }).content, UNCONFIRMED, mode);
   }
 });
 
