@@ -33,28 +33,35 @@ class ScenarioFixture(MediatorFixture):
         return self.end_run(drv, run_id, "stop")["result"]
 
 
-def _requirement(stage: str, obligation: str) -> evaluation.Requirement:
-    return evaluation.Requirement(stage, obligation, obligation, None, {}, (), None, "agent", "next_turn", False)
+def _requirement(stage: str, obligation: str, admissible: bool = True) -> evaluation.Requirement:
+    return evaluation.Requirement(stage, obligation, obligation, None, {}, (), None, "agent", "next_turn", admissible)
 
 
 class FirstAdmissibleCells(ConformanceCase):
-    """The report's first admissible requirement is one selector over ``REPORT_STAGES``: the gate, the view and the
-    ``admissible`` flag of ``report_requirements`` read it, never a row's position."""
+    """The report's first admissible requirement is the first row ``report_requirements`` marks ``admissible``: it is the
+    one owner of admissibility, and the gate, the view and the turn end's actor read the selector, never a row's position
+    or its stage."""
 
     def test_no_requirement_has_no_first(self):
         self.assertIsNone(evaluation.first_admissible(()))
 
-    def test_rows_in_stage_order_give_the_first_row(self):
-        rows = [_requirement(stage, stage) for stage in ("claim", "passes", "audit")]
+    def test_no_admissible_row_has_no_first(self):
+        self.assertIsNone(evaluation.first_admissible([_requirement("audit", "a", False)]))
+
+    def test_the_first_admissible_row_of_a_stage_ordered_report(self):
+        rows = [_requirement("claim", "c"), _requirement("passes", "p", False), _requirement("audit", "a", False)]
         self.assertIs(evaluation.first_admissible(rows), rows[0])
 
-    def test_rows_out_of_stage_order_give_the_earliest_stage(self):
-        rows = [_requirement("audit", "a"), _requirement("terminal", "t"), _requirement("confirmation", "c"),
-                _requirement("passes", "p")]
-        self.assertIs(evaluation.first_admissible(rows), rows[2])
+    def test_a_held_row_at_an_earlier_stage_is_not_chosen(self):
+        rows = [_requirement("confirmation", "held", False), _requirement("passes", "p")]
+        self.assertIs(evaluation.first_admissible(rows), rows[1])
+
+    def test_an_admissible_row_out_of_stage_order_is_the_first_in_row_order(self):
+        rows = [_requirement("terminal", "t", False), _requirement("audit", "a"), _requirement("passes", "p")]
+        self.assertIs(evaluation.first_admissible(rows), rows[1])
 
     def test_a_tie_goes_to_the_first_in_row_order(self):
-        rows = [_requirement("audit", "a"), _requirement("claim", "first"), _requirement("claim", "second")]
+        rows = [_requirement("audit", "a", False), _requirement("claim", "first"), _requirement("claim", "second")]
         self.assertIs(evaluation.first_admissible(rows), rows[1])
 
     def test_the_stage_rank_is_the_one_order(self):

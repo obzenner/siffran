@@ -65,9 +65,12 @@ def _graph_of(claims: list[str], reworded=frozenset()) -> dict:
     return _graph("C0", [(c, *words[c]) for c in claims], [("C0", c) for c in claims if c != "C0"])
 
 
-def _spy_on_requirements() -> None:
-    """For the life of this test module, every ``report_requirements`` answer the gate, the author view and the observer
-    ask for must name, as its first admissible requirement, the row first in its list (the selector changes nothing)."""
+_SPIES: list = []
+
+
+def setUpModule() -> None:
+    """For this module's tests only, every ``report_requirements`` answer the gate, the author view and the observer ask
+    for must name, as its first admissible requirement, the row first in its list (true while rows are stage-ordered)."""
     real = evaluation.report_requirements
 
     def spy(*args, **kwargs):
@@ -77,10 +80,14 @@ def _spy_on_requirements() -> None:
         return owed
 
     for module in (evaluation, projection, core_observer):
-        mock.patch.object(module, "report_requirements", spy).start()
+        patch = mock.patch.object(module, "report_requirements", spy)
+        patch.start()
+        _SPIES.append(patch)
 
 
-_spy_on_requirements()
+def tearDownModule() -> None:
+    while _SPIES:
+        _SPIES.pop().stop()
 
 
 class ObserverEqualsCoreMachine(RuleBasedStateMachine):
