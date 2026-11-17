@@ -77,14 +77,16 @@ def closed_code(result: dict) -> str:
 
     The run's allowance spent, nobody who can be asked with no automatic way on, or no way left to change a shown-out
     configuration (the view's own ``next_action`` is the stop) → ``governance.approval_unavailable`` (the stop alone);
-    a raise nobody can approve while a proposal within the approved ceilings is still admitted (the view's ``next_action``
-    is to propose) → ``governance.raise_unavailable``; this configuration's
+    a raise nobody can approve, or none can be asked for want of an interaction, while a proposal within the approved
+    ceilings is still admitted (the view's ``next_action`` is to propose) → ``governance.raise_unavailable``; this configuration's
     presentations spent with a change still possible → ``governance.configuration_shown``; a human who closed the dialog
     → ``governance.dialog_closed``. Nobody to ask is tested first, so every host answers a resumed run the same way."""
     governed = (result.get("run") or {}).get("governance") or {}
     if governed.get("next_action") == "residual.accept":
         return "governance.approval_unavailable"
-    if (governed.get("context") or {}).get("approval_capability") == "unavailable":
+    spent = (governed.get("interactions_remaining") or {}).get("total") == 0
+    if (governed.get("context") or {}).get("approval_capability") == "unavailable" or (spent and governed.get("prompt_error")):
+        # nobody can approve a pending raise, or nothing is left to ask with, and the view still offers a proposal
         return "governance.raise_unavailable" if governed.get("raises") is True else "governance.approval_unavailable"
     if governed.get("prompt_error"):
         return ("governance.approval_unavailable" if (governed.get("interactions_remaining") or {}).get("total") == 0

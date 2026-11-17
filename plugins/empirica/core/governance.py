@@ -282,11 +282,26 @@ def _no_ingress(governance: Mapping, budgets: Mapping) -> bool:
             and governance["context"]["approval_capability"] != HUMAN_CONFIGURATION)
 
 
+def _automatic_way_on(governance: Mapping, budgets: Mapping) -> bool:
+    """Whether a raise is pending while a revision within the approved ceilings is still admitted: the non-raising revision
+    of this run is automatic (interactive auto after its first approval; every deliberative proposal goes to the human, and
+    a delegated run's raise is refused), so it asks nobody and spends no interaction."""
+    return (sized(governance) and raises(governance, budgets) and expected_approval_kind(governance, False) == "auto"
+            and not revisions_exhausted(governance))
+
+
 def raise_without_ingress(governance: Mapping, budgets: Mapping) -> bool:
-    """Whether a pending raise (the only human question after the first approval) cannot be asked, while a revision is
-    still admitted: a proposal within the approved ceilings is automatic and needs nobody, so the way on is that proposal
-    or the honest stop."""
-    return raises(governance, budgets) and _no_ingress(governance, budgets) and not revisions_exhausted(governance)
+    """Whether a pending raise (the only human question after the first approval) cannot be asked because no human can be
+    reached, while an automatic revision is still admitted: that proposal or the honest stop is the way on."""
+    return _automatic_way_on(governance, budgets) and _no_ingress(governance, budgets)
+
+
+def raise_unasked(governance: Mapping, confirmations: int, budgets: Mapping) -> bool:
+    """Whether a pending raise cannot be asked, for want of a human to ask or of an interaction to ask with (the run's total
+    allowance is spent), while an automatic revision is still admitted: the way on is that proposal or the honest stop. A
+    revision within the approved ceilings asks nobody, so a spent allowance does not close it."""
+    return _automatic_way_on(governance, budgets) and (
+        _no_ingress(governance, budgets) or interactions_remaining(governance, confirmations)["total"] == 0)
 
 
 def nobody_to_ask(governance: Mapping, budgets: Mapping) -> bool:

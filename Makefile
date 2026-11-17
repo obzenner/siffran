@@ -193,7 +193,10 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 		test_governance.GovernanceServiceTests.test_F2_a_pending_raise_with_one_revision_left_still_offers_the_change_after_three_showings \
 		test_governance.GovernanceServiceTests.test_F2_a_pending_raise_with_nobody_to_ask_offers_a_revision_within_the_ceilings_and_the_stop \
 		test_governance.GovernanceServiceTests.test_F2_a_pending_raise_with_nobody_to_ask_and_no_revision_left_names_the_stop_alone \
-		test_governance.GovernanceServiceTests.test_F2_before_the_first_approval_nobody_to_ask_is_still_the_stop_alone
+		test_governance.GovernanceServiceTests.test_F2_before_the_first_approval_nobody_to_ask_is_still_the_stop_alone \
+		test_governance.GovernanceServiceTests.test_F1_a_deliberative_raise_with_no_ingress_names_the_stop_alone \
+		test_governance.GovernanceServiceTests.test_F2_a_pending_raise_with_the_run_total_spent_and_a_revision_left_offers_the_change_and_the_stop \
+		test_governance.GovernanceServiceTests.test_F2_a_pending_raise_with_the_run_total_spent_and_no_revision_left_names_the_stop_alone
 
 check-evidence: ## Fast evidence rules: citations, confirmation, scenarios, A1 boundaries, home isolation, host adapter contracts
 	@printf '$(BOLD)==> evidence suite$(RESET)\n'

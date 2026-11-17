@@ -767,6 +767,57 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(out["run"]["next_actions"], ["governance.propose", "residual.accept"])
         self.assertIn("within the approved ceilings", reason["message"])
 
+    def _raise_pending_after_approval(self, run, mode, session):
+        """A run approved by its human at 7 passes, then a proposal back at 8 (a raise) waiting; returns the mediators' ingress."""
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "route", "reason": "supplied context"}})
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "graph", "payload": GRAPH}})
+        ingress = dict(context_ingress=lambda _p, r, v: self.service.trusted_governance_context(run_id=r, payload=v),
+                       decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v),
+                       documents=self.documents)
+        mediator = HostGovernance(self.profile, elicit=lambda message, schema: {"action": "accept", "content": {}}, **ingress)
+        budgets = {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}
+        first = self.dispatch({"type": "ObserveAction", "run_id": run, "action": {
+            "kind": "configure_run", "budgets": {**budgets, "max_passes": 7}, "rationale": SIZED_RATIONALE}})["result"]
+        self.assertEqual(mediator(first)["run"]["governance"]["state"], "approved")
+        raised = self.dispatch({"type": "ObserveAction", "run_id": run, "action": {
+            "kind": "configure_run", "budgets": budgets, "rationale": "raise the pass allowance back"}})["result"]
+        self.assertTrue(raised["run"]["governance"]["raises"])
+        self.assertEqual(raised["run"]["governance"]["control_mode"], mode)
+        return ingress
+
+    def test_F1_a_deliberative_raise_nobody_can_approve_names_the_stop_alone(self):
+        """Every deliberative proposal goes to the human, so with no ingress no revision is automatic: the reason and the run's
+        Next agree on the stop alone (the within-the-ceilings way on belongs to interactive auto)."""
+        ingress = self._raise_pending_after_approval(self.run, "deliberative", "delib")
+        self.service.trusted_governance_context(run_id=self.run, payload={"author": AUTHOR, "ingress": "mcp_elicitation"})
+        raised = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]
+        out = HostGovernance(self.profile, elicit=None, **ingress)(raised)  # this host can show no dialog now
+        reason = out["reasons"][0]
+        self.assertEqual((out["type"], reason["code"], reason["next_actions"]),
+                         ("Block", "governance.approval_unavailable", ["residual.accept"]))
+        self.assertEqual(out["run"]["next_actions"], ["residual.accept"])
+
+    def test_F2_a_raise_with_the_run_total_spent_names_the_proposal_within_the_ceilings_and_the_stop(self):
+        """The run's interactions are spent while a human could otherwise be reached: nothing can be asked, but a revision
+        within the approved ceilings asks nobody, so the reason and the run's Next agree on propose or stop."""
+        auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto raise spent",
+                              "invocation": {**TEST_INVOCATION, "delegation": True},
+                              "selector": {"project": "p", "session": "auto-raise-spent"}})["result"]["run"]["id"]
+        ingress = self._raise_pending_after_approval(auto, "auto", "auto")
+        from core import governance as core_governance
+        receipts = len(self.service._coordinator.last_snapshot.state.governance["receipts"])
+        with patch.object(core_governance, "MAX_INTERACTIONS", receipts):
+            raised = self.dispatch({"type": "GetRun", "run_id": auto})["result"]
+            self.assertEqual(raised["run"]["governance"]["interactions_remaining"]["total"], 0)
+            shown = []
+            out = HostGovernance(self.profile, elicit=lambda message, schema: shown.append(message) or {"action": "accept", "content": {}},
+                                 **ingress)(raised)
+        reason = out["reasons"][0]
+        self.assertEqual(shown, [], "no dialog opens when the allowance is spent")
+        self.assertEqual((out["type"], reason["code"], reason["next_actions"]),
+                         ("Block", "governance.raise_unavailable", ["governance.propose", "residual.accept"]))
+        self.assertEqual(out["run"]["next_actions"], ["governance.propose", "residual.accept"])
+
     def test_interactive_auto_without_ui_fails_closed_despite_delegation(self):
         auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto no ui",
                               "invocation": {**TEST_INVOCATION, "delegation": True},

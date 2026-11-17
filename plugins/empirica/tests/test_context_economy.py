@@ -793,6 +793,19 @@ class DismissalRecoveryTests(_ServiceHarness):
         self.assertEqual(closed_code({"run": {"governance": {**way_on, "next_action": "residual.accept"}}}),
                          "governance.approval_unavailable")
         self.assertEqual(closed_code({"run": {"governance": {**way_on, "raises": False}}}), "governance.approval_unavailable")
+        # F2: the run's total allowance spent while a human could be reached (nothing to ask with) and a revision within the
+        # approved ceilings admitted: the same way on, whichever host reads it
+        spent = {**way_on, "prompt_error": "governance.interaction_limit", "interactions_remaining": {"proposal": 3, "total": 0},
+                 "context": {"approval_capability": "human_configuration"}}
+        self.assertEqual(closed_code({"run": {"governance": spent}}), "governance.raise_unavailable")
+        self.assertEqual(closed_code({"run": {"governance": {**spent, "next_action": "residual.accept"}}}), "governance.approval_unavailable")
+        self.assertEqual(closed_code({"run": {"governance": {**spent, "raises": False}}}), "governance.approval_unavailable")
+        # presentations spent with the total left is a configuration shown out, whatever is pending
+        self.assertEqual(closed_code({"run": {"governance": {**spent, "interactions_remaining": {"proposal": 0, "total": 100}}}}),
+                         "governance.configuration_shown")
+        # F1: a deliberative run has no automatic revision, so its view names the stop alone and the reason agrees
+        delib = {**way_on, "control_mode": "deliberative", "next_action": "residual.accept"}
+        self.assertEqual(closed_code({"run": {"governance": delib}}), "governance.approval_unavailable")
 
     def test_a_document_that_cannot_be_bound_lets_the_chooser_decide_and_agrees_with_next(self):
         from adapters.governance import HostGovernance

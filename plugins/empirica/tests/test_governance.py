@@ -2750,6 +2750,44 @@ class GovernanceServiceTests(unittest.TestCase):
         self._no_ingress()
         self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
 
+    def test_F1_a_deliberative_raise_with_no_ingress_names_the_stop_alone(self):
+        """Only an automatic revision can be offered when nobody can approve a raise. Every deliberative proposal goes to the
+        human, so a deliberative run whose host reports no ingress gets the stop alone, as before the raise-aware stop."""
+        self.prepare()
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")  # the human's approval
+        self.assertEqual(self._propose(9)["type"], "Allow")
+        governed = self.view()["governance"]
+        self.assertEqual((governed["control_mode"], governed["raises"]), ("deliberative", True))
+        self._no_ingress()
+        self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
+        # and what it offers is true: a proposal within the ceilings is a human's to approve here too, so nothing automatic exists
+        self.assertEqual(self._propose(6)["type"], "Allow")
+        self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
+
+    def _spend_the_run_total(self):
+        """Every interaction of the run spent (the allowance's single owner is patched to the receipts written so far)."""
+        self.view()  # reassemble, so the coordinator's latest snapshot holds the last write
+        receipts = len(self.service._coordinator.last_snapshot.state.governance["receipts"])
+        patched = mock.patch.object(governance, "MAX_INTERACTIONS", receipts)
+        patched.start()
+        self.addCleanup(patched.stop)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"]["total"], 0)
+
+    def test_F2_a_pending_raise_with_the_run_total_spent_and_a_revision_left_offers_the_change_and_the_stop(self):
+        """A raise nobody can be asked about (no interaction is left to ask with) while an automatic revision is admitted: the
+        way on is that revision or the stop. A revision within the approved ceilings asks nobody and spends no interaction."""
+        self._raise_pending(0)
+        self._spend_the_run_total()
+        self.assertEqual(self._next(), (["governance.propose", "residual.accept"], "governance.propose"))
+        self.assertEqual(self._propose(6, "within the approved ceilings")["type"], "Allow")  # the offered way is admitted
+        governed = self.view()["governance"]
+        self.assertEqual((governed["raises"], governed["human_wait"]), (False, False))
+
+    def test_F2_a_pending_raise_with_the_run_total_spent_and_no_revision_left_names_the_stop_alone(self):
+        self._raise_pending(governance.MAX_REVISIONS - 1)
+        self._spend_the_run_total()
+        self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
+
     def test_F2_before_the_first_approval_nobody_to_ask_is_still_the_stop_alone(self):
         self._prepare_auto(self.INTERACTIVE)
         self._no_ingress()

@@ -307,6 +307,20 @@ test("a closed dialog, a spent configuration, a spent run and no UI each choose 
     ["governance.approval_unavailable", ["residual.accept"]]);
   assert.deepEqual(await codes(h => noRaiseIngress(h, "governance.propose", false), []),
     ["governance.approval_unavailable", ["residual.accept"]]);
+  // F2: the run's total allowance spent while a human could be reached, a raise pending and an automatic revision admitted
+  // (the view's next action is propose): the same way on; the view naming the stop alone, or no raise, still wins.
+  const totalSpent = (h: ReturnType<typeof harness>, next: string, raises = true, proposal = 3, total = 0) => {
+    h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal, total };
+    (h.g as Record<string, unknown>).raises = raises; (h.g as Record<string, unknown>).next_action = next;
+  };
+  assert.deepEqual(await codes(h => totalSpent(h, "governance.propose"), []), ["governance.raise_unavailable", again]);
+  assert.deepEqual(await codes(h => totalSpent(h, "residual.accept"), []), ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => totalSpent(h, "governance.propose", false), []), ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => totalSpent(h, "governance.propose", true, 0, 100), []), ["governance.configuration_shown", again]);
+  // F1: a deliberative run has no automatic revision, so with no human to ask its view names the stop alone
+  assert.deepEqual(await codes(h => { noRaiseIngress(h, "residual.accept"); (h.g as Record<string, unknown>).control_mode = "deliberative"; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
   // N1: three showings, then resumed where nothing can be shown: the core's refresh reports an unavailable
   // capability, and nobody to ask outranks the spent configuration (the same order as Claude's closed_code).
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";

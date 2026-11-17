@@ -115,7 +115,7 @@ core never writes a human receipt for a revision that raised nothing (`decision_
 The limits are unchanged: 3 dialogs per plan revision,
 8 post-approval material revisions, 128 interactions. `budget.exhausted` offers `budget.raise` in deliberative and interactive
 auto, and `recovery_exclusions` is keyed by the run's mode (`deliberative`, `auto_interactive`, `auto_delegated`). A host does
-not settle the turn on an exhausted budget when the core offers `budget.raise` to an auto run: the agent is the one to propose it.
+not settle the turn on an exhausted budget when the core offers `budget.raise` to an auto run: the agent is the one to propose it. A raise that cannot be asked, because no human can be reached or the run has no interaction left to ask with, leaves a proposal within the approved ceilings, which is automatic and spends no interaction, so the view offers that proposal and the stop (`governance.raise_unavailable`). Only interactive auto has such a proposal: every deliberative proposal goes to the human, so a deliberative run with nobody to ask is offered the stop alone.
 
 Two deliberate exceptions, both stated rather than hidden: a refuting web source still discards a claim in auto, with no
 human to confirm or reject it, and a stored 7.0.x human `confirm` or `reject` still counts in every mode.

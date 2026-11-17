@@ -772,17 +772,18 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            # The stop alone when no dialog can be shown: nobody to ask, or the run's allowance (not just this
-            # configuration's three presentations: changed ceilings are a new configuration) is spent, or this
-            # configuration is shown out and no change is allowed any more (the revision allowance is spent).
+            # A pending raise nobody can be asked about (no human, or no interaction left) leaves a revision within the approved
+            # ceilings, which is automatic: propose it, or stop. Otherwise the stop alone when no dialog can be shown: nobody
+            # to ask, or the run's allowance (not just this configuration's three presentations: changed ceilings are a new
+            # configuration) is spent, or this configuration is shown out and no change is allowed any more (the revision
+            # allowance is spent).
             confirmations = confirmation.interactions(snapshot)
-            if (governance.interactions_remaining(governed, confirmations)["total"] == 0
+            if governance.raise_unasked(governed, confirmations, state.budgets):
+                actions.extend(("governance.propose", "residual.accept"))
+            elif (governance.interactions_remaining(governed, confirmations)["total"] == 0
                     or governance.nobody_to_ask(governed, state.budgets)
                     or governance.configuration_stuck(governed, confirmations, state.budgets)):
                 actions.append("residual.accept")
-            elif governance.raise_without_ingress(governed, state.budgets):
-                # a raise nobody can approve: propose within the approved ceilings (automatic), or stop
-                actions.extend(("governance.propose", "residual.accept"))
             else:
                 actions.append("governance.propose")
         elif facts["route.recorded"] and not facts["investigation.recorded"]:
