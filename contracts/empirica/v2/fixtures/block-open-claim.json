@@ -105,6 +105,7 @@
           "findings": []
         },
         "confirmation_batch": null,
+        "turn_end_actor": "author",
         "spike_backend": {
           "kind": "spikes_unavailable"
         }

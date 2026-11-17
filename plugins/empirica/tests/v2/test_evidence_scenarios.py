@@ -12,6 +12,7 @@ from adapters import confirmation
 from core import evaluation
 from application import protocol
 from assertions import ConformanceCase, action_freeze, observe_action
+from governance_setup import TEST_INVOCATION
 from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
 from application.protocol import host_profile_id  # noqa: E402
@@ -508,3 +509,79 @@ class RestoreCells(ScenarioFixture):
                                                  "command": {"type": "GetRun", "run_id": run2}})["result"]["run"]
         self.assertEqual(shown["confirmation_batch"]["prompt_error"], "already_presented")
         self.assertEqual(shown["confirmation_batch"], self.batch(drv2, run2))
+
+
+class TurnEndActorCells(ScenarioFixture):
+    """The run view's ``turn_end_actor`` (D2.3): who a host's turn end waits on, owned by the core. It is the actor of the
+    report's first admissible requirement (the author's, whether it owes claim work or an audit, or the human's), and
+    ``none`` when nothing is owed, when the root claim is refuted or conflicted (no further work can approve it), and
+    when the run has ended."""
+
+    MODES = ("deliberative", "auto")
+
+    def actor(self, drv, run_id) -> str:
+        return self.run_view(drv, run_id)["turn_end_actor"]
+
+    def test_author_while_the_agent_owes_research(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.assertEqual(self.actor(drv, run_id), "author", mode)
+            self.assertEqual(self.codes(self.report(drv, run_id)), ["claim.research_missing"])
+
+    def test_author_before_its_configuration_is_approved(self):
+        drv = self.bind_driver("ADR-0073", "turn-end", "setup")
+        run_id = self.start_run(drv, goal="Nothing approved yet.", control_mode="deliberative",
+                                invocation={**TEST_INVOCATION, "human_surface": "human"})
+        self.assertEqual(self.actor(drv, run_id), "author")
+
+    def test_human_while_a_confirmation_waits_on_a_human(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.research(drv, run_id, "web", URL)
+            self.assertEqual((mode, self.actor(drv, run_id)), (mode, "human"))
+
+    def test_author_while_an_audit_is_owed_or_pending(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.research(drv, run_id, "code", WORKSPACE_REF)
+            self.assertEqual((self.codes(self.report(drv, run_id)), self.actor(drv, run_id)),
+                             (["audit.required"], "author"), mode)
+            self.require_pending_audit_child(drv, run_id)
+            self.assertEqual(self.actor(drv, run_id), "author", mode)  # it waits for the audit, or relaunches it
+
+    def test_none_when_nothing_is_owed(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.research(drv, run_id, "code", WORKSPACE_REF)
+            child = self.require_pending_audit_child(drv, run_id)
+            self.require_trusted_audit_attribution(drv, run_id, child, variant="distinct")
+            payload = self.build_audit_verdict_payload(drv, run_id, verdict="pass", scope_review="pass")
+            drv.trusted_audit_verdict(run_id, child, payload)
+            view = self.run_view(drv, run_id)
+            self.assertEqual((view["status"], view["turn_end_actor"]), ("active", "none"), mode)
+
+    def test_none_for_a_refuted_root(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
+            self.assertEqual(self.codes(self.report(drv, run_id)), ["claim.refuted"])
+            self.assertEqual(self.actor(drv, run_id), "none", mode)
+
+    def test_none_for_a_conflicted_root(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.research(drv, run_id, "code", WORKSPACE_REF)
+            self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
+            self.assertEqual(self.codes(self.report(drv, run_id)), ["evidence.conflict"])
+            self.assertEqual(self.actor(drv, run_id), "none", mode)
+
+    def test_a_refuted_leaf_is_not_a_refuted_root(self):
+        drv, run_id = self.start(graph=self.chain())
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1", result="refutes")
+        self.assertEqual(self.actor(drv, run_id), "author")
+
+    def test_none_for_a_terminal_run(self):
+        for mode in self.MODES:
+            drv, run_id = self.start(mode=mode)
+            self.assertEqual(self.stop(drv, run_id)["run"]["turn_end_actor"], "none", mode)
+            self.assertEqual(self.actor(drv, run_id), "none", mode)

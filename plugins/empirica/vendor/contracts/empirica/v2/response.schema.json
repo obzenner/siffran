@@ -1545,7 +1545,8 @@
         "next_actions",
         "untrusted_delimiters",
         "governance",
-        "confirmation_batch"
+        "confirmation_batch",
+        "turn_end_actor"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -1604,6 +1605,14 @@
         },
         "terminal_note": {
           "type": "string"
+        },
+        "turn_end_actor": {
+          "enum": [
+            "author",
+            "human",
+            "none"
+          ],
+          "description": "Who the run waits on at a turn end, owned by the core (core.evaluation.turn_end_actor): the actor of the report's first admissible requirement (the author for claim work or an audit, the human), none when nothing is owed, when the run has ended, and when the root claim is refuted or conflicted. A host reads it and derives nothing else."
         },
         "next_actions": {
           "type": "array",

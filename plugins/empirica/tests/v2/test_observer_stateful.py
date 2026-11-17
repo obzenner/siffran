@@ -247,6 +247,21 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         self.receipts += 1
         self.b.present_and_answer(self.run, f"answer-{self.receipts}", decisions)
 
+    def _turn_end_actor(self, snapshot, core, argument) -> None:
+        """``turn_end_actor`` is the actor of the report's first admissible requirement (the author, whether it owes claim
+        work or an audit, or the human), ``none`` when nothing is owed, when the root is refuted or conflicted
+        (read from the public argument), and when the run has ended."""
+        if core["status"] != "active":
+            want = "none"
+        else:
+            first = evaluation.first_admissible(evaluation.report_requirements(snapshot, evaluation.derive_claims(snapshot)))
+            root = next((c for c in argument["claims"] if c["claim_id"] == argument["root_claim_id"]), None)
+            outcomes = {a["outcome"] for a in argument["artifacts"] if a["kind"] == "research" and a["active"]
+                        and root is not None and a["claim_id"] == root["claim_id"]}
+            ruled_out = root is not None and (root["state"] == "discarded" or outcomes >= {"supporting", "refuting"})
+            want = ("none" if first is None or ruled_out else "human" if first.actor == "human" else "author")
+        assert core["turn_end_actor"] == want, (core["turn_end_actor"], want)
+
     # --- the invariant -----------------------------------------------------------------------------------------------
 
     @invariant()
@@ -265,9 +280,11 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         reader.store = copy_store(self.b.store)
         reader.drv = reader.store.driver
         core = reader.a.dispatch(reader.drv, get_run(run_id=self.run))["result"]["run"]
+        seen = reader.drv._service._coordinator.last_snapshot  # the state GetRun read, before any report counts a pass
         argument = reader.a.dispatch(reader.drv, get_argument(run_id=self.run))["result"]["argument"]
         gate = reader.a.dispatch(reader.drv, evaluate(run_id=self.run, intent="report_convergence"))["result"]
         c = self.check
+        self._turn_end_actor(seen, core, argument)
         decided, self.decisions = decision_problems(row, detail, argument, core)
         assert decided == [], decided
         stepped, self.steps = step_problems(detail, argument)
