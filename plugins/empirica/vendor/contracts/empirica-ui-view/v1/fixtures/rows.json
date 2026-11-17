@@ -270,7 +270,7 @@
  },
  {
   "ask": "confirm_source",
-  "asked_at": 1790596440.0,
+  "asked_at": 1790597040.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -344,14 +344,14 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790595900.0,
+  "started": 1790596500.0,
   "state": "active",
-  "updated": 1790596440.0,
-  "version": "sha256:e88d5c0d887dc92877309114eaed2bc2276616ea4807a3927e8776c993067958"
+  "updated": 1790597040.0,
+  "version": "sha256:dcde4aa2f79476510b6c4aeea7d6fb1562ebd992516f2e6fa183d4746391e36d"
  },
  {
   "ask": "approve_configuration",
-  "asked_at": 1790601420.0,
+  "asked_at": 1790602020.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -408,10 +408,10 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790601180.0,
+  "started": 1790601780.0,
   "state": "active",
-  "updated": 1790601540.0,
-  "version": "sha256:2c1ff1af23b376c13fbb12759940a917642ed1790092fd3bc23f79bea5d7d9b7"
+  "updated": 1790602140.0,
+  "version": "sha256:1bacbe00baa99c6fe2bb562ce6d043bfaaf0d4c26d5afe78f173e997e6db0815"
  },
  {
   "ask": "freeze_scope",
@@ -489,10 +489,10 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790601600.0,
+  "started": 1790602200.0,
   "state": "active",
-  "updated": 1790602560.0,
-  "version": "sha256:05776d339ccbde190f5dac4201ebb8018f0a5558c8165d0af0f6eab0101bfacb"
+  "updated": 1790603160.0,
+  "version": "sha256:39f17e0c8bf58075af85504b3ec06701e9ffd146ffb92f1046a444040c1d1432"
  },
  {
   "ask": null,
@@ -687,6 +687,103 @@
   "state": "active",
   "updated": 1790589120.0,
   "version": "sha256:ff0bc7a2d5627215cd772fe72b4b9ec896264cd4176bcbb3d9bb21c1f0381223"
+ },
+ {
+  "ask": null,
+  "asked_at": null,
+  "attention": "not_ended",
+  "audit": {
+   "current": null,
+   "independence": null,
+   "pending": false,
+   "verdict": "none"
+  },
+  "claims": [
+   {
+    "assurance": "not_approved",
+    "blocker": "claim.research_missing",
+    "blocker_claim": "C0",
+    "evidence": "none",
+    "gating": true,
+    "id": "C0",
+    "kind": "ordinary",
+    "review": "none",
+    "state": "open",
+    "text": "Previews load in one request."
+   },
+   {
+    "assurance": "awaiting_audit",
+    "blocker": null,
+    "blocker_claim": null,
+    "evidence": "research",
+    "gating": true,
+    "id": "C1",
+    "kind": "needs-decision",
+    "review": "none",
+    "state": "approved",
+    "text": "Serve WebP, as every supported browser reads it."
+   },
+   {
+    "assurance": "not_approved",
+    "blocker": "claim.refuted",
+    "blocker_claim": "C2",
+    "evidence": "research",
+    "gating": true,
+    "id": "C2",
+    "kind": "needs-decision",
+    "review": "none",
+    "state": "discarded",
+    "text": "Keep a JPEG fallback for old browsers."
+   }
+  ],
+  "diagnostic": null,
+  "edges": [
+   {
+    "from": "C0",
+    "to": "C1"
+   },
+   {
+    "from": "C0",
+    "to": "C2"
+   }
+  ],
+  "ended": null,
+  "flags": {
+   "changed_since_audit": false,
+   "decided": true,
+   "failed_audit": false,
+   "refuted": true
+  },
+  "generation": 1,
+  "goal": "Pick the thumbnail format and its fallback.",
+  "id": "01174704eecc",
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1",
+  "mode": "auto",
+  "next": {
+   "message": "Record research for claim C0.",
+   "where": "next_turn",
+   "who": "agent"
+  },
+  "previous": null,
+  "progress": {
+   "approved": 1,
+   "required": 3
+  },
+  "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+  "root": "C0",
+  "run": "s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3",
+  "session": {
+   "delegated": true,
+   "host": "claude",
+   "interactive": true,
+   "label": null,
+   "locator": null
+  },
+  "standing": "not_ended",
+  "started": 1790595900.0,
+  "state": "active",
+  "updated": 1790596440.0,
+  "version": "sha256:c77fd779e24e2ccd466a8c9bcf464dd19dbc8b65748d66792efc42d4199d6730"
  },
  {
   "ask": null,

@@ -23,7 +23,7 @@ from typing import Any
 from sandbox_isolation import force_absent_sandbox_home
 
 import governance_setup
-from governance_setup import TEST_INVOCATION, sized_configure_run
+from governance_setup import TEST_INVOCATION, invocation_for, sized_configure_run
 from application import generic_spike
 from application.location import storage_id
 from application.observer import Project, document_entry, run_key
@@ -160,7 +160,7 @@ def step_problems(detail: dict[str, Any], argument: dict[str, Any]) -> tuple[lis
 def decision_problems(row: dict[str, Any], detail: dict[str, Any], argument: dict[str, Any]) -> tuple[list[str], list[str]]:
     """Each ``needs-decision`` claim's decision as the observer reads it, against the public ``GetArgument`` projection of
     the same run (answer present, scope, state), never the observer: the problems, and the status each claim should
-    read (approved, rejected, waiting, unanswered, deferred, not_asked)."""
+    read (approved, rejected, waiting, unanswered, deferred, not_asked, and in auto decided_by_author, rejected_by_evidence)."""
     problems, seen = [], []
     for claim in argument["claims"]:
         if claim["kind"] != "needs-decision":
@@ -169,10 +169,13 @@ def decision_problems(row: dict[str, Any], detail: dict[str, Any], argument: dic
         answered = claim.get("human_decision")
         if answered is not None:
             want = {"approve": "approved", "reject": "rejected"}[answered["outcome"]]
-        elif claim["gating"]:
-            want = ("waiting" if row["state"] == "active" else "unanswered") if claim["state"] == "blocked" else "not_asked"
-        else:
+        elif not claim["gating"]:
             want = "deferred"
+        elif row["mode"] == "auto":  # the author's: its evidence decided it, or the agent still owes research
+            want = {"approved": "decided_by_author", "discarded": "rejected_by_evidence"}.get(
+                claim["state"], "not_asked" if row["state"] == "active" else "unanswered")
+        else:
+            want = ("waiting" if row["state"] == "active" else "unanswered") if claim["state"] == "blocked" else "not_asked"
         seen.append(want)
         at = f"{row['key']} {claim['claim_id']}"
         if decision["status"] != want:
@@ -258,6 +261,7 @@ FIXTURE_SCENARIOS = (
     "approval-pending",    # needs_human, approve_configuration: the dialog shown, not answered
     "pending-amendment",   # needs_human, approve_revision
     "freeze-scope",        # needs_human, freeze_scope
+    "auto-decided",        # an auto run: one decision its evidence approved, one it ruled out
     "converged",           # proven
     "refuted",             # stopped_residual, a refuted claim
     "frozen",              # stopped_frozen
@@ -872,6 +876,18 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
     b.a.dispatch(b.drv, observe_action(run_id=run, action=sized_configure_run(
         budgets={"max_passes": 3, "max_spawns": 0, "max_audit_spawns": 1}, rationale="One claim, no spikes.")))
     b.stamp("pending-amendment", "lumen", "s-amend")
+
+    # lumen: an unattended auto run. Nobody is asked: its evidence approves one decision and rules out the other.
+    run = b.begin("lumen", "s-auto", "Pick the thumbnail format and its fallback.", _graph(
+        "C0", [("C0", "ordinary", "Previews load in one request."),
+               ("C1", "needs-decision", "Serve WebP, as every supported browser reads it."),
+               ("C2", "needs-decision", "Keep a JPEG fallback for old browsers.")],
+        [("C0", "C1"), ("C0", "C2")]), surface="unavailable", control_mode="auto",
+        invocation=invocation_for(PROFILE, host="claude", delegation=True, human_surface="unavailable",
+                                  signal="v2 harness"))
+    b.research(run, "C1", ref="docs/browsers.md")
+    b.research(run, "C2", result="refutes", ref="docs/support.md")
+    b.stamp("auto-decided", "lumen", "s-auto")
 
     # atlas: a source a human must confirm, beside research the agent still owes. The other stages of the gate (the
     # audits it refuses, an unattended run, a host that has not looked, a spent ceiling, drift after a stop, regraphs)

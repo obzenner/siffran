@@ -77,10 +77,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790601600.0,
+    "started": 1790602200.0,
     "state": "active",
-    "updated": 1790602560.0,
-    "version": "sha256:05776d339ccbde190f5dac4201ebb8018f0a5558c8165d0af0f6eab0101bfacb"
+    "updated": 1790603160.0,
+    "version": "sha256:39f17e0c8bf58075af85504b3ec06701e9ffd146ffb92f1046a444040c1d1432"
    }
   ],
   "audit": {
@@ -89,7 +89,7 @@
   "auditor": "anthropic/claude-opus-4-6",
   "audits": [
    {
-    "at": 1790602560.0,
+    "at": 1790603160.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
      "The frozen claim is cited."
@@ -135,7 +135,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790601960.0,
+    "at": 1790602560.0,
     "claim": null,
     "document": {
      "body": null,
@@ -268,10 +268,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790601600.0,
+   "started": 1790602200.0,
    "state": "active",
-   "updated": 1790602560.0,
-   "version": "sha256:05776d339ccbde190f5dac4201ebb8018f0a5558c8165d0af0f6eab0101bfacb"
+   "updated": 1790603160.0,
+   "version": "sha256:39f17e0c8bf58075af85504b3ec06701e9ffd146ffb92f1046a444040c1d1432"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -279,7 +279,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790601600.0,
+    "at": 1790602200.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -291,7 +291,7 @@
     "terminal": false
    },
    {
-    "at": 1790601780.0,
+    "at": 1790602380.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -303,7 +303,7 @@
     "terminal": false
    },
    {
-    "at": 1790602140.0,
+    "at": 1790602740.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -315,7 +315,7 @@
     "terminal": false
    },
    {
-    "at": 1790602260.0,
+    "at": 1790602860.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -327,7 +327,7 @@
     "terminal": false
    },
    {
-    "at": 1790602500.0,
+    "at": 1790603100.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -339,7 +339,7 @@
     "terminal": false
    },
    {
-    "at": 1790602560.0,
+    "at": 1790603160.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -352,13 +352,13 @@
    }
   ],
   "stop": null,
-  "version": "sha256:05776d339ccbde190f5dac4201ebb8018f0a5558c8165d0af0f6eab0101bfacb"
+  "version": "sha256:39f17e0c8bf58075af85504b3ec06701e9ffd146ffb92f1046a444040c1d1432"
  },
  "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1": {
   "attempts": [
    {
     "ask": "approve_configuration",
-    "asked_at": 1790601420.0,
+    "asked_at": 1790602020.0,
     "attention": "needs_you",
     "audit": {
      "current": null,
@@ -415,10 +415,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790601180.0,
+    "started": 1790601780.0,
     "state": "active",
-    "updated": 1790601540.0,
-    "version": "sha256:2c1ff1af23b376c13fbb12759940a917642ed1790092fd3bc23f79bea5d7d9b7"
+    "updated": 1790602140.0,
+    "version": "sha256:1bacbe00baa99c6fe2bb562ce6d043bfaaf0d4c26d5afe78f173e997e6db0815"
    }
   ],
   "audit": {
@@ -442,7 +442,7 @@
    {
     "answer": "later",
     "asked": "approve_configuration",
-    "at": 1790601540.0,
+    "at": 1790602140.0,
     "claim": null,
     "document": {
      "body": {
@@ -571,7 +571,7 @@
   "residuals": [],
   "row": {
    "ask": "approve_configuration",
-   "asked_at": 1790601420.0,
+   "asked_at": 1790602020.0,
    "attention": "needs_you",
    "audit": {
     "current": null,
@@ -628,10 +628,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790601180.0,
+   "started": 1790601780.0,
    "state": "active",
-   "updated": 1790601540.0,
-   "version": "sha256:2c1ff1af23b376c13fbb12759940a917642ed1790092fd3bc23f79bea5d7d9b7"
+   "updated": 1790602140.0,
+   "version": "sha256:1bacbe00baa99c6fe2bb562ce6d043bfaaf0d4c26d5afe78f173e997e6db0815"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -639,7 +639,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790601180.0,
+    "at": 1790601780.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -651,7 +651,7 @@
     "terminal": false
    },
    {
-    "at": 1790601360.0,
+    "at": 1790601960.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -664,7 +664,415 @@
    }
   ],
   "stop": null,
-  "version": "sha256:2c1ff1af23b376c13fbb12759940a917642ed1790092fd3bc23f79bea5d7d9b7"
+  "version": "sha256:1bacbe00baa99c6fe2bb562ce6d043bfaaf0d4c26d5afe78f173e997e6db0815"
+ },
+ "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "not_ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.research_missing",
+      "blocker_claim": "C0",
+      "evidence": "none",
+      "gating": true,
+      "id": "C0",
+      "kind": "ordinary",
+      "review": "none",
+      "state": "open",
+      "text": "Previews load in one request."
+     },
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "research",
+      "gating": true,
+      "id": "C1",
+      "kind": "needs-decision",
+      "review": "none",
+      "state": "approved",
+      "text": "Serve WebP, as every supported browser reads it."
+     },
+     {
+      "assurance": "not_approved",
+      "blocker": "claim.refuted",
+      "blocker_claim": "C2",
+      "evidence": "research",
+      "gating": true,
+      "id": "C2",
+      "kind": "needs-decision",
+      "review": "none",
+      "state": "discarded",
+      "text": "Keep a JPEG fallback for old browsers."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [
+     {
+      "from": "C0",
+      "to": "C1"
+     },
+     {
+      "from": "C0",
+      "to": "C2"
+     }
+    ],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": true
+    },
+    "generation": 1,
+    "goal": "Pick the thumbnail format and its fallback.",
+    "id": "01174704eecc",
+    "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1",
+    "mode": "auto",
+    "next": {
+     "message": "Record research for claim C0.",
+     "where": "next_turn",
+     "who": "agent"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 1,
+     "required": 3
+    },
+    "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+    "root": "C0",
+    "run": "s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3",
+    "session": {
+     "delegated": true,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "not_ended",
+    "started": 1790595900.0,
+    "state": "active",
+    "updated": 1790596440.0,
+    "version": "sha256:c77fd779e24e2ccd466a8c9bcf464dd19dbc8b65748d66792efc42d4199d6730"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": "Record research for claim C0.",
+    "decision": null,
+    "id": "C0",
+    "proof": [],
+    "records": [],
+    "research": 0
+   },
+   {
+    "blocker_message": null,
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "status": "decided_by_author",
+     "where": null
+    },
+    "id": "C1",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "docs/browsers.md states this directly.",
+      "retrieve": true,
+      "source": "docs/browsers.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   },
+   {
+    "blocker_message": "Refuted by active evidence; claim C2 still blocks this scope.",
+    "decision": {
+     "answer": null,
+     "outcome": null,
+     "status": "rejected_by_evidence",
+     "where": null
+    },
+    "id": "C2",
+    "proof": [],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "refuting",
+      "quote": "docs/support.md states this directly.",
+      "retrieve": true,
+      "source": "docs/support.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 0
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790596200.0,
+    "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:9d092d471741ec4dd46032da6d8088da2cf3e7a812f22e1814e52178eb92db88",
+     "path": "/tmp/empirica-home/projects/s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/runs/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/gen-1/hitl/9d092d471741ec4dd46032da6d8088da2cf3e7a812f22e1814e52178eb92db88.json",
+     "status": "missing"
+    },
+    "effect": "configuration_approved",
+    "plan": 1,
+    "source": null
+   }
+  ],
+  "dropped": [
+   {
+    "at": 1790596440.0,
+    "citation": "docs/support.md states this directly.",
+    "claim": "C2",
+    "command": null,
+    "kind": "needs-decision",
+    "removed": false,
+    "source": "docs/support.md",
+    "text": "Keep a JPEG fallback for old browsers.",
+    "why": "refuted"
+   }
+  ],
+  "goal": "Pick the thumbnail format and its fallback.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "auto",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [
+     "C0"
+    ],
+    "message": "Record research for claim C0.",
+    "need": "claim.research_missing",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [
+     "C2"
+    ],
+    "message": "Refuted by active evidence; claim C2 still blocks this scope.",
+    "need": "claim.refuted",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "later",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "not_ended",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.research_missing",
+     "blocker_claim": "C0",
+     "evidence": "none",
+     "gating": true,
+     "id": "C0",
+     "kind": "ordinary",
+     "review": "none",
+     "state": "open",
+     "text": "Previews load in one request."
+    },
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "research",
+     "gating": true,
+     "id": "C1",
+     "kind": "needs-decision",
+     "review": "none",
+     "state": "approved",
+     "text": "Serve WebP, as every supported browser reads it."
+    },
+    {
+     "assurance": "not_approved",
+     "blocker": "claim.refuted",
+     "blocker_claim": "C2",
+     "evidence": "research",
+     "gating": true,
+     "id": "C2",
+     "kind": "needs-decision",
+     "review": "none",
+     "state": "discarded",
+     "text": "Keep a JPEG fallback for old browsers."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [
+    {
+     "from": "C0",
+     "to": "C1"
+    },
+    {
+     "from": "C0",
+     "to": "C2"
+    }
+   ],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": true
+   },
+   "generation": 1,
+   "goal": "Pick the thumbnail format and its fallback.",
+   "id": "01174704eecc",
+   "key": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1",
+   "mode": "auto",
+   "next": {
+    "message": "Record research for claim C0.",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 1,
+    "required": 3
+   },
+   "project": "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50",
+   "root": "C0",
+   "run": "s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3",
+   "session": {
+    "delegated": true,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "not_ended",
+   "started": 1790595900.0,
+   "state": "active",
+   "updated": 1790596440.0,
+   "version": "sha256:c77fd779e24e2ccd466a8c9bcf464dd19dbc8b65748d66792efc42d4199d6730"
+  },
+  "spike_backend": {
+   "kind": "spikes_unavailable"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790595900.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790596020.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790596380.0,
+    "bookkeeping": false,
+    "claim": "C1",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790596440.0,
+    "bookkeeping": false,
+    "claim": "C2",
+    "command": null,
+    "kind": "research",
+    "n": 4,
+    "outcome": "refuting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:c77fd779e24e2ccd466a8c9bcf464dd19dbc8b65748d66792efc42d4199d6730"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
   "attempts": [
@@ -1965,7 +2373,7 @@
   "attempts": [
    {
     "ask": "confirm_source",
-    "asked_at": 1790596440.0,
+    "asked_at": 1790597040.0,
     "attention": "needs_you",
     "audit": {
      "current": null,
@@ -2039,10 +2447,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790595900.0,
+    "started": 1790596500.0,
     "state": "active",
-    "updated": 1790596440.0,
-    "version": "sha256:e88d5c0d887dc92877309114eaed2bc2276616ea4807a3927e8776c993067958"
+    "updated": 1790597040.0,
+    "version": "sha256:dcde4aa2f79476510b6c4aeea7d6fb1562ebd992516f2e6fa183d4746391e36d"
    }
   ],
   "audit": {
@@ -2090,7 +2498,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790596260.0,
+    "at": 1790596860.0,
     "claim": null,
     "document": {
      "body": null,
@@ -2161,7 +2569,7 @@
   "residuals": [],
   "row": {
    "ask": "confirm_source",
-   "asked_at": 1790596440.0,
+   "asked_at": 1790597040.0,
    "attention": "needs_you",
    "audit": {
     "current": null,
@@ -2235,10 +2643,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790595900.0,
+   "started": 1790596500.0,
    "state": "active",
-   "updated": 1790596440.0,
-   "version": "sha256:e88d5c0d887dc92877309114eaed2bc2276616ea4807a3927e8776c993067958"
+   "updated": 1790597040.0,
+   "version": "sha256:dcde4aa2f79476510b6c4aeea7d6fb1562ebd992516f2e6fa183d4746391e36d"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -2246,7 +2654,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790595900.0,
+    "at": 1790596500.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -2258,7 +2666,7 @@
     "terminal": false
    },
    {
-    "at": 1790596080.0,
+    "at": 1790596680.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -2270,7 +2678,7 @@
     "terminal": false
    },
    {
-    "at": 1790596440.0,
+    "at": 1790597040.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -2283,7 +2691,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:e88d5c0d887dc92877309114eaed2bc2276616ea4807a3927e8776c993067958"
+  "version": "sha256:dcde4aa2f79476510b6c4aeea7d6fb1562ebd992516f2e6fa183d4746391e36d"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "attempts": [

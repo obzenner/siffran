@@ -74,4 +74,30 @@ To come: when human-only evidence is asked in interactive auto, and an audit of 
 
 ### D5 Persisted runs
 
-To come: the policy for runs persisted before this change.
+An auto run is read by this version's rules, whether it is active or ended and whichever version wrote it. D1 applies to
+every such run, and a stored fact is never rewritten: the terminal `status`, the audit verdicts, the receipts and the
+presentations stay as they were recorded. A human answer in a persisted run (an `evidence_confirmation` item) still
+decides its claim, in every mode, as before.
+
+The observer reads a `needs-decision` claim's standing from the run's mode, the claim's derived state and the run's
+status. Only an auto run with no human answer changes:
+
+| Claim in an auto run, no human answer | Standing |
+|---|---|
+| outside the run's scope | `deferred` |
+| `approved` by its evidence | `decided_by_author` |
+| `discarded` by its evidence | `rejected_by_evidence` |
+| open, run active | `not_asked` (the agent owes research) |
+| open, run ended | `unanswered` |
+
+A human answer is `approved` or `rejected` in every mode, and a deliberative run keeps its standings. The two new values
+are additive in the `empirica-ui-view/v1` standing enum, with copy.
+
+Two consequences follow for runs already persisted: an ended auto run may show a decision that read `unanswered` as
+decided by its author, and an active auto run with a decision left on Later becomes author-decidable. The upgrade note
+states both.
+
+Rejected alternative: a semantics marker in the run state, so that old runs keep the old rules. It needs a state field
+and so a major version, and it leaves two rule sets for one mode.
+
+Reversal condition: a persisted run whose reading changes in a way an operator cannot tell from its stored facts.
