@@ -22,6 +22,7 @@ sys.path.insert(0, str(PLUGIN))
 from adapters.author_view import render_author_view, validate_public_result  # noqa: E402
 from application.protocol import contract_result, host_profile_id, next_action_surfaces, stored, to_stored  # noqa: E402
 from core.governance import human_wait  # noqa: E402
+from regen_contract_fixtures import turn_end_actor_of  # noqa: E402
 from core.projection import confirmation_actions  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
@@ -351,6 +352,8 @@ def main() -> int:
         text = render_author_view(result, strict=True)
         pairs.append((name, result, text))
     for name, result in _synthetic_results():
+        if isinstance(result, dict) and "run" in result:  # whose turn it is, as the view's own reasons and governance say
+            result["run"]["turn_end_actor"] = turn_end_actor_of(result)
         text = render_author_view(result, strict=True)
         pairs.append((name, result, text))
 

@@ -1639,10 +1639,11 @@
         "turn_end_actor": {
           "enum": [
             "author",
+            "auditor",
             "human",
             "none"
           ],
-          "description": "Who the run waits on at a turn end, owned by the core (core.evaluation.turn_end_actor): the actor of the report's first admissible requirement (the author for claim work or an audit, the human), none when nothing is owed, when the run has ended, and when the root claim is refuted or conflicted. A host reads it and derives nothing else."
+          "description": "Who the run waits on at a turn end, owned by the core (core.evaluation.turn_end_actor): the actor of the report's first admissible requirement. author: the agent's work, including launching an audit; auditor: an audit child is running, so the turn settles and the child's result continues the run; human: a human is being asked. none: nothing is owed, the run has ended, or the root claim is refuted or conflicted and no human is being asked. A host reads it and derives nothing else."
         },
         "next_actions": {
           "type": "array",
