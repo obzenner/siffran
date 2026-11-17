@@ -1528,10 +1528,13 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
         #   ordinary: active supporting research, no active refuting/failing evidence.
         #   needs-experiment: additionally requires an active passing spike with satisfied
         #     prerequisites and no RunView freshness change for its bindings.
-        #   needs-decision: approved when (a) its human_decision approves it, or (b) it has
-        #     active supporting research and no active refuting research (the ordinary fold-1
-        #     rule). Neither is invalid. The view carries no control mode, so this is structural:
-        #     the core owns the rule that (b) without (a) approves only in auto.
+        #   needs-decision: a human_decision that does not approve always rejects. Otherwise it
+        #     is approved when (a) its human_decision approves it, or (b) it has an active
+        #     supporting research outcome and no active refuting research (confirmation status
+        #     is the core's, as for ordinary). Neither is invalid. The view carries no control
+        #     mode, so this is structural: the core owns the rule that (b) without (a) approves
+        #     only in auto; A3 must add the core test
+        #     test_a_deliberative_needs_decision_with_only_research_stays_blocked.
         if claim.get("state") == "approved":
             active_arts = [artifact_by_id[a] for a in ae if a in artifact_by_id]
             has_supporting = any(a.get("kind") == "research"
@@ -1548,7 +1551,10 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
                                   for a in active_arts)
             human = claim.get("human_decision")
             human_approved = isinstance(human, dict) and human.get("outcome") == "approve"
-            if ck == "needs-decision" and not human_approved and not has_supporting:
+            if ck == "needs-decision" and isinstance(human, dict) and not human_approved:
+                errors.append(f"{where}: argument.claims[{i}] needs-decision approved but its "
+                              f"human_decision does not approve it")
+            elif ck == "needs-decision" and not human_approved and not has_supporting:
                 errors.append(f"{where}: argument.claims[{i}] needs-decision approved with neither "
                               f"an approving human_decision nor active supporting research")
             elif not has_supporting and not (ck == "needs-decision" and human_approved):
@@ -4248,21 +4254,52 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
            "needs-decision approved with neither")
     expect(lambda e: check_argument_view(_arg_env(_nd_arg(False, {"outcome": "reject", "answer": None})),
                                          registry, e, "neg"),
-           "needs-decision approved with neither an approving human_decision nor active supporting research",
+           "needs-decision approved but its human_decision does not approve it",
            "needs-decision approved with a rejecting human_decision")
     for label, nd in (("(a) human_decision", _nd_arg(False, _approve)), ("(b) supporting research", _nd_arg(True))):
         if _nd_errors(nd):
             errors.append(f"NEG needs-decision approved with {label} must pass but produced: {_nd_errors(nd)}")
-    nd = _nd_arg(True)
-    nd["artifacts"].append({"sequence": 4, "artifact_id": "sha256:" + "9" * 64,
-        "claim_id": "G0", "claim_digest": d64, "kind": "research", "statement_digest": d64,
-        "active": True, "outcome": "refuting", "source_kind": "web",
-        "source_ref": "https://example.test/refutes", "citation": "Observed refutation."})
-    nd["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "9" * 64, P1]
+    _refuter = "sha256:" + "9" * 64
+
+    def _with_refuting(nd: dict) -> dict:
+        nd["artifacts"].append({"sequence": 4, "artifact_id": _refuter,
+            "claim_id": "G0", "claim_digest": d64, "kind": "research", "statement_digest": d64,
+            "active": True, "outcome": "refuting", "source_kind": "web",
+            "source_ref": "https://example.test/refutes", "citation": "Observed refutation.",
+            "verification": VERIFICATION})
+        ids = [*nd["claims"][0]["active_evidence_ids"], _refuter]
+        nd["claims"][0]["active_evidence_ids"] = ids
+        nd["claims"][0]["evidence_digest"] = registry_digest(ids)
+        nd["audit"]["reviewed_claims"][0]["evidence_digest"] = nd["claims"][0]["evidence_digest"]
+        return nd
+
+    # An evidence veto is the only error: a decision or research never overrides refuting evidence.
+    for label, nd in (("(b)", _nd_arg(True)), ("(a)", _nd_arg(False, _approve))):
+        if _nd_errors(_with_refuting(nd)) != ["neg: argument.claims[0] approved but active refuting "
+                                              "research present in active_evidence_ids"]:
+            errors.append(f"NEG needs-decision approved with {label} plus refuting research: "
+                          f"expected only the refuting error, got {_nd_errors(nd)}")
+    # A failed active spike vetoes an approving decision.
+    nd = _nd_arg(True, _approve)
+    _fail_req = _validation_spike_request(
+        sequence=2, artifact_id="sha256:" + "b" * 64, claim_digest=d64,
+        prerequisites=[R1, R2], paths=REQ_FILES, backend=nd["spike_backend"])
+    nd["artifacts"].append(_validation_spike_result(
+        sequence=4, artifact_id="sha256:" + "a" * 64, request=_fail_req, claim_digest=d64,
+        exit_code=1, active=True, supersedes=None))
+    nd["artifacts"].insert(2, _fail_req)
+    for idx, art in enumerate(nd["artifacts"]):
+        art["sequence"] = idx
+    nd["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "a" * 64, P1]
     nd["claims"][0]["evidence_digest"] = registry_digest(nd["claims"][0]["active_evidence_ids"])
     nd["audit"]["reviewed_claims"][0]["evidence_digest"] = nd["claims"][0]["evidence_digest"]
     expect(lambda e: check_argument_view(_arg_env(nd), registry, e, "neg"),
-           "approved but active refuting research", "needs-decision approved with refuting research")
+           "approved but active failing spike", "needs-decision approved (a) with a failed spike")
+    # A non-approving decision wins over supporting research.
+    expect(lambda e: check_argument_view(_arg_env(_nd_arg(True, {"outcome": "reject", "answer": None})),
+                                         registry, e, "neg"),
+           "needs-decision approved but its human_decision does not approve it",
+           "needs-decision approved with a rejecting human_decision and supporting research")
 
     # identical-digest distinct-claim leakage NEGATIVE: two claims share one wording
     # digest; each must have its own active set and must not share artifacts.
