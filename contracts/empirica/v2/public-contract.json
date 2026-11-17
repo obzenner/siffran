@@ -2211,7 +2211,7 @@
         },
         {
           "id": "roles/human",
-          "text": "The human resolves judgment, budget, and product decisions and accepts residuals; the human must not be silently simulated by an agent."
+          "text": "The human resolves budget decisions, and in deliberative mode judgment and product decisions, and accepts residuals; the human must not be silently simulated by an agent."
         }
       ]
     },
@@ -2277,7 +2277,7 @@
         },
         {
           "id": "claims/residuals/needs_decision",
-          "text": "In deliberative mode a needs-decision claim is the human's: it cannot be agent-approved and becomes a human residual. In auto it is the author's: research that counts approves it, refuting evidence discards it, and a human answer, when present, still decides."
+          "text": "In deliberative mode a needs-decision claim is the human's: it cannot be agent-approved and becomes a human residual. In auto it is the author's: supporting research that does not wait on a human approves it, refuting research or a failed spike discards it, and a human answer, when present, decides after those."
         },
         {
           "id": "claims/residuals/lossless_obligation",
