@@ -1714,6 +1714,7 @@ class GovernanceServiceTests(unittest.TestCase):
         def other(**changes):
             runtime = copy.deepcopy(recorded)
             runtime["subagents"].update(changes)
+            self.assertNotEqual(runtime, recorded, "a case that equals the recorded runtime refuses nothing")
             return runtime
 
         def prepare(payload):
@@ -1725,7 +1726,7 @@ class GovernanceServiceTests(unittest.TestCase):
             before = copy.deepcopy(self.runs.data)
             children = len(self.view()["children"])
             for label, payload in (
-                    ("a reviewed version other than the recorded one", {"host_runtime": other(version="0.76.1")}),
+                    ("a reviewed version other than the recorded one", {"host_runtime": other(version="0.75.0")}),
                     ("another package root", {"host_runtime": other(package_root="/opt/other/pi-subagents")}),
                     ("another preflight module", {"host_runtime": other(preflight_path=recorded["subagents"]["package_root"] + "/src/api/other.js")}),
                     ("no runtime observed", {}),
