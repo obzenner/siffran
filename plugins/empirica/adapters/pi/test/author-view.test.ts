@@ -49,6 +49,20 @@ test("author-view loads every next-action surface from the public contract", () 
   }
 });
 
+test("an owed audit shows the host profile's launch byte for byte; a host with none keeps the protocol surface", () => {
+  const profiles = JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "..", "..", "vendor", "contracts",
+    "empirica", "v2", "host-profiles.json"), "utf8")).profiles as Json[];
+  for (const host of ["claude-code", "pi", "codex-cli"]) {
+    const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, `audit-owed-${host.replace(/-code$|-cli$/, "")}.json`), "utf8"));
+    const launch = profiles.find((row) => row.profile_id === golden.result.run.host.profile_id)!.audit_launch as string | undefined;
+    const text = renderAuthorView(golden.result, { strict: true });
+    assert.equal(text.split(`next: ${launch}`).length - 1, launch === undefined ? 0 : 2, host);
+    if (launch === undefined) assert.ok(text.includes("next: host: child_reserve"), host);
+    else assert.ok(!text.includes("child_reserve"), host);
+  }
+  assert.ok(!readFileSync(path.join(import.meta.dirname, "..", "src", "author-view.ts"), "utf8").includes("empirica-auditor"));
+});
+
 test("every contract label drives the rendered text", () => {
   const labels = PUBLIC_TOOLS.author_view.labels as Record<string, string>;
   const original = { ...labels };

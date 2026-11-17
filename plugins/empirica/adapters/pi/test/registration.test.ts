@@ -230,7 +230,7 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
 
 test("Pi rendered-text ceiling matches Python and covers audit-pending and terminal views", () => {
   assert.equal(POST_MEDIATION_CEILING, 1300, "Pi and Python must share the measured ceiling");
-  for (const name of ["block-pending-audit", "allow-converged"]) {
+  for (const name of ["block-pending-audit", "allow-converged", "audit-owed-claude", "audit-owed-pi", "audit-owed-codex"]) {
     const golden = JSON.parse(readStoredText(
       path.join(HERE, "author-view-golden", `${name}.json`), "utf8"));
     const text = renderAuthorView(golden.result);

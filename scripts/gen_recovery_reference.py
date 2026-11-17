@@ -44,7 +44,7 @@ AUTHOR_GUIDANCE = {
     "claim.refuted": "Active evidence refutes the claim: read the run, then discard or restate the claim in a new graph.",
     "evidence.conflict": "Supporting and refuting research both exist for the claim's current text, and more research cannot clear it: revise or discard the contradicted claim (a frozen claim cannot be rewritten) and research the revised claim, or stop with the residual; never edit a claim cosmetically to evade adverse evidence.",
     "budget.exhausted": "A ceiling is spent: stop honestly with `report_convergence intent=stop`; in deliberative mode you may propose a raise for human approval, in auto mode start a fresh run.",
-    "audit.required": "Launch the packaged auditor as your host's instructions say and never reserve the child yourself; on Codex, end the evidence-complete turn so Stop rejects the unsupported audit.",
+    "audit.required": "Make the auditor launch shown in Next, exactly as printed, and never reserve the child yourself; on Codex, end the evidence-complete turn so Stop rejects the unsupported audit.",
     "audit.pending": "Do nothing: the host is settling the audit child; never poll or respawn.",
     "audit.unreadable": "The auditor returned no valid verdict: retry within the audit ceiling (normally once), otherwise stop.",
     "audit.failed": "Address every finding listed under `Audit:`, then retry within the audit ceiling (normally once); stop if it fails again.",

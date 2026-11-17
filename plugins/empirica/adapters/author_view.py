@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, NewType
 
 from application.protocol import (
+    audit_launch,
     author_view_labels,
     next_action_surfaces,
     response_schema_defs,
@@ -132,8 +133,10 @@ def _fallback(result: Any) -> str:
         return "null"
 
 
-def render_surface(action_id: str) -> Trusted:
-    """Render one contract-owned action surface."""
+def render_surface(action_id: str, launch: str | None = None, audit: bool = False) -> Trusted:
+    """Render one contract-owned action surface; an audit's child action is the host's exact auditor launch."""
+    if launch and (action_id == "child.spawn_auditor" or (audit and action_id == "child.retry")):
+        return Trusted(launch)
     surface = _SURFACES[action_id]
     tool = surface.get("tool")
     if tool == "empirica_observe":
@@ -257,13 +260,13 @@ def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
     return Trusted(f"{missing['code']} {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
-def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
+def _reason(row: dict[str, Any], safety: TextSafety, launch: str | None = None) -> Reason:
     """Parse one schema-valid reason row."""
     return Reason(
         Trusted(row["code"]), Trusted(row["message"]),
         _affected(row.get("affected"), safety),
         _parameters(row["parameters"], safety),
-        tuple(render_surface(action) for action in row["next_actions"]),
+        tuple(render_surface(action, launch, row["code"].startswith("audit.")) for action in row["next_actions"]),
     )
 
 
@@ -334,6 +337,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
                     Trusted(run["id"]), _spike_backend(run),
                     safety.untrusted(rationale) if rationale is not None else None, host_note)
+    launch = audit_launch(run["host"]["profile_id"])
     terminal_next = tuple(render_surface(action) for action in run["next_actions"])
     terminal = run["status"] != "active"
     obligations = tuple(
@@ -343,7 +347,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
              if row["id"].startswith("claim:") else Trusted(row["required"]))
             if row["required"] else None,
             _missing(row, safety) if row["missing"] is not None else None,
-            tuple(render_surface(action) for action in row["next"])
+            tuple(render_surface(action, launch, row["id"] == "obligation.audit") for action in row["next"])
             or (terminal_next if terminal else ()),
         )
         for row in run["obligations"]["active"] if row["status"] != "satisfied")
@@ -353,11 +357,12 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     residuals = tuple(
         Reason(Trusted(row["code"]), Trusted(""), _residual_claims(row, safety),
                _parameters(row["parameters"], safety),
-               tuple(render_surface(action) for action in row["next_actions"]))
+               tuple(render_surface(action, launch, row["code"].startswith("audit.")) for action in row["next_actions"]))
         for row in run["residuals"])
     children = tuple(
         Child(Trusted(row["resource_class"]), _child_label(row, safety), Trusted(row["state"]),
-              render_surface(row["recovery_action"]) if row.get("recovery_action") else None)
+              render_surface(row["recovery_action"], launch, row["resource_class"] == "audit")
+              if row.get("recovery_action") else None)
         for row in run["children"])
     freshness = tuple(
         Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
@@ -365,7 +370,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     return AuthorView(
         header, _audit_summary(run["audit"], safety),
         # Only Block carries reasons; a run-bearing Allow has none.
-        (tuple(_reason(row, safety) for row in result["reasons"])
+        (tuple(_reason(row, safety, launch) for row in result["reasons"])
          if result["type"] == "Block" else ()),
         obligations, satisfied, residuals, children, freshness,
         () if terminal else terminal_next,

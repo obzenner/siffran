@@ -603,6 +603,77 @@ class SizeBudgetTests(_ServiceHarness):
                                 "re-attaching the full presentation must exceed the ceiling")
 
 
+class AuditLaunchViewTests(unittest.TestCase):
+    """S4: when an audit is owed the view shows the host's exact auditor launch (the host profile's ``audit_launch``), not
+    ``host: child_reserve``; a host with no launch (Codex) renders the protocol surface unchanged. C5 sizes are measured on
+    the real audit-owed GetRun and report_convergence Block of each host: at authoring (characters) the largest of them is
+    reported by ``test_the_audit_owed_views_stay_under_the_ceiling`` failing with its numbers if the ceiling is crossed."""
+
+    CEILING = SizeBudgetTests.CEILING
+
+    def _owed(self, profile):
+        """Drive a real run on ``profile`` to the audit-owed state; return (GetRun text, report_convergence Block text)."""
+        from governance_setup import invocation_for
+        runs, artifacts = Runs(), Artifacts()
+        service = compose(Workspace(), Harness(), runs, artifacts, None, profile, {}, None)
+
+        def req(command):
+            return service.dispatch({"protocol": "empirica/v2", "request_id": "t", "command": command})["result"]
+
+        def act(kind, **kwargs):
+            return req({"type": "ObserveAction", "run_id": run_id, "action": {"kind": kind, **kwargs}})
+
+        run_id = req({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
+                      "invocation": invocation_for(profile), "selector": {"project": "p", "session": "s"}})["run"]["id"]
+        act("route", reason="supplied context")
+        act("graph", payload=copy.deepcopy(GRAPH))
+        act(**sized_configure_run(budgets={"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, rationale=SIZED_RATIONALE))
+        approve_current(service._coordinator, run_id)
+        act("investigate")
+        act("research", claim_id="C0", source_kind="code", result="supports",
+            payload={"source_ref": "plugins/empirica/tests/test_context_economy.py", "citation": "observed directly"})
+        act("freeze")
+        tools = PublicTools(profile, dispatch=lambda request, _profile: service.dispatch(request))
+        read = tools.call_internal("empirica_read", {"operation": "GetRun", "run_id": run_id})["content"][0]["text"]
+        block = tools.call_internal("report_convergence", {"run_id": run_id, "intent": "report_convergence"})["content"][0]["text"]
+        return read, block
+
+    def test_the_view_shows_each_hosts_launch_and_the_profile_is_the_only_copy(self):
+        for host in ("claude-code", "pi"):
+            profile = host_profile_id(host)
+            launch = _proto.host_profile(profile)["audit_launch"]
+            read, block = self._owed(profile)
+            for label, text in (("GetRun", read), ("report_convergence", block)):
+                self.assertIn(f"next: {launch}", text, f"{host} {label}")
+                self.assertNotIn("child_reserve", text, f"{host} {label}")
+        # No renderer carries a copy of a launch: the profile is the only place that names the auditor.
+        root = Path(__file__).resolve().parents[1] / "adapters"
+        for source in (root / "author_view.py", root / "pi" / "src" / "author-view.ts"):
+            self.assertNotIn("empirica-auditor", source.read_text(encoding="utf-8"), source.name)
+
+    def test_the_claude_launch_is_the_shape_the_spawn_hook_accepts(self):
+        launch = _proto.host_profile(host_profile_id("claude-code"))["audit_launch"]
+        tool, _, arguments = launch.partition(" ")
+        fields = json.loads(arguments)
+        self.assertEqual(tool, "Agent")
+        self.assertEqual(fields["subagent_type"], "empirica:empirica-auditor")  # the hook's role check
+        self.assertTrue(fields["prompt"].strip() and fields["description"].strip())  # real purpose: the hook replaces both
+        self.assertLessEqual(set(fields), {"subagent_type", "description", "prompt"}, "no model override: the hook denies it")
+
+    def test_a_host_with_no_launch_renders_without_a_hole(self):
+        self.assertNotIn("audit_launch", _proto.host_profile(host_profile_id("codex-cli")))
+        from adapters.author_view import render_surface
+        self.assertEqual(render_surface("child.spawn_auditor", None), "host: child_reserve")
+        self.assertEqual(render_surface("child.spawn_auditor", ""), "host: child_reserve")
+        self.assertEqual(render_surface("child.retry", "launch"), "host: child_reserve", "an ordinary child's retry is not an audit")
+        self.assertEqual(render_surface("child.retry", "launch", audit=True), "launch")
+
+    def test_the_audit_owed_views_stay_under_the_ceiling(self):
+        for host in ("claude-code", "pi"):
+            for label, text in zip(("GetRun", "report_convergence"), self._owed(host_profile_id(host))):
+                self.assertLess(len(text), self.CEILING, f"{host} audit-owed {label}: {len(text)} characters")
+
+
 #: What a human can be asked: the one batch of evidence and decisions (ADR-0067).
 HUMAN_OPERATIONS = ("confirmation",)
 

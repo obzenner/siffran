@@ -70,6 +70,11 @@ const CLAIM_ID = new RegExp(String((RESPONSE_DEFS[CLAIM_ID_DEF] as Json).pattern
 const SURFACES = Object.fromEntries(
   Object.entries(PUBLIC_CONTRACT.next_actions as Json).map(([id, row]) => [id, row.surface]),
 ) as Json;
+// The exact auditor launch each host profile declares: the profile is its only copy.
+const AUDIT_LAUNCHES = new Map<string, string>(
+  (readVendored("host-profiles.json").profiles as Json[])
+    .filter((row) => typeof row.audit_launch === "string").map((row) => [row.profile_id, row.audit_launch]),
+);
 const CEILINGS = Object.keys(PUBLIC_CONTRACT.governance_decisions.controls.budgets as Json)
   .map((ceiling) => [ceiling, `${ceiling.slice("max_".length)}_used`] as const);
 
@@ -159,8 +164,9 @@ function validResult(result: unknown): boolean {
   }
 }
 
-/** Render one contract-owned action surface. */
-function surface(actionId: string): Trusted {
+/** Render one contract-owned action surface; an audit's child action is the host's exact auditor launch. */
+function surface(actionId: string, launch?: string, audit = false): Trusted {
+  if (launch && (actionId === "child.spawn_auditor" || (audit && actionId === "child.retry"))) return trusted(launch);
   const row = SURFACES[actionId] as Json;
   if (row.tool === "empirica_observe") return trusted(`empirica_observe kind=${row.action}`);
   if (row.tool === "empirica_read") return trusted(`empirica_read ${row.operation}`);
@@ -287,11 +293,11 @@ function missing(row: Json, safety: TextSafety): Trusted {
 }
 
 /** Parse one schema-valid reason row. */
-function reason(row: Json, safety: TextSafety): Reason {
+function reason(row: Json, safety: TextSafety, launch?: string): Reason {
   return {
     code: trusted(row.code), message: trusted(row.message), affected: affected(row.affected, safety),
     params: parameters(row.parameters, safety),
-    nextActions: (row.next_actions as string[]).map(surface),
+    nextActions: (row.next_actions as string[]).map((id) => surface(id, launch, String(row.code).startsWith("audit."))),
   };
 }
 
@@ -381,7 +387,8 @@ function parse(result: Json): AuthorView {
     proposalRationale: rationale === null ? null : untrusted(rationale, safety),
     hostNote: hostNote(run.host as Json),
   };
-  const terminalNext = (run.next_actions as string[]).map(surface);
+  const launch = AUDIT_LAUNCHES.get(run.host.profile_id);
+  const terminalNext = (run.next_actions as string[]).map((id) => surface(id));
   const terminal = run.status !== "active";
   const active = run.obligations.active as Json[];
   const obligations = active.filter((row) => row.status !== "satisfied").map((row): Obligation => ({
@@ -390,7 +397,7 @@ function parse(result: Json): AuthorView {
       ? (String(row.id).startsWith("claim:") ? untrusted(row.required, safety) : trusted(row.required))
       : null,
     missing: row.missing === null ? null : missing(row, safety),
-    nextActions: (row.next as string[]).map(surface).concat(
+    nextActions: (row.next as string[]).map((id) => surface(id, launch, row.id === "obligation.audit")).concat(
       (row.next as string[]).length || !terminal ? [] : terminalNext,
     ),
   }));
@@ -399,12 +406,12 @@ function parse(result: Json): AuthorView {
   const residuals = (run.residuals as Json[]).map((row): Reason => ({
     code: trusted(row.code), message: trusted(""), affected: residualClaims(row, safety),
     params: parameters(row.parameters, safety),
-    nextActions: (row.next_actions as string[]).map(surface),
+    nextActions: (row.next_actions as string[]).map((id) => surface(id, launch, String(row.code).startsWith("audit."))),
   }));
   const children = (run.children as Json[]).map((row): Child => ({
     resourceClass: trusted(row.resource_class), purpose: childLabel(row, safety),
     state: trusted(row.state),
-    recovery: row.recovery_action ? surface(row.recovery_action) : null,
+    recovery: row.recovery_action ? surface(row.recovery_action, launch, row.resource_class === "audit") : null,
   }));
   const freshness = (run.freshness.changes as Json[]).map((row): Freshness => ({
     path: untrusted(row.path, safety), state: trusted(row.state),
@@ -418,7 +425,7 @@ function parse(result: Json): AuthorView {
     },
     // Only Block carries reasons; a run-bearing Allow has none.
     reasons: result.type === "Block"
-      ? (result.reasons as Json[]).map((row) => reason(row, safety)) : [],
+      ? (result.reasons as Json[]).map((row) => reason(row, safety, launch)) : [],
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
     waiting: waitingLines(run, safety),

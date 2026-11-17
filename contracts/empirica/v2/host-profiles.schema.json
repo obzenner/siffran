@@ -53,6 +53,11 @@
           "sources": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
           "delegation_env": {"type": "string", "pattern": "^[A-Z][A-Z0-9_]+$"},
           "approval_ingress": {"enum": ["unavailable", "mcp_elicitation", "pi_ui"]},
+          "audit_launch": {
+            "description": "The exact call the author agent makes to launch the auditor: the tool name, a space, then its JSON arguments. The author view prints it, verbatim, wherever the next action is to launch the auditor. Absent for a host with no audit launch (audit_execution `unavailable`): the view then names the protocol surface instead.",
+            "type": "string",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_]* \\{.*\\}$"
+          },
           "subagents_compatibility": {
             "description": "The external runtime that executes a foreground audit (Empirica 4.1 D5/D6, ADR-0069): the package, the version range it may be admitted in, and the policy identifier that names the audit bound and launch classification. Inside the range a version is admitted by what the adapter observes of it (the live launch preflight and the tool's own parameter schema), not by a list; a version with a checked-in compat record is reviewed, any other is recorded as not reviewed. profile_id is '<host_id>+<policy_id>'.",
             "type": "object",

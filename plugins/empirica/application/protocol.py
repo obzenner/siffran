@@ -193,6 +193,11 @@ def host_profile_id(host_id: str) -> str:
     return ids[0]
 
 
+def audit_launch(profile_id: str) -> str | None:
+    """The exact auditor launch a host's profile declares (``host-profiles.json`` is its only copy), else ``None``."""
+    return (_PROFILES.get(profile_id) or {}).get("audit_launch")
+
+
 def host_profile(profile_id: str) -> Mapping[str, Any]:
     return copy.deepcopy(_PROFILES[profile_id])
 

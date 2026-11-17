@@ -20,7 +20,7 @@ PLUGIN = ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(PLUGIN))
 
 from adapters.author_view import render_author_view, validate_public_result  # noqa: E402
-from application.protocol import contract_result, next_action_surfaces, stored, to_stored  # noqa: E402
+from application.protocol import contract_result, host_profile_id, next_action_surfaces, stored, to_stored  # noqa: E402
 from core.governance import human_wait  # noqa: E402
 from core.projection import confirmation_actions  # noqa: E402
 
@@ -149,6 +149,23 @@ def _synthetic_results() -> list[tuple[str, object]]:
             row.update(status="violated", missing={"code": "audit.failed", "target_claim_id": None,
                                                   "parameters": {}},
                        next=list(failed_metadata["next_actions"]))
+
+    # An audit is owed: each host's view shows its own exact auditor launch (a host with none keeps the protocol surface).
+    owed_meta = contract["reasons"]["audit.required"]
+    audit_owed = {}
+    for host in ("claude-code", "pi", "codex-cli"):
+        view = copy.deepcopy(pending)
+        view["run"]["host"]["profile_id"] = host_profile_id(host)
+        view["run"]["children"] = []
+        view["run"]["audit"] = {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []}
+        view["reasons"] = [{"code": "audit.required", "parameters": {}, "message": owed_meta["message"],
+                            "next_actions": owed_meta["next_actions"], "sections": owed_meta["sections"],
+                            "affected": {"obligation_id": "obligation.audit"}}]
+        view["run"]["obligations"]["active"] = [{
+            "id": "obligation.audit", "required": contract["bootstrap"]["audit_obligation"]["must"], "observed": [],
+            "status": "residual", "missing": {"code": "audit.required", "target_claim_id": None, "parameters": {}},
+            "next": list(owed_meta["next_actions"])}]
+        audit_owed[f"audit-owed-{host.removesuffix('-code').removesuffix('-cli')}"] = view
 
     # A pass that no longer covers the argument, with a re-audit on its way: the audit is "passed, no longer current,
     # re-audit pending" and never "failed" or "required" (U1: four facts, not one overloaded word).
@@ -293,6 +310,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         *evidence.items(),
         *governance.items(),
         ("getargument-human-answers", answered),
+        *audit_owed.items(),
         ("audit-stale-scope", audit_stale),
         ("audit-mixed", audit_mixed),
         ("audit-passed-not-current-reaudit-pending", audit_not_current),
