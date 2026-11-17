@@ -544,7 +544,7 @@ class SizeBudgetTests(_ServiceHarness):
         out, dialogs = self._configure(dismiss)
         sc = out["structuredContent"]
         self.assertEqual(sc["type"], "Block", "dismiss must return Block")
-        self.assertEqual(sc["reasons"][0]["code"], "governance.approval_unavailable")
+        self.assertEqual(sc["reasons"][0]["code"], "governance.dialog_closed")
         self.assertEqual(sc["run"]["governance"]["state"], "pending")
         self.assertEqual(dialogs, 1, "dismiss is a single dialog")
         unavailable = _proto.author_view_labels()["spike_backend_unavailable"]
@@ -608,21 +608,23 @@ class SizeBudgetTests(_ServiceHarness):
 
 
 class DismissalRecoveryTests(_ServiceHarness):
-    """After a configuration dialog closes without approval, the view names ONE way on, and the carriers agree.
+    """After a configuration dialog ends without approval, the view names ONE way on, and the carriers agree.
 
-    Closed by the human (dismissed, timed out, declined): the human acts next; when they say how to go on the author
-    calls ``configure_run`` again. Nothing could be shown (no approval UI): the only way on is the honest stop. Run in
-    deliberative and in interactive auto (one human approval episode before investigation)."""
+    The adapter only chooses which contract code applies, from core facts; the code's row owns the actions, and the
+    run-level ``Next:`` must agree with it in every case:
+      * the human closed the dialog (dismissed, timed out) → ``governance.dialog_closed``: ``configure_run`` or stop;
+      * this configuration was shown three times → ``governance.interaction_limit``: ``configure_run`` (changed ceilings) or stop;
+      * no dialog can be shown now (no UI, even after a human-capable context) or the run's allowance is spent →
+        ``governance.approval_unavailable``: the stop alone.
+    A decline is an Allow with no reason; its run-level Next is ``configure_run``. Deliberative and interactive auto."""
 
     _mediator = SizeBudgetTests._mediator
-    _configure = SizeBudgetTests._configure
     _observe_dispatch = SizeBudgetTests._observe_dispatch
 
     AGAIN = "empirica_observe kind=configure_run"
     STOP = "report_convergence intent=stop"
-    CASES = (("dismissed", lambda *_a, **_k: {"action": "cancel"}),
-             ("timed out", lambda *_a, **_k: None),
-             ("declined", lambda *_a, **_k: {"action": "decline"}))
+    BUDGETS = {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}
+    CLOSE = {"dismissed": lambda *_a, **_k: {"action": "cancel"}, "timed out": lambda *_a, **_k: None}
 
     def _start(self, mode, tag=""):
         self.run_id = self.req({"type": "StartRun", "control_mode": mode, "goal": "governed task",
@@ -631,49 +633,99 @@ class DismissalRecoveryTests(_ServiceHarness):
         self.action("route", reason="supplied context")
         self.action("graph", payload=copy.deepcopy(GRAPH))
 
-    @staticmethod
-    def _lines(text):
-        return [line.strip() for line in text.splitlines()]
+    def _call(self, elicit, budgets=None, govern=None):
+        """One configure_run through the real HostGovernance; (view text, dialogs opened)."""
+        shown = {"n": 0}
 
-    def _next_lines(self, text):
-        lines = self._lines(text)
-        return [line for line in lines if line.startswith("next:")], lines[lines.index("Next:") + 1]
+        def counted(*args, **kwargs):
+            shown["n"] += 1
+            return elicit(*args, **kwargs)
+
+        tools = PublicTools(PROFILE, dispatch=self._observe_dispatch,
+                            govern=govern or self._mediator(None if elicit is None else counted))
+        out = tools.call_internal("empirica_observe", {"run_id": self.run_id, "action": {
+            "kind": "configure_run", "budgets": budgets or self.BUDGETS, "rationale": SIZED_RATIONALE}})
+        return out["content"][0]["text"], shown["n"]
+
+    def _way_on(self, text):
+        """(reason code, its ``next:`` actions as printed, the run-level Next); the three must agree."""
+        lines = [line.strip() for line in text.splitlines()]
+        reasons = [line.split(":")[0] for line in lines if line.startswith("governance.")]
+        nexts = [line[len("next: "):].split("; ") for line in lines if line.startswith("next:")]
+        run_next = lines[lines.index("Next:") + 1]
+        return (reasons[0] if reasons else None), (nexts[0] if nexts else []), run_next
+
+    def _agree(self, text, code, actions):
+        got_code, got_next, run_next = self._way_on(text)
+        self.assertEqual((got_code, got_next), (code, actions), text)
+        self.assertIn(run_next, got_next or [run_next], "the run-level Next is one of the reason's actions")
+        self.assertEqual(run_next, actions[0] if code != "governance.approval_unavailable" else self.STOP, text)
+        self.assertNotIn("governance_context", text)
+        self.assertNotIn("blindly", text)
 
     def test_a_closed_dialog_names_one_way_on_in_every_mode(self):
         for mode in ("deliberative", "auto"):
-            for case, answer in self.CASES:
+            for case, answer in self.CLOSE.items():
                 with self.subTest(mode=mode, case=case):
                     self._start(mode, case)
-                    out, dialogs = self._configure(answer)
-                    text = out["content"][0]["text"]
+                    text, dialogs = self._call(answer)
                     self.assertEqual(dialogs, 1)
-                    reason_next, run_next = self._next_lines(text)
-                    self.assertEqual(run_next, self.AGAIN)
-                    self.assertTrue(all(row == f"next: {self.AGAIN}; {self.STOP}" for row in reason_next), reason_next)
-                    self.assertNotIn("governance_context", text)
-                    self.assertNotIn("blindly", text)
-                    self.assertEqual(self._configure(answer)[1], 1, "the resubmitted configure_run reopens the dialog")
+                    self._agree(text, "governance.dialog_closed", [self.AGAIN, self.STOP])
+                    self.assertEqual(self._call(answer)[1], 1, "the resubmitted configure_run reopens the dialog")
 
-    def test_no_approval_ui_names_only_the_stop(self):
-        from adapters.governance import HostGovernance
+    def test_a_decline_is_an_allow_with_no_reason_and_the_run_next_asks_again(self):
         for mode in ("deliberative", "auto"):
             with self.subTest(mode=mode):
-                self._start(mode)
+                self._start(mode, "declined")
+                text, dialogs = self._call(lambda *_a, **_k: {"action": "decline"})
+                code, reason_next, run_next = self._way_on(text)
+                self.assertEqual((dialogs, code, reason_next, run_next), (1, None, [], self.AGAIN), text)
+                self.assertEqual(self._call(lambda *_a, **_k: {"action": "decline"})[1], 1)
+
+    def test_three_dismissals_end_the_dialogs_for_these_values_but_changed_ceilings_reopen_it(self):
+        for mode in ("deliberative", "auto"):
+            with self.subTest(mode=mode):
+                self._start(mode, "limit")
+                answer = self.CLOSE["dismissed"]
+                for _ in range(2):
+                    self._agree(self._call(answer)[0], "governance.dialog_closed", [self.AGAIN, self.STOP])
+                text, dialogs = self._call(answer)
+                self.assertEqual(dialogs, 1)
+                self._agree(text, "governance.interaction_limit", [self.AGAIN, self.STOP])
+                text, dialogs = self._call(answer)
+                self.assertEqual(dialogs, 0, "the same values are not shown a fourth time")
+                self._agree(text, "governance.interaction_limit", [self.AGAIN, self.STOP])
+                text, dialogs = self._call(answer, budgets={**self.BUDGETS, "max_passes": 7})
+                self.assertEqual(dialogs, 1, "changed ceilings are a new configuration and reopen the dialog")
+                self._agree(text, "governance.dialog_closed", [self.AGAIN, self.STOP])
+
+    def test_the_runs_spent_allowance_names_the_stop_alone(self):
+        from core import governance as core_governance
+        for mode in ("deliberative", "auto"):
+            with self.subTest(mode=mode), patch.object(core_governance, "MAX_INTERACTIONS", 2):
+                self._start(mode, "total")
+                self._call(self.CLOSE["dismissed"])
+                text, _ = self._call(self.CLOSE["dismissed"])
+                self._agree(text, "governance.approval_unavailable", [self.STOP])
+                self._agree(self._call(self.CLOSE["dismissed"], budgets={**self.BUDGETS, "max_passes": 7})[0],
+                            "governance.approval_unavailable", [self.STOP])
+
+    def test_no_approval_ui_names_only_the_stop_even_after_a_human_capable_context(self):
+        for mode in ("deliberative", "auto"):
+            with self.subTest(mode=mode, history="reported no ingress"):
+                self._start(mode, "no-ui")
                 # what the host's start hook reports: the host, and that it has no approval ingress
                 self.service.trusted_governance_context(run_id=self.run_id, payload={"author": AUTHOR, "ingress": "unavailable"})
-                tools = PublicTools(PROFILE, dispatch=self._observe_dispatch, govern=HostGovernance(
-                    PROFILE, elicit=None, context_ingress=lambda _p, rid, ctx: self.service.trusted_governance_context(
-                        run_id=rid, payload=ctx),
-                    decision_ingress=lambda _p, rid, payload: self.service.trusted_governance_decision(
-                        run_id=rid, payload=payload)))
-                out = tools.call_internal("empirica_observe", {"run_id": self.run_id, "action": {
-                    "kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
-                    "rationale": SIZED_RATIONALE}})
-                text = out["content"][0]["text"]
-                reason_next, run_next = self._next_lines(text)
-                self.assertEqual(reason_next, [f"next: {self.STOP}"])
-                self.assertEqual(run_next, self.STOP)
-                self.assertNotIn("governance_context", text)
+                self._agree(self._call(None)[0], "governance.approval_unavailable", [self.STOP])
+            with self.subTest(mode=mode, history="was human-capable"):
+                self._start(mode, "was-human")
+                # the start hook's report: the host's author and a human-capable ingress
+                self.service.trusted_governance_context(run_id=self.run_id, payload={"author": AUTHOR, "ingress": "pi_ui"})
+                self._agree(self._call(self.CLOSE["dismissed"])[0], "governance.dialog_closed", [self.AGAIN, self.STOP])
+                # the same run resumed where nothing can be shown: the earlier context said human-capable
+                text, dialogs = self._call(None)
+                self.assertEqual(dialogs, 0)
+                self._agree(text, "governance.approval_unavailable", [self.STOP])
                 self.assertNotIn("configure_run", text)
 
     def test_the_read_tool_does_not_forbid_the_recovery_the_view_names(self):

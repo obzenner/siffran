@@ -754,7 +754,9 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            if (governance.interaction_error(governed, confirmation.interactions(snapshot))
+            # The stop alone when no dialog can be shown: nobody to ask, or the run's allowance (not just this
+            # configuration's three presentations: changed ceilings are a new configuration) is spent.
+            if (governance.interactions_remaining(governed, confirmation.interactions(snapshot))["total"] == 0
                     or governance.nobody_to_ask(governed)):
                 actions.append("residual.accept")
             else:

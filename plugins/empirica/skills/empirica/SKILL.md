@@ -65,7 +65,7 @@ language. When budgets, a stall, or scope closure matter, read
 
 ## 3. Obtain independent audit
 
-Once confirmations are done (`report_convergence` presents them first; the core refuses the audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Once confirmations are done (when evidence waits on a human, `report_convergence` presents it) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
 Approval is not convergence: it means the evidence passed the service's rules, not that it
 convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
 and check that each claim follows from its cited sources alone.
@@ -80,9 +80,9 @@ convergence is unsupported. Do not substitute an ordinary model response.
 ## 4. Request the terminal decision
 
 Call the host's guarded convergence operation when the graph, evidence, and
-scope are current. On Claude and Pi this is `report_convergence`: it has a human
-confirm waiting evidence before the audit, and after the bound audit its `Allow`
-is the terminal decision.
+scope are current. On Claude and Pi this is `report_convergence`: when evidence
+waits on a human, `report_convergence` presents it; after the bound audit its
+`Allow` is the terminal decision.
 
 - Only a schema-guarded `Allow` permits reporting the result.
 - `Allow(converged=true)` permits a convergence claim.

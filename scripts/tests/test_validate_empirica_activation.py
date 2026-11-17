@@ -159,12 +159,12 @@ class SkillOrderTests(unittest.TestCase):
              "(route \u2192 graph \u2192 approved configuration).**")
     # Wording changed on purpose, each pinned by its exact new text and mapped back to the original it replaced: the digest
     # is computed on the original (2020801f), so every other paragraph stays proven unchanged. Each states a rule once.
-    REWRITES = (("Once confirmations are done (`report_convergence` presents them first; the core refuses the audit while one is pending)",
+    REWRITES = (("Once confirmations are done (when evidence waits on a human, `report_convergence` presents it)",
                  "Once confirmations are done (report first; the core refuses an audit while one is pending)"),
                 ("Call the host's guarded convergence operation when the graph, evidence, and\n"
-                 "scope are current. On Claude and Pi this is `report_convergence`: it has a human\n"
-                 "confirm waiting evidence before the audit, and after the bound audit its `Allow`\n"
-                 "is the terminal decision.",
+                 "scope are current. On Claude and Pi this is `report_convergence`: when evidence\n"
+                 "waits on a human, `report_convergence` presents it; after the bound audit its\n"
+                 "`Allow` is the terminal decision.",
                  "Call the host's guarded convergence operation exactly once after the graph,\n"
                  "evidence, and scope are current. On Claude and Pi this is `report_convergence`\n"
                  "after the bound audit."),

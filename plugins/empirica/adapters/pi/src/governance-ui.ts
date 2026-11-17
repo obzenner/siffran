@@ -93,17 +93,26 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
   return result;
 }
 
-function unavailable(response: Response, code = "governance.approval_unavailable"): Response {
+/**
+ * The one contract code for a mediation that ended without a decision, chosen from the run's own governance facts
+ * (never from the adapter's guess): the row it names owns the actions. Python: `closed_code`. The run's allowance
+ * spent, or nobody who can be asked → the stop alone; this configuration's presentations spent → `interaction_limit`;
+ * a human who closed the dialog → `dialog_closed`.
+ */
+function closedCode(response: Response): string {
+  const run = "run" in response.result ? response.result.run : null;
+  const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean;
+    interactions_remaining?: { total?: number } };
+  if (g.prompt_error) return g.interactions_remaining?.total === 0 ? "governance.approval_unavailable" : g.prompt_error;
+  return g.human_wait === true ? "governance.dialog_closed" : "governance.approval_unavailable";
+}
+
+function unavailable(response: Response, code?: string): Response {
+  code ??= closedCode(response);
   if (!(code in RECOVERY)) throw new Error(`Missing canonical governance recovery metadata: ${code}`);
   if (!("run" in response.result)) return response;
-  // A dialog the human closed is theirs to reopen: the author asks again once they say how to go on. Where nobody
-  // can be asked the row's honest stop is the only way on.
-  const asked = code === "governance.approval_unavailable"
-    && (response.result.run?.governance as { human_wait?: boolean } | null | undefined)?.human_wait === true;
-  const row = RECOVERY[code];
   return { ...response, result: { type: "Block", run: response.result.run,
-    reasons: [{ code, parameters: {}, ...row,
-      next_actions: asked ? ["governance.propose", ...row.next_actions] : row.next_actions }] } };
+    reasons: [{ code, parameters: {}, ...RECOVERY[code] }] } };
 }
 
 /**
@@ -250,7 +259,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
     return unavailable(response, "governance.stale_proposal");
   if (g.state === "approved") return response;
   const approvalKind = expectedApprovalKind(g);
-  if (g.prompt_error) return unavailable(response, g.prompt_error);
+  if (g.prompt_error) return unavailable(response);
   const envelope = { run_id: runId, receipt_id: randomUUID(), proposal_digest: g.proposal_digest,
     plan_revision: g.plan_revision, approval_kind: approvalKind };
   // PR 09 (ADR-0072 write-first): a host_ui mediation must hold the bridge-written bound
@@ -258,7 +267,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   // means governance.approval_unavailable, nothing spent. States that wait on no human carry
   // no document and never reach here by the state guard above. The auto lane binds nothing.
   const bound = approvalKind === "host_ui" ? boundDocument(presentationOf(response)) : undefined;
-  if (approvalKind === "host_ui" && !bound) return unavailable(response);
+  if (approvalKind === "host_ui" && !bound) return unavailable(response, "governance.approval_unavailable");
   const mediationEnvelope = bound ? { ...envelope, document_digest: bound.digest } : envelope;
   const dismiss = async (): Promise<Response> => {
     const stored = await trusted({ operation: "governance_decision", run_id: runId,

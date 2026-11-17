@@ -256,7 +256,7 @@ class GovernanceHostTests(unittest.TestCase):
                     "auditor_provider": "anthropic", "auditor_model": "claude-opus-4-6"}}
                 result = self.propose()["result"]["structuredContent"]
                 self.assertEqual(result["type"], "Block")
-                self.assertEqual(result["reasons"][0]["code"], "governance.approval_unavailable")
+                self.assertEqual(result["reasons"][0]["code"], "governance.dialog_closed")
                 self.assertIsNone(result["run"]["governance"]["approved_digest"])
                 self.assertEqual(result["run"]["governance"]["budgets"]["max_spawns"], 1)
 

@@ -71,14 +71,26 @@ def governance_timeout() -> float:
                      f"got {json.dumps(raw, ensure_ascii=False)}")
 
 
-def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:
+def closed_code(result: dict) -> str:
+    """The one contract code for a mediation that ended without a decision, chosen from the run's own governance
+    facts (never from the adapter's guess): the row it names owns the actions.
+
+    The run's allowance spent, or nobody who can be asked → ``governance.approval_unavailable`` (the stop alone); this
+    configuration's presentations spent → ``governance.interaction_limit``; a human who closed the dialog →
+    ``governance.dialog_closed``."""
+    governed = (result.get("run") or {}).get("governance") or {}
+    if governed.get("prompt_error"):
+        return ("governance.approval_unavailable" if (governed.get("interactions_remaining") or {}).get("total") == 0
+                else governed["prompt_error"])
+    return "governance.dialog_closed" if governed.get("human_wait") is True else "governance.approval_unavailable"
+
+
+def unavailable(result: dict, code: str | None = None, *, message: str | None = None) -> dict:
+    code = code or closed_code(result)
     row = protocol.public_contract()["reasons"][code]
-    # A dialog the human closed is theirs to reopen: the author asks again once they say how to go on. Where nobody
-    # can be asked the row's honest stop is the only way on.
-    asked = code == "governance.approval_unavailable" and (result["run"].get("governance") or {}).get("human_wait")
     return {"type": "Block", "run": result["run"], "reasons": [{"code": code,
             "parameters": {}, "message": message or row["message"], "sections": row["sections"],
-            "next_actions": (["governance.propose"] if asked else []) + row["next_actions"]}]}
+            "next_actions": row["next_actions"]}]}
 
 
 def _duration(timeout: float) -> str:
@@ -323,7 +335,11 @@ class HostGovernance:
         approval_kind = expected_approval_kind(g)
         approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
         if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
-            return unavailable(result)
+            # Report what this host can do NOW, so the run's own facts (and its Next) say nobody can be asked,
+            # whatever an earlier context said; then the view names the stop alone.
+            reported = self.context_ingress(self.profile, run["id"],
+                                            {"author": g["context"]["author"], "ingress": "unavailable"}).get("result", {})
+            return unavailable(reported if reported.get("run") else result, "governance.approval_unavailable")
         context = {"author": g["context"]["author"], "ingress": approval_ingress}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
         if result.get("type") not in {"Allow", "Inert"} or not result.get("run"):
@@ -332,7 +348,7 @@ class HostGovernance:
         if confirmation and expected != (g["plan_revision"], g["proposal_digest"]):
             return unavailable(result, "governance.stale_proposal")
         if g["prompt_error"]:
-            return unavailable(result, g["prompt_error"])
+            return unavailable(result)
         envelope = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                     "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
         document = None
@@ -341,7 +357,7 @@ class HostGovernance:
             # present; a document this state cannot bind refuses the mediation outright
             document = self._bound_document(result)
             if document is None:
-                return unavailable(result)
+                return unavailable(result, "governance.approval_unavailable")
             envelope["document_digest"] = document["digest"]
             # PR 16 (A10/A11): the one Details link per presentation — a live observer of this
             # home's link to the decision row beside the short digest, else the honest fallback

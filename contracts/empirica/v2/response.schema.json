@@ -956,6 +956,21 @@
           ],
           "properties": {
             "code": {
+              "const": "governance.dialog_closed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "governance.auto_ceiling"
             },
             "parameters": {

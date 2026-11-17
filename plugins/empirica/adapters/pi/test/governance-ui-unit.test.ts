@@ -263,18 +263,34 @@ test("declining confirmation keeps the edited revision pending", async () => {
   assert.equal(h.g.state, "pending");
 });
 
-test("a closed dialog asks again once the human says so; a host with nobody to ask names only the stop", async () => {
-  const asked = harness([[ESC]]);
-  const closed = await asked.invoke();
-  assert.equal(closed.result.type, "Block");
-  if (closed.result.type === "Block")
-    assert.deepEqual(closed.result.reasons[0].next_actions, ["governance.propose", "residual.accept"]);
-  const nobody = harness();
-  nobody.g.human_wait = false;
-  nobody.ctx.hasUI = false;
-  const refused = await nobody.invoke();
-  assert.equal(refused.result.type, "Block");
-  if (refused.result.type === "Block") assert.deepEqual(refused.result.reasons[0].next_actions, ["residual.accept"]);
+// The adapter only chooses which contract code applies, from the run's own facts; the code's row owns the actions.
+test("a closed dialog, a spent configuration, a spent run and no UI each choose one contract code", async () => {
+  const codes = async (setup: (h: ReturnType<typeof harness>) => void, keys: string[][] = [[ESC]]) => {
+    const h = harness(keys);
+    setup(h);
+    const out = await h.invoke();
+    assert.equal(out.result.type, "Block");
+    const reason = out.result.type === "Block" ? out.result.reasons[0] : undefined;
+    return [reason?.code, reason?.next_actions];
+  };
+  const again = ["governance.propose", "residual.accept"];
+  assert.deepEqual(await codes(() => {}), ["governance.dialog_closed", again]);
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 }; }, []),
+    ["governance.interaction_limit", again]);
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 0 }; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.ctx.hasUI = false; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+});
+
+test("the host reports what it can show NOW: no UI means an unavailable ingress", () => {
+  const ctx = fakeCtx();
+  ctx.hasUI = true;
+  assert.equal(piGovernanceContext(ctx).ingress, "pi_ui");
+  ctx.hasUI = false;
+  assert.equal(piGovernanceContext(ctx).ingress, "unavailable");
 });
 
 test("no-op keys and cancel approve nothing", async () => {

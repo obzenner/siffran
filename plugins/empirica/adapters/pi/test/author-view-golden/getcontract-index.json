@@ -362,6 +362,12 @@
             ]
           },
           {
+            "code": "governance.dialog_closed",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
             "code": "governance.auto_ceiling",
             "sections": [
               "governance"

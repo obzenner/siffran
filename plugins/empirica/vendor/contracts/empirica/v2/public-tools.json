@@ -332,11 +332,21 @@
       ]
     },
     "governance.approval_unavailable": {
-      "message": "Nothing is approved. Once the human says how to go on, take the next: action; with no approval UI only the stop applies.",
+      "message": "No approval dialog can be shown now, so nothing is approved and the only way on is the honest stop.",
       "sections": [
         "governance"
       ],
       "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "governance.dialog_closed": {
+      "message": "The approval dialog ended without an answer, so nothing is approved; once the human says how to go on, propose again, or stop.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
         "residual.accept"
       ]
     },
@@ -361,7 +371,7 @@
       ]
     },
     "governance.interaction_limit": {
-      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
+      "message": "This configuration has been shown three times; once the human says which ceilings to change, propose them, or stop.",
       "sections": [
         "governance"
       ],
