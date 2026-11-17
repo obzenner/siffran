@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from types import MappingProxyType
@@ -1408,6 +1408,25 @@ def audit_acceptance(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) 
 #: answers, the pass ceiling, the audit, the human's consent to end the run. A requirement is *admissible* (the gate names it
 #: now) exactly when no earlier stage has an unmet one.
 REPORT_STAGES = ("setup", "claim", "confirmation", "passes", "audit", "terminal")
+
+
+def stage_rank(stage: str) -> int:
+    """A stage's place in ``REPORT_STAGES``, the one order of a report."""
+    return REPORT_STAGES.index(stage)
+
+
+def earliest_stage(stages: Iterable[str]) -> int | None:
+    """The rank of the earliest of ``stages``, or ``None`` when there are none: the stage that is admissible now."""
+    return min(map(stage_rank, stages), default=None)
+
+
+def first_admissible(requirements: Sequence[Requirement]) -> Requirement | None:
+    """The requirement the gate names now: the first, in row order, of those at the earliest stage present, whatever
+    position the rows were appended in. ``None`` when nothing is owed."""
+    earliest = earliest_stage(r.stage for r in requirements)
+    return next((r for r in requirements if stage_rank(r.stage) == earliest), None)
+
+
 #: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
 HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON})
 #: Where a requirement waits that is not admissible yet: for the stages before it.
@@ -1454,7 +1473,7 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                         setup: bool = True) -> tuple[Requirement, ...]:
     """Everything an active run still owes before the report converges it, in the gate's order, each with who acts and where.
 
-    This is the one projection of the report's ordering. The gate blocks on the first requirement (``_evaluate``); the author
+    This is the one projection of the report's ordering. The gate blocks on the first admissible one (``first_admissible``); the author
     view lists them as its obligations and holds the ones behind an earlier stage (``core.projection``); the observer
     publishes them as what the run owes and names the first admissible one next (``core.observer``). It is pure: nothing is
     committed, so what the gate reaches only after charging a pass is listed without charging it.
@@ -1502,7 +1521,7 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                 key = terminal_key("stopped_frozen", terminal_digest(snapshot, derivation, "stopped_frozen"))
                 found.append(("terminal", obligation, required, TERMINAL_STOP_REASON, consent, (), None,
                               confirmation.prompt_error(snapshot, key, terminal=True)))
-    first = min((REPORT_STAGES.index(row[0]) for row in found), default=0)
+    first = earliest_stage(row[0] for row in found)
     # Who acts on a human's step is the human only while the request is with them (P3c): the configuration once the agent
     # has asked and a host can show it (``governance.human_wait``); the end of the run unless the human already declined it
     # (then the agent keeps working until the human tells it to stop again).
@@ -1515,7 +1534,7 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                                                             and parameters["case"] == "declined"))
                  or (stage == "setup" and obligation == approval and configuration_waits))
         actor = "human" if human else "auditor" if reason == "audit.pending" else "agent"
-        admissible = REPORT_STAGES.index(stage) == first
+        admissible = stage_rank(stage) == first
         place = ((confirmation.ask_where(prompt_error) if reason else "next_report") if actor == "human"
                  else "in_progress" if actor == "auditor" else "next_turn")
         # Whether the gate names a requirement now (``admissible``) is one fact; whether a human will be shown the question is
@@ -1756,10 +1775,10 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
             return end(replace(state, status=status))
-        # The first requirement of the report's one ordering (the author alone before the human, the passes before the audit)
-        # is what the gate names; the observer and the author view list the same requirements.
+        # The first admissible requirement of the report's one ordering (the author alone before the human, the passes
+        # before the audit) is what the gate names; the observer and the author view list the same requirements.
         owed = report_requirements(snapshot, derivation, setup=False)
-        first = owed[0] if owed else None
+        first = first_admissible(owed)
         if first is not None and first.stage in {"claim", "confirmation", "passes"}:
             return decide(state, "Block", reason=first.reason, parameters=first.parameters, affected=first.affected)
         current_digest = derivation_digest(snapshot, derivation)

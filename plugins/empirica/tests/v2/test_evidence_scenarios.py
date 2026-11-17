@@ -11,7 +11,7 @@ from unittest import mock
 from adapters import confirmation
 from core import evaluation
 from application import protocol
-from assertions import action_freeze, observe_action
+from assertions import ConformanceCase, action_freeze, observe_action
 from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
 from application.protocol import host_profile_id  # noqa: E402
@@ -31,6 +31,36 @@ class ScenarioFixture(MediatorFixture):
 
     def stop(self, drv, run_id) -> dict:
         return self.end_run(drv, run_id, "stop")["result"]
+
+
+def _requirement(stage: str, obligation: str) -> evaluation.Requirement:
+    return evaluation.Requirement(stage, obligation, obligation, None, {}, (), None, "agent", "next_turn", False)
+
+
+class FirstAdmissibleCells(ConformanceCase):
+    """The report's first admissible requirement is one selector over ``REPORT_STAGES``: the gate, the view and the
+    ``admissible`` flag of ``report_requirements`` read it, never a row's position."""
+
+    def test_no_requirement_has_no_first(self):
+        self.assertIsNone(evaluation.first_admissible(()))
+
+    def test_rows_in_stage_order_give_the_first_row(self):
+        rows = [_requirement(stage, stage) for stage in ("claim", "passes", "audit")]
+        self.assertIs(evaluation.first_admissible(rows), rows[0])
+
+    def test_rows_out_of_stage_order_give_the_earliest_stage(self):
+        rows = [_requirement("audit", "a"), _requirement("terminal", "t"), _requirement("confirmation", "c"),
+                _requirement("passes", "p")]
+        self.assertIs(evaluation.first_admissible(rows), rows[2])
+
+    def test_a_tie_goes_to_the_first_in_row_order(self):
+        rows = [_requirement("audit", "a"), _requirement("claim", "first"), _requirement("claim", "second")]
+        self.assertIs(evaluation.first_admissible(rows), rows[1])
+
+    def test_the_stage_rank_is_the_one_order(self):
+        self.assertEqual([evaluation.stage_rank(s) for s in evaluation.REPORT_STAGES], list(range(6)))
+        self.assertEqual(evaluation.earliest_stage(["audit", "claim", "terminal"]), evaluation.stage_rank("claim"))
+        self.assertIsNone(evaluation.earliest_stage([]))
 
 
 class HumanSurfaceCells(ScenarioFixture):

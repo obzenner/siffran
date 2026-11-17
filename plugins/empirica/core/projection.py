@@ -12,7 +12,7 @@ from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSU
                          claim_blockers, claim_digest, confirmation_batch, derive_claims,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
-                         progress_basis, report_requirements, terminal_batch, REPORT_STAGES, Requirement)
+                         progress_basis, report_requirements, terminal_batch, earliest_stage, stage_rank, Requirement)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -207,7 +207,7 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
     # What the report requires, in the gate's order (``core.evaluation.report_requirements``): the claim rows below are its
     # claim stage, the rows after them its human, pass, audit and consent stages, and a row behind an earlier stage is held.
     owed = report_requirements(snapshot, derivation, blockers)
-    early = min((REPORT_STAGES.index(r.stage) for r in owed), default=None)
+    early = earliest_stage(r.stage for r in owed)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
             blocker = blockers_by_claim.get(claim["id"])
@@ -221,7 +221,7 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
                 "satisfied" if states[claim["id"]] == "approved" else "residual", terminal_next)
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
-            elif terminal_next is None and blocker is not None and early is not None and REPORT_STAGES.index(
+            elif terminal_next is None and blocker is not None and early is not None and stage_rank(
                     "confirmation" if blocker["reason"] == CONFIRMATION_REASON else "claim") > early:
                 row["hold"] = "blocked"
             active.append(row)
