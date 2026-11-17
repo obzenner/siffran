@@ -494,7 +494,7 @@ def _stop(result: dict, **kwargs):
     if governance is not None:
         if min(governance["interactions_remaining"].values()) == 0:  # a spent allowance is the core's interaction limit
             governance["prompt_error"] = "governance.interaction_limit"
-        governance["human_wait"] = human_wait(governance, governance["prompt_error"])
+        governance["human_wait"] = human_wait(governance, governance["prompt_error"], governance["raises"])
     return stop_result(_typed(result), **{"stop_hook_active": False, **kwargs})
 
 
@@ -1887,7 +1887,7 @@ class TurnEndPredicateParityTests(unittest.TestCase):
                 continue
             governed += 1
             with self.subTest(case=case["name"]):
-                self.assertEqual(human_wait(governance, governance["prompt_error"]), case["human_wait"])
+                self.assertEqual(human_wait(governance, governance["prompt_error"], governance["raises"]), case["human_wait"])
                 self.assertEqual(governance["human_wait"], case["human_wait"], "the run view publishes the core's answer")
         self.assertGreaterEqual(governed, 10)
 

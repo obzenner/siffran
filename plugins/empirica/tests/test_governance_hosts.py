@@ -773,7 +773,7 @@ class GovernanceHostTests(unittest.TestCase):
             {"control_mode": "deliberative", "first_approval": False, "raises": False,
              "context": {"interactive": False}},
         ]
-        expected = [expected_approval_kind(case) for case in cases]
+        expected = [expected_approval_kind(case, case["raises"]) for case in cases]
         self.assertEqual(expected[-2:], ["auto", "host_ui"])
         self.assertEqual(expected[2:5], ["auto", "host_ui", "auto"])  # a raise is the interactive human's, once approved
         module = Path(__file__).resolve().parents[1] / "adapters" / "pi" / "src" / "governance-ui.ts"

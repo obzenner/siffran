@@ -304,17 +304,16 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
 
     # --- expected approval kind per phase ---
     def test_expected_approval_kind_matrix(self):
-        flat = {"raises": False}
-        self.assertEqual(governance.expected_approval_kind({**_placeholder("deliberative"), **flat}), "host_ui")
+        self.assertEqual(governance.expected_approval_kind(_placeholder("deliberative"), False), "host_ui")
         delegated = _placeholder("auto", {"interactive": False, "delegation": True})
-        self.assertEqual(governance.expected_approval_kind({**delegated, **flat}), "auto")
+        self.assertEqual(governance.expected_approval_kind(delegated, False), "auto")
         interactive = _sized(_placeholder("auto", {"interactive": True, "delegation": True}),
                              SIZED_BUDGETS, SIZED_RATIONALE)
-        self.assertEqual(governance.expected_approval_kind({**interactive, **flat}), "host_ui")
+        self.assertEqual(governance.expected_approval_kind(interactive, False), "host_ui")
         interactive = governance.plain(interactive)
         interactive["first_approval"] = True
-        self.assertEqual(governance.expected_approval_kind({**interactive, **flat}), "auto")
-        self.assertEqual(governance.expected_approval_kind({**interactive, "raises": True}), "host_ui")  # a raise is the human's
+        self.assertEqual(governance.expected_approval_kind(interactive, False), "auto")
+        self.assertEqual(governance.expected_approval_kind(interactive, True), "host_ui")  # a raise is the human's
 
     # --- auto decisions without delegated or prior-human authority are refused ---
     def test_auto_decision_without_authority_refused(self):
@@ -496,6 +495,15 @@ class InteractiveAutoRaiseCoreTests(unittest.TestCase):
         revised = governance.revise("goal", gov, proposal=proposed)
         return revised, replace_budgets(state, revised)
 
+    def test_a_stored_governance_names_no_raise_so_the_caller_passes_the_ceilings(self):
+        """The state holds no ``raises``: a caller with ``state.governance`` derives it from the ceilings and passes it."""
+        gov, state = _first_approved()
+        self.assertNotIn("raises", gov)
+        self.assertEqual(governance.expected_approval_kind(gov, governance.raises(gov, state.budgets)), "auto")
+        raised, _ = self.raise_to(gov, state, 9)
+        self.assertNotIn("raises", raised)
+        self.assertEqual(governance.expected_approval_kind(raised, governance.raises(raised, state.budgets)), "host_ui")
+
     def test_the_fact_is_derived_from_the_proposal_and_the_approved_ceilings(self):
         gov, state = _first_approved()
         self.assertFalse(governance.raises(gov, state.budgets))  # nothing proposed beyond the approval
@@ -522,12 +530,12 @@ class InteractiveAutoRaiseCoreTests(unittest.TestCase):
         gov, state = _first_approved()
         raised, _ = self.raise_to(gov, state, 9)
         lowered, _ = self.raise_to(gov, state, 6)
-        view = lambda g: {**g, "raises": governance.raises(g, state.budgets)}  # noqa: E731
-        self.assertEqual(governance.expected_approval_kind(view(raised)), "host_ui")
-        self.assertEqual(governance.expected_approval_kind(view(lowered)), "auto")
-        self.assertEqual(governance.expected_approval_kind(view(gov)), "auto")
+        kind = lambda g: governance.expected_approval_kind(g, governance.raises(g, state.budgets))  # noqa: E731
+        self.assertEqual(kind(raised), "host_ui")
+        self.assertEqual(kind(lowered), "auto")
+        self.assertEqual(kind(gov), "auto")
         delegated = _placeholder("auto", {"interactive": False, "delegation": True})
-        self.assertEqual(governance.expected_approval_kind({**delegated, "first_approval": True, "raises": True}), "auto")
+        self.assertEqual(governance.expected_approval_kind({**delegated, "first_approval": True}, True), "auto")
 
     def test_a_forged_auto_decision_for_a_raise_is_refused(self):
         gov, state = _first_approved()
@@ -545,12 +553,12 @@ class InteractiveAutoRaiseCoreTests(unittest.TestCase):
         raised, _ = self.raise_to(gov, state, 9)
         view = {**raised, "raises": True}
         self.assertEqual(raised["state"], "revision_pending")
-        self.assertTrue(governance.human_wait(view, None))
-        self.assertFalse(governance.human_wait({**view, "state": "rejected"}, None))  # the human answered: the agent acts
-        self.assertFalse(governance.human_wait(view, "unavailable"))
+        self.assertTrue(governance.human_wait(view, None, True))
+        self.assertFalse(governance.human_wait({**view, "state": "rejected"}, None, True))  # the human answered: the agent acts
+        self.assertFalse(governance.human_wait(view, "unavailable", True))
         deliberative = governance.plain(_sized(_capable(_placeholder()), SIZED_BUDGETS, SIZED_RATIONALE))
-        deliberative.update(state="rejected", raises=False)
-        self.assertTrue(governance.human_wait(deliberative, None))  # a deliberative rejection still waits on the human
+        deliberative.update(state="rejected")
+        self.assertTrue(governance.human_wait(deliberative, None, False))  # a deliberative rejection still waits on the human
 
     def test_each_raise_spends_one_of_the_post_approval_revisions(self):
         gov, state = _first_approved()
@@ -599,13 +607,38 @@ class InteractiveAutoRaiseCoreTests(unittest.TestCase):
                             state="approved", budgets_passes=9)
         self.assertFalse(governance.invariant(twice))
 
-    def test_a_second_human_episode_without_a_raise_is_still_invalid(self):
+    def test_a_human_episode_without_a_raise_is_invalid_at_the_standing_revision(self):
+        """The validator holds the standing revision to the rule (a human receipt there needs a raise) and the history to one
+        approval per revision; it does not reconstruct which earlier revision raised (``decision_error`` never writes one)."""
         revision = _first_approved()[0]["plan_revision"] + 1
         for outcome, state in (("present", "revision_pending"), ("dismiss", "revision_pending"), ("reject", "rejected")):
             with self.subTest(outcome=outcome):
                 lowered = self.stored(6, receipts=[dict(revision=revision, outcome=outcome)], state=state,
                                       budgets_passes=8)
                 self.assertFalse(governance.invariant(lowered))
+
+    def test_the_first_approval_of_an_interactive_auto_run_is_the_humans(self):
+        """ADR-0063: an ``auto`` receipt alone never approves an interactive auto run, whatever else is in order."""
+        gov = governance.plain(_sized(_capable(_placeholder("auto", {"interactive": True, "delegation": True})),
+                                      SIZED_BUDGETS, SIZED_RATIONALE))
+        gov.update(state="approved", approved_digest=gov["proposal_digest"], approval_kind="auto", first_approval=True,
+                   receipts=[_approving(gov, revision=gov["plan_revision"], kind="auto")])
+        self.assertFalse(governance.invariant(_invariant_doc(gov)))
+        human, _ = _first_approved()
+        self.assertTrue(governance.invariant(_invariant_doc(human)))  # the same run, approved by its human
+
+    def test_a_delegated_raise_inside_its_envelope_is_still_invalid(self):
+        """Only the pending-raise rule can refuse this state: the proposal fits the envelope and every receipt is ``auto``."""
+        delegated = governance.plain(_sized(_placeholder("auto", {"interactive": False, "delegation": True}),
+                                            {**SIZED_BUDGETS, "max_passes": 6}, SIZED_RATIONALE))
+        delegated.update(state="approved", approved_digest=delegated["proposal_digest"], approval_kind="auto",
+                         first_approval=True, receipts=[_approving(delegated, revision=1, kind="auto")])
+        self.assertTrue(governance.invariant(_invariant_doc(delegated, max_passes=6)))
+        raised = governance.revise("goal", delegated, proposal={"budgets": {**SIZED_BUDGETS, "max_passes": 7},
+                                                                 "rationale": SIZED_RATIONALE})
+        pending = {**raised, "state": "revision_pending"}
+        self.assertLessEqual(raised["proposal"]["budgets"]["max_passes"], delegated["delegation_envelope"]["max_passes"])
+        self.assertFalse(governance.invariant(_invariant_doc(pending, max_passes=6)))
 
     def test_a_delegated_run_never_holds_a_human_receipt_or_a_pending_raise(self):
         delegated = governance.plain(_sized(_placeholder("auto", {"interactive": False, "delegation": True}),
@@ -2603,7 +2636,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self._propose(9)["type"], "Allow")  # today: governance.auto_ceiling
         run = self.request({"type": "GetRun", "run_id": self.run_id})["run"]
         g = run["governance"]
-        self.assertEqual((g["state"], g["raises"], g["human_wait"], expected_approval_kind(g)),
+        self.assertEqual((g["state"], g["raises"], g["human_wait"], expected_approval_kind(g, g["raises"])),
                          ("revision_pending", True, True, "host_ui"))
         self.assertEqual(run["turn_end_actor"], "human")
         forged = self.admit(self.decision(approval_kind="auto"))

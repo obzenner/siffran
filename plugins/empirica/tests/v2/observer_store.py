@@ -511,7 +511,7 @@ class _Builder:
             self.publish_document(run_id, asked["presentation"]["document"])
         g = asked["run"]["governance"]
         envelope = {"run_id": run_id, "receipt_id": receipt, "proposal_digest": g["proposal_digest"],
-                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g),
+                    "plan_revision": g["plan_revision"], "approval_kind": expected_approval_kind(g, g["raises"]),
                     "document_digest": asked["presentation"]["document"]["digest"]}
         done = service.trusted_governance_decision(run_id=run_id, payload={**envelope, "outcome": "present"})
         assert done["result"]["type"] == "Allow", done

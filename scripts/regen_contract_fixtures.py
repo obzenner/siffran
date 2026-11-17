@@ -195,7 +195,7 @@ def generated(path: Path) -> str:
     if isinstance(governed, dict) and "prompt_error" in governed:
         # Who acts on the configuration is the core's answer, never a fixture's (core.governance.human_wait).
         governed["raises"] = raises(governed, governed["budgets"])  # derived from the proposal and the approved ceilings
-        governed["human_wait"] = human_wait(governed, governed["prompt_error"])
+        governed["human_wait"] = human_wait(governed, governed["prompt_error"], governed["raises"])
     return json.dumps(to_stored(document), indent=2) + "\n"
 
 

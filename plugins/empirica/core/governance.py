@@ -228,7 +228,7 @@ def exclusion_key(governance: Mapping) -> str:
     return "auto_interactive" if governance["context"]["interactive"] is True else "auto_delegated"
 
 
-def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
+def human_wait(governance: Mapping, prompt_error: str | None, raises: bool) -> bool:
     """Whether the run's configuration waits on its human now: the agent has asked (a sized ``configure_run``, not the
     StartRun placeholder), the configuration is in ``HUMAN_WAIT_STATES`` (not approved yet, or rejected), this phase is a
     human's to approve (``host_ui``), the host that mediated it can show a human its dialog (``approval_capability``) and
@@ -240,9 +240,10 @@ def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
     Read from the governance of the run's state or of its author view (the same keys); the author view publishes the
     answer as ``governance.human_wait``. The one predicate of who acts on a configuration: the report's requirements
     (``evaluation.report_requirements``) and so the observer's standing and ask, and the hosts' turn-end wait, which reads
-    the view's answer and adds only its own approval ingress and the sole-blocker check."""
+    the view's answer and adds only its own approval ingress and the sole-blocker check. ``raises`` is the fact ``raises``
+    derives (the run view's ``governance.raises``); the state holds none, so the caller names it."""
     return (governance["state"] in _waiting_states(governance) and sized(governance)
-            and expected_approval_kind(governance) == "host_ui"
+            and expected_approval_kind(governance, raises) == "host_ui"
             and governance["context"]["approval_capability"] == HUMAN_CONFIGURATION and prompt_error is None)
 
 
@@ -254,18 +255,19 @@ def _waiting_states(governance: Mapping) -> frozenset:
     return HUMAN_WAIT_STATES
 
 
-def expected_approval_kind(governance: Mapping) -> str:
+def expected_approval_kind(governance: Mapping, raises: bool) -> str:
     """The permitted approval kind for the current phase, from neutral admitted facts.
 
     Deliberative runs are always human. Delegated auto (no interactive human) is always
     automatic. Interactive auto requires one human approval episode before the first
-    successful approval, then is automatic thereafter, except that a proposal that raises a ceiling
-    (``governance["raises"]``, the fact ``raises`` derives and the run view publishes) is a further human
-    episode; interactive authority outranks delegation and never silently downgrades (ADR-0063, ADR-0073)."""
+    successful approval, then is automatic thereafter, except that a proposal that raises a ceiling (``raises``) is a
+    further human episode; interactive authority outranks delegation and never silently downgrades (ADR-0063, ADR-0073).
+    ``raises`` is the fact the function ``raises`` derives from the ceilings, and the run view publishes it as
+    ``governance.raises``; a stored governance holds none, so every caller names it and none can omit it."""
     if governance["control_mode"] == "deliberative":
         return "host_ui"
     if governance["context"]["interactive"] is True:
-        return "host_ui" if not governance["first_approval"] or governance["raises"] else "auto"
+        return "host_ui" if not governance["first_approval"] or raises else "auto"
     return "auto"  # delegated auto: no human episode
 
 
@@ -357,7 +359,7 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping,
         return "governance.stale_proposal"
     if prior is None and (reason := interaction_error(governance, confirmations)):
         return reason
-    expected = expected_approval_kind({**governance, "raises": raises(governance, budgets)})
+    expected = expected_approval_kind(governance, raises(governance, budgets))
     auto_authorized = (governance["first_approval"] or
                        governance["context"]["delegation"] is True)
     if (decision["approval_kind"] == "auto" and not auto_authorized):

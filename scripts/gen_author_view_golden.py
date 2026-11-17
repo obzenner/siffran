@@ -240,7 +240,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         g["context"].update(approval_capability=capability, ingress=ingress, interactive=interactive,
                             delegation=delegation)
         g["raises"] = raises(g, g["budgets"])
-        g["human_wait"] = human_wait(g, prompt_error)
+        g["human_wait"] = human_wait(g, prompt_error, g["raises"])
         meta = contract["reasons"][reason]
         view["reasons"] = [{"code": reason, "parameters": {}, "message": meta["message"],
                             "next_actions": list(meta["next_actions"]), "sections": meta["sections"]}]

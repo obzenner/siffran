@@ -108,8 +108,11 @@ to ask and still refuses a raise (`governance.auto_ceiling`); a fresh run is its
 and the run view publishes the answer as `governance.raises`. `expected_approval_kind` is `host_ui` for an interactive auto
 run that has not been approved yet or whose proposal raises, so both hosts read one fact. A rejected raise changes nothing and
 `human_wait` is false: the agent continues within the approved ceilings or stops. The stored state holds no new field. The
-validator allows a pending, rejected or human-approved raise in interactive auto only, with at most one approving `host_ui`
-receipt per revision, and any other second human episode stays invalid. The limits are unchanged: 3 dialogs per plan revision,
+validator allows a pending, rejected or human-approved raise in interactive auto only. At the standing revision a human
+receipt is valid only if that proposal raises; across the history the validator checks one approving `host_ui` receipt per
+revision and that every `auto` receipt follows a human approval. It does not reconstruct which earlier revision raised: the
+core never writes a human receipt for a revision that raised nothing (`decision_error`), and the validator is the second line.
+The limits are unchanged: 3 dialogs per plan revision,
 8 post-approval material revisions, 128 interactions. `budget.exhausted` offers `budget.raise` in deliberative and interactive
 auto, and `recovery_exclusions` is keyed by the run's mode (`deliberative`, `auto_interactive`, `auto_delegated`). A host does
 not settle the turn on an exhausted budget when the core offers `budget.raise` to an auto run: the agent is the one to propose it.

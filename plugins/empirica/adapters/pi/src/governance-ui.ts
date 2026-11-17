@@ -18,9 +18,9 @@ interface Governance {
   proposal: Proposal; prompt_error: string | null;
   /** Whether the configuration waits on its human: the core's answer (`core.governance.human_wait`). */
   human_wait: boolean;
-  /** Whether the standing proposal asks for more than the run approved: the core's answer (`core.governance.raises`).
-   * Optional in the type, so a view that lacks it reads as no raise. */
-  raises?: boolean;
+  /** Whether the standing proposal asks for more than the run approved: the core's answer (`core.governance.raises`),
+   * required by the response schema. */
+  raises: boolean;
   context: { author: { provider_id: string; model_id: string } | null; ingress: string;
     interactive: boolean | null; delegation: boolean };
 }
