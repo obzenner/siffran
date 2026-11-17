@@ -66,14 +66,17 @@ class AuditorDefinitionTests(unittest.TestCase):
 
     def test_the_shared_rubric_judges_author_decided_decisions_and_partial_coverage(self):
         text = " ".join((self.agents / "empirica-auditor.md").read_text(encoding="utf-8").split())
-        for required in ("`human_decision`", "decided by the author", "`reviewed_claims`", "outside the verdict"):
+        self.assertRegex(text, r"An approved `needs-decision` claim without `human_decision` was decided by the author\.")
+        for required in ("naming the missing comparison", "say which alternative needs a comparison",
+                         "Pass or fail the audit on the claims in `reviewed_claims`",
+                         "items 1\u20135 to those claims only", "items 6\u20139 to the whole graph",
+                         "judged only through items 6\u20139"):
             self.assertIn(required, text)
-        self.assertRegex(text, r"without `human_decision`[^.]*decided by the author")
-        self.assertRegex(text, r"`reviewed_claims`[^.]*\. [^.]*outside the verdict")
 
     def test_the_pi_wrapper_carries_no_rubric_copy(self):
         text = (self.agents / "pi/empirica-auditor.md").read_text(encoding="utf-8")
-        for absent in ("decided by the author", "outside the verdict", "`human_decision`", "## Rubric"):
+        for absent in ("decided by the author", "outside the verdict", "`human_decision`", "## Rubric",
+                       "Every approved gating claim"):
             self.assertNotIn(absent, text)
 
 
