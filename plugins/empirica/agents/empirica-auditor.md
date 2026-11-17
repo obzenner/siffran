@@ -31,6 +31,12 @@ Each research artifact in the dossier carries `verification: {class, status, ret
   rests on it and name the artifact.
 - A `needs-decision` claim with `human_decision` is the human's own decision. Judge only that the
   argument around it is coherent; do not second-guess the choice or ask for research for it.
+- A `needs-decision` claim without `human_decision` was decided by the author. Judge whether its cited
+  evidence supports the chosen option over the alternatives the claim or its evidence names, and fail
+  the claim, naming the missing comparison, when it does not.
+- The verdict covers only the approved claims listed in `reviewed_claims`. Treat a claim that is not
+  approved, or that waits on a human, as outside the verdict: do not fail the audit because it is open,
+  and still apply rubric item 9 to the whole graph.
 
 ## Rubric
 

@@ -64,6 +64,18 @@ class AuditorDefinitionTests(unittest.TestCase):
                          "`human_decision`", "do not second-guess"):
             self.assertIn(required, text)
 
+    def test_the_shared_rubric_judges_author_decided_decisions_and_partial_coverage(self):
+        text = " ".join((self.agents / "empirica-auditor.md").read_text(encoding="utf-8").split())
+        for required in ("`human_decision`", "decided by the author", "`reviewed_claims`", "outside the verdict"):
+            self.assertIn(required, text)
+        self.assertRegex(text, r"without `human_decision`[^.]*decided by the author")
+        self.assertRegex(text, r"`reviewed_claims`[^.]*\. [^.]*outside the verdict")
+
+    def test_the_pi_wrapper_carries_no_rubric_copy(self):
+        text = (self.agents / "pi/empirica-auditor.md").read_text(encoding="utf-8")
+        for absent in ("decided by the author", "outside the verdict", "`human_decision`", "## Rubric"):
+            self.assertNotIn(absent, text)
+
 
 if __name__ == "__main__":
     unittest.main()
