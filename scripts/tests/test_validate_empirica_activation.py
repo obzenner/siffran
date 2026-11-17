@@ -103,6 +103,16 @@ class SkillSizeTests(unittest.TestCase):
         # An anchor cannot overlap the placeholder: one containing `$` is refused, so none can straddle it.
         self.assertIn("contains `$`", activation.skill_anchor_problems(ok, ["ANCHOR `$ARG"])[0])
 
+    def test_the_goal_offset_is_measured_on_the_rendered_body_not_the_file(self):
+        # S3 r2 N2: an anchor after `$ARGUMENTS` by less than the frontmatter's length would pass if the offset were taken on
+        # the raw file (the anchor is found in the body, the placeholder in the file).
+        front = "---\nname: x\ndescription: " + "d" * 900 + "\n---\n"
+        text = front + "Intro `$ARGUMENTS` ANCHOR\n"
+        problems = activation.skill_anchor_problems(text, ["ANCHOR"])
+        self.assertEqual(len(problems), 1)
+        self.assertIn("must end before the first `$ARGUMENTS`", problems[0])
+        self.assertEqual(activation.skill_anchor_problems(front + "Intro ANCHOR `$ARGUMENTS`\n", ["ANCHOR"]), [])
+
     def test_the_closing_frontmatter_delimiter_may_have_trailing_whitespace(self):
         # The same rule as scripts/validate_skills.py: a delimiter line is `line.strip() == "---"`.
         text = "---\nname: x\n--- \nbody ANCHOR `$ARGUMENTS`"
@@ -113,7 +123,7 @@ class SkillSizeTests(unittest.TestCase):
     def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
         # The bound is the CURRENT ceiling: a PR that lowers SKILL_MAX_CHARS lowers this number in the same edit, so a later
         # raise needs a visible edit here. The cut is a rendered-window size, independent of the file size.
-        self.assertLessEqual(activation.SKILL_MAX_CHARS, 14_400)
+        self.assertLessEqual(activation.SKILL_MAX_CHARS, 7_400)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
         self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 12, "the early anchors are chosen")
         limit = activation.SKILL_MAX_CHARS
@@ -138,83 +148,55 @@ class SkillSizeTests(unittest.TestCase):
 
 
 class SkillOrderTests(unittest.TestCase):
-    """S3: the reorder moved lines and changed none; the anchors are unique and before the goal substitution."""
+    """S10: the skill keeps only the judgment nothing else carries. Each judgment sentence is pinned by its exact text, so a
+    deletion is a visible edit here; the anchors are unique and end before the goal substitution.
 
-    # sha256 of the sorted paragraphs (blocks between blank lines, lines right-stripped, headings left out) of SKILL.md as it
-    # was before the reorder (2020801f). A line moved from one paragraph to another changes two paragraphs and is caught.
-    PARAGRAPHS_DIGEST = "aab1b2c44ea4b244e86386286f7766c60c7b0ab0b4ec5b8c764cf03b59e50105"
-    # The only paragraphs the reorder added: a lead-in per moved block whose cross-reference would otherwise dangle, and
-    # the pointer that tells a first read where to start.
-    LEAD_INS = ("Claim discipline; the two folds named here are defined in section 8 below.",
-                "At invocation, begin with section 6 (route, graph, configuration, investigate); "
-                "sections 2\u20135 apply once investigation is admitted.")
-    # The one allowed paragraph split: this original paragraph is now two (the read-before-route rule moved up as its own
-    # paragraph; the host-surface sentence stayed with the matrix). The digest sees the original paragraph.
-    SPLIT = ("Identify the exact active host surface from the tools and lifecycle already present in context.\n"
-             "**Do not read any file, including a skill reference, before the `investigate` witness is admitted\n"
-             "(route \u2192 graph \u2192 approved configuration).** Use this inline bootstrap matrix:",
-             "Identify the exact active host surface from the tools and lifecycle already present in context.\n"
-             "Use this inline bootstrap matrix:",
-             "**Do not read any file, including a skill reference, before the `investigate` witness is admitted\n"
-             "(route \u2192 graph \u2192 approved configuration).**")
-    # Wording changed on purpose, each pinned by its exact new text and mapped back to the original it replaced: the digest
-    # is computed on the original (2020801f), so every other paragraph stays proven unchanged. Each states a rule once.
-    REWRITES = (("Once confirmations are done (when evidence waits on a human, `report_convergence` presents it)",
-                 "Once confirmations are done (report first; the core refuses an audit while one is pending)"),
-                ("Call the host's guarded convergence operation when the graph, evidence, and\n"
-                 "scope are current. On Claude and Pi this is `report_convergence`: when evidence\n"
-                 "waits on a human, `report_convergence` presents it; after the bound audit its\n"
-                 "`Allow` is the terminal decision.",
-                 "Call the host's guarded convergence operation exactly once after the graph,\n"
-                 "evidence, and scope are current. On Claude and Pi this is `report_convergence`\n"
-                 "after the bound audit."),
-                ("   After dismissal, timeout, or rejection, wait for the human; Claude can settle the turn nonterminally while\n"
-                 "   investigation and convergence remain blocked. When they say how to go on, take the view's `next:`\n"
-                 "   (`configure_run` again, with the same or human-edited ceilings); record `investigate`\n"
-                 "   only once the view says `approved`.",
-                 "   After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while\n"
-                 "   investigation and convergence remain blocked. After dismissal, timeout, or rejection, resubmit\n"
-                 "   `configure_run` (the same or human-edited ceilings) to reopen the dialog; record `investigate`\n"
-                 "   only once the view says `approved`."))
-    # The judgment an agent needs before investigation is inline (the references cannot be read until the `investigate`
-    # witness is admitted): each wording change below, and each paragraph added in INLINED, is pinned by exact text. The
-    # inlined rules are used at invocation, when the whole skill is loaded, so they need not be early anchors.
-    REWRITES += (
-                ('uncertainty. Write it by the rules in section 7.\n   Take exact action',
-                 'uncertainty. Larger graphs must be\n   root-connected DAGs. Take exact action'),
-                ('Include a rationale explaining that sizing.',
-                 'Include a 1–600 character nonblank rationale explaining that sizing.'),
-                ('control mode. Preserve',
-                 'control mode. The goal is displayed read-only; the claim graph and reviewer are not approvable. Preserve'),
-                ('envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows\n   from the other, so size each for its own work. A pass is charged only when the derivation changes.\n   Timeout is dismissal',
-                 'envelope.\n   The host-owned timeout and presentation limits are fixed by the contract and displayed read-only.\n   Timeout is dismissal'),
-                ('Construct the smallest closed graph whose gating root is the goal and whose gating claims cover every material\nunknown. Write the first graph before approval, from the supplied context, by these rules:',
-                 'After approval and investigation admission, read\n[references/claim-graph.md](references/claim-graph.md). Construct the smallest\nclosed graph whose root is the goal and whose gating claims cover every material\nunknown.'),
-                ('Submit the graph through the active author-action surface. Once investigation is admitted,\n[references/claim-graph.md](references/claim-graph.md) adds the detail for amending it.',
-                 "Submit the graph through the active author-action surface. Never persist a claim's\nstate or confidence: claim state is derived from current evidence on every read.\nA malformed, detached, missing, or corrupt selected graph fails closed."),
-                (' and graph shapes from the `empirica_observe`\n   tool input schema, never from contract reads or guesses.',
-                 ' and graph shapes from the `empirica_observe`\n   tool input schema, which carries every closed action shape (including the graph\n   payload); do not guess field names or nesting. Contract reads are optional\n   explanation, never the source of a shape.'),
-                ('is unsupported;\ndo not continue with an unrecorded substitute.',
-                 'is unsupported. The core and\nsupported host adapters fail closed before investigative tools, evidence, child\nbudget, or harness execution; do not continue with an unrecorded substitute.'),
-                ('except a `needs-decision` claim**. Record',
-                 "except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record"),
-                ("Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.",
-                 'If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before\ninvestigation and report the exact unsupported capability. Do not imitate the missing operation\nin prose or write runtime artifacts by hand.'),
-                ('Do not loop on refusal or exhaustion.\n6. Wait',
-                 'Do not loop on refusal or exhaustion. The optional\n   [governance reference](references/governance.md) documents host-owned recovery details; it is\n   not a prerequisite read.\n6. Wait'),
-                ('("What still needs confirming"). A summary',
-                 '("What still needs confirming"); a `needs-decision`\n   claim is human-owned and needs no research. A summary'),
-                ('through `configure_run`\n([references/governance.md](references/governance.md) has the host-owned recovery details). Freeze',
-                 'through `configure_run`. Freeze'),
-                ('2. **Spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.',
-                 '2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView\'s\n   immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:\n   continue non-spike research or refine the graph, or stop with an honest residual. If it is\n   `qualified`, construct exactly `{"kind":"spike_request","claim_id":...,"plan":...}` with a\n   closed `empirica.spike-plan-draft/2` containing exactly `schema`, `image`, `argv`, `inputs`,\n   and `environment`. Name one already-local Docker image by familiar name/tag, repository digest,\n   full image ID, or unambiguous ID prefix; Empirica never inventories, pulls, builds, or installs it.\n   Supply one exact nonempty executable/argument vector, zero or more repository-relative files or\n   directories, and at most 128 environment overrides. `HOME` and `TMPDIR` are framework-owned.\n   Never put credentials or secrets in environment values: values persist in the immutable request,\n   and content-addressed plan identity can confirm guessed low-entropy values even though public\n   views expose names only. Never add authority, profile, resources, timeout, user, workdir, network,\n   topology, service, alias, host path, Docker option, image acquisition, or derived capture facts.\n\n   The service captures only the declared immutable files and runs the harness\n   at most once within that application call; a result-CAS retry never reruns it, but a crash after\n   execution or a separate call may execute the same sealed request again, so the probe must be safe\n   under duplicate execution. `qualified` means bound, not currently healthy.\n\n   Any tool works as argv (`cargo build`, `npm run build`, `pytest -k load`, `go test ./...`) inside\n   one host-fixed container: uid/gid 65534, `/work` = `HOME`, read-only `/inputs`, 1 MiB per stream,\n   and the host-selected network profile. The 120-second workload runs inside the 210-second\n   operation; Pi\'s 300-second and Claude MCP\'s 360-second limits are outer transport margins. The\n   one complete list of what you choose, what the host fixes, what is never available, and every\n   refusal `reason` with its hint is public-contract clause `evidence/spike/limits` (`GetContract`\n   section `evidence/spike`).\n\n   Only the verdict container\'s inspected natural exit produces uppercase `PASS`/`FAIL`: zero is\n   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Any other outcome is a\n   spike Fault `unavailable` and admits **no spike result evidence**. The Fault carries one closed\n   `reason` whenever the cause is attributable: act on its hint. A Fault without a reason is an\n   internal host failure: retry once, then ask the operator. Never treat it as FAIL, use a host\n   fallback, or claim evidence that was not admitted. Operator requalification can affect only a future run.\n3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the\n   bounded spike again; otherwise follow the unavailable guidance above.\n4. **Derive the result:**\n   - supporting research satisfies Fold 1;\n   - refuting research refutes the claim;\n   - a current passing spike satisfies Fold 2;\n   - absent or stale evidence leaves the claim open;\n   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until\n     then it is a human residual.'),
-                )
-    INLINED = ("- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",)
-    HOST_SENTENCE = "Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure."
-    INLINED_SECTION_1 = ("Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted nor attributed to a producer.",)
-    REMOVED = ('External actor CLIs are not metered or attributed (ADR 0061).',
-               # S8: the host matrix, deleted; host compatibility comes from the host profiles and the start refusals
-               *('Identify the exact active host surface from the tools and lifecycle already present in context.\nUse this inline bootstrap matrix:', "- **Claude Code capability profile (qualified on `2.1.296`, compatible\n  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and\n  public MCP tools are active and trusted; record route first. Canonical audits\n  are host-owned async children; a current pending audit settles the parent turn\n  until Claude's native completion notification resumes it.\n- **Pi capability profile (qualified on `1.1.0`, compatible\n  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`\n  injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,\n  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact\n  version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed\n  (`>=0.74.0,<1.0.0`; the range and the reviewed versions are listed in `doc/hosts.md`); one inside it with no compat record is admitted\n  and shown as not reviewed. Any other state is a `host.subagents_*`\n  refusal.\n- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a\n  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is\n  refused with the reason on stderr and exit code 1.\n- **Codex:** Empirica is not available on Codex.\n- **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending\n  qualification rather than borrowing another profile's capabilities. After admission, consult\n[references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.", 'A runnable convergence workflow requires all of these capabilities:', '1. read the complete public run view, including obligations;\n2. submit author actions for route, graph, research, spike request, and freeze;\n3. obtain the current audit argument through the host-bound workflow;\n4. launch and observe a bound independent auditor;\n5. submit the observed verdict through private host ingress;\n6. request the guarded convergence decision;\n7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).', "The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does\nnot disable graph refinement, research, honest residual stopping, reads, or audit of claims that need\nno experiment. Do not submit an unchanged spike request in that state and never fabricate or replace\nspike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or\n`docker-networked-v1` value means this run is bound to the two published digests; it is not a\nclaim that Docker is currently healthy."))
+    S3's paragraph digest proved that a REORDER moved text and changed none. S10 rewrites most paragraphs on purpose, so the
+    digest would need an exception for nearly every one; the exact-text pins below replace it."""
+
+    # (D) The judgment, in its shortest positive form. Everything else was enforced by a schema, a contract reason or the
+    # start refusals, or shown by the author view, the start context or a reference (the S10 report maps each sentence).
+    JUDGMENT = (
+        "Never edit operational state under `~/.empirica-plugin/` or knowledge under `refs/empirica/*` directly, and never create Empirica state under `.claude/`, `.codex/`, or `.pi/`.",
+        "Treat training-weight knowledge as hypothesis: discharge load-bearing claims against evidence or surface them as unverified.",
+        "**Experiments go through Empirica only.** During an active run, every experimental workload is an `empirica_observe` `spike_request`; never run one through the ambient host shell, `docker run`, or `docker exec`, including after an unavailable or refused result. Neither an image-acquisition approval nor read-only inspection substitutes for one.",
+        "**Do not read any file, including a skill reference, before the `investigate` witness is admitted\n(route \u2192 graph \u2192 approved configuration).**",
+        "A run exists only if `/empirica` injected a handle; without one, nothing was started.",
+        "Discard refuted claims or replace them with narrower ones; never preserve a preferred design by grading contrary evidence away. New claims attach to the root and pass through both folds (section 8).",
+        "Evidence leaves, attribution, child events, and audit verdicts are trusted host ingress; submit only the author actions the host exposes. Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted nor attributed to a producer.",
+        "Stop before investigation and report the exact unsupported capability when a public tool or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand.",
+        "At invocation, begin with section 6; the loop, audit and terminal steps in sections 2\u20135 apply once investigation is admitted.",
+        "After each evidence batch, reread it, drop refuted branches, add only claims the evidence forces, and take the next call it names. Do not loop on unchanged state or infer convergence from confidence-like language;",
+        "Approval is not convergence: it means the evidence passed the service's rules, not that it convinces.",
+        "Check `GetArgument`, the argument the auditor will receive: each claim must follow from its cited sources alone.",
+        "Never substitute an ordinary model response for the audit.",
+        "- `Allow(converged=true)` permits a convergence claim.",
+        "- `Allow(converged=false)` permits an honest non-converged report; `Block`, `Inert` with an active handle, `Fault`, malformed output, or transport failure never permits convergence. A terminal run is reported, never re-judged.",
+        "To accept residual or deferred scope, or an exhausted pass budget, call it once with `intent: \"stop\"`; only the resulting `Allow(converged=false)` authorizes an honest stopped report.",
+        "**converged** \u2014 a passing bound audit covers the current argument; **stopped** as residual (human or data obligations remain), frozen (scope closed, later claims deferred) or budget (the process ended); **unsupported** \u2014 the host lacked a capability; **faulted** \u2014 state, artifacts, transport, or protocol failed closed.",
+        "Commit only the goal's product artifacts, tests, and accepted decisions.",
+        "2. Record `{\"kind\":\"route\",\"reason\":\"<why>\"}`, then propose the smallest claim graph from supplied context only, by the rules in section 7.",
+        "1. Restate the goal without the flags; list each dependency as **known** (fixed by evidence you can cite now) or **unknown** (needs observation, experiment, or human judgment).",
+        "then size the run from the gating claims, how many need experiments, and the expected audit rounds (normally 2: an initial audit and one retry).",
+        "Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows from the other. A pass is charged only when the derivation changes.",
+        "Then record `{\"kind\":\"investigate\"}` before any native read, search, command, evidence submission, or child launch; approval supplies neither witness.",
+        "- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.",
+        "- `needs-experiment` only when a deterministic spike plan can falsify the claim.",
+        "- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research, and with nobody to ask it stays open and the run can only stop as a residual.",
+        "- Every other claim is `ordinary`.",
+        "- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",
+        "Apply the folds in order (Fold 1, then Fold 2):",
+        "1. **Fold 1: research first, for every gating claim except a `needs-decision` claim.** Cite a concrete code, docs, runtime, or web source that supports or refutes the exact current claim text; generic precedent is not evidence, and a summary of a source is not a citation.",
+        "2. **Fold 2: spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.",
+    )
+    # What each deleted restatement said is now carried elsewhere (the S10 report maps every sentence); none may return.
+    DELETED = ("`missing: <code> via claim", "Pi retains", "hidden digests", "exactly once", "report first", "to reopen the dialog",
+               "spike_backend", "spikes_unavailable", "spike-plan-draft", "qualified on", "inline bootstrap matrix",
+               "EMPIRICA_AUTO_DELEGATION", "needs no research, and a", "not a prerequisite read", "The optional",
+               "run.governance.state", "Claude can settle the turn", "fixed 8/1/2", "unattended", "a `needs-decision`\n   claim is human-owned")
+    HEADINGS = ("1. Non-negotiables", "2. The loop", "3. Obtain independent audit", "4. Request the terminal decision",
+                "5. Finalize and hand off", "6. Invocation, and route before investigating", "7. Refine the claim graph",
+                "8. Earn or discard every gating claim")
     # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
     # may add anchors or reword one only by editing this list, visibly.
     REQUIRED = ("Claude launches `empirica:empirica-auditor`, Pi calls the",
@@ -228,140 +210,62 @@ class SkillOrderTests(unittest.TestCase):
     def skill(self):
         return (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
 
-    @staticmethod
-    def paragraphs(text):
-        blocks = (["\n".join(line.rstrip() for line in block.splitlines() if line.strip())]
-                  for block in re.split(r"\n\s*\n", text))
-        return [block for (block,) in blocks if block and not (block.startswith("#") and "\n" not in block)]
-
-    def digest(self, text, lead_ins=LEAD_INS):
-        import hashlib
-        for new, original in self.REWRITES:
-            self.assertEqual(text.count(new), 1, new)
-            text = text.replace(new, original)
-        for added in (*self.INLINED, *self.INLINED_SECTION_1):
-            self.assertEqual(text.count(added), 1, added)
-            text = text.replace(added + "\n\n", "", 1)
-        paragraphs = self.paragraphs(text)
-        paragraphs += self.REMOVED
-        for lead in lead_ins:
-            self.assertEqual(paragraphs.count(lead), 1, lead)
-            paragraphs.remove(lead)
-        whole, first, second = self.SPLIT
-        self.assertEqual((paragraphs.count(first), paragraphs.count(second)), (1, 1), "the split paragraphs")
-        paragraphs.remove(first)
-        paragraphs.remove(second)
-        paragraphs.append(whole)
-        return hashlib.sha256("\n\n".join(sorted(paragraphs)).encode()).hexdigest()
-
-    def test_every_paragraph_is_preserved_and_none_added(self):
+    def section(self, number):
         text = self.skill()
-        self.assertEqual(self.digest(text), self.PARAGRAPHS_DIGEST)
-        lines = text.splitlines()
-        gone = next(i for i, line in enumerate(lines) if line.startswith("Treat training-weight"))
-        deleted = "\n".join(lines[:gone] + lines[gone + 1:])
-        self.assertNotEqual(self.digest(deleted), self.PARAGRAPHS_DIGEST, "a deleted line is caught")
-        self.assertNotEqual(self.digest(text + "\n\nOne more sentence.\n"), self.PARAGRAPHS_DIGEST, "an added paragraph is caught")
-        self.assertNotEqual(self.digest(text.replace("hypothesis", "guess", 1)), self.PARAGRAPHS_DIGEST, "a rewritten line is caught")
+        start = text.index(f"\n## {number}. ")
+        following = text.find(f"\n## {number + 1}. ", start + 1)
+        return text[start:] if following == -1 else text[start:following]
 
-    def test_the_pre_investigation_judgment_is_inline_in_sections_6_and_7(self):
+    def test_every_judgment_sentence_is_present_exactly_once(self):
         text = self.skill()
-        start, end = text.index("\n## 6. "), text.index("\n## 8. ")
-        for rule in (*self.INLINED, "Write it by the rules in section 7.",
-                     "size each for its own work."):
-            self.assertIn(rule, text[start:end], rule)
-        for fact in ("`needs-experiment` only when a deterministic spike plan can falsify the claim.",
-                     "`needs-decision` only for an irreducible human choice",
-                     "One gating claim per material unknown or invariant",
-                     "Every other claim is `ordinary`.",
-                     "Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`"):
-            self.assertEqual(text.count(fact), 1, fact)
+        for sentence in self.JUDGMENT:
+            with self.subTest(sentence=sentence[:60]):
+                self.assertEqual(text.count(sentence), 1)
 
-    def test_the_review_fixes_are_pinned_by_exact_text(self):
+    def test_a_deleted_or_reworded_judgment_sentence_is_caught(self):
         text = self.skill()
-        s2, s6, s8 = text.index("\n## 2. "), text.index("\n## 6. "), text.index("\n## 8. ")
-        external = ("Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted "
-                    "nor attributed to a producer.")
-        self.assertEqual(text.count(external), 1)
-        self.assertLess(text.index(external), s2, "the external-CLI fact is in section 1")
-        pass_charge = "A pass is charged only when the derivation changes."
-        no_verdict = "state no verdict or confidence in a claim's text"
-        for fact in (pass_charge, no_verdict):
-            self.assertEqual(text.count(fact), 1, fact)
-            self.assertTrue(s6 < text.index(fact) < s8, fact)
-        # the needs-decision rule has one carrier (section 7); section 8 only excepts the claim from research
-        self.assertEqual(text.count("is answered by the human"), 0)
-        self.assertEqual(text.count("human residual"), 0)
-        self.assertEqual(text.count("the human answers it when you report"), 1)
+        sentence = self.JUDGMENT[4]
+        for broken in (text.replace(sentence, ""), text.replace("injected a handle", "set a handle")):
+            self.assertNotEqual(sum(broken.count(s) == 1 for s in self.JUDGMENT), len(self.JUDGMENT))
 
-    def test_section_9_keeps_only_the_judgment_nothing_enforces(self):
+    def test_the_restatements_the_skill_used_to_carry_are_gone(self):
         text = self.skill()
-        section = text[text.index("\n## 9. "):]
-        self.assertEqual(text.count(self.HOST_SENTENCE), 1)
-        self.assertEqual(section.split("\n\n", 1)[1].strip(), self.HOST_SENTENCE, "section 9 is that one paragraph")
-        self.assertLess(len(section.strip()), 600)
-        # each judgment clause pinned by its exact words
-        for clause in ("Stop before investigation and report the exact unsupported capability when one of the three public "
-                       "tools or the auditor launch is absent",
-                       "when the start refuses the host, or when the host is unknown",
-                       "never borrow another host's capabilities, imitate a missing operation in prose, "
-                       "or write runtime artifacts by hand",
-                       "[references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure"):
-            self.assertIn(clause, self.HOST_SENTENCE)
-        for gone in ("capability profile", "qualified on", "inline bootstrap matrix", "not available on Codex",
-                     "EMPIRICA_AUTO_DELEGATION", "A runnable convergence workflow", "`spikes_unavailable` does",
-                     "qualified range", "a needed operation"):
-            self.assertNotIn(gone, text)
+        for gone in self.DELETED:
+            with self.subTest(gone=gone):
+                self.assertNotIn(gone, text)
+        self.assertEqual(text.count("needs no research"), 1, "section 7 alone carries the needs-decision rule")
 
-    def test_the_third_needs_decision_restatement_and_the_optional_link_sentence_are_gone(self):
+    def test_the_sections_are_one_to_eight_in_order_and_section_nine_is_gone(self):
         text = self.skill()
-        self.assertNotIn("is human-owned and needs no research", text)
-        self.assertEqual(text.count("needs no research"), 1, "section 7 carries the rule")
-        self.assertNotIn("not a prerequisite read", text)
-        self.assertNotIn("The optional", text)
+        positions = [text.index(f"\n## {heading}\n") for heading in self.HEADINGS]
+        self.assertEqual(positions, sorted(positions))
+        self.assertEqual(re.findall(r"\n## (\d+)\. ", text), [str(n) for n in range(1, 9)])
+        self.assertNotIn("\n## 9. ", text)
+
+    def test_the_pointers_name_the_sections_they_mean(self):
+        text = self.skill()
+        # every `section N` / `sections N\u2013M` reference resolves to a heading, and the two lead-ins say what they point at
+        for number in re.findall(r"\bsections? (\d)", text):
+            self.assertIn(f"\n## {number}. ", text)
+        self.assertIn("begin with section 6; the loop, audit and terminal steps in sections 2\u20135 apply", text)
+        self.assertIn("pass through both folds (section 8)", text)
+        self.assertIn("by the rules in section 7", text)
+        self.assertTrue(self.section(8).lstrip().startswith("## 8. Earn or discard every gating claim"))
+        self.assertIn("Fold 1", self.section(8))
+        self.assertIn("Fold 2", self.section(8))
+
+    def test_the_governance_link_is_one_and_after_the_route_section(self):
+        text = self.skill()
         self.assertEqual(text.count("](references/governance.md)"), 1)
-        self.assertGreater(text.index("](references/governance.md)"), text.index("\n## 7. "), "linked after section 6")
+        self.assertGreater(text.index("](references/governance.md)"), text.index("\n## 7. "))
 
-    SPIKE_ITEM = ("2. **Spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from "
-                  "the claim: a plan whose verdict container would fail if the claim were false.")
-
-    def test_the_spike_item_keeps_only_the_judgment_nothing_enforces(self):
-        text = self.skill()
-        section = text[text.index("\n## 8. "):text.index("\n## 9. ")]
-        self.assertEqual(section.count(self.SPIKE_ITEM), 1)
-        self.assertTrue(section.rstrip().endswith(self.SPIKE_ITEM), "the spike item closes section 8")
-        for clause in ("**Spike second, only for `needs-experiment`, after supporting research.**",
-                       "Derive the falsifier from the claim:",
-                       "a plan whose verdict container would fail if the claim were false."):
-            self.assertIn(clause, self.SPIKE_ITEM)
-        for gone in ("spike_backend", "spikes_unavailable", "spike-plan-draft", "environment overrides",
-                     "framework-owned", "duplicate execution", "natural exit", "Operator requalification", "Re-gate stale",
-                     "Derive the result", "uid/gid", "120"):
-            self.assertNotIn(gone, text, gone)
-        self.assertNotIn("spike_request", section, "section 8 leaves the plan shape to the tool schema")
-        self.assertNotIn("evidence/spike", section)
-
-    def test_the_terminal_call_is_not_called_the_only_call(self):
-        text = self.skill()
-        self.assertNotIn("exactly once", text)
-        self.assertNotIn("report first", text)
-        self.assertNotIn("to reopen the dialog", text)
-
-    def test_a_line_moved_between_paragraphs_is_caught(self):
-        lines = self.skill().splitlines()
-        first = next(i for i, line in enumerate(lines) if line.startswith("**Experiments go through Empirica only.**"))
-        end = first + next(i for i, line in enumerate(lines[first:]) if not line.strip())
-        # the last line of the experiments paragraph becomes the second line of the paragraph before it
-        moved = lines[:first - 1] + [lines[end - 1], ""] + lines[first:end - 1] + lines[end:]
-        self.assertEqual(sorted(line for line in moved if line.strip()), sorted(line for line in lines if line.strip()),
-                         "the same lines, so a sorted-line digest would pass")
-        self.assertNotEqual(self.digest("\n".join(moved)), self.PARAGRAPHS_DIGEST)
-
-    def test_the_pointer_names_the_section_that_starts_the_run(self):
-        text = self.skill()
-        self.assertIn("\n## 6. Invocation, and route before investigating\n", text)
-        for number in "2345":
-            self.assertRegex(text, rf"\n## {number}\. ")
+    def test_the_spike_fold_names_no_plan_shape(self):
+        section = self.section(8)
+        for gone in ("spike-plan-draft", "argv", "environment", "inputs", "schema", "image", "uid/gid", "120"):
+            self.assertNotIn(gone, section, gone)
+        self.assertTrue(section.rstrip().endswith(self.JUDGMENT[-1]), "the spike fold closes section 8")
+        # S9 F4: naming `spike_request` is allowed (section 1 does); the plan shape is what the tool schema owns
+        self.assertEqual(activation.skill_spike_number_problems(self.skill()), [])
 
     def test_the_required_facts_are_pinned_by_exact_string(self):
         self.assertLessEqual(set(self.REQUIRED), set(activation.REQUIRED_EARLY_ANCHORS))
@@ -377,6 +281,11 @@ class SkillOrderTests(unittest.TestCase):
             with self.subTest(anchor=anchor):
                 self.assertEqual(body.count(anchor), 1)
                 self.assertLessEqual(body.index(anchor) + len(anchor), invocation, "no anchor needs the goal allowance")
+
+    def test_the_whole_skill_fits_the_ratchet_with_the_measured_ratio(self):
+        text = self.skill()
+        self.assertLessEqual(len(text), 7_400)
+        self.assertLessEqual(len(text.splitlines()), 120)
 
 
 class HostLiteralTests(unittest.TestCase):
@@ -436,7 +345,8 @@ class SpikeNumberTests(unittest.TestCase):
         for literal in ("a 120 s workload", "the 300 seconds margin", "the 120-second workload", "inside the 210-second operation",
                         "Pi's 300-second limit", "1 MiB per stream", "512 MiB tmpfs", "2 GiB memory", "256 PIDs",
                         "uid/gid 65534", "at most 128 environment overrides", "`nofile 1024`", "64 MiB per file",
-                        "a closed `empirica.spike-plan-draft/2`", "empirica.spike-plan-draft/3", "a 5 min limit"):
+                        "a closed `empirica.spike-plan-draft/2`", "empirica.spike-plan-draft/3", "a 5 min limit",
+                        "at most 4096 files", "2 CPUs", "1 CPU", "`timeout 120`", "timeout   30"):
             with self.subTest(literal=literal):
                 self.assertEqual(len(self.problems(f"Text. {literal}. More.")), 1, literal)
 
@@ -444,7 +354,8 @@ class SpikeNumberTests(unittest.TestCase):
         for text in ("`docker-isolated-v1` and the fixed 8/1/2 envelope", "normally 2: an initial audit and one retry",
                      "a 1\u2013600 character rationale", "up to 4,096 characters", "section 7", "1. read the view;\n2. submit",
                      "a spike plan whose verdict container would fail", "the `spike_request` tool", "Fold 2",
-                     "two seconds later", "the first 5,000 tokens"):
+                     "two seconds later", "the first 5,000 tokens", "the files you cite", "a CPU-bound probe", "the timeout is host-owned",
+                     "one file per record"):
             with self.subTest(text=text):
                 self.assertEqual(self.problems(text), [])
 
@@ -512,8 +423,8 @@ class ReferenceLinkTests(unittest.TestCase):
                 self.assertEqual(activation.skill_link_problems(text, self.REFERENCES), [])
 
     def test_a_dot_slash_link_to_a_missing_file_is_named(self):
-        text = self.skill().replace("## 9. Preflight the host",
-                                    "## 9. Preflight the host\n\nSee [x](./references/missing.md).")
+        text = self.skill().replace("## 8. Earn or discard every gating claim",
+                                    "## 8. Earn or discard every gating claim\n\nSee [x](./references/missing.md).")
         problems = activation.skill_link_problems(text, self.REFERENCES)
         self.assertEqual(len(problems), 1, problems)
         self.assertIn("missing.md", problems[0])

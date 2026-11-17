@@ -250,7 +250,14 @@ class PublicSpikeBackendTests(unittest.TestCase):
         contract = (ROOT / "contracts/empirica/v2/public-contract.json").read_text()
         skill = (ROOT / "plugins/empirica/skills/empirica/SKILL.md").read_text()
         # the skill no longer carries these facts (the activation validator's numeric guard keeps it so)
-        self.assertNotIn("120", skill)
+        # the validator resolves its paths from the repository root
+        import contextlib
+        import importlib.util
+        with contextlib.chdir(ROOT):
+            spec = importlib.util.spec_from_file_location("empirica_activation_guard", ROOT / "scripts/validate_empirica_activation.py")
+            activation = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(activation)
+        self.assertEqual(activation.skill_spike_number_problems(skill), [])
         resources = " ".join((evidence, contract))
         self.assertIn("stdout", resources.lower())
         self.assertIn("stderr", resources.lower())

@@ -156,7 +156,7 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
 # SKILL_MAX_CHARS may exceed the file by at most SKILL_MAX_HEADROOM, so shrinking the skill forces the ceiling down.
 # The rule across revisions: the constants test's upper bound is the CURRENT ceiling, and every PR that lowers
 # SKILL_MAX_CHARS lowers that bound in the same edit, so a later raise needs a visible test edit.
-SKILL_MAX_CHARS = 14_400
+SKILL_MAX_CHARS = 7_400
 SKILL_MAX_HEADROOM = 1_000
 # SKILL_TOP_CHARS is the early-anchor cut. 5,000 x 2.966 = 14,830; 13,300 is about 90% of that, because the ratio is a
 # whole-file average (a prefix dense in code or identifiers fits fewer characters) and the counter Claude Code uses for
@@ -223,8 +223,8 @@ def skill_host_literal_problems(skill_text: str) -> list[str]:
 # carry no such unit. The frontmatter is outside the guard.
 _SPIKE_NUMBERS = (
     re.compile(r"\b\d[\d,]*\s*-?\s*(?:ms|s|secs?|seconds?|mins?|minutes?)\b", re.IGNORECASE),
-    re.compile(r"\b\d[\d,]*\s*-?\s*(?:[KMG]iB|[KMG]B|PIDs?|environment overrides?)\b"),
-    re.compile(r"\buid/gid\b|\b65534\b|\bnofile\b"),
+    re.compile(r"\b\d[\d,]*\s*-?\s*(?:[KMG]iB|[KMG]B|PIDs?|CPUs?|files?|environment overrides?)\b"),
+    re.compile(r"\buid/gid\b|\b65534\b|\bnofile\b|\btimeout\s+\d"),
     re.compile(r"spike-plan-draft/\d+"),
 )
 
