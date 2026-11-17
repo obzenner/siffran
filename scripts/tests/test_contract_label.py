@@ -187,12 +187,28 @@ class TurnEndNoticeTests(unittest.TestCase):
         notice = json.loads(text(CONTRACTS / "public-contract.json"))["settlement_notices"][self.NOTICE]
         self.assertIn("{reason}", notice)
         self.assertIn("report_convergence intent=stop", notice)
-        # true for every cause of `none` (a graph revision is a step) and for a turn that goes on (it does not hand the turn back)
-        self.assertIn("revise the claim graph and continue", notice)
         # a frozen graph admits no revision, so the way on is offered only where it exists
         self.assertIn("unless the claim graph is frozen", notice)
+        self.assertIn("revise the claim graph and continue", notice)
         self.assertNotIn("hand the turn back", notice)
         self.assertNotIn("No step left", notice)
+
+    def test_the_notice_is_true_for_every_turn_that_carries_it(self):
+        """The residual is the directive of the actor `none` (the core's reason names the refuted or conflicted root), the
+        directive of the last continuation before a bound, where the author still has a step, and the settlement at the bound.
+        So it claims only what holds for all three: it offers the stop on the condition that no step of the agent's moves
+        the run, and otherwise asks for the step the reason names. It never says the run cannot converge."""
+        notice = json.loads(text(CONTRACTS / "public-contract.json"))["settlement_notices"][self.NOTICE]
+        self.assertIn("If no step of yours moves the run, end it honestly with report_convergence intent=stop", notice)
+        self.assertIn("otherwise act on that reason", notice)
+        for false_when_the_author_has_a_step in ("cannot converge", "claims stand"):
+            self.assertNotIn(false_when_the_author_has_a_step, notice)
+
+    def test_the_adr_states_what_makes_the_notice_true_for_each_use(self):
+        adr = " ".join(text(next((ROOT / "doc" / "adr").glob("0073-*.md"))).split())
+        self.assertNotIn("says that the run cannot converge as its claims stand", adr)
+        self.assertIn("true for every cause of the actor `none`", adr)
+        self.assertIn("and for the last continuation and the settlement at a bound", adr)
 
 
 if __name__ == "__main__":

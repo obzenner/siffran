@@ -1346,9 +1346,15 @@ class StopModeTests(unittest.TestCase):
         got = self.turn_ends(fresh, [none, none])
         self.assertEqual(got[0], (2, "", self.residual(self.REFUTED) + "\n"))
         self.assertEqual((got[1][0], json.loads(got[1][1])), (0, {"systemMessage": self.residual(self.REFUTED)}))
-        # a none chain whose basis keeps moving continues, bounded by the host's own cap of continuations
-        moving = [self.auto_view("no_author_step", basis="sha256:" + format(i, "064x"), mode="auto-delegated") for i in range(5)]
-        self.assertEqual([code for code, _, _ in self.turn_ends({"session_id": "k-" + uuid.uuid4().hex}, moving)], [2] * 5)
+        # a none chain whose basis keeps moving continues (T bounds it): the T-th turn end of the chain settles with the residual
+        t = self.registry_bounds()["T"]
+        moving = [self.auto_view("no_author_step", basis="sha256:" + format(i, "064x"), mode="auto-delegated") for i in range(t + 1)]
+        got = self.turn_ends({"session_id": "k-" + uuid.uuid4().hex}, moving)
+        self.assertEqual([code for code, _, _ in got[: t - 1]], [2] * (t - 1))
+        self.assertEqual(got[t - 2], (2, "", self.residual(self.REFUTED) + "\n"))  # a none directive is the residual throughout
+        code, out, err = got[t - 1]
+        self.assertEqual((code, err, json.loads(out)), (0, "", {"systemMessage": self.residual(self.REFUTED)}))  # the T-th settles
+        self.assertEqual(got[t][0], 2)  # the settled turn ended the chain: a new one starts
 
     def test_A8_the_human_and_auditor_actors_and_deliberative_are_as_before_and_clear_the_count(self):
         k = self.registry_bounds()["K"]
