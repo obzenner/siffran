@@ -162,6 +162,18 @@ If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
   an Empirica auto run needs a fresh run. 7.0.2 does not need this: its own denial releases and refunds the
   reservation.
 
+## Auto mode decides its own claims (7.1.0)
+
+In an auto run, a `needs-decision` claim that no human answered belongs to the agent: supporting research approves it and
+refuting research discards it. The observer shows these as `decided_by_author` and `rejected_by_evidence`. Every auto run
+is read this way, active or ended, and nothing stored is rewritten: terminal statuses, audit verdicts and receipts stay as
+recorded. Two readings change for runs written by an earlier 7.0.x:
+
+- An ended auto run may show a decision that read `unanswered` as decided by its author.
+- An active auto run whose decision was left on Later now waits on the agent's research, not on a person.
+
+A human answer already recorded still decides its claim in every mode. Deliberative runs read as before.
+
 ## Qualified hosts
 
 The host versions 7.0.0 was qualified on are recorded here after the operator's native

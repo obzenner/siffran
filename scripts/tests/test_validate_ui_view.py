@@ -152,6 +152,12 @@ class ValidateUiViewTests(unittest.TestCase):
         decision["where"] = None
         self.assertRejected(ROWS, details, "a decision says where it is asked exactly while it waits")
 
+    def test_an_author_decided_standing_outside_an_auto_run_is_rejected(self):
+        details = copy.deepcopy(RUNS)
+        decision = next(c for c in _detail(details, "verification")["claims"] if c["decision"])["decision"]
+        decision.update(status="decided_by_author", where=None)
+        self.assertRejected(ROWS, details, "only an auto run's decision is decided by its author")
+
     def test_a_record_enum_that_drifts_from_the_core_is_rejected(self):
         view_schema, run_schema = v.schemas()
         run_schema["$defs"]["record"]["properties"]["status"]["enum"].append("waived")

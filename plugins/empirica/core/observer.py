@@ -177,16 +177,23 @@ def _record(snapshot: EvaluationSnapshot, record: Mapping[str, Any], prompt_erro
 
 
 def _decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating: bool, waiting: bool,
-              prompt_error: str | None) -> dict[str, Any] | None:
-    """A ``needs-decision`` claim's standing: ``approved`` or ``rejected`` once the human answered; else ``deferred``
-    when it is outside the run's scope (nobody is asked), ``waiting`` while the human is asked (``where``), ``unanswered``
-    when the run ended with it open, and ``not_asked`` when it is in scope but nothing asks (it was refuted, say)."""
+              prompt_error: str | None, state: str) -> dict[str, Any] | None:
+    """A ``needs-decision`` claim's standing, with ``state`` the core's derived state of the claim. ``approved`` or
+    ``rejected`` once a human answered, in every mode; else ``deferred`` when it is outside the run's scope (nobody is
+    asked). In an auto run, with no answer, the claim is the author's: ``decided_by_author`` when its evidence approved
+    it, ``rejected_by_evidence`` when evidence discarded it, else ``not_asked`` while the agent owes research and
+    ``unanswered`` once the run ended with it open. In a deliberative run, ``waiting`` while the human is asked
+    (``where``), ``unanswered`` when the run ended with it open, and ``not_asked`` when it is in scope but nothing asks
+    (it was refuted, say)."""
     if claim["kind"] != "needs-decision":
         return None
     answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
     active = snapshot.state.status == "active"
+    auto = snapshot.state.governance["control_mode"] == "auto"
+    authored = {"approved": "decided_by_author", "discarded": "rejected_by_evidence"}.get(state)
     status = (("approved" if answer["outcome"] == confirmation.APPROVE else "rejected") if answer
               else "deferred" if not gating
+              else (authored or ("not_asked" if active else "unanswered")) if auto
               else ("waiting" if active else "unanswered") if waiting else "not_asked")
     return {"status": status, "outcome": answer["outcome"] if answer else None,
             "answer": answer.get("answer") if answer else None,
@@ -196,14 +203,14 @@ def _decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating: bo
 
 def _claim_detail(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating: bool,
                   blocker_message: str | None, waiting: bool, prompt_error: str | None,
-                  audit_pending: bool, stale: set[str]) -> dict[str, Any]:
+                  audit_pending: bool, stale: set[str], state: str) -> dict[str, Any]:
     active = {a["artifact_id"] for a in active_evidence(snapshot, claim)}
     digest = claim_digest(claim)
     return {"id": claim["id"], "blocker_message": blocker_message,
             "records": [_record(snapshot, a, prompt_error, audit_pending) for a in snapshot.history
                         if a.get("kind") == "research" and a.get("claim_id") == claim["id"]
                         and a.get("claim_digest") == digest],
-            "decision": _decision(snapshot, claim, gating, waiting, prompt_error),
+            "decision": _decision(snapshot, claim, gating, waiting, prompt_error, state),
             "research": sum(a["kind"] == "research" and a.get("outcome") == "supporting"
                             for a in active_evidence(snapshot, claim)),
             "proof": _spikes(snapshot, claim, digest, active, stale)}
@@ -666,7 +673,7 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
                                  reason_message(reasons[blockers[c["id"]]["reason"]],
                                                 blockers[c["id"]]["parameters"], ended=ended)
                                  if c["id"] in blockers else None, c["id"] in deciding, prompt_error,
-                                 audit["pending"], set(derivation.freshness_heads))
+                                 audit["pending"], set(derivation.freshness_heads), derivation.states[c["id"]])
                    for c in claims],
     })
     return governance.plain(row), detail

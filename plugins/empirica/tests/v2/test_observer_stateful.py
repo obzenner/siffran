@@ -323,6 +323,12 @@ REPLAYS = {
         ("begin", dict(start="attended", extra={"C2"}, approve=True)), ("stop", dict(consent=True))],
     "a decision refuted by research is not asked": [
         ("begin", dict(start="attended", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=True, ref="a.md"))],
+    "an auto decision its evidence approves is the author's": [
+        ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=False, ref="a.md"))],
+    "an auto decision its evidence rules out": [
+        ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=True, ref="a.md"))],
+    "an auto decision left open by a stop": [
+        ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("stop", dict(consent=True))],
     "a stop shown and declined": [
         ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
         ("stop", dict(consent=False))],
@@ -341,7 +347,8 @@ class ReplayTests(unittest.TestCase):
                     decisions |= set(machine.decisions)
                     steps_seen |= set(machine.steps)
         # The oracles must see every answer they tell apart, or an observer that always says one would pass.
-        self.assertEqual(decisions, {"approved", "rejected", "waiting", "unanswered", "deferred", "not_asked"})
+        self.assertEqual(decisions, {"approved", "rejected", "waiting", "unanswered", "deferred", "not_asked",
+                                     "decided_by_author", "rejected_by_evidence"})
         self.assertEqual(steps_seen, {"current", "replaced", "gone"})
 
 

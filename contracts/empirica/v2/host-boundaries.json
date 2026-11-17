@@ -1774,7 +1774,10 @@
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_b_a_decision_resting_on_a_retrievable_record_waits_on_the_records_confirmation",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_c_non_gating_and_conflicted_decisions_follow_the_ordinary_rules",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_d_a_researched_decision_converges_in_delegated_auto_with_nobody_asked",
-        "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_a_deliberative_needs_decision_with_only_research_stays_blocked"
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_a_deliberative_needs_decision_with_only_research_stays_blocked",
+        "plugins/empirica/tests/v2/test_observer_facts.py::AutoDecisionStandingTests::test_a_persisted_human_confirmation_decides_an_auto_run_in_the_same_shape",
+        "plugins/empirica/tests/v2/test_observer_facts.py::AutoDecisionStandingTests::test_the_five_no_answer_cases_of_an_auto_run",
+        "plugins/empirica/tests/v2/test_observer_facts.py::AutoDecisionStandingTests::test_a_mixed_run_of_a_persisted_answer_and_a_researched_decision_has_a_distinct_auditor"
       ],
       "ledger_rows": []
     },
