@@ -263,6 +263,20 @@ test("declining confirmation keeps the edited revision pending", async () => {
   assert.equal(h.g.state, "pending");
 });
 
+test("a closed dialog asks again once the human says so; a host with nobody to ask names only the stop", async () => {
+  const asked = harness([[ESC]]);
+  const closed = await asked.invoke();
+  assert.equal(closed.result.type, "Block");
+  if (closed.result.type === "Block")
+    assert.deepEqual(closed.result.reasons[0].next_actions, ["governance.propose", "residual.accept"]);
+  const nobody = harness();
+  nobody.g.human_wait = false;
+  nobody.ctx.hasUI = false;
+  const refused = await nobody.invoke();
+  assert.equal(refused.result.type, "Block");
+  if (refused.result.type === "Block") assert.deepEqual(refused.result.reasons[0].next_actions, ["residual.accept"]);
+});
+
 test("no-op keys and cancel approve nothing", async () => {
   const h = harness([["x", ESC]]);
   await h.invoke();

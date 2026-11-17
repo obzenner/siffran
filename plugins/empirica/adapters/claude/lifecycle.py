@@ -310,7 +310,8 @@ def run_start_main() -> int:
             context = (
                 f"Empirica v2 is active. Opaque run handle: {handle}. "
                 "Use empirica_observe for public author actions, empirica_read for the "
-                "current RunView/argument/contract, and report_convergence only after "
+                "current RunView/argument/contract, and report_convergence to have a human "
+                "confirm waiting evidence before the audit and to decide the run after "
                 "the bound audit is current. Never submit trusted ingress."
             )
             json.dump({"hookSpecificOutput": {"hookEventName": "UserPromptExpansion",

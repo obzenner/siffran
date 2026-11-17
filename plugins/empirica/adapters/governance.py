@@ -73,9 +73,12 @@ def governance_timeout() -> float:
 
 def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:
     row = protocol.public_contract()["reasons"][code]
+    # A dialog the human closed is theirs to reopen: the author asks again once they say how to go on. Where nobody
+    # can be asked the row's honest stop is the only way on.
+    asked = code == "governance.approval_unavailable" and (result["run"].get("governance") or {}).get("human_wait")
     return {"type": "Block", "run": result["run"], "reasons": [{"code": code,
             "parameters": {}, "message": message or row["message"], "sections": row["sections"],
-            "next_actions": row["next_actions"]}]}
+            "next_actions": (["governance.propose"] if asked else []) + row["next_actions"]}]}
 
 
 def _duration(timeout: float) -> str:

@@ -96,8 +96,14 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
 function unavailable(response: Response, code = "governance.approval_unavailable"): Response {
   if (!(code in RECOVERY)) throw new Error(`Missing canonical governance recovery metadata: ${code}`);
   if (!("run" in response.result)) return response;
+  // A dialog the human closed is theirs to reopen: the author asks again once they say how to go on. Where nobody
+  // can be asked the row's honest stop is the only way on.
+  const asked = code === "governance.approval_unavailable"
+    && (response.result.run?.governance as { human_wait?: boolean } | null | undefined)?.human_wait === true;
+  const row = RECOVERY[code];
   return { ...response, result: { type: "Block", run: response.result.run,
-    reasons: [{ code, parameters: {}, ...RECOVERY[code] }] } };
+    reasons: [{ code, parameters: {}, ...row,
+      next_actions: asked ? ["governance.propose", ...row.next_actions] : row.next_actions }] } };
 }
 
 /**

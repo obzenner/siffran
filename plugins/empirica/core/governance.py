@@ -229,6 +229,14 @@ def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
             and governance["context"]["approval_capability"] == HUMAN_CONFIGURATION and prompt_error is None)
 
 
+def nobody_to_ask(governance: Mapping) -> bool:
+    """Whether a sized proposal waits on a human's approval that a host which has reported its context cannot put to
+    one: the agent may only stop honestly. A host that has not reported yet (no ``author``) is not asked to give up."""
+    return (sized(governance) and expected_approval_kind(governance) == "host_ui"
+            and governance["context"]["author"] is not None
+            and governance["context"]["approval_capability"] != HUMAN_CONFIGURATION)
+
+
 def expected_approval_kind(governance: Mapping) -> str:
     """The permitted approval kind for the current phase, from neutral admitted facts.
 

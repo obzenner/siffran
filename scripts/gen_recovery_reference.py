@@ -67,7 +67,7 @@ AUTHOR_GUIDANCE = {
     "governance.auto_invocation_required": "Auto needs an interactive invocation or operator-set `EMPIRICA_AUTO_DELEGATION=1`: run interactively or have the operator set it, then start fresh.",
     "governance.approval_required": "Submit a task-sized `configure_run` (all three ceilings plus a 1-600 character rationale) and wait for host approval; nothing is authorized before it.",
     "governance.revision_required": "The configuration changed: resubmit `configure_run` for a new host decision, or stop honestly.",
-    "governance.approval_unavailable": "The host could not obtain a decision: do not retry blindly; have the host refresh its governance context or use an approval-capable host, or accept the residual.",
+    "governance.approval_unavailable": "Nothing is approved: when the human says how to go on, take the view's `next:` (`configure_run` again where it is listed); with no approval UI, stop honestly or use an approval-capable host.",
     "governance.auto_ceiling": "Auto never raises ceilings after approval (interactive auto included), and a delegated proposal must fit its actual envelope (8/1/2, or narrower if the operator limited it): reduce scope, or start a fresh run with a larger approved size.",
     "governance.budget_contradictory": "StartRun budgets or operator limits exceed the fixed 8/1/2 delegated-auto policy, or a StartRun budget widens an operator limit (budgets may only narrow): correct the offending source and start a fresh run.",
     "governance.revision_exhausted": "Auto's material-revision allowance is spent: start a fresh run with a larger approved size, or use deliberative mode.",

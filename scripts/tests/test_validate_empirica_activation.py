@@ -157,6 +157,25 @@ class SkillOrderTests(unittest.TestCase):
              "Use this inline bootstrap matrix:",
              "**Do not read any file, including a skill reference, before the `investigate` witness is admitted\n"
              "(route \u2192 graph \u2192 approved configuration).**")
+    # Wording changed on purpose, each pinned by its exact new text and mapped back to the original it replaced: the digest
+    # is computed on the original (2020801f), so every other paragraph stays proven unchanged. Each states a rule once.
+    REWRITES = (("Once confirmations are done (`report_convergence` presents them first; the core refuses the audit while one is pending)",
+                 "Once confirmations are done (report first; the core refuses an audit while one is pending)"),
+                ("Call the host's guarded convergence operation when the graph, evidence, and\n"
+                 "scope are current. On Claude and Pi this is `report_convergence`: it has a human\n"
+                 "confirm waiting evidence before the audit, and after the bound audit its `Allow`\n"
+                 "is the terminal decision.",
+                 "Call the host's guarded convergence operation exactly once after the graph,\n"
+                 "evidence, and scope are current. On Claude and Pi this is `report_convergence`\n"
+                 "after the bound audit."),
+                ("   After dismissal, timeout, or rejection, wait for the human; Claude can settle the turn nonterminally while\n"
+                 "   investigation and convergence remain blocked. When they say how to go on, take the view's `next:`\n"
+                 "   (`configure_run` again, with the same or human-edited ceilings); record `investigate`\n"
+                 "   only once the view says `approved`.",
+                 "   After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while\n"
+                 "   investigation and convergence remain blocked. After dismissal, timeout, or rejection, resubmit\n"
+                 "   `configure_run` (the same or human-edited ceilings) to reopen the dialog; record `investigate`\n"
+                 "   only once the view says `approved`."))
     # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
     # may add anchors or reword one only by editing this list, visibly.
     REQUIRED = ("Claude launches `empirica:empirica-auditor`, Pi calls the",
@@ -178,6 +197,9 @@ class SkillOrderTests(unittest.TestCase):
 
     def digest(self, text, lead_ins=LEAD_INS):
         import hashlib
+        for new, original in self.REWRITES:
+            self.assertEqual(text.count(new), 1, new)
+            text = text.replace(new, original)
         paragraphs = self.paragraphs(text)
         for lead in lead_ins:
             self.assertEqual(paragraphs.count(lead), 1, lead)
@@ -198,6 +220,12 @@ class SkillOrderTests(unittest.TestCase):
         self.assertNotEqual(self.digest(deleted), self.PARAGRAPHS_DIGEST, "a deleted line is caught")
         self.assertNotEqual(self.digest(text + "\n\nOne more sentence.\n"), self.PARAGRAPHS_DIGEST, "an added paragraph is caught")
         self.assertNotEqual(self.digest(text.replace("hypothesis", "guess", 1)), self.PARAGRAPHS_DIGEST, "a rewritten line is caught")
+
+    def test_the_terminal_call_is_not_called_the_only_call(self):
+        text = self.skill()
+        self.assertNotIn("exactly once", text)
+        self.assertNotIn("report first", text)
+        self.assertNotIn("to reopen the dialog", text)
 
     def test_a_line_moved_between_paragraphs_is_caught(self):
         lines = self.skill().splitlines()

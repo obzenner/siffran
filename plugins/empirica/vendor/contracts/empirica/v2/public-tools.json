@@ -3,7 +3,7 @@
   "definitions": {
     "empirica_read": {
       "title": "Read Empirica state",
-      "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+      "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome; the run view's next: line says when to call configure_run again."
     },
     "empirica_observe": {
       "title": "Record an Empirica author action",
@@ -332,12 +332,11 @@
       ]
     },
     "governance.approval_unavailable": {
-      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+      "message": "Nothing is approved. Once the human says how to go on, take the next: action; with no approval UI only the stop applies.",
       "sections": [
         "governance"
       ],
       "next_actions": [
-        "host.repair_context",
         "residual.accept"
       ]
     },

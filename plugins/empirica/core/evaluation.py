@@ -754,7 +754,8 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            if governance.interaction_error(governed, confirmation.interactions(snapshot)):
+            if (governance.interaction_error(governed, confirmation.interactions(snapshot))
+                    or governance.nobody_to_ask(governed)):
                 actions.append("residual.accept")
             else:
                 actions.append("governance.propose")

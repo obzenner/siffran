@@ -65,7 +65,7 @@ language. When budgets, a stall, or scope closure matter, read
 
 ## 3. Obtain independent audit
 
-Once confirmations are done (report first; the core refuses an audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
+Once confirmations are done (`report_convergence` presents them first; the core refuses the audit while one is pending) and every in-scope gating claim is approved, read [references/audit.md](references/audit.md).
 Approval is not convergence: it means the evidence passed the service's rules, not that it
 convinces. Before requesting the audit, read `GetArgument`, the argument the auditor will receive,
 and check that each claim follows from its cited sources alone.
@@ -79,9 +79,10 @@ convergence is unsupported. Do not substitute an ordinary model response.
 
 ## 4. Request the terminal decision
 
-Call the host's guarded convergence operation exactly once after the graph,
-evidence, and scope are current. On Claude and Pi this is `report_convergence`
-after the bound audit.
+Call the host's guarded convergence operation when the graph, evidence, and
+scope are current. On Claude and Pi this is `report_convergence`: it has a human
+confirm waiting evidence before the audit, and after the bound audit its `Allow`
+is the terminal decision.
 
 - Only a schema-guarded `Allow` permits reporting the result.
 - `Allow(converged=true)` permits a convergence claim.
@@ -149,9 +150,9 @@ Do this before reading files, searching, browsing, or running commands.
 6. Wait until the text view's governance summary says `approved` for the exact displayed
    configuration; do not expect or parse a `run.governance.state` JSON field.
    Configuration amendments need a second review; human numeric edits are not corruption.
-   After cancellation/timeout, wait for the human; Claude can settle the turn nonterminally while
-   investigation and convergence remain blocked. After dismissal, timeout, or rejection, resubmit
-   `configure_run` (the same or human-edited ceilings) to reopen the dialog; record `investigate`
+   After dismissal, timeout, or rejection, wait for the human; Claude can settle the turn nonterminally while
+   investigation and convergence remain blocked. When they say how to go on, take the view's `next:`
+   (`configure_run` again, with the same or human-edited ceilings); record `investigate`
    only once the view says `approved`. Then record the `investigate` witness `{"kind":"investigate"}` before any
    native read, search, command, evidence submission, or child launch. Approval does not supply
    either witness.

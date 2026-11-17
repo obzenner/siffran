@@ -607,6 +607,81 @@ class SizeBudgetTests(_ServiceHarness):
                                 "re-attaching the full presentation must exceed the ceiling")
 
 
+class DismissalRecoveryTests(_ServiceHarness):
+    """After a configuration dialog closes without approval, the view names ONE way on, and the carriers agree.
+
+    Closed by the human (dismissed, timed out, declined): the human acts next; when they say how to go on the author
+    calls ``configure_run`` again. Nothing could be shown (no approval UI): the only way on is the honest stop. Run in
+    deliberative and in interactive auto (one human approval episode before investigation)."""
+
+    _mediator = SizeBudgetTests._mediator
+    _configure = SizeBudgetTests._configure
+    _observe_dispatch = SizeBudgetTests._observe_dispatch
+
+    AGAIN = "empirica_observe kind=configure_run"
+    STOP = "report_convergence intent=stop"
+    CASES = (("dismissed", lambda *_a, **_k: {"action": "cancel"}),
+             ("timed out", lambda *_a, **_k: None),
+             ("declined", lambda *_a, **_k: {"action": "decline"}))
+
+    def _start(self, mode, tag=""):
+        self.run_id = self.req({"type": "StartRun", "control_mode": mode, "goal": "governed task",
+                                "invocation": dict(TEST_INVOCATION),
+                                "selector": {"project": "p", "session": f"s-{mode}-{tag}"}})["run"]["id"]
+        self.action("route", reason="supplied context")
+        self.action("graph", payload=copy.deepcopy(GRAPH))
+
+    @staticmethod
+    def _lines(text):
+        return [line.strip() for line in text.splitlines()]
+
+    def _next_lines(self, text):
+        lines = self._lines(text)
+        return [line for line in lines if line.startswith("next:")], lines[lines.index("Next:") + 1]
+
+    def test_a_closed_dialog_names_one_way_on_in_every_mode(self):
+        for mode in ("deliberative", "auto"):
+            for case, answer in self.CASES:
+                with self.subTest(mode=mode, case=case):
+                    self._start(mode, case)
+                    out, dialogs = self._configure(answer)
+                    text = out["content"][0]["text"]
+                    self.assertEqual(dialogs, 1)
+                    reason_next, run_next = self._next_lines(text)
+                    self.assertEqual(run_next, self.AGAIN)
+                    self.assertTrue(all(row == f"next: {self.AGAIN}; {self.STOP}" for row in reason_next), reason_next)
+                    self.assertNotIn("governance_context", text)
+                    self.assertNotIn("blindly", text)
+                    self.assertEqual(self._configure(answer)[1], 1, "the resubmitted configure_run reopens the dialog")
+
+    def test_no_approval_ui_names_only_the_stop(self):
+        from adapters.governance import HostGovernance
+        for mode in ("deliberative", "auto"):
+            with self.subTest(mode=mode):
+                self._start(mode)
+                # what the host's start hook reports: the host, and that it has no approval ingress
+                self.service.trusted_governance_context(run_id=self.run_id, payload={"author": AUTHOR, "ingress": "unavailable"})
+                tools = PublicTools(PROFILE, dispatch=self._observe_dispatch, govern=HostGovernance(
+                    PROFILE, elicit=None, context_ingress=lambda _p, rid, ctx: self.service.trusted_governance_context(
+                        run_id=rid, payload=ctx),
+                    decision_ingress=lambda _p, rid, payload: self.service.trusted_governance_decision(
+                        run_id=rid, payload=payload)))
+                out = tools.call_internal("empirica_observe", {"run_id": self.run_id, "action": {
+                    "kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
+                    "rationale": SIZED_RATIONALE}})
+                text = out["content"][0]["text"]
+                reason_next, run_next = self._next_lines(text)
+                self.assertEqual(reason_next, [f"next: {self.STOP}"])
+                self.assertEqual(run_next, self.STOP)
+                self.assertNotIn("governance_context", text)
+                self.assertNotIn("configure_run", text)
+
+    def test_the_read_tool_does_not_forbid_the_recovery_the_view_names(self):
+        description = next(d["description"] for d in PublicTools(CLAUDE).definitions() if d["name"] == _pt.READ_TOOL)
+        self.assertNotIn("reopen host UI", description)
+        self.assertIn("next:", description)
+
+
 class AuditLaunchViewTests(unittest.TestCase):
     """S4: when an audit is owed the view shows the host's exact auditor launch (the host profile's ``audit_launch``), not
     ``host: child_reserve``; a host with no launch (Codex) renders the protocol surface unchanged. C5 sizes are measured on
