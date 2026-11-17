@@ -118,10 +118,9 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
           assert.deepEqual(got, { kind: "notice", notice: fill(template, template.includes("{resource}")
             ? { resource: "pass" } : template.includes("{reason}") ? { reason } : {}) }, where);
         } else if (expected.outcome === "continue-with-notice") {
-          // the cell's notice is the directive on every turn end of the chain, once per basis: the same basis again ends with
-          // the way out, and the K-th turn end on a basis ends with the residual, as for any continuation
-          if (label === "stalled") assert.deepEqual(got, { kind: "no-progress", notice: fill(NOTICES.unattended_residual, { reason }) }, where);
-          else if (label === "repeat") assert.deepEqual(got, { kind: "no-progress", notice: fill(NOTICES.unattended_continue, { reason }) }, where);
+          // the cell's notice is the directive on every turn end of the chain, once per basis: the same basis again, and the
+          // K-th turn end on a basis, end the chain with the residual (the one meaning of `end-no-progress`)
+          if (label === "stalled" || label === "repeat") assert.deepEqual(got, { kind: "no-progress", notice: fill(NOTICES.unattended_residual, { reason }) }, where);
           else assert.deepEqual(got, { kind: "continue", message: fill(NOTICES[name!], { reason }) }, where);
         } else {
           assert.equal(expected.outcome, "continue", where);
@@ -143,9 +142,9 @@ test("A7: an auto run whose author has no step left continues with the residual 
       assert.deepEqual(turnEnd(block(mode, "no_author_step"), previous),
         { kind: "continue", message: directive, memory: { basis: "sha256:0", count: 1, total: (previous?.total ?? 0) + 1 } },
         `${mode} / ${JSON.stringify(previous)}`);
-    // bounded like every auto continuation: the same basis again ends the turn with the way out
+    // bounded like every auto continuation: the same basis again ends the chain with the residual
     assert.deepEqual(turnEnd(block(mode, "no_author_step"), memory("sha256:0")),
-      { kind: "no-progress", notice: fill(NOTICES.unattended_continue, { reason: REFUTED }) }, mode);
+      { kind: "no-progress", notice: directive }, mode);
   }
   assert.match(directive, /report_convergence intent=stop/);
   assert.match(directive, /revise the claim graph/);
@@ -164,21 +163,20 @@ test("A9: the none continuation is counted, and the bound check comes ahead of i
     // the T-th turn end of a chain ends it, whatever the basis did and whoever acts
     assert.deepEqual(turnEnd(view, memory(basis(7), 1, CONTINUATION_T - 1)), residual, `${mode} / T`);
     assert.equal(turnEnd(view, memory(basis(7), 1, CONTINUATION_T - 2)).kind, "continue", `${mode} / T - 1`);
-    // the K-th on one basis ends with the residual (not the way out); the second on one basis, short of K, ends with the way out
+    // the K-th on one basis ends with the residual; so does the second on one basis, short of K: once per basis
     assert.deepEqual(turnEnd(view, memory("sha256:0", CONTINUATION_K - 1)), residual, `${mode} / K`);
-    assert.deepEqual(turnEnd(view, memory("sha256:0", 1)),
-      { kind: "no-progress", notice: fill(NOTICES.unattended_continue, { reason: REFUTED }) }, `${mode} / once per basis`);
+    assert.deepEqual(turnEnd(view, memory("sha256:0", 1)), residual, `${mode} / once per basis`);
   }
 });
 
-test("A7: a none actor reaches the agent through the handler: it continues once, and the same basis again settles", async () => {
+test("A7: a none actor reaches the agent through the handler: it continues once, and the same basis again ends with the residual", async () => {
   const w = await wired(() => block("auto-delegated", "no_author_step"));
   const first = await w.settle();
   assert.equal(first?.continue, true);
   assert.equal((first?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_residual, { reason: REFUTED }));
   const stalled = await w.settle();  // nothing moved
   assert.equal(stalled?.continue, undefined);
-  assert.equal((stalled?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_continue, { reason: REFUTED }));
+  assert.equal((stalled?.entries?.[0] as { content: string }).content, fill(NOTICES.unattended_residual, { reason: REFUTED }));
   assert.deepEqual(w.pi.entries.at(-1), { customType: "empirica.turn_end", data: { outcome: "no-progress" } });
 });
 
@@ -271,6 +269,46 @@ test("A9: K and T are the registry's: one place in the adapter, read from the re
   assert.equal(Number(bounds.definition.match(/\bT = (\d+)/)?.[1]), CONTINUATION_T);
   assert.match(bounds.definition, /K-th turn end of a chain on one observation basis, or the T-th turn end in a chain, ends the chain/);
   assert.ok(bounds.enforced_by.includes("pi"));
+});
+
+test("A8: the shared chains end where the registry's K says, on Pi as on Claude", () => {
+  const k = JSON.parse(readFileSync(path.resolve(HERE, "..", "..", "..", "..", "..", "contracts", "empirica", "v2",
+    "host-boundaries.json"), "utf8")).turn_end.bounds.K as number;
+  const shared = JSON.parse(readFileSync(path.resolve(HERE, "fixtures", "turn-end-chains.json"), "utf8")) as {
+    cases: Array<{ name: string; actor: "author" | "none"; first_actor?: "author" | "none"; segments: Array<[string, string]>;
+      final: string; then: "continue" | "end" }>;
+  };
+  const turns = (text: string): number => (text === "K" ? k : text.startsWith("K-") ? k - Number(text.slice(2)) : Number(text));
+  assert.ok(shared.cases.length >= 8);
+  const id = (label: string): Basis => `sha256:${label}`;
+  for (const item of shared.cases) {
+    const view = (label: string, actor: string): Result => {
+      const result = block("auto-delegated", actor === "none" ? "no_author_step" : "real") as unknown as { run: Record<string, unknown> };
+      result.run.basis = id(label);
+      return result as unknown as Result;
+    };
+    let memory: Memory | null = null;
+    for (const [label, count] of item.segments) {
+      for (let i = 0; i < turns(count); i++) {
+        const got = turnEnd(view(label, item.first_actor ?? item.actor), memory);
+        assert.equal(got.kind, "continue", `${item.name}: ${label} #${i + 1}`);
+        memory = (got as { memory: Memory }).memory;
+      }
+    }
+    const last = turnEnd(view(item.final, item.actor), memory);
+    assert.equal(last.kind === "continue" ? "continue" : "end", item.then, item.name);
+    if (item.then === "end") assert.equal(last.kind, "no-progress");
+  }
+});
+
+test("A8: the notice of a continuation asks the agent to act and never offers the stop; the residual alone does", () => {
+  const later = fill(NOTICES.unattended_continue, { reason: REASON });
+  assert.match(later, /Nobody is watching/);
+  assert.match(later, /act on that reason/);
+  assert.doesNotMatch(later, /intent=stop/);
+  const [, two] = chain([() => block("auto-interactive-post"), () => block("auto-interactive-post")]);
+  assert.equal((two as { message: string }).message, later);
+  assert.match(fill(NOTICES.unattended_residual, { reason: REASON }), /report_convergence intent=stop/);
 });
 
 test("A9: on an unchanged basis continuations 1 and 2 continue and the third end is the residual", () => {

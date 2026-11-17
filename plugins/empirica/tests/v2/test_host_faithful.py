@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from unittest.mock import patch
 
 from adapters.author_view import render_author_view
-from adapters.claude.completion import stop_result
+from adapters.claude.completion import count_turn_end, remember_chain, stop_result
 from adapters.claude.run_start import invocation_provenance
 from adapters.claude.transport import Response
 from adapters.public_tools import PublicTools
@@ -297,11 +298,15 @@ class StopHookLoopOnClaude(HostFaithful):
     CAP = 8  # Claude's own override: the hook must end the loop before it matters, and the test fails if it does not
 
     def hook_loop(self, drv, run_id, agent):
-        stops, active = [], False
+        """The Stop hook as ``completion_main`` runs it: the count of turn ends on the run's basis is kept per session, so the
+        K-th turn end of a chain ends it. Claude sets ``stop_hook_active`` only on a Stop that follows a blocked one."""
+        stops, active, session = [], False, {"session_id": "loop-" + uuid.uuid4().hex}
         for _ in range(self.CAP):
             response = Response.from_envelope({"request_id": "stop"}, {
                 "protocol": "empirica/v2", "request_id": "stop", "result": self.evaluated(drv, run_id)})
-            stop = stop_result(response, stop_hook_active=active)
+            count = count_turn_end(session, response.result, stop_hook_active=active)
+            stop = stop_result(response, stop_hook_active=active, turn_count=count)
+            remember_chain(session, response.result, stop.chain_count)
             stops.append(stop)
             if stop.exit_code == 0:
                 break
@@ -328,38 +333,50 @@ class StopHookLoopOnClaude(HostFaithful):
         self.assertEqual(json.loads(stops[0].stdout), {"systemMessage": protocol.PAUSED_FOR_EVIDENCE_NOTICE})
         self.assertEqual(self.human.shown, [])
 
-    def test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_runs_to_the_cap_with_no_directive_in_interactive_auto(self):
-        """An auto run asks no one, so the Stop never directs a report: the first turn end gives the core's reason and each
-        later one the way out; an agent that ignores them runs into Claude's own cap, the host's bound (`host-capped`,
-        `stop_host_cap`), and nobody is shown a dialog."""
+    def test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_ends_at_the_K_th_turn_end_with_no_directive_in_interactive_auto(self):
+        """An auto run asks no one, so the Stop never directs a report: the first turn end gives the core's reason, the next
+        the notice that asks the agent to act, and the K-th (the registry's ``turn_end.bounds``) the residual, which offers the
+        stop. An agent that ignores them reaches that end, never Claude's own cap; nobody is shown a dialog."""
         drv, run_id = self.claude(mode="auto")
         self.after_research(run_id)
         stops = self.hook_loop(drv, run_id, lambda text: None)
-        self.assertEqual(len(stops), self.CAP)
-        self.assertTrue(all(s.exit_code == 2 for s in stops))
-        self.assertFalse(any(protocol.EVIDENCE_REPORT_NOTICE in s.stderr for s in stops))
-        self.assertIn("intent=stop", stops[1].stderr)  # the way out, from the second turn end on
+        k = self.registry_K()
+        self.assertEqual([s.exit_code for s in stops], [2] * (k - 1) + [0], [s.stderr or s.stdout for s in stops])
+        self.assertFalse(any(protocol.EVIDENCE_REPORT_NOTICE in (s.stderr + s.stdout) for s in stops))
+        self.assertTrue(stops[1].stderr.endswith("Nobody is watching this turn end, so act on that reason now.\n"), stops[1].stderr)
+        self.assertIn("intent=stop", json.loads(stops[-1].stdout)["systemMessage"])  # the residual does
         self.assertEqual(self.human.shown, [])
+
+    @staticmethod
+    def registry_K() -> int:
+        from pathlib import Path
+        path = Path(__file__).resolve().parents[4] / "contracts" / "empirica" / "v2" / "host-boundaries.json"
+        return json.loads(path.read_text(encoding="utf-8"))["turn_end"]["bounds"]["K"]
 
     def unattended(self, **session):
         drv, run_id = self.claude(mode="auto", **session)
         calls: list[str] = []
 
-        def agent(text):  # the literal agent: take the way out the directive names
+        def agent(text):  # the literal agent: take the way out the notice it was handed names
             if "intent=stop" in text and calls == []:
                 calls.append("report_convergence intent=stop")
                 self.say(call_of(calls[-1], run_id))
         stops = self.hook_loop(drv, run_id, agent)
+        if stops[-1].exit_code == 0 and stops[-1].stdout.startswith("{"):  # the residual settles the turn: the agent reads it next
+            agent(json.loads(stops[-1].stdout)["systemMessage"])
         return drv, run_id, stops, calls
 
-    def test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_directives_intent_stop(self):
+    def test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_residuals_intent_stop(self):
         for label, session in (("interactive auto after the first approval", {}), ("delegated auto", {"delegated": True})):
             with self.subTest(label):
                 drv, run_id, stops, calls = self.unattended(**session)
                 self.assertEqual([s.exit_code for s in stops], [2, 2, 0], [s.stderr or s.stdout for s in stops])
                 self.assertEqual(stops[0].stderr.strip(), "Record research for claim C0.")  # an auto first turn end gives the core's reason
-                self.assertIn("intent=stop", stops[1].stderr)  # the continuation names the way out
                 self.assertIn("Record research for claim C0.", stops[1].stderr)
+                self.assertTrue(stops[1].stderr.endswith("act on that reason now.\n"))  # the continuation asks the agent to act, no stop
+                self.assertNotIn("intent=stop", stops[1].stderr)
+                self.assertIn("intent=stop", stops[2].stdout)  # the K-th turn end is the residual, the notice that does
+                self.assertIn("Record research for claim C0.", stops[2].stdout)
                 self.assertEqual(calls, ["report_convergence intent=stop"])
                 self.assertTrue(self.run_view(drv, run_id)["status"].startswith("stopped_"), self.run_view(drv, run_id)["status"])
                 self.assertEqual(self.human.shown, [])

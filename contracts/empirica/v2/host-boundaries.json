@@ -16,6 +16,7 @@
       "T": 16,
       "definition": "With K = 3 and T = 16: the K-th turn end of a chain on one observation basis, or the T-th turn end in a chain, ends the chain with the `unattended_residual` notice, so at most K − 1 continuations on one basis and T − 1 in a chain. A changed basis restarts the count on the new basis; any turn end that is not a continuation ends the chain and clears both counts. A continuation that carries the `unattended_residual` directive (the actor `none`) counts like any other.",
       "enforced_by": [
+        "claude",
         "pi"
       ]
     },
@@ -24,10 +25,10 @@
       "settle": "End the turn with the run view and no notice: exactly one audit is pending and its result continues the run.",
       "settle-notice": "End the turn with the contract notice of the settlement; the run stays active and not converged, and nothing was approved or confirmed by the settlement.",
       "pause": "End the turn with a contract notice that is not a convergence claim and names the real next step the human can relay to the agent; the run stays active, nobody was asked, nothing was granted. The same on a first and a later turn end.",
-      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; `unattended_continue` on a later turn end of the same chain). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else. A chain is bounded by `bounds` (the K-th turn end on one basis and the T-th in a chain end it instead, `end-no-progress`). A host in `bounds.enforced_by` counts them; any other host ends at the first repeat on an unchanged basis with `unattended_continue`. A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason.",
-      "end-no-progress": "End the turn because the chain reached its bound (`bounds`): the notice is `unattended_residual`, which offers `report_convergence intent=stop` as the honest end, and Pi records `no-progress`. A host that does not count (not in `bounds.enforced_by`) ends at the first repeat on an unchanged basis with `unattended_continue`.",
+      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason on the first turn end of a chain; `unattended_continue`, which asks it to act on the reason, on a later one). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else. A chain is bounded by `bounds`: the K-th turn end on one basis and the T-th in a chain end it instead (`end-no-progress`).",
+      "end-no-progress": "End the chain because it reached its bound (`bounds`), or because the `none` actor's one continuation on a basis was spent: the notice is `unattended_residual`, the one notice that offers `report_convergence intent=stop` as the honest end. Pi records `no-progress`.",
       "unreachable": "The state cannot arise in this control mode (the core never produces it there); no host outcome is defined, and a scenario names the test that proves it.",
-      "continue-with-notice": "Keep the turn going with the cell's notice as the directive, once per observation basis: the run needs a decision from the agent (end honestly, or revise the claim graph), and a settled turn would hand it to nobody. The continuation is counted like any other (`bounds`), and a turn end on the basis the previous one saw ends the turn instead with `unattended_continue` (`end-no-progress`)."
+      "continue-with-notice": "Keep the turn going with the cell's notice as the directive, once per observation basis: the run needs a decision from the agent (end honestly, or revise the claim graph), and a settled turn would hand it to nobody. The continuation is counted like any other (`bounds`), and a turn end on the basis the previous one saw ends the chain instead with `unattended_residual` (`end-no-progress`)."
     },
     "states": [
       {
@@ -309,8 +310,8 @@
         "allow": "exit 0 with the run view",
         "settle": "exit 0; the run view (async audit) or `systemMessage` with the notice",
         "pause": "exit 0 with `systemMessage`",
-        "continue": "exit 2 with the reason on stderr (the real reason), and `unattended_continue` when `stop_hook_active` is true; on any later turn end whose `run.basis` is the one the previous Stop saw, the turn ends (exit 0) with `unattended_continue`",
-        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule). The adapter adds the same rule as Pi: it remembers the core's `run.basis` per session and a continuation on an unchanged basis ends with `unattended_continue`; the cap is the backstop, no longer the bound that matters. Claude is not in `bounds.enforced_by`: it does not count K and T, and ends at the first repeat on one basis.",
+        "continue": "exit 2 with the reason on stderr (the real reason), and `unattended_continue` when `stop_hook_active` is true; the K-th turn end on one `run.basis` ends the chain (exit 0) with `unattended_residual`",
+        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule). The adapter counts K of `bounds`: it remembers `{basis, count}` per session, in a file written atomically, and reads it only on a Stop that follows a blocked one (`stop_hook_active` true); a changed basis restarts the count at 1, any outcome that is not a continuation clears it, and a record it cannot read (a bare basis from an older version, or a malformed one) reads as a changed basis. Claude does not count T: a chain's total is bounded by the host's own cap of continuations.",
         "table_driven": "EHB-STOP-23"
       },
       "pi": {
@@ -556,7 +557,7 @@
       "boundary": "HB-STOP",
       "title": "a turn end is decided by the control mode and the run state, the same on every host (the turn-end table)",
       "control_mode_dependent": true,
-      "outcomes": "Claude: `pause` (exit 0, `systemMessage`, `paused_for_human`/`paused_for_evidence`; the same on the first and on a later Stop; ADR-0068 owns the `stop_hook_active` rule) | `continue` (exit 2; `unattended_continue` when `stop_hook_active` is true) | unchanged settlements (see `HX-STOP-01`). If the host resets `stop_hook_active` between continuations, an auto run's post-tool Stop blocks again and the outcome is `host-capped` (`report-limitation`). Pi: `HX-STOP-04`.",
+      "outcomes": "Claude: `pause` (exit 0, `systemMessage`, `paused_for_human`/`paused_for_evidence`; the same on the first and on a later Stop; ADR-0068 owns the `stop_hook_active` rule) | `continue` (exit 2; `unattended_continue` when `stop_hook_active` is true; the K-th turn end on one basis ends with `unattended_residual`, exit 0) | unchanged settlements (see `HX-STOP-01`). If the host resets `stop_hook_active` between continuations, an auto run's post-tool Stop blocks again and the outcome is `host-capped` (`report-limitation`). Pi: `HX-STOP-04`.",
       "outcomes_by_mode": "See the turn-end table (`turn_end`): deliberative pauses on any other active state; an auto run continues while the author has a step (`turn_end_actor` `author`), continues with `unattended_residual` as the directive when `turn_end_actor` is `none` (end honestly, or revise the claim graph), and settles while a human is asked about its configuration or a budget raise or an audit runs; the settlements apply in every mode.",
       "scenarios": [
         "EHB-STOP-05",
@@ -582,7 +583,8 @@
         "EHB-STOP-40",
         "EHB-STOP-41",
         "EHB-STOP-42",
-        "EHB-STOP-43"
+        "EHB-STOP-43",
+        "EHB-STOP-44"
       ],
       "sources": "CC \"Stop input\" and \"Stop decision control\"; Q2; ADR-0019 (G2), ADR-0051, ADR-0063, ADR-0064 interim (`fb1106b`), ADR-0067 A2-1/A2-2, ADR-0068; HEATH AS3 (`pause`); CODE `P/adapters/claude/completion.py:_turn_end_mode`."
     },
@@ -603,7 +605,7 @@
         "EHB-STOP-37"
       ],
       "sources": "ADR-32, ADR-68, `dist/core/extensions/types.d.ts:729-779,805` and `docs/extensions.md:66,117` of Pi 1.1.0 (Q3 surface §1), PI-T (`agent_before_settle`).",
-      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; an auto run continues while the core's `run.basis` changes between continuations, and a chain is bounded by `turn_end.bounds` (Pi enforces it; a host not in `enforced_by` ends at the first repeat with `unattended_continue`)."
+      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; an auto run continues while the core's `run.basis` changes between continuations, and a chain is bounded by `turn_end.bounds`."
     },
     {
       "id": "HX-STOP-05",
@@ -1313,10 +1315,10 @@
       ],
       "setup": "any `auto` run (interactive before or after its first approval, delegated), active, non-converged, with a blocker other than a sole evidence confirmation (`EHB-STOP-20` takes precedence for that case), the previous Stop already blocked",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: exit 2, `unattended_continue`: the real reason and \"Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop\"; never a human pause",
+      "expected": "C: exit 2, `unattended_continue`: the real reason and a request to act on it (\"Nobody is watching this turn end, so act on that reason now\"), which does not offer the stop; never a human pause; the K-th turn end on one basis ends with `unattended_residual` instead",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_08_auto_runs_block_with_the_way_out_on_a_continuation",
-        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_directives_intent_stop"
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_residuals_intent_stop"
       ],
       "ledger_rows": [
         "stop_unattended_directive"
@@ -1428,7 +1430,7 @@
       "covered_by": [
         "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_one_stop",
         "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_evidence_wait_pauses_and_nobody_is_shown_a_dialog_by_the_stop",
-        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_runs_to_the_cap_with_no_directive_in_interactive_auto"
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_ends_at_the_K_th_turn_end_with_no_directive_in_interactive_auto"
       ],
       "ledger_rows": [
         "stop_pause_rendering"
@@ -1443,9 +1445,9 @@
       ],
       "setup": "interactive auto after the first approval, and delegated auto, with a literal agent",
       "action": "the Stop hook loop",
-      "expected": "C: Stops `[2, 2, 0]`; the continuation names `report_convergence intent=stop`; the run ends `stopped_*`",
+      "expected": "C: Stops `[2, 2, 0]`; the third is the residual, which names `report_convergence intent=stop`; the run ends `stopped_*` once the agent acts on it",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_directives_intent_stop"
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_17_unattended_auto_ends_honestly_through_the_residuals_intent_stop"
       ],
       "ledger_rows": [
         "stop_unattended_directive"
@@ -2552,7 +2554,7 @@
       ],
       "setup": "a first approval that cannot be asked here (no MCP ingress, interactions spent, or a prompt error), so `human_wait` does not apply; the previous Stop already blocked",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: interactive auto before its first approval takes the auto outcome (exit 2, `unattended_continue`, `intent=stop` named), where it used to re-block with the real reason until Claude's cap; the first Stop is the real-reason block",
+      "expected": "C: interactive auto before its first approval takes the auto outcome (exit 2, `unattended_continue`, which asks the agent to act and offers no stop), where it used to re-block with the real reason until Claude's cap; the first Stop is the real-reason block",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_19_an_approval_that_cannot_be_asked_ends_the_loop_by_mode"
       ],
@@ -2567,10 +2569,10 @@
       ],
       "setup": "the sole blocker is a claim resting only on a source that needs a human (inert: an auto run asks no one); the previous Stop already blocked; the same outcome as `EHB-STOP-08`",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: every `auto` mode gets `unattended_continue` (exit 2, the real reason and the way out) while the core's `run.basis` changes, never the `evidence_report` directive; on an unchanged basis the turn ends (exit 0) with `unattended_continue`",
+      "expected": "C: every `auto` mode gets `unattended_continue` (exit 2, the real reason and a request to act) while the core's `run.basis` changes, never the `evidence_report` directive; the K-th turn end on one basis ends (exit 0) with `unattended_residual`",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_has_no_evidence_directive_and_deliberative_hands_off",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_INVARIANT_across_turn_ends_read_only_calls_earn_one_continuation_and_a_changed_basis_one_more"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_INVARIANT_across_turn_ends_read_only_calls_earn_continuations_up_to_K_on_one_basis_and_a_changed_basis_restarts_the_count"
       ],
       "ledger_rows": [
         "stop_unattended_directive",
@@ -2738,12 +2740,12 @@
       ],
       "setup": "an auto run whose `turn_end_actor` is `none` (the root claim is refuted or conflicted)",
       "action": "Stop (Claude) / `agent_before_settle` (Pi)",
-      "expected": "C/P: the turn goes on (Claude exit 2; Pi `continue: true`) with the `unattended_residual` notice as the directive: it names the core's reason and offers `report_convergence intent=stop` or a revised claim graph, on the first turn end and on a later one on a changed basis; the continuation is counted against `turn_end.bounds`, and a turn end on the basis the previous one saw ends the turn with `unattended_continue` (the no-progress rule); deliberative pauses with `paused_for_human`",
+      "expected": "C/P: the turn goes on (Claude exit 2; Pi `continue: true`) with the `unattended_residual` notice as the directive: it names the core's reason and offers `report_convergence intent=stop` or a revised claim graph, on the first turn end and on a later one on a changed basis; the continuation is counted against `turn_end.bounds`, and a turn end on the basis the previous one saw ends the chain with `unattended_residual` (exit 0 on Claude); deliberative pauses with `paused_for_human`",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_an_auto_run_whose_author_has_no_step_left_continues_with_the_residual_as_its_directive",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_a_none_actor_that_does_not_move_the_run_ends_the_turn_on_the_no_progress_rule",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_a_none_actor_that_does_not_move_the_run_ends_the_turn_with_the_residual",
         "plugins/empirica/adapters/pi/test/turn-end.test.ts::A7: an auto run whose author has no step left continues with the residual as its directive; deliberative still pauses",
-        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A7: a none actor reaches the agent through the handler: it continues once, and the same basis again settles"
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A7: a none actor reaches the agent through the handler: it continues once, and the same basis again ends with the residual"
       ],
       "ledger_rows": []
     },
@@ -2795,6 +2797,32 @@
         "plugins/empirica/tests/test_governance.py::GovernanceServiceTests::test_A11d_budget_exhaustion_offers_the_raise_to_interactive_auto_only"
       ],
       "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-44",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "Claude, an auto run at the bound of `turn_end.bounds`: its next turn end would be the K-th on one observation basis",
+      "action": "Stop with `stop_hook_active: true`, on the basis the previous Stop saw",
+      "expected": "C: exit 0 with `systemMessage` = `unattended_residual` (it offers `report_convergence intent=stop`) and the count is cleared; turn ends 1 and 2 on one basis continue (exit 2) and the third ends; a changed `run.basis` restarts the count, and so does a Stop that follows no blocked one (`stop_hook_active` absent, false or not literally true); any outcome that is not a continuation clears the count (a settlement, a pause, a wait, an allow); the `none` continuation is counted like any other; a memory file an older version wrote (the bare basis) or an unreadable one reads as a changed basis; a chain's total is bounded by the host's own cap of continuations (`host-capped`)",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_on_an_unchanged_basis_turn_ends_one_to_K_minus_one_continue_and_the_K_th_is_the_residual",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_a_changed_basis_restarts_the_count",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_a_stop_that_is_not_a_continuation_starts_a_new_chain",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_a_stored_basis_from_an_older_version_and_an_unreadable_memory_read_as_a_changed_basis",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_the_none_continuation_is_counted_like_any_other",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_the_human_and_auditor_actors_and_deliberative_are_as_before_and_clear_the_count",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A8_a_non_active_or_unreadable_stop_leaves_no_count_behind",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_INVARIANT_across_turn_ends_read_only_calls_earn_continuations_up_to_K_on_one_basis_and_a_changed_basis_restarts_the_count",
+        "scripts/tests/test_contract_label.py::TurnEndBoundsTests::test_both_hosts_count_with_the_registrys_numbers"
+      ],
+      "ledger_rows": [
+        "stop_host_cap"
+      ]
     },
     {
       "id": "EHB-STOP-31",

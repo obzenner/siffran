@@ -936,9 +936,9 @@ class StopModeTests(unittest.TestCase):
                 self.assertEqual((blocked.exit_code, blocked.stdout), (2, ""))
                 self.assertEqual(blocked.stderr, render_notice(self.notices()["unattended_continue"], reason=self.REASON) + "\n")
                 self.assertIn(self.REASON, blocked.stderr)
-                self.assertIn("intent=stop", blocked.stderr)
-                self.assertIn("does not hand the turn back", blocked.stderr)
-                self.assertNotIn("unattended", blocked.stderr)  # interactive auto has a human present
+                self.assertNotIn("intent=stop", blocked.stderr)  # only the residual offers the stop
+                self.assertIn("Nobody is watching", blocked.stderr)
+                self.assertIn("act on that reason", blocked.stderr)
 
     def test_EHB_STOP_20_an_auto_continuation_has_no_evidence_directive_and_deliberative_hands_off(self):
         """An auto continuation on an evidence wait is the way out with the real reason (nobody is asked, in any auto mode);
@@ -953,25 +953,27 @@ class StopModeTests(unittest.TestCase):
         self.assertEqual((paused.exit_code, paused.stderr), (0, ""))
         self.assertEqual(json.loads(paused.stdout), {"systemMessage": self.notices()["paused_for_evidence"]})
 
-    def test_INVARIANT_across_turn_ends_read_only_calls_earn_one_continuation_and_a_changed_basis_one_more(self):
+    def test_INVARIANT_across_turn_ends_read_only_calls_earn_continuations_up_to_K_on_one_basis_and_a_changed_basis_restarts_the_count(self):
         """G17b item 2 (the Pi twin is `turn-end.test.ts`): every sequence of up to 6 events between Stops, each a read-only call
-        (the core's `run.basis` is unchanged) or a recorded observation (it moves), for an evidence wait and for a plain
-        auto reason. A Stop that continues is exit 2; a continuation (`stop_hook_active`) on the basis the previous Stop saw
-        ends with `unattended_continue` (exit 0)."""
+        (the core's `run.basis` is unchanged) or a recorded observation (it moves), for an evidence wait and for a plain auto
+        reason. The oracle: a Stop continues (exit 2) unless it is the K-th turn end of its chain on one basis, which ends
+        with `unattended_residual` (exit 0) and starts a new chain (`stop_hook_active` false) at the next Stop."""
         import uuid
+        k = self.registry_bounds()["K"]
         for kind in ("real", "evidence"):
             for length in range(0, 7):
                 for pattern in range(2 ** length):
                     events = ["record" if (pattern >> i) & 1 else "read" for i in range(length)]
                     session = {"session_id": "basis-" + uuid.uuid4().hex}
-                    revision, active, previous = 0, False, None
+                    revision, active, previous, count = 0, False, None, 0
                     for step in [None, *events]:
                         if step == "record":
                             revision += 1
                         view = self.block("auto-interactive-post", kind)
                         view["run"]["basis"] = "sha256:" + format(revision, "064x")
                         code, out, _ = self.hook({**session, **({"stop_hook_active": True} if active else {})}, view)
-                        expected = (not active) or previous != revision
+                        count = count + 1 if active and previous == revision else 1
+                        expected = count < k
                         self.assertEqual(code == 2, expected, (kind, events, step))
                         if not expected:
                             self.assertIn("intent=stop", json.loads(out)["systemMessage"])
@@ -1008,7 +1010,7 @@ class StopModeTests(unittest.TestCase):
                 run["run"]["governance"].update(spent)
                 blocked = self.stop(run, stop_hook_active=True)
                 self.assertEqual(blocked.exit_code, 2)
-                self.assertIn("intent=stop", blocked.stderr)
+                self.assertNotIn("intent=stop", blocked.stderr)
 
     def test_EHB_STOP_12_existing_settlements_Allow_Inert_and_Fault_are_unchanged_on_a_continuation(self):
         notices = self.notices()
@@ -1056,6 +1058,11 @@ class StopModeTests(unittest.TestCase):
     #: Each state of the registry's turn-end table, built by ``cell_result`` for a control mode.
     TABLE = PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "host-boundaries.json"
 
+    @classmethod
+    def registry_bounds(cls) -> dict:
+        """K and T: the registry's one definition (``turn_end.bounds``), never restated in a test."""
+        return json.loads(cls.TABLE.read_text(encoding="utf-8"))["turn_end"]["bounds"]
+
     def cell_result(self, state: str, mode: str, outcome: str, notice: str | None = None) -> dict | None:
         """A core response for one state of the table in one mode, or None where the state cannot arise in that mode."""
         if outcome == "unreachable":
@@ -1095,16 +1102,20 @@ class StopModeTests(unittest.TestCase):
             paused = self.stop(self.block("deliberative", "no_author_step"), stop_hook_active=flag)
             self.assertEqual(json.loads(paused.stdout), self.paused(self.REFUTED), flag)
 
-    def test_A7_a_none_actor_that_does_not_move_the_run_ends_the_turn_on_the_no_progress_rule(self):
-        """The directive is bounded like every auto continuation: the next turn end on the basis the previous one saw settles
-        with ``unattended_continue`` (the core's ``run.basis`` did not change), and a changed basis (a revised graph) goes on."""
+    def test_A7_a_none_actor_that_does_not_move_the_run_ends_the_turn_with_the_residual(self):
+        """The directive is bounded like every auto continuation, and the end has one meaning: the next turn end on the basis the
+        previous one saw (the core's ``run.basis`` did not move) settles with ``unattended_residual``, and a changed basis
+        (a revised graph) goes on."""
         session = {"session_id": "none-" + uuid.uuid4().hex}
         view = self.block("auto-delegated", "no_author_step")
+        residual = render_notice(self.notices()["unattended_residual"], reason=self.REFUTED)
         code, out, err = self.hook({**session}, view)
-        self.assertEqual((code, out, err), (2, "", render_notice(self.notices()["unattended_residual"], reason=self.REFUTED) + "\n"))
+        self.assertEqual((code, out, err), (2, "", residual + "\n"))
         code, out, err = self.hook({**session, "stop_hook_active": True}, view)  # nothing moved
         self.assertEqual((code, err), (0, ""))
-        self.assertEqual(json.loads(out), {"systemMessage": render_notice(self.notices()["unattended_continue"], reason=self.REFUTED)})
+        self.assertEqual(json.loads(out), {"systemMessage": residual})
+        code, out, err = self.hook({**session}, view)  # the settled turn ended the chain: a new one starts
+        self.assertEqual((code, out, err), (2, "", residual + "\n"))
         moved = self.block("auto-delegated", "no_author_step")
         moved["run"]["basis"] = "sha256:" + "9" * 64
         code, out, err = self.hook({**session, "stop_hook_active": True}, moved)
@@ -1202,7 +1213,182 @@ class StopModeTests(unittest.TestCase):
                             else:  # a first turn end gives the core's own reason
                                 self.assertEqual(got.stderr, " ".join(row["message"] for row in result["reasons"]) + "\n")
                         checked += 1
+                if cell["outcome"] in ("continue", "continue-with-notice"):  # the K-th turn end on one basis ends the chain
+                    reason = " ".join(row["message"] for row in result["reasons"])
+                    for turn in (self.registry_bounds()["K"], self.registry_bounds()["K"] + 1):
+                        with self.subTest(state=state["id"], mode=mode, count=turn):
+                            got = stop_result(_typed(result), stop_hook_active=True, turn_count=turn)
+                            self.assertEqual((got.exit_code, got.stderr, json.loads(got.stdout)),
+                                             (0, "", {"systemMessage": render_notice(notices["unattended_residual"], reason=reason)}))
+                            checked += 1
         self.assertGreater(checked, 30)  # a table that read as empty would pass vacuously
+
+    # --- A8: the adapter counts the turn ends of a chain on one basis (K), as Pi does ----------------------------------
+
+    def turn_ends(self, session: dict, views, *, chain: bool = True):
+        """The (exit code, stdout, stderr) of each Stop in ``views`` through the real hook, one session. ``chain``: Claude sends
+        ``stop_hook_active`` true after a Stop that blocked (exit 2), and false after one that did not."""
+        out, active = [], False
+        for view in views:
+            got = self.hook({**session, **({"stop_hook_active": True} if chain and active else {})}, view)
+            out.append(got)
+            active = got[0] == 2
+        return out
+
+    def auto_view(self, kind: str = "real", basis: str | None = None, mode: str = "auto-interactive-post") -> dict:
+        view = self.block(mode, kind)
+        view["run"]["basis"] = basis or "sha256:" + "1" * 64
+        return view
+
+    def residual(self, reason: str | None = None) -> str:
+        return render_notice(self.notices()["unattended_residual"], reason=reason or self.REASON)
+
+    def test_A8_on_an_unchanged_basis_turn_ends_one_to_K_minus_one_continue_and_the_K_th_is_the_residual(self):
+        k = self.registry_bounds()["K"]
+        for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
+            with self.subTest(mode=mode):
+                session = {"session_id": "k-" + uuid.uuid4().hex}
+                got = self.turn_ends(session, [self.auto_view(mode=mode)] * (k + 2))
+                continued = render_notice(self.notices()["unattended_continue"], reason=self.REASON) + "\n"
+                self.assertEqual(got[0], (2, "", self.REASON + "\n"))  # the first turn end gives the core's reason
+                for turn in range(1, k - 1):
+                    self.assertEqual(got[turn], (2, "", continued), turn)
+                code, out, err = got[k - 1]
+                self.assertEqual((code, err, json.loads(out)), (0, "", {"systemMessage": self.residual()}))
+                self.assertIn("intent=stop", out)
+                # the residual settled the turn, which ended the chain: the next Stop starts a new one at 1
+                self.assertEqual(got[k], (2, "", self.REASON + "\n"))
+                self.assertEqual(got[k + 1], (2, "", continued))
+
+    def test_A8_a_changed_basis_restarts_the_count(self):
+        k = self.registry_bounds()["K"]
+        session = {"session_id": "k-" + uuid.uuid4().hex}
+        views = [self.auto_view(basis="sha256:" + format(i // (k - 1), "064x")) for i in range(4 * (k - 1))]  # K - 1 per basis
+        got = self.turn_ends(session, views)
+        self.assertEqual([code for code, _, _ in got], [2] * len(views))
+
+    def test_A8_a_stop_that_is_not_a_continuation_starts_a_new_chain(self):
+        """``stop_hook_active`` absent or false means a new chain has started: the count does not carry over."""
+        k = self.registry_bounds()["K"]
+        for flag in ({}, {"stop_hook_active": False}):
+            with self.subTest(flag=flag):
+                session = {"session_id": "k-" + uuid.uuid4().hex}
+                view = self.auto_view()
+                for _ in range(k + 3):  # never a continuation, so never more than a first turn end
+                    self.assertEqual(self.hook({**session, **flag}, view), (2, "", self.REASON + "\n"))
+        # a chain of K - 1 turn ends, then a new prompt (flag false), then the count starts again at 1
+        session = {"session_id": "k-" + uuid.uuid4().hex}
+        view = self.auto_view()
+        for turn in range(k - 1):
+            self.hook({**session, **({"stop_hook_active": True} if turn else {})}, view)
+        code, _, err = self.hook({**session, "stop_hook_active": True}, view)  # would be the K-th
+        self.assertEqual(code, 0)
+        self.hook({**session}, view)  # a new chain at 1
+        code, _, err = self.hook({**session, "stop_hook_active": True}, view)  # 2
+        self.assertEqual(code, 2)
+
+    def test_A8_a_stored_basis_from_an_older_version_and_an_unreadable_memory_read_as_a_changed_basis(self):
+        """A 7.0.x memory file held the bare basis; a corrupt or foreign one is read the same way: as a changed basis, so the
+        count starts at 1 and the turn continues."""
+        from adapters.claude.completion import _basis_file
+        view = self.auto_view()
+        for label, content in (("bare basis", view["run"]["basis"]), ("corrupt", "{not json"), ("empty", ""),
+                               ("wrong shape", json.dumps(["x"])), ("string count", json.dumps({"basis": view["run"]["basis"], "count": "2"})),
+                               ("negative count", json.dumps({"basis": view["run"]["basis"], "count": -1})),
+                               ("float count", json.dumps({"basis": view["run"]["basis"], "count": 1.5})),
+                               ("bool count", json.dumps({"basis": view["run"]["basis"], "count": True})),
+                               ("no count", json.dumps({"basis": view["run"]["basis"]}))):
+            with self.subTest(label):
+                session = {"session_id": "old-" + uuid.uuid4().hex}
+                _basis_file(session).write_text(content, encoding="utf-8")
+                code, _, err = self.hook({**session, "stop_hook_active": True}, view)  # on the same basis, and not the K-th
+                self.assertEqual((code, err.startswith("Empirica is not converged")), (2, True))
+                self.assertEqual(json.loads(_basis_file(session).read_text(encoding="utf-8")),
+                                 {"basis": view["run"]["basis"], "count": 1})
+        session = {"session_id": "old-" + uuid.uuid4().hex}  # a readable record counts on: the same basis at K - 1 ends
+        k = self.registry_bounds()["K"]
+        _basis_file(session).write_text(json.dumps({"basis": view["run"]["basis"], "count": k - 1}), encoding="utf-8")
+        self.assertEqual(self.hook({**session, "stop_hook_active": True}, view)[0], 0)
+
+    def test_A8_the_none_continuation_is_counted_like_any_other(self):
+        k = self.registry_bounds()["K"]
+        session = {"session_id": "k-" + uuid.uuid4().hex}
+        none = self.auto_view("no_author_step", mode="auto-delegated")
+        # a none continuation on the basis the author's turn ends already counted on: the chain's count carries across actors
+        author = self.auto_view("real", mode="auto-delegated")
+        got = self.turn_ends(session, [author] * (k - 1) + [none])
+        self.assertEqual([code for code, _, _ in got], [2] * (k - 1) + [0], got)
+        self.assertEqual(got[-1][0], 0)  # the K-th turn end on one basis is the residual whoever acts
+        self.assertEqual(json.loads(got[-1][1]), {"systemMessage": self.residual(self.REFUTED)})
+        # and a first none continuation is counted: the second turn end on its basis ends with the residual (one meaning)
+        fresh = {"session_id": "k-" + uuid.uuid4().hex}
+        got = self.turn_ends(fresh, [none, none])
+        self.assertEqual(got[0], (2, "", self.residual(self.REFUTED) + "\n"))
+        self.assertEqual((got[1][0], json.loads(got[1][1])), (0, {"systemMessage": self.residual(self.REFUTED)}))
+        # a none chain whose basis keeps moving continues, bounded by the host's own cap of continuations
+        moving = [self.auto_view("no_author_step", basis="sha256:" + format(i, "064x"), mode="auto-delegated") for i in range(5)]
+        self.assertEqual([code for code, _, _ in self.turn_ends({"session_id": "k-" + uuid.uuid4().hex}, moving)], [2] * 5)
+
+    def test_A8_the_human_and_auditor_actors_and_deliberative_are_as_before_and_clear_the_count(self):
+        k = self.registry_bounds()["K"]
+        view = self.auto_view()
+        for kind, mode in (("human_wait", "auto-interactive-pre"), ("audit_pending", "auto-interactive-post"),
+                           ("budget", "auto-interactive-post"), ("real", "deliberative")):
+            with self.subTest(kind=kind, mode=mode):
+                session = {"session_id": "k-" + uuid.uuid4().hex}
+                got = self.turn_ends(session, [view] * (k - 1))  # one short of the K-th
+                self.assertEqual(got[-1][0], 2)
+                other = self.auto_view(kind, mode=mode)
+                other["run"]["basis"] = view["run"]["basis"]
+                if kind == "human_wait":
+                    other["run"]["governance"]["human_wait"] = True  # the core's answer, as ``_stop`` publishes it
+                code, out, err = self.hook({**session, "stop_hook_active": True}, other)
+                self.assertEqual((code, err), (0, ""))  # a settlement, a wait, a pause: exactly as before
+                from adapters.claude.completion import _basis_file
+                self.assertFalse(_basis_file(session).exists(), "an outcome that is not a continuation ends the chain")
+                if kind != "audit_pending":
+                    self.assertIn("systemMessage", json.loads(out))
+                self.assertEqual(code, 0)
+                # any outcome that is not a continuation cleared the count: a Stop on the basis, in a continuation, is the 1st
+                self.assertEqual(self.hook({**session, "stop_hook_active": True}, view)[0], 2)
+
+    def test_A8_the_chains_both_hosts_share_end_where_the_registrys_K_says(self):
+        """``turn-end-chains.json`` is read by Pi's suite too: the same chains, the same ends (K is the registry's)."""
+        k = self.registry_bounds()["K"]
+        shared = json.loads((PLUGIN_ROOT / "adapters" / "pi" / "test" / "fixtures" / "turn-end-chains.json")
+                            .read_text(encoding="utf-8"))["cases"]
+
+        def turns(text: str) -> int:
+            return k if text == "K" else k - int(text[2:]) if text.startswith("K-") else int(text)
+        self.assertGreaterEqual(len(shared), 8)
+        for item in shared:
+            with self.subTest(item["name"]):
+                session = {"session_id": "chain-" + uuid.uuid4().hex}
+                active = False
+
+                def stop(label: str, actor: str):
+                    nonlocal active
+                    view = self.auto_view("no_author_step" if actor == "none" else "real", basis="sha256:" + label.ljust(64, "0"),
+                                          mode="auto-delegated")
+                    got = self.hook({**session, **({"stop_hook_active": True} if active else {})}, view)
+                    active = got[0] == 2
+                    return got
+                for label, count in item["segments"]:
+                    for _ in range(turns(count)):
+                        self.assertEqual(stop(label, item.get("first_actor", item["actor"]))[0], 2)
+                code, out, _ = stop(item["final"], item["actor"])
+                self.assertEqual("continue" if code == 2 else "end", item["then"])
+                if code == 0:
+                    self.assertIn("intent=stop", json.loads(out)["systemMessage"])
+
+    def test_A8_a_non_active_or_unreadable_stop_leaves_no_count_behind(self):
+        from adapters.claude.completion import _basis_file
+        session = {"session_id": "k-" + uuid.uuid4().hex}
+        view = self.auto_view()
+        self.hook({**session}, view)
+        self.assertTrue(_basis_file(session).exists())
+        self.hook({**session}, {"type": "Inert", "reason": "no_run"})
+        self.assertFalse(_basis_file(session).exists())
 
     def test_EHB_STOP_21_a_deliberative_turn_end_pauses_on_the_first_stop_and_on_a_later_one(self):
         """The first Stop of a deliberative run pauses with the real next step, whatever ``stop_hook_active`` says."""

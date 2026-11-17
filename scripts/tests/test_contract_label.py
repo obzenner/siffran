@@ -64,12 +64,56 @@ class TurnEndBoundsTests(unittest.TestCase):
                      ROOT / ".agents" / "skills" / "native-qualification" / "references" / "scenarios.md"):
             self.assertIn(wanted, " ".join(text(path).split()), str(path.relative_to(ROOT)))
 
+    def test_both_hosts_count_with_the_registrys_numbers(self):
+        """K is the registry's on both hosts: the same number in each adapter's one constant, and both hosts named as counting."""
+        bounds = json.loads(text(CONTRACTS / "host-boundaries.json"))["turn_end"]["bounds"]
+        self.assertEqual(sorted(bounds["enforced_by"]), ["claude", "pi"])
+        for path, name in ((PLUGIN / "adapters" / "claude" / "completion.py", "CONTINUATION_K"),
+                           (PLUGIN / "adapters" / "pi" / "src" / "turn-end.ts", "CONTINUATION_K")):
+            found = re.search(rf"^(?:export const )?{name} = (\d+)", text(path), re.M)
+            self.assertIsNotNone(found, str(path))
+            self.assertEqual(int(found.group(1)), bounds["K"], str(path))
+        found = re.search(r"^export const CONTINUATION_T = (\d+)", text(PLUGIN / "adapters" / "pi" / "src" / "turn-end.ts"), re.M)
+        self.assertEqual(int(found.group(1)), bounds["T"])
+
+    def test_no_prose_says_a_host_does_not_count(self):
+        """Both hosts count K, so nothing that describes the contract says Claude (or any host) does not count yet."""
+        adr = next((ROOT / "doc" / "adr").glob("0073-*.md"))
+        for path in (adr, PLUGIN / "adapters" / "pi" / "README.md", ROOT / "doc" / "design" / "empirica-host-boundary-registry.md",
+                     ROOT / ".agents" / "skills" / "native-qualification" / "references" / "scenarios.md",
+                     CONTRACTS / "host-boundaries.json"):
+            for phrase in ("does not count yet", "do not yet count", "does not count K", "not in `bounds.enforced_by`",
+                           "does not count K", "Claude does not count yet"):
+                self.assertNotIn(phrase, text(path), f"{path.relative_to(ROOT)}: {phrase}")
+
     def test_no_prose_of_the_table_restates_the_numbers(self):
         table = json.loads(text(CONTRACTS / "host-boundaries.json"))["turn_end"]
         prose = {name: cell for name, cell in table["outcomes"].items()}
         prose.update({f"{host}.loop_bound": surface["loop_bound"] for host, surface in table["hosts"].items()})
         for name, sentence in prose.items():
             self.assertNotRegex(sentence, r"\b[KT] = \d+", name)
+
+
+class ContinueNoticeTests(unittest.TestCase):
+    """``unattended_continue`` is the notice of a turn that goes on: it names the core's reason, says nobody is watching and asks
+    the agent to act on the reason. The residual is the only notice that offers the honest stop."""
+
+    def notices(self) -> dict:
+        return json.loads(text(CONTRACTS / "public-contract.json"))["settlement_notices"]
+
+    def test_the_continue_notice_asks_for_action_and_does_not_offer_the_stop(self):
+        notice = self.notices()["unattended_continue"]
+        self.assertEqual(notice.count("{reason}"), 1)
+        self.assertIn("Nobody is watching", notice)
+        self.assertIn("act on that reason", notice)
+        for phrase in ("intent=stop", "report_convergence", "end honestly", "hand the turn back"):
+            self.assertNotIn(phrase, notice, phrase)
+
+    def test_the_residual_offers_the_stop_and_the_continue_notice_does_not(self):
+        notices = self.notices()
+        self.assertIn("report_convergence intent=stop", notices["unattended_residual"])
+        for name in ("unattended_continue",):
+            self.assertNotIn("intent=stop", notices[name], name)
 
 
 class TurnEndNoticeTests(unittest.TestCase):

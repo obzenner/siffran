@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import tempfile
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -27,6 +28,8 @@ class StopResult:
     exit_code: int
     stdout: str = ""
     stderr: str = ""
+    #: Set only when the turn goes on in an auto chain: the count of turn ends on the run's basis to remember (``count_turn_end``).
+    chain_count: int | None = None
 
 
 def _handle(run_id: object) -> str:
@@ -153,29 +156,65 @@ def _reason_text(result: Result) -> str:
     return text if text[-1] in ".!?" else text + "."
 
 
+#: K: the K-th turn end of a chain on one observation basis ends the chain with the residual notice (K - 1 continuations).
+#: The registry's ``turn_end.bounds`` defines it once; a test reads the registry against this constant, and against Pi's.
+#: Claude has no T: the host's own cap of eight consecutive continuations bounds a chain's total.
+CONTINUATION_K = 3
+
+
 def _basis_file(payload: Mapping[str, object]) -> Path:
     session = "".join(ch for ch in str(payload.get("session_id", "")) if ch.isalnum() or ch in "-_")[:80] or "session"
     return Path(tempfile.gettempdir()) / f"empirica-stop-basis-{session}"
 
 
-def unchanged_basis(payload: Mapping[str, object], result: Result) -> bool:
-    """Remember the core's ``run.basis`` for this session and say whether it is the one the previous Stop remembered. The
-    adapter composes nothing: progress is the core's basis (``core.evaluation.progress_basis``), on every host. Unreadable or
-    unwritable memory, or a view without a basis, reads as "changed": the continuation is repeated and Claude's own cap of
-    eight bounds it."""
+def _remembered(path: Path) -> tuple[str, int] | None:
+    """The chain's record, ``(basis, count)``, as the adapter wrote it, else ``None``. A 7.0.x file held the bare basis, and
+    anything unreadable (not JSON, the wrong shape, a count that is not a non-negative integer) is read the same way: as a
+    changed basis with count 0."""
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(value, dict):
+        return None
+    basis, count = value.get("basis"), value.get("count")
+    if isinstance(basis, str) and type(count) is int and count >= 0:
+        return basis, count
+    return None
+
+
+def _basis_of(result: Result) -> str | None:
     basis = result.run.get("basis") if result.run is not None else None
-    if not isinstance(basis, str):
-        return False
+    return basis if isinstance(basis, str) else None
+
+
+def count_turn_end(payload: Mapping[str, object], result: Result, *, stop_hook_active: bool) -> int:
+    """How many turn ends of this chain the core's ``run.basis`` has now seen, this one included (1 on a first turn end and
+    on a changed basis). A chain continues only while Claude sends ``stop_hook_active`` true, so any other Stop starts a new
+    one and the record is not read. The adapter composes nothing: progress is the core's basis
+    (``core.evaluation.progress_basis``), on every host. A view without a basis, or an unreadable record, reads as "changed"."""
+    basis = _basis_of(result)
+    previous = _remembered(_basis_file(payload)) if stop_hook_active and basis is not None else None
+    return previous[1] + 1 if previous is not None and previous[0] == basis else 1
+
+
+def remember_chain(payload: Mapping[str, object], result: Result | None, count: int | None) -> None:
+    """Keep ``{basis, count}`` after a turn end that continued (``count`` is its ``StopResult.chain_count``); after any other
+    outcome the chain has ended, so the record is removed. The write is atomic (a temporary file in the same directory, then a
+    rename), so a reader never sees half a record. An unwritable record only means the next turn end reads "changed": the
+    continuation is repeated and Claude's own cap bounds it."""
     path = _basis_file(payload)
+    basis = _basis_of(result) if result is not None else None
     try:
-        previous = path.read_text(encoding="utf-8") if path.exists() else None
+        if count is None or basis is None:
+            path.unlink(missing_ok=True)
+            return
+        with tempfile.NamedTemporaryFile("w", encoding="utf-8", dir=path.parent, prefix=path.name + ".", delete=False) as handle:
+            handle.write(json.dumps({"basis": basis, "count": count}, sort_keys=True))
+            staged = Path(handle.name)
+        os.replace(staged, path)
     except OSError:
-        previous = None
-    try:
-        path.write_text(basis, encoding="utf-8")
-    except OSError:
-        return False
-    return previous == basis
+        return
 
 
 def _settlement(notice: str) -> StopResult:
@@ -184,12 +223,13 @@ def _settlement(notice: str) -> StopResult:
         {"systemMessage": notice}, sort_keys=True, separators=(",", ":"), ensure_ascii=False) + "\n")
 
 
-def stop_result(response: object, *, stop_hook_active: bool, no_progress: bool = False) -> StopResult:
+def stop_result(response: object, *, stop_hook_active: bool, turn_count: int = 1) -> StopResult:
     """Translate a core evaluation to the Stop hook's process result; a settlement never claims convergence.
 
-    The outcome is the cell of the turn-end table (ADR-0068, ``turn_end`` in ``host-boundaries.json``) for the run's
-    control mode and state. A deliberative turn end pauses, first or later, so ``stop_hook_active`` has no role there; it
-    only marks a *later* turn end of an auto chain, which gets the way out (``unattended_continue``)."""
+    The outcome is the cell of the turn-end table (ADR-0068, ``turn_end`` in ``host-boundaries.json``) for the run's control
+    mode and state. A deliberative turn end pauses, first or later, so ``stop_hook_active`` has no role there; it only marks
+    a *later* turn end of an auto chain. ``turn_count`` is this turn end's count on the run's basis (``count_turn_end()``): the
+    K-th ends the chain with the residual notice, whoever acts."""
     if not isinstance(response, Response):
         return StopResult(2, stderr="empirica completion gate returned a malformed response\n")
     result = response.result
@@ -210,14 +250,19 @@ def stop_result(response: object, *, stop_hook_active: bool, no_progress: bool =
             if _evidence_report_directive(result):
                 return _settlement(PAUSED_FOR_EVIDENCE_NOTICE)
             return _settlement(render_notice(PAUSED_FOR_HUMAN_NOTICE, reason=_reason_text(result)))
-        if mode == "auto" and stop_hook_active and no_progress:  # continued once already and the core's basis did not move
-            return _settlement(render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)))
-        if mode == "auto" and result.run.get("turn_end_actor") == "none":
-            # The author has no step that approves the claims as they stand: the agent is handed the residual notice as the
-            # directive (a settled turn would hand the run to nobody), to end honestly or revise the graph.
-            return StopResult(2, stderr=render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=_reason_text(result)) + "\n")
-        if mode == "auto" and stop_hook_active:
-            return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)) + "\n")
+        if mode == "auto":
+            reason = _reason_text(result)
+            acts = result.run.get("turn_end_actor")
+            if turn_count >= CONTINUATION_K or (acts == "none" and turn_count > 1):
+                # the K-th turn end on one basis, or the none actor's second: the honest end, the one notice that offers the stop
+                return _settlement(render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=reason))
+            if acts == "none":
+                # The author has no step that approves the claims as they stand: the agent is handed the residual notice as the
+                # directive (a settled turn would hand the run to nobody), to end honestly or revise the graph.
+                return StopResult(2, stderr=render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=reason) + "\n", chain_count=turn_count)
+            if stop_hook_active:
+                return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=reason) + "\n", chain_count=turn_count)
+            return StopResult(2, stderr=reason + "\n", chain_count=turn_count)
         return StopResult(2, stderr=_reason_text(result) + "\n")
     if kind == "Fault":
         text = result.message or "empirica completion gate fault"

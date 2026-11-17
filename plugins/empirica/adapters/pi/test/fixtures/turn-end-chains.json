@@ -1,0 +1,14 @@
+{
+  "about": "Where an auto chain ends is decided by the registry's `turn_end.bounds` (its K), not by a host. Each case runs `segments` of turn ends on one observation basis (a segment is a basis label and a count, `K` standing for the registry's number), every one of which continues, then one `final` turn end on a basis, which `then` says continues or ends the chain with `unattended_residual`. `actor` is the run view's `turn_end_actor`. Pi (`turn-end.test.ts`) and Claude (`test_claude_adapter.py`) read this file, so the two hosts answer the same chains.",
+  "cases": [
+    { "name": "author: K - 1 turn ends on one basis continue, the K-th ends", "actor": "author", "segments": [["a", "K-1"]], "final": "a", "then": "end" },
+    { "name": "author: one turn end short of K, the next basis continues", "actor": "author", "segments": [["a", "K-1"]], "final": "b", "then": "continue" },
+    { "name": "author: a changed basis restarts the count", "actor": "author", "segments": [["a", "K-1"], ["b", "K-1"]], "final": "b", "then": "end" },
+    { "name": "author: returning to an earlier basis starts from 1", "actor": "author", "segments": [["a", "K-1"], ["b", "1"]], "final": "a", "then": "continue" },
+    { "name": "author: a first turn end continues", "actor": "author", "segments": [], "final": "a", "then": "continue" },
+    { "name": "none: the first turn end continues with the directive", "actor": "none", "segments": [], "final": "a", "then": "continue" },
+    { "name": "none: the second turn end on one basis ends the chain", "actor": "none", "segments": [["a", "1"]], "final": "a", "then": "end" },
+    { "name": "none: a changed basis continues", "actor": "none", "segments": [["a", "1"]], "final": "b", "then": "continue" },
+    { "name": "none: the count carries across the actor, the K-th turn end on one basis ends", "actor": "none", "segments": [["a", "K-1"]], "final": "a", "then": "end", "first_actor": "author" }
+  ]
+}
