@@ -705,6 +705,12 @@ class ResponseMappingTests(unittest.TestCase):
         run = fixture["expected"]["result"]["run"]
         self.assertIn(f'{author_view_labels()["run_id"]} {run["id"]}', body)
         self.assertIn(run["status"], body)
+        recovery = ("The claim graph is not in this view; read it with empirica_read "
+                    "operation=GetArgument before changing it.")
+        self.assertEqual(context.count(recovery), 1)
+        self.assertNotIn(recovery, body)
+        self.assertTrue(context.endswith("\n" + recovery))
+        self.assertLess(len(body), 1300, "the restored view stays under the context-economy ceiling")
         terminal = stored(json.loads((_FIXTURES / "allow-converged.json").read_text()))["expected"]
         self.assertEqual(restore_context(_typed(terminal["result"])), "")
 

@@ -448,10 +448,10 @@ The host finishes responding and would hand control to the human. **One table de
 <!-- BEGIN GENERATED: HX-COMPACT-01 (make registry-doc) -->
 - **outcomes.**
   - Claude: `SessionStart` matcher `compact` → `RestoreRun` → bounded run view on stdout, exit 0 always; orphaned pending audits are reconciled first (`reconcile_orphans(…, include_pending=False)`). A restore failure writes one diagnostic line and exits 0. `PreCompact` is not used (it could block compaction, which Empirica does not).
-  - Pi: `session_before_compact` dispatches `RestoreRun` best-effort and returns a compaction summary carrying the handle; failure is not a gate. `session_compact` and `session_compact_failed` are not handled.
+  - Pi: `session_before_compact` is not handled, so Pi keeps its own summary. `session_compact` dispatches `RestoreRun` and queues one `empirica` message: the handle, the rendered run view as untrusted data, and the line saying the claim graph is not in the view and is read with `empirica_read` `GetArgument`. A restore failure sends the handle line only; a terminal run or no handle sends nothing; nothing throws. `session_compact_failed` is not handled.
   - Codex: `SessionStart` source `compact` re-evaluates.
 - **conformance_scenarios.** `EHB-COMPACT-01`, `EHB-COMPACT-02`
-- **sources.** QREF `restore_after_compaction`, ADR-33, T1 §1 ("Restore/compaction must preserve …"), `V2/test_evidence_scenarios.py::RestoreCells::test_everything_the_human_gate_depends_on_survives_a_reload_and_a_restore`, `CT/test_activation_lifecycle.py::test_restore_is_silent_and_exit_zero`, `PT/gate.test.ts` ("session_start reconstructs the handle; compaction carries the handle text").
+- **sources.** QREF `restore_after_compaction`, ADR-33, T1 §1 ("Restore/compaction must preserve …"), `V2/test_evidence_scenarios.py::RestoreCells::test_everything_the_human_gate_depends_on_survives_a_reload_and_a_restore`, `CT/test_activation_lifecycle.py::test_restore_is_silent_and_exit_zero`, `PT/gate.test.ts` ("after compaction one Empirica message carries the handle, the rendered run view and the GetArgument recovery line").
 <!-- END GENERATED -->
 
 #### HX-MODEL-01 — the author identity follows the main model; a switch revokes no approval
