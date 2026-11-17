@@ -2603,8 +2603,31 @@ test("a different run taking over during the restore sends nothing", async () =>
   assert.deepEqual(await s.w.pi.context(HISTORY), HISTORY);
 });
 
+test("a terminal result for the run that was taken over retires nothing: the new run keeps its handle and its journal", async () => {
+  let release!: (response: Response) => void;
+  let first = true;
+  const s = await restoredSession(() => {
+    if (!first) return envelope({ type: "Allow", converged: false, run: run() });
+    first = false;
+    return new Promise<Response>((resolve) => { release = resolve; });
+  });
+  const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: "restored" } }]);
+  const compacting = (s.w.pi.handlers.get("session_compact") as (e: unknown, c: unknown) => Promise<unknown>)({}, ctx);
+  const other = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: "other" } }]);
+  await (s.w.pi.handlers.get("session_start") as (e: unknown, c: unknown) => unknown)({}, other);
+  // Run A (the one whose restore was pending) comes back terminal after run B took over.
+  release(envelope({ type: "Allow", converged: true, run: { ...run("converged"), id: "restored" } }));
+  await compacting;
+  assert.equal(s.queued().length, 0);
+  assert.ok(!s.w.pi.entries.some((e) => e.customType === "empirica.run.done"), "B is not tombstoned");
+  // B is still the current run: a read goes to B's handle.
+  await execTool(s.w, "empirica_read", { operation: "GetRun" });
+  const read = s.w.requests.at(-1)!.command as { type: string; run_id?: string };
+  assert.deepEqual([read.type, read.run_id], ["GetRun", "other"]);
+});
+
 test("after compaction a terminal run, or no handle, sends nothing", async () => {
-  const terminal = await restoredSession(() => envelope({ type: "Allow", converged: true, run: run("converged") }));
+  const terminal = await restoredSession(() => envelope({ type: "Allow", converged: true, run: { ...run("converged"), id: "restored" } }));
   await terminal.compact();
   assert.equal(terminal.queued().length, 0);
   assert.deepEqual(await terminal.w.pi.context(HISTORY), HISTORY);

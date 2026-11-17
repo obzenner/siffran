@@ -507,11 +507,13 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
      * The one owner of ending a run (G17b): every path that can see a terminal result calls it (the gate that evaluates a
      * report, the explicit `report_convergence`, and `agent_before_settle`). A terminal result writes the journal tombstone,
      * keeps the handle readable (`retiredHandle`) and stops gating (`runHandle` null). It is idempotent: with no active
-     * handle a further terminal result does nothing.
+     * handle a further terminal result does nothing. It retires only the run the result is FOR: `runHandle` is always a
+     * `result.run.id` (set from `run?.id` / `result.run.id` and persisted as the `empirica.run` entry), so a terminal result
+     * for another run, one awaited before a different run took over, changes nothing.
      */
     const onTerminal = (response: Response): void => {
       const result = response.result;
-      if (!runHandle || result.type !== "Allow"
+      if (!runHandle || result.type !== "Allow" || result.run.id !== runHandle
           || !["converged", "stopped_budget", "stopped_frozen", "stopped_residual"].includes(String(result.run.status))) return;
       pi.appendEntry?.("empirica.run.done", { runHandle });
       retiredHandle = runHandle;
