@@ -386,7 +386,7 @@ test("/empirica dispatches StartRun and persists the opaque handle", async () =>
   assert.match(w.pi.userMessages[0], /The user invocation is `build the thing`/);
   assert.match(w.pi.userMessages[0], /"kind":"route","reason":/);
   assert.match(w.pi.userMessages[0], /operation="GetRun"/);
-  assert.match(w.pi.userMessages[0], /Pi calls the packaged auditor/);
+  assert.match(w.pi.userMessages[0], /The view prints the auditor launch\./);
   assert.doesNotMatch(w.pi.userMessages[0], /\$ARGUMENTS/);
 });
 

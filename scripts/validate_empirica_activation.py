@@ -156,7 +156,10 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
 # SKILL_MAX_CHARS may exceed the file by at most SKILL_MAX_HEADROOM, so shrinking the skill forces the ceiling down.
 # The rule across revisions: the constants test's upper bound is the CURRENT ceiling, and every PR that lowers
 # SKILL_MAX_CHARS lowers that bound in the same edit, so a later raise needs a visible test edit.
-SKILL_MAX_CHARS = 7_400
+# WHAT IS COUNTED: the rendered body (what Claude keeps) plus the frontmatter `description` (what triggers the skill and is
+# loaded with it). The other frontmatter fields (`compatibility`, `allowed-tools`, `argument-hint`) are install metadata the
+# agent does not read as instructions, so they are not counted.
+SKILL_MAX_CHARS = 7_300
 SKILL_MAX_HEADROOM = 1_000
 # SKILL_TOP_CHARS is the early-anchor cut. 5,000 x 2.966 = 14,830; 13,300 is about 90% of that, because the ratio is a
 # whole-file average (a prefix dense in code or identifiers fits fewer characters) and the counter Claude Code uses for
@@ -177,7 +180,7 @@ REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
     "Never edit operational state under",
     "grading contrary evidence away",
     "are trusted host ingress",
-    "Claude launches `empirica:empirica-auditor`, Pi calls the",
+    "The view prints the auditor launch.",
     "`Allow(converged=true)` permits a convergence claim.",
     "call it once with `intent: \"stop\"`",
     "**faulted** — state, artifacts, transport, or protocol failed closed.",
@@ -239,10 +242,25 @@ def skill_spike_number_problems(skill_text: str) -> list[str]:
             "`evidence/spike` clauses, the `spike_request` tool description and references/evidence.md own them"]
 
 
+def frontmatter_description(skill_text: str) -> str:
+    """The value of the frontmatter ``description`` field, without its surrounding quotes ("" when there is none)."""
+    head = skill_text[:len(skill_text) - len(rendered_body(skill_text))]
+    for line in head.splitlines():
+        if line.startswith("description:"):
+            value = line[len("description:"):].strip()
+            return value[1:-1] if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'" else value
+    return ""
+
+
+def measured_size(skill_text: str) -> int:
+    """The characters the ratchet counts: the rendered body plus the frontmatter description."""
+    return len(rendered_body(skill_text)) + len(frontmatter_description(skill_text))
+
+
 def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[str]:
-    """The whole SKILL.md (frontmatter included) is within the ceiling, and the ceiling within SKILL_MAX_HEADROOM of it."""
+    """The measured skill (rendered body plus description) is within the ceiling, and the ceiling within SKILL_MAX_HEADROOM of it."""
     limit = SKILL_MAX_CHARS if max_chars is None else max_chars
-    size = len(skill_text)
+    size = measured_size(skill_text)
     if size > limit:
         return [f"SKILL.md is {size:,} characters, over the {limit:,}-character ceiling; "
                 "move sometimes-needed material to references/ (Claude re-attaches only ~5,000 tokens after compaction)"]

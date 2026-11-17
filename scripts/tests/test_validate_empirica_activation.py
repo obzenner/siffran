@@ -43,6 +43,25 @@ class SkillSizeTests(unittest.TestCase):
         self.assertEqual(activation.skill_size_problems(text), [])
         self.assertEqual(activation.skill_anchor_problems(text), [])
 
+    def test_the_ratchet_counts_the_rendered_body_and_the_description_only(self):
+        # S10 fix F4: `compatibility` and `allowed-tools` are install metadata; the description is what triggers the skill.
+        front = "---\nname: x\ndescription: \"%s\"\nallowed-tools: %s\ncompatibility: %s\n---\n"
+        base = front % ("d" * 100, "a" * 10, "c" * 10) + "b" * 500
+        self.assertEqual(activation.measured_size(base), 600)
+        padded = front % ("d" * 100, "a" * 400, "c" * 400) + "b" * 500
+        self.assertEqual(activation.measured_size(padded), 600, "metadata beyond the description is not counted")
+        self.assertEqual(activation.measured_size(front % ("d" * 150, "a", "c") + "b" * 500), 650, "the description counts")
+        self.assertEqual(activation.measured_size(front % ("d" * 100, "a", "c") + "b" * 700), 800, "the body counts")
+        self.assertEqual(activation.measured_size("x" * 40), 40, "no frontmatter: the whole text is the body")
+        self.assertIn("SKILL.md is 600 characters, over the 599", activation.skill_size_problems(padded, max_chars=599)[0])
+        self.assertEqual(activation.skill_size_problems(padded, max_chars=600), [], "the ceiling counts the same number")
+
+    def test_the_description_says_when_to_use_the_skill(self):
+        description = re.search(r"^description: \"(.*)\"$", self.committed(), re.MULTILINE).group(1)
+        self.assertIn("Use for", description, "a when-to-use clause, not only what the skill is")
+        for trigger in ("architectural uncertainty", "competing approaches", "risky assumptions"):
+            self.assertIn(trigger, description)
+
     def test_a_skill_of_ceiling_plus_one_characters_is_rejected_naming_both_numbers(self):
         limit = activation.SKILL_MAX_CHARS
         self.assertEqual(activation.skill_size_problems("x" * limit), [])
@@ -123,7 +142,7 @@ class SkillSizeTests(unittest.TestCase):
     def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
         # The bound is the CURRENT ceiling: a PR that lowers SKILL_MAX_CHARS lowers this number in the same edit, so a later
         # raise needs a visible edit here. The cut is a rendered-window size, independent of the file size.
-        self.assertLessEqual(activation.SKILL_MAX_CHARS, 7_400)
+        self.assertLessEqual(activation.SKILL_MAX_CHARS, 7_300)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
         self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 12, "the early anchors are chosen")
         limit = activation.SKILL_MAX_CHARS
@@ -176,8 +195,16 @@ class SkillOrderTests(unittest.TestCase):
         "**converged** \u2014 a passing bound audit covers the current argument; **stopped** as residual (human or data obligations remain), frozen (scope closed, later claims deferred) or budget (the process ended); **unsupported** \u2014 the host lacked a capability; **faulted** \u2014 state, artifacts, transport, or protocol failed closed.",
         "Commit only the goal's product artifacts, tests, and accepted decisions.",
         "2. Record `{\"kind\":\"route\",\"reason\":\"<why>\"}`, then propose the smallest claim graph from supplied context only, by the rules in section 7.",
-        "1. Restate the goal without the flags; list each dependency as **known** (fixed by evidence you can cite now) or **unknown** (needs observation, experiment, or human judgment).",
-        "then size the run from the gating claims, how many need experiments, and the expected audit rounds (normally 2: an initial audit and one retry).",
+        "1. Restate the goal without the flags; list each dependency as **known** or **unknown**.",
+        "3. Read `empirica_read(operation=\"GetRun\")`, then size the run from the gating claims, how many need experiments, and the expected audit rounds (normally 2: an initial audit and one retry).",
+        "Propose all three ceilings with `configure_run` and a rationale explaining the sizing.",
+        "4. Wait until the view says `approved`, taking its `next:` after any dismissal.",
+        "The three public tools return a plain-text author view whose `Reasons`, `Open obligations` and `Next` calls are the worklist.",
+        "Follow the view's `next:` rather than re-calling the gate;",
+        "Call `report_convergence` when the graph, evidence, and scope are current; after the bound audit its `Allow` is the terminal decision.",
+        "Build the smallest closed graph whose gating root is the goal and whose gating claims cover every material unknown:",
+        "The view prints the auditor launch.",
+        "The user invocation is `$ARGUMENTS`.",
         "Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows from the other. A pass is charged only when the derivation changes.",
         "Then record `{\"kind\":\"investigate\"}` before any native read, search, command, evidence submission, or child launch; approval supplies neither witness.",
         "- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.",
@@ -189,6 +216,19 @@ class SkillOrderTests(unittest.TestCase):
         "1. **Fold 1: research first, for every gating claim except a `needs-decision` claim.** Cite a concrete code, docs, runtime, or web source that supports or refutes the exact current claim text; generic precedent is not evidence, and a summary of a source is not a citation.",
         "2. **Fold 2: spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.",
     )
+    # Every sentence that links a reference, pinned by exact text. The skill's whole rendered body is the headings, JUDGMENT
+    # and LINKS and nothing else (test_the_body_is_exactly_the_pinned_sentences).
+    LINKS = (
+        "[references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.",
+        "[references/budget-freeze.md](references/budget-freeze.md) covers budgets, stalls and scope closure.",
+        "When every in-scope gating claim is approved, read [references/audit.md](references/audit.md).",
+        "[references/recovery.md](references/recovery.md) covers other reason codes.",
+        "Read [references/handoff.md](references/handoff.md) before producing the final artifact, and report one of:",
+        "Once investigation is admitted, see [claim-graph](references/claim-graph.md) and [governance](references/governance.md).",
+        "Read [references/evidence.md](references/evidence.md) before adding evidence.",
+    )
+    # The unlisted remainder of the body: none. A sentence added to the skill must be listed above, visibly.
+    SKELETON = ""
     # What each deleted restatement said is now carried elsewhere (the S10 report maps every sentence); none may return.
     DELETED = ("`missing: <code> via claim", "Pi retains", "hidden digests", "exactly once", "report first", "to reopen the dialog",
                "spike_backend", "spikes_unavailable", "spike-plan-draft", "qualified on", "inline bootstrap matrix",
@@ -199,7 +239,7 @@ class SkillOrderTests(unittest.TestCase):
                 "8. Earn or discard every gating claim")
     # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
     # may add anchors or reword one only by editing this list, visibly.
-    REQUIRED = ("Claude launches `empirica:empirica-auditor`, Pi calls the",
+    REQUIRED = ("The view prints the auditor launch.",
                 "`Allow(converged=true)` permits a convergence claim.",
                 "call it once with `intent: \"stop\"`",
                 "**faulted** \u2014 state, artifacts, transport, or protocol failed closed.",
@@ -216,9 +256,34 @@ class SkillOrderTests(unittest.TestCase):
         following = text.find(f"\n## {number + 1}. ", start + 1)
         return text[start:] if following == -1 else text[start:following]
 
+    def residual(self, text):
+        """What is left of the rendered body after the headings, JUDGMENT and LINKS are removed (list markers and blanks aside)."""
+        body = "\n".join(line for line in activation.rendered_body(text).splitlines() if not line.startswith("#"))
+        for sentence in sorted((*self.JUDGMENT, *self.LINKS), key=len, reverse=True):
+            body = body.replace(sentence, "", 1)
+        return re.sub(r"\s+", " ", body).strip()
+
+    def test_the_body_is_exactly_the_pinned_sentences(self):
+        # The guard closes both ways: a pinned sentence cannot go (the exactly-once test), and no unlisted sentence can come.
+        self.assertEqual(self.residual(self.skill()), self.SKELETON)
+
+    def test_deleting_a_judgment_sentence_or_adding_an_unlisted_one_fails(self):
+        text = self.skill()
+        for sentence in ("Follow the view's `next:` rather than re-calling the gate;",
+                         "4. Wait until the view says `approved`, taking its `next:` after any dismissal.",
+                         "The three public tools return a plain-text author view whose `Reasons`, `Open obligations` and `Next` calls are the worklist."):
+            self.assertEqual(self.residual(text), self.SKELETON)
+            gone = text.replace(sentence, "", 1)
+            self.assertNotEqual(gone, text)
+            self.assertFalse(all(gone.count(p) == 1 for p in (*self.JUDGMENT, *self.LINKS)), sentence)
+        for added in ("\n\nAlways ask the human first.\n", "\n- A new bullet.\n"):
+            self.assertNotEqual(self.residual(text + added), self.SKELETON, added)
+        reworded = text.replace("Never substitute an ordinary model response", "Never use an ordinary model response")
+        self.assertFalse(all(reworded.count(p) == 1 for p in (*self.JUDGMENT, *self.LINKS)))
+
     def test_every_judgment_sentence_is_present_exactly_once(self):
         text = self.skill()
-        for sentence in self.JUDGMENT:
+        for sentence in (*self.JUDGMENT, *self.LINKS):
             with self.subTest(sentence=sentence[:60]):
                 self.assertEqual(text.count(sentence), 1)
 
@@ -284,7 +349,7 @@ class SkillOrderTests(unittest.TestCase):
 
     def test_the_whole_skill_fits_the_ratchet_with_the_measured_ratio(self):
         text = self.skill()
-        self.assertLessEqual(len(text), 7_400)
+        self.assertLessEqual(activation.measured_size(text), 7_300)
         self.assertLessEqual(len(text.splitlines()), 120)
 
 

@@ -1,6 +1,6 @@
 ---
 name: empirica
-description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain: route first, represent unknowns as claims, require cited research before spikes, and request an independently audited convergence decision. Invoke as /empirica <goal>."
+description: "Empirical-convergence workflow for non-trivial work whose plan is uncertain: route first, represent unknowns as claims, require cited research before spikes, and request an independently audited convergence decision. Use for architectural uncertainty, competing approaches, and risky assumptions. Invoke as /empirica <goal>."
 allowed-tools: Read Glob Grep Bash Edit Write Agent TaskCreate TaskUpdate WebFetch
 compatibility: Claude Code >=2.1.278,<2.2.0; Pi >=1.0.0,<2.0.0 with the external pi-subagents; python3 for hook-backed hosts.
 argument-hint: "[--auto] <goal>"
@@ -35,7 +35,7 @@ The three public tools return a plain-text author view whose `Reasons`, `Open ob
 
 ## 3. Obtain independent audit
 
-When every in-scope gating claim is approved, read [references/audit.md](references/audit.md). Approval is not convergence: it means the evidence passed the service's rules, not that it convinces. Check `GetArgument`, the argument the auditor will receive: each claim must follow from its cited sources alone. Claude launches `empirica:empirica-auditor`, Pi calls the packaged auditor, and the view prints the launch. Never substitute an ordinary model response for the audit.
+When every in-scope gating claim is approved, read [references/audit.md](references/audit.md). Approval is not convergence: it means the evidence passed the service's rules, not that it convinces. Check `GetArgument`, the argument the auditor will receive: each claim must follow from its cited sources alone. The view prints the auditor launch. Never substitute an ordinary model response for the audit.
 
 ## 4. Request the terminal decision
 
@@ -58,7 +58,7 @@ Commit only the goal's product artifacts, tests, and accepted decisions.
 
 The user invocation is `$ARGUMENTS`.
 
-1. Restate the goal without the flags; list each dependency as **known** (fixed by evidence you can cite now) or **unknown** (needs observation, experiment, or human judgment).
+1. Restate the goal without the flags; list each dependency as **known** or **unknown**.
 2. Record `{"kind":"route","reason":"<why>"}`, then propose the smallest claim graph from supplied context only, by the rules in section 7.
 3. Read `empirica_read(operation="GetRun")`, then size the run from the gating claims, how many need experiments, and the expected audit rounds (normally 2: an initial audit and one retry). Propose all three ceilings with `configure_run` and a rationale explaining the sizing. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows from the other. A pass is charged only when the derivation changes.
 4. Wait until the view says `approved`, taking its `next:` after any dismissal. Then record `{"kind":"investigate"}` before any native read, search, command, evidence submission, or child launch; approval supplies neither witness.
@@ -73,7 +73,7 @@ Build the smallest closed graph whose gating root is the goal and whose gating c
 - Every other claim is `ordinary`.
 - Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.
 
-Once investigation is admitted, [references/claim-graph.md](references/claim-graph.md) and [references/governance.md](references/governance.md) give the amendment and configuration-recovery details.
+Once investigation is admitted, see [claim-graph](references/claim-graph.md) and [governance](references/governance.md).
 
 ## 8. Earn or discard every gating claim
 
