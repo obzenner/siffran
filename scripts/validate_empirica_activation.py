@@ -229,8 +229,9 @@ def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] 
 PRE_INVESTIGATION_REFERENCES = ("claim-graph.md", "governance.md", "budget-freeze.md")
 REFERENCE_LATER_HEADER = ("The rules needed before investigation are in the skill; "
                           "this reference adds the detail for later.")
-_LINK = re.compile(r"\]\(references/([A-Za-z0-9._-]+\.md)(?:#([A-Za-z0-9_-]+))?\)")
-_READ_THEN_LINK = re.compile(r"\b[Rr]ead\b[^.]*\]\(references/")
+_LINK = re.compile(r"\]\((?:\./)?references/([A-Za-z0-9._-]+\.md)(?:#([A-Za-z0-9_-]+))?\)")
+# The one way a reference link may stand in section 6: its own sentence says the read is optional.
+OPTIONAL_READ_MARK = "not a prerequisite read"
 _BEFORE_ROUTE_HEADER = re.compile(r"\b[Rr]ead\b[^.]*\bbefore\b[^.]*\b(?:seeding|routing|the route)\b")
 
 
@@ -240,8 +241,9 @@ def _slugs(text: str) -> set[str]:
 
 
 def skill_link_problems(skill_text: str, references: Path) -> list[str]:
-    """Every reference link in the skill resolves (file, and heading when an anchor is named), and the route section
-    (6) presents none as a read before investigation is admitted: the agent cannot read any file until then."""
+    """Every reference link in the skill resolves (file, and heading when an anchor is named; a leading ``./`` is the same
+    link), and the route section (6) carries none unless its own sentence marks the read optional: the agent cannot read
+    any file until the `investigate` witness, so any other link there is an instruction it cannot follow."""
     problems = []
     for match in _LINK.finditer(skill_text):
         name, anchor = match.groups()
@@ -252,9 +254,16 @@ def skill_link_problems(skill_text: str, references: Path) -> list[str]:
             problems.append(f"SKILL.md links to references/{name}#{anchor}, which has no such heading")
     start = skill_text.find("\n## 6. ")
     end = skill_text.find("\n## 7. ", start + 1)
-    if start != -1 and end != -1 and _READ_THEN_LINK.search(skill_text[start:end]):
-        problems.append("SKILL.md section 6 tells the agent to read a reference before investigation is admitted; "
-                        "inline the judgment instead (the read is denied until the `investigate` witness)")
+    if start != -1 and end != -1:
+        section = skill_text[start:end]
+        stops = [m.end() for m in re.finditer(r"[.!?](?=\s|$)|\n\s*\n", section)] + [len(section)]
+        for link in _LINK.finditer(section):
+            after = next(stop for stop in stops if stop > link.start())
+            before = max((stop for stop in stops if stop <= link.start()), default=0)
+            if OPTIONAL_READ_MARK not in " ".join(section[before:after].split()):
+                problems.append(f"SKILL.md section 6 links to references/{link.group(1)} before investigation is admitted "
+                                f"without marking it optional (\"{OPTIONAL_READ_MARK}\"); inline the judgment instead "
+                                "(every read is denied until the `investigate` witness)")
     return problems
 
 

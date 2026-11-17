@@ -186,7 +186,7 @@ class SkillOrderTests(unittest.TestCase):
                  'Include a 1–600 character nonblank rationale explaining that sizing.'),
                 ('control mode. Preserve',
                  'control mode. The goal is displayed read-only; the claim graph and reviewer are not approvable. Preserve'),
-                ('envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows\n   from the other, so size each for its own work.\n   Timeout is dismissal',
+                ('envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows\n   from the other, so size each for its own work. A pass is charged only when the derivation changes.\n   Timeout is dismissal',
                  'envelope.\n   The host-owned timeout and presentation limits are fixed by the contract and displayed read-only.\n   Timeout is dismissal'),
                 ('Construct the smallest closed graph whose gating root is the goal and whose gating claims cover every material\nunknown. Write the first graph before approval, from the supplied context, by these rules:',
                  'After approval and investigation admission, read\n[references/claim-graph.md](references/claim-graph.md). Construct the smallest\nclosed graph whose root is the goal and whose gating claims cover every material\nunknown.'),
@@ -196,8 +196,13 @@ class SkillOrderTests(unittest.TestCase):
                  ' and graph shapes from the `empirica_observe`\n   tool input schema, which carries every closed action shape (including the graph\n   payload); do not guess field names or nesting. Contract reads are optional\n   explanation, never the source of a shape.'),
                 ('is unsupported;\ndo not continue with an unrecorded substitute.',
                  'is unsupported. The core and\nsupported host adapters fail closed before investigative tools, evidence, child\nbudget, or harness execution; do not continue with an unrecorded substitute.'),
+                ('   - absent or stale evidence leaves the claim open.',
+                 '   - absent or stale evidence leaves the claim open;\n   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until\n     then it is a human residual.'),
+                ('except a `needs-decision` claim**. Record',
+                 "except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record"),
                 )
-    INLINED = ('- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds.',)
+    INLINED = ("- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",)
+    INLINED_SECTION_1 = ("Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted nor attributed to a producer.",)
     REMOVED = ('External actor CLIs are not metered or attributed (ADR 0061).',)
     # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
     # may add anchors or reword one only by editing this list, visibly.
@@ -223,7 +228,7 @@ class SkillOrderTests(unittest.TestCase):
         for new, original in self.REWRITES:
             self.assertEqual(text.count(new), 1, new)
             text = text.replace(new, original)
-        for added in self.INLINED:
+        for added in (*self.INLINED, *self.INLINED_SECTION_1):
             self.assertEqual(text.count(added), 1, added)
             text = text.replace(added + "\n\n", "", 1)
         paragraphs = self.paragraphs(text)
@@ -260,6 +265,23 @@ class SkillOrderTests(unittest.TestCase):
                      "Every other claim is `ordinary`.",
                      "Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`"):
             self.assertEqual(text.count(fact), 1, fact)
+
+    def test_the_review_fixes_are_pinned_by_exact_text(self):
+        text = self.skill()
+        s2, s6, s8 = text.index("\n## 2. "), text.index("\n## 6. "), text.index("\n## 8. ")
+        external = ("Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted "
+                    "nor attributed to a producer.")
+        self.assertEqual(text.count(external), 1)
+        self.assertLess(text.index(external), s2, "the external-CLI fact is in section 1")
+        pass_charge = "A pass is charged only when the derivation changes."
+        no_verdict = "state no verdict or confidence in a claim's text"
+        for fact in (pass_charge, no_verdict):
+            self.assertEqual(text.count(fact), 1, fact)
+            self.assertTrue(s6 < text.index(fact) < s8, fact)
+        # the needs-decision rule has one carrier (section 7); section 8 only excepts the claim from research
+        self.assertEqual(text.count("is answered by the human"), 0)
+        self.assertEqual(text.count("human residual"), 0)
+        self.assertEqual(text.count("the human answers it when you report"), 1)
 
     def test_the_terminal_call_is_not_called_the_only_call(self):
         text = self.skill()
@@ -317,12 +339,34 @@ class ReferenceLinkTests(unittest.TestCase):
         problems = activation.skill_link_problems(text, self.REFERENCES)
         self.assertTrue(any("no-such-file.md" in problem for problem in problems), problems)
 
-    def test_an_imperative_read_in_the_route_section_is_named(self):
-        text = self.skill().replace("## 6. Invocation, and route before investigating\n",
-                                    "## 6. Invocation, and route before investigating\n\nRead [the graph rules](references/claim-graph.md) first.\n")
+    def route_section_with(self, sentence):
+        return self.skill().replace("## 6. Invocation, and route before investigating\n",
+                                    "## 6. Invocation, and route before investigating\n\n" + sentence + "\n")
+
+    def test_any_reference_link_in_the_route_section_is_named_unless_marked_optional(self):
+        for sentence in ("Read [the graph rules](references/claim-graph.md) first.",
+                         "See [the graph rules](references/claim-graph.md) first.",
+                         "Consult [the graph rules](references/claim-graph.md) before routing.",
+                         "First open [the governance reference](references/governance.md).",
+                         "Do not read [the graph rules](references/claim-graph.md) yet."):
+            with self.subTest(sentence=sentence):
+                problems = activation.skill_link_problems(self.route_section_with(sentence), self.REFERENCES)
+                self.assertEqual(len(problems), 1, problems)
+                self.assertIn("before investigation is admitted", problems[0])
+
+    def test_a_link_marked_not_a_prerequisite_read_is_accepted_in_the_route_section(self):
+        marked = "The detail is in [the graph rules](references/claim-graph.md); it is not a prerequisite read."
+        self.assertEqual(activation.skill_link_problems(self.route_section_with(marked), self.REFERENCES), [])
+        # the mark belongs to its own sentence: a marked neighbour does not excuse an unmarked link
+        mixed = "See [the graph rules](references/claim-graph.md) first. Nothing here is a prerequisite read."
+        self.assertEqual(len(activation.skill_link_problems(self.route_section_with(mixed), self.REFERENCES)), 1)
+
+    def test_a_dot_slash_link_to_a_missing_file_is_named(self):
+        text = self.skill().replace("## 9. Preflight the host",
+                                    "## 9. Preflight the host\n\nSee [x](./references/missing.md).")
         problems = activation.skill_link_problems(text, self.REFERENCES)
         self.assertEqual(len(problems), 1, problems)
-        self.assertIn("before investigation is admitted", problems[0])
+        self.assertIn("missing.md", problems[0])
 
     def test_a_header_that_says_to_read_before_routing_is_named(self):
         import tempfile

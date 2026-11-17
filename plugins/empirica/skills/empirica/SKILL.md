@@ -29,6 +29,8 @@ The binding rules are the public contract's `evidence/spike/isolation` and `evid
 **Do not read any file, including a skill reference, before the `investigate` witness is admitted
 (route → graph → approved configuration).**
 
+Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted nor attributed to a producer.
+
 Claim discipline; the two folds named here are defined in section 8 below.
 
 Refuted claims are discarded or replaced with narrower claims. Never preserve a
@@ -139,7 +141,7 @@ Do this before reading files, searching, browsing, or running commands.
    Take exact action and graph shapes from the `empirica_observe`
    tool input schema, never from contract reads or guesses.
 5. Read `empirica_read(operation="GetRun")`, then size the run from the supplied task and selected graph. Count the gating claims, identify how many need experiments, and allow for expected audit rounds (normally 2: an initial audit and one retry). Propose all three ceilings explicitly with `configure_run`; the author agent chooses these ceilings, never the adapter or core. Include a rationale explaining that sizing. The rationale is explanation only—not a command, authority claim, evidence, or approvable conclusion. This requests approval of run configuration only: budget ceilings and control mode. Preserve the human's edited values rather than resending stale fields, and note explicit `--auto` has one up-front human approval episode and then stays within approved ceilings. Delegated auto has no dialog and stays within the fixed 8/1/2 envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows
-   from the other, so size each for its own work.
+   from the other, so size each for its own work. A pass is charged only when the derivation changes.
    Timeout is dismissal, not rejection. Do not loop on refusal or exhaustion. The optional
    [governance reference](references/governance.md) documents host-owned recovery details; it is
    not a prerequisite read.
@@ -167,7 +169,7 @@ unknown. Write the first graph before approval, from the supplied context, by th
 - `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,
   and where nobody can be asked it stays open and the run can only stop as a residual.
 - Every other claim is `ordinary`.
-- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds.
+- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.
 
 Submit the graph through the active author-action surface. Once investigation is admitted,
 [references/claim-graph.md](references/claim-graph.md) adds the detail for amending it.
@@ -185,7 +187,7 @@ worklist. Counts and reason strings are telemetry, not authority.
 Read [references/evidence.md](references/evidence.md) before adding evidence.
 Apply the folds in order:
 
-1. **Research first for every gating claim, except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record a concrete code, docs,
+1. **Research first for every gating claim, except a `needs-decision` claim**. Record a concrete code, docs,
    runtime, or web source that supports or refutes the exact current claim text.
    `source_ref` and the verbatim `citation` must identify the file or runtime observation that
    bears on this claim; generic precedent is not evidence for a repository-specific claim.
@@ -235,9 +237,7 @@ Apply the folds in order:
    - supporting research satisfies Fold 1;
    - refuting research refutes the claim;
    - a current passing spike satisfies Fold 2;
-   - absent or stale evidence leaves the claim open;
-   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until
-     then it is a human residual.
+   - absent or stale evidence leaves the claim open.
 
 ## 9. Preflight the host
 
