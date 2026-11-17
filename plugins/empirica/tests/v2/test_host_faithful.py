@@ -347,8 +347,11 @@ class StopHookLoopOnClaude(HostFaithful):
         for earlier in stops[1:k - 2]:  # a continuation before the last asks for action and offers no stop
             self.assertTrue(earlier.stderr.endswith("Auto mode asks nobody at this turn end, so act on that reason now.\n"), earlier.stderr)
         self.assertIn("intent=stop", stops[k - 2].stderr)  # the last continuation: the stop, on stderr, which the model reads
-        self.assertEqual(json.loads(stops[-1].stdout)["systemMessage"].split("The run cannot")[1],
-                         stops[k - 2].stderr.split("The run cannot")[1].rstrip("\n"))  # and the settlement carries the same notice
+        residual = "If no step of yours moves the run, end it honestly with report_convergence intent=stop"  # the residual notice's own sentence
+        self.assertIn(residual, stops[k - 2].stderr)
+        self.assertEqual(json.loads(stops[-1].stdout)["systemMessage"],
+                         stops[k - 2].stderr.rstrip("\n"))  # and the settlement carries the same notice, word for word
+        self.assertFalse(any(residual in earlier.stderr for earlier in stops[:k - 2]))  # no earlier turn end carries it
         self.assertEqual(self.human.shown, [])
 
     @staticmethod
