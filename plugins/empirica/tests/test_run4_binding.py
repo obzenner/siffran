@@ -198,20 +198,60 @@ class PublicSpikeBackendTests(unittest.TestCase):
             for marker in forbidden:
                 self.assertNotIn(marker, text, f"{source}: legacy public reachability")
 
-    def test_agent_spike_design_limits_are_bound_to_backend_constants(self):
-        skill = (ROOT / "plugins/empirica/skills/empirica/SKILL.md").read_text()
+    SPIKE_PHRASES = ("no spike result evidence", "result-cas", "crash", "separate call", "duplicate execution")
+
+    def spike_rule_problems(self, contract, evidence, tool_description):
+        """Where the spike rules live now: the public contract's evidence/spike clauses, references/evidence.md, and the
+        spike_request tool description (which points to the limits). The skill restates none of them."""
+        problems = []
+        clauses = {clause["id"]: clause["text"]
+                   for clause in json.loads(contract)["sections"]["evidence/spike"]["clauses"]} \
+            if "sections" in json.loads(contract) else {}
+        for clause in ("evidence/spike/design", "evidence/spike/outcomes", "evidence/spike/attestation",
+                       "evidence/spike/limits"):
+            if clause not in clauses:
+                problems.append(f"the contract lacks clause {clause}")
+        for name, text in (("the contract", contract), ("references/evidence.md", evidence)):
+            normalized = " ".join(text.lower().split())
+            positions = [text.find(value) for value in ("120", "210", "300", "360")]
+            if -1 in positions or positions != sorted(positions):
+                problems.append(f"{name} does not state the 120/210/300/360-second limits in order")
+            problems += [f"{name} lacks {phrase!r}" for phrase in self.SPIKE_PHRASES if phrase not in normalized]
+        if "evidence/spike/limits" not in evidence:
+            problems.append("references/evidence.md does not point to evidence/spike/limits")
+        if "evidence/spike/limits" not in tool_description:
+            problems.append("the spike_request tool description does not point to evidence/spike/limits")
+        return problems
+
+    def spike_sources(self):
         evidence = (ROOT / "plugins/empirica/skills/empirica/references/evidence.md").read_text()
         contract = (ROOT / "contracts/empirica/v2/public-contract.json").read_text()
-        for text in (skill, evidence, contract):
-            normalized = " ".join(text.lower().split())
-            positions = [text.index(value) for value in ("120", "210", "300", "360")]
-            self.assertEqual(positions, sorted(positions))
-            self.assertIn("no spike result evidence", normalized)
-            self.assertIn("result-cas", normalized)
-            self.assertIn("crash", normalized)
-            self.assertIn("separate call", normalized)
-            self.assertIn("duplicate execution", normalized)
-        resources = " ".join((skill, evidence, contract))
+        request = json.loads((ROOT / "contracts/empirica/v2/request.schema.json").read_text())
+        return contract, evidence, request["$defs"]["actionSpikeRequest"]["description"]
+
+    def test_agent_spike_rules_live_in_the_contract_the_tool_description_and_evidence_md(self):
+        contract, evidence, description = self.spike_sources()
+        self.assertEqual(self.spike_rule_problems(contract, evidence, description), [])
+        # the flat public tool schema the hosts register carries the same description
+        flat = json.loads((ROOT / "contracts/empirica/v2/public-tools.json").read_text())
+        self.assertIn(description, json.dumps(flat))
+
+    def test_the_binding_pin_is_red_against_a_contract_missing_the_clause(self):
+        contract, evidence, description = self.spike_sources()
+        document = json.loads(contract)
+        clauses = document["sections"]["evidence/spike"]["clauses"]
+        document["sections"]["evidence/spike"]["clauses"] = [c for c in clauses if c["id"] != "evidence/spike/limits"]
+        problems = self.spike_rule_problems(json.dumps(document), evidence, description)
+        self.assertIn("the contract lacks clause evidence/spike/limits", problems)
+        self.assertTrue(self.spike_rule_problems(contract, evidence, description.replace("evidence/spike/limits", "")))
+
+    def test_agent_spike_design_limits_are_bound_to_backend_constants(self):
+        evidence = (ROOT / "plugins/empirica/skills/empirica/references/evidence.md").read_text()
+        contract = (ROOT / "contracts/empirica/v2/public-contract.json").read_text()
+        skill = (ROOT / "plugins/empirica/skills/empirica/SKILL.md").read_text()
+        # the skill no longer carries these facts (the activation validator's numeric guard keeps it so)
+        self.assertNotIn("120", skill)
+        resources = " ".join((evidence, contract))
         self.assertIn("stdout", resources.lower())
         self.assertIn("stderr", resources.lower())
         self.assertIn("512 MiB", resources)
@@ -219,7 +259,6 @@ class PublicSpikeBackendTests(unittest.TestCase):
         self.assertIn("nofile 1024", resources)
         # The one agent-visible limitation set; scripts/validate_docker_spike_contract.py checks
         # that it equals its rendering from the code constants.
-        self.assertIn("evidence/spike/limits", skill)
         self.assertIn("evidence/spike/limits", evidence)
         self.assertIn("256 files", resources)
         self.assertIn("64 MiB", resources)

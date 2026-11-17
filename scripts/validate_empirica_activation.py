@@ -156,7 +156,7 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
 # SKILL_MAX_CHARS may exceed the file by at most SKILL_MAX_HEADROOM, so shrinking the skill forces the ceiling down.
 # The rule across revisions: the constants test's upper bound is the CURRENT ceiling, and every PR that lowers
 # SKILL_MAX_CHARS lowers that bound in the same edit, so a later raise needs a visible test edit.
-SKILL_MAX_CHARS = 17_600
+SKILL_MAX_CHARS = 14_400
 SKILL_MAX_HEADROOM = 1_000
 # SKILL_TOP_CHARS is the early-anchor cut. 5,000 x 2.966 = 14,830; 13,300 is about 90% of that, because the ratio is a
 # whole-file average (a prefix dense in code or identifiers fits fewer characters) and the counter Claude Code uses for
@@ -213,6 +213,30 @@ def skill_host_literal_problems(skill_text: str) -> list[str]:
         return []
     return [f"SKILL.md body names a host version or range ({', '.join(sorted(set(found))[:5])}); host compatibility "
             "belongs to the host profiles and the start refusals, never to the skill"]
+
+
+# The skill body states no spike time limit, resource number or plan schema version: the public contract's evidence/spike
+# clauses (`evidence/spike/limits` is the one complete list), the `spike_request` tool description and
+# references/evidence.md own them, so a copy only drifts. Four shapes: a duration (`120 s`, `300 seconds`, `120-second`),
+# a size or count with its unit (`1 MiB`, `256 PIDs`, `128 environment overrides`), a fixed id (`uid/gid`, `65534`,
+# `nofile`), and the plan schema version (`spike-plan-draft/2`). Prose numbers such as `normally 2` or `4,096 characters`
+# carry no such unit. The frontmatter is outside the guard.
+_SPIKE_NUMBERS = (
+    re.compile(r"\b\d[\d,]*\s*-?\s*(?:ms|s|secs?|seconds?|mins?|minutes?)\b", re.IGNORECASE),
+    re.compile(r"\b\d[\d,]*\s*-?\s*(?:[KMG]iB|[KMG]B|PIDs?|environment overrides?)\b"),
+    re.compile(r"\buid/gid\b|\b65534\b|\bnofile\b"),
+    re.compile(r"spike-plan-draft/\d+"),
+)
+
+
+def skill_spike_number_problems(skill_text: str) -> list[str]:
+    """One problem when the rendered body states a spike limit or plan schema version (see ``_SPIKE_NUMBERS``)."""
+    body = rendered_body(skill_text)
+    found = sorted({" ".join(m.group(0).split()) for pattern in _SPIKE_NUMBERS for m in pattern.finditer(body)})
+    if not found:
+        return []
+    return [f"SKILL.md body states a spike limit or schema version ({', '.join(found[:5])}); the contract's "
+            "`evidence/spike` clauses, the `spike_request` tool description and references/evidence.md own them"]
 
 
 def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[str]:
@@ -395,7 +419,7 @@ def main() -> int:
     if len(skill_text.split()) > 3500:
         fail("SKILL.md exceeds the conservative 3,500-word context budget")
     for problem in [*skill_size_problems(skill_text), *skill_anchor_problems(skill_text),
-                    *skill_host_literal_problems(skill_text)]:
+                    *skill_host_literal_problems(skill_text), *skill_spike_number_problems(skill_text)]:
         fail(problem)
     references = SKILL.parent / "references"
     for name in REQUIRED_SKILL_REFERENCES:

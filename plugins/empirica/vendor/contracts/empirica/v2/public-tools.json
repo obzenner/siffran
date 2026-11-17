@@ -644,7 +644,7 @@
                 }
               },
               {
-                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored.",
+                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored. Limits and refusal reasons: public-contract clause evidence/spike/limits.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -1121,7 +1121,7 @@
                 }
               },
               {
-                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored.",
+                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored. Limits and refusal reasons: public-contract clause evidence/spike/limits.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [

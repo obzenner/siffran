@@ -196,46 +196,7 @@ Apply the folds in order:
    observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed by a
    human. What still needs a confirmation, who asks, when, and how often is owned by
    [references/evidence.md](references/evidence.md) ("What still needs confirming"). A summary of what a source says is not a citation.
-2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView's
-   immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:
-   continue non-spike research or refine the graph, or stop with an honest residual. If it is
-   `qualified`, construct exactly `{"kind":"spike_request","claim_id":...,"plan":...}` with a
-   closed `empirica.spike-plan-draft/2` containing exactly `schema`, `image`, `argv`, `inputs`,
-   and `environment`. Name one already-local Docker image by familiar name/tag, repository digest,
-   full image ID, or unambiguous ID prefix; Empirica never inventories, pulls, builds, or installs it.
-   Supply one exact nonempty executable/argument vector, zero or more repository-relative files or
-   directories, and at most 128 environment overrides. `HOME` and `TMPDIR` are framework-owned.
-   Never put credentials or secrets in environment values: values persist in the immutable request,
-   and content-addressed plan identity can confirm guessed low-entropy values even though public
-   views expose names only. Never add authority, profile, resources, timeout, user, workdir, network,
-   topology, service, alias, host path, Docker option, image acquisition, or derived capture facts.
-
-   The service captures only the declared immutable files and runs the harness
-   at most once within that application call; a result-CAS retry never reruns it, but a crash after
-   execution or a separate call may execute the same sealed request again, so the probe must be safe
-   under duplicate execution. `qualified` means bound, not currently healthy.
-
-   Any tool works as argv (`cargo build`, `npm run build`, `pytest -k load`, `go test ./...`) inside
-   one host-fixed container: uid/gid 65534, `/work` = `HOME`, read-only `/inputs`, 1 MiB per stream,
-   and the host-selected network profile. The 120-second workload runs inside the 210-second
-   operation; Pi's 300-second and Claude MCP's 360-second limits are outer transport margins. The
-   one complete list of what you choose, what the host fixes, what is never available, and every
-   refusal `reason` with its hint is public-contract clause `evidence/spike/limits` (`GetContract`
-   section `evidence/spike`).
-
-   Only the verdict container's inspected natural exit produces uppercase `PASS`/`FAIL`: zero is
-   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Any other outcome is a
-   spike Fault `unavailable` and admits **no spike result evidence**. The Fault carries one closed
-   `reason` whenever the cause is attributable: act on its hint. A Fault without a reason is an
-   internal host failure: retry once, then ask the operator. Never treat it as FAIL, use a host
-   fallback, or claim evidence that was not admitted. Operator requalification can affect only a future run.
-3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the
-   bounded spike again; otherwise follow the unavailable guidance above.
-4. **Derive the result:**
-   - supporting research satisfies Fold 1;
-   - refuting research refutes the claim;
-   - a current passing spike satisfies Fold 2;
-   - absent or stale evidence leaves the claim open.
+2. **Spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.
 
 ## 9. Preflight the host
 

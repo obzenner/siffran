@@ -113,7 +113,7 @@ class SkillSizeTests(unittest.TestCase):
     def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
         # The bound is the CURRENT ceiling: a PR that lowers SKILL_MAX_CHARS lowers this number in the same edit, so a later
         # raise needs a visible edit here. The cut is a rendered-window size, independent of the file size.
-        self.assertLessEqual(activation.SKILL_MAX_CHARS, 17_600)
+        self.assertLessEqual(activation.SKILL_MAX_CHARS, 14_400)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
         self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 12, "the early anchors are chosen")
         limit = activation.SKILL_MAX_CHARS
@@ -196,8 +196,6 @@ class SkillOrderTests(unittest.TestCase):
                  ' and graph shapes from the `empirica_observe`\n   tool input schema, which carries every closed action shape (including the graph\n   payload); do not guess field names or nesting. Contract reads are optional\n   explanation, never the source of a shape.'),
                 ('is unsupported;\ndo not continue with an unrecorded substitute.',
                  'is unsupported. The core and\nsupported host adapters fail closed before investigative tools, evidence, child\nbudget, or harness execution; do not continue with an unrecorded substitute.'),
-                ('   - absent or stale evidence leaves the claim open.',
-                 '   - absent or stale evidence leaves the claim open;\n   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until\n     then it is a human residual.'),
                 ('except a `needs-decision` claim**. Record',
                  "except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record"),
                 ("Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.",
@@ -208,6 +206,8 @@ class SkillOrderTests(unittest.TestCase):
                  '("What still needs confirming"); a `needs-decision`\n   claim is human-owned and needs no research. A summary'),
                 ('through `configure_run`\n([references/governance.md](references/governance.md) has the host-owned recovery details). Freeze',
                  'through `configure_run`. Freeze'),
+                ('2. **Spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from the claim: a plan whose verdict container would fail if the claim were false.',
+                 '2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView\'s\n   immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:\n   continue non-spike research or refine the graph, or stop with an honest residual. If it is\n   `qualified`, construct exactly `{"kind":"spike_request","claim_id":...,"plan":...}` with a\n   closed `empirica.spike-plan-draft/2` containing exactly `schema`, `image`, `argv`, `inputs`,\n   and `environment`. Name one already-local Docker image by familiar name/tag, repository digest,\n   full image ID, or unambiguous ID prefix; Empirica never inventories, pulls, builds, or installs it.\n   Supply one exact nonempty executable/argument vector, zero or more repository-relative files or\n   directories, and at most 128 environment overrides. `HOME` and `TMPDIR` are framework-owned.\n   Never put credentials or secrets in environment values: values persist in the immutable request,\n   and content-addressed plan identity can confirm guessed low-entropy values even though public\n   views expose names only. Never add authority, profile, resources, timeout, user, workdir, network,\n   topology, service, alias, host path, Docker option, image acquisition, or derived capture facts.\n\n   The service captures only the declared immutable files and runs the harness\n   at most once within that application call; a result-CAS retry never reruns it, but a crash after\n   execution or a separate call may execute the same sealed request again, so the probe must be safe\n   under duplicate execution. `qualified` means bound, not currently healthy.\n\n   Any tool works as argv (`cargo build`, `npm run build`, `pytest -k load`, `go test ./...`) inside\n   one host-fixed container: uid/gid 65534, `/work` = `HOME`, read-only `/inputs`, 1 MiB per stream,\n   and the host-selected network profile. The 120-second workload runs inside the 210-second\n   operation; Pi\'s 300-second and Claude MCP\'s 360-second limits are outer transport margins. The\n   one complete list of what you choose, what the host fixes, what is never available, and every\n   refusal `reason` with its hint is public-contract clause `evidence/spike/limits` (`GetContract`\n   section `evidence/spike`).\n\n   Only the verdict container\'s inspected natural exit produces uppercase `PASS`/`FAIL`: zero is\n   `PASS`, and nonzero is `FAIL` except natural 137, which is unavailable. Any other outcome is a\n   spike Fault `unavailable` and admits **no spike result evidence**. The Fault carries one closed\n   `reason` whenever the cause is attributable: act on its hint. A Fault without a reason is an\n   internal host failure: retry once, then ask the operator. Never treat it as FAIL, use a host\n   fallback, or claim evidence that was not admitted. Operator requalification can affect only a future run.\n3. **Re-gate stale spikes.** If a bound file changes and the backend remains qualified, request the\n   bounded spike again; otherwise follow the unavailable guidance above.\n4. **Derive the result:**\n   - supporting research satisfies Fold 1;\n   - refuting research refutes the claim;\n   - a current passing spike satisfies Fold 2;\n   - absent or stale evidence leaves the claim open;\n   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until\n     then it is a human residual.'),
                 )
     INLINED = ("- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",)
     HOST_SENTENCE = "Stop before investigation and report the exact unsupported capability when one of the three public tools or the auditor launch is absent, when the start refuses the host, or when the host is unknown; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure."
@@ -322,6 +322,25 @@ class SkillOrderTests(unittest.TestCase):
         self.assertEqual(text.count("](references/governance.md)"), 1)
         self.assertGreater(text.index("](references/governance.md)"), text.index("\n## 7. "), "linked after section 6")
 
+    SPIKE_ITEM = ("2. **Spike second, only for `needs-experiment`, after supporting research.** Derive the falsifier from "
+                  "the claim: a plan whose verdict container would fail if the claim were false.")
+
+    def test_the_spike_item_keeps_only_the_judgment_nothing_enforces(self):
+        text = self.skill()
+        section = text[text.index("\n## 8. "):text.index("\n## 9. ")]
+        self.assertEqual(section.count(self.SPIKE_ITEM), 1)
+        self.assertTrue(section.rstrip().endswith(self.SPIKE_ITEM), "the spike item closes section 8")
+        for clause in ("**Spike second, only for `needs-experiment`, after supporting research.**",
+                       "Derive the falsifier from the claim:",
+                       "a plan whose verdict container would fail if the claim were false."):
+            self.assertIn(clause, self.SPIKE_ITEM)
+        for gone in ("spike_backend", "spikes_unavailable", "spike-plan-draft", "environment overrides",
+                     "framework-owned", "duplicate execution", "natural exit", "Operator requalification", "Re-gate stale",
+                     "Derive the result", "uid/gid", "120"):
+            self.assertNotIn(gone, text, gone)
+        self.assertNotIn("spike_request", section, "section 8 leaves the plan shape to the tool schema")
+        self.assertNotIn("evidence/spike", section)
+
     def test_the_terminal_call_is_not_called_the_only_call(self):
         text = self.skill()
         self.assertNotIn("exactly once", text)
@@ -400,6 +419,37 @@ class HostLiteralTests(unittest.TestCase):
     def test_the_frontmatter_is_outside_the_guard(self):
         text = "---\ncompatibility: Claude Code >=2.1.278,<2.2.0\n---\nBody."
         self.assertEqual(activation.skill_host_literal_problems(text), [])
+
+
+class SpikeNumberTests(unittest.TestCase):
+    """The skill body states no spike time limit, resource number or plan schema version: the contract's
+    evidence/spike clauses, the spike_request tool description and references/evidence.md own them."""
+
+    def problems(self, body):
+        return activation.skill_spike_number_problems("---\nname: x\n---\n" + body)
+
+    def test_the_committed_skill_states_no_spike_number(self):
+        text = (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
+        self.assertEqual(activation.skill_spike_number_problems(text), [])
+
+    def test_a_time_limit_a_resource_number_or_the_schema_version_is_rejected(self):
+        for literal in ("a 120 s workload", "the 300 seconds margin", "the 120-second workload", "inside the 210-second operation",
+                        "Pi's 300-second limit", "1 MiB per stream", "512 MiB tmpfs", "2 GiB memory", "256 PIDs",
+                        "uid/gid 65534", "at most 128 environment overrides", "`nofile 1024`", "64 MiB per file",
+                        "a closed `empirica.spike-plan-draft/2`", "empirica.spike-plan-draft/3", "a 5 min limit"):
+            with self.subTest(literal=literal):
+                self.assertEqual(len(self.problems(f"Text. {literal}. More.")), 1, literal)
+
+    def test_other_numbers_are_accepted(self):
+        for text in ("`docker-isolated-v1` and the fixed 8/1/2 envelope", "normally 2: an initial audit and one retry",
+                     "a 1\u2013600 character rationale", "up to 4,096 characters", "section 7", "1. read the view;\n2. submit",
+                     "a spike plan whose verdict container would fail", "the `spike_request` tool", "Fold 2",
+                     "two seconds later", "the first 5,000 tokens"):
+            with self.subTest(text=text):
+                self.assertEqual(self.problems(text), [])
+
+    def test_the_frontmatter_is_outside_the_guard(self):
+        self.assertEqual(activation.skill_spike_number_problems("---\ndescription: 120 s\n---\nBody."), [])
 
 
 class ReferenceLinkTests(unittest.TestCase):
