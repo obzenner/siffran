@@ -112,8 +112,8 @@ by both claim ID and current wording digest (distinct claims with identical word
 active evidence), and `evidence_digest` is the canonical `registry_digest` of that JSON array. The
 projection carries the canonical claim kind (`ordinary | needs-experiment | needs-decision`), derived
 from the graph, so approval requirements follow D1 §5: `ordinary` requires active supporting
-research; `needs-experiment` additionally requires an active passing spike; `needs-decision` cannot
-project approved. Internal append storage may differ, but hosts and tests consume only this typed
+research; `needs-experiment` additionally requires an active passing spike; `needs-decision` is
+the human's in deliberative mode and the author's in auto. Internal append storage may differ, but hosts and tests consume only this typed
 projection. Route, investigate, and freeze witnesses remain reflected through derived obligations,
 claims, and residuals; they are not added to this evidence artifact list.
 `RestoreRun` returns the same bounded RunView shape (or a structured Block/Fault), never counters or
@@ -278,7 +278,9 @@ Requirements:
 - `needs-experiment`: active supporting Fold 1 plus an active passing Fold-2 spike that names it as a
   prerequisite and is fresh;
 - refutation: active refuting research or active failing deterministic spike;
-- `needs-decision`: cannot be agent-approved; becomes human residual;
+- `needs-decision`: in deliberative mode it cannot be agent-approved and becomes a human residual; in auto it is
+  approved by an approving `human_decision`, or by active supporting research (a core rule), and only with no
+  active refuting or failing evidence;
 - simultaneous active supporting and refuting research fails closed as an evidence conflict; it does
   not select either research result. An active failing deterministic spike is the machine falsifier
   and refutes the claim even though supporting research was a prerequisite to run it. The author

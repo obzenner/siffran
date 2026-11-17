@@ -1650,6 +1650,14 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             if rc.get("claim_id") in rc_keys:
                 errors.append(f"{where}: argument.audit.reviewed_claims[{i}] duplicate claim_id {rc.get('claim_id')!r}")
             rc_keys.add(rc.get("claim_id"))
+        # A settled audit whose reviewed claims all have no active evidence rests on no producer: its independence is
+        # human_owned or unverified, never a producer-independence class.
+        active_by_id = {c.get("claim_id"): c.get("active_evidence_ids") for c in claims if isinstance(c, dict)}
+        if (covered and reviewed_claims and not any(active_by_id.get(rc.get("claim_id")) for rc in reviewed_claims
+                                                    if isinstance(rc, dict))
+                and audit.get("independence") not in {"human_owned", "unverified"}):
+            errors.append(f"{where}: argument.audit.independence {audit.get('independence')!r} must be human_owned or "
+                          f"unverified when no reviewed claim has active evidence")
         # MAJOR-1: for a settled verdict that still covers the argument (current), reviewed_claims must equal exactly
         # all current claims where gating=true and state=approved, with each reviewed evidence_digest equal to that
         # claim's current evidence_digest. With no verdict or a pending re-audit they must be empty (the raw schema
@@ -4241,6 +4249,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
             nd["claims"][0]["active_evidence_ids"] = []
             nd["claims"][0]["evidence_digest"] = registry_digest([])
             nd["audit"]["reviewed_claims"][0]["evidence_digest"] = registry_digest([])
+            nd["audit"]["independence"] = "human_owned"
         return nd
 
     def _nd_errors(nd: dict) -> list[str]:
@@ -4259,6 +4268,19 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
     for label, nd in (("(a) human_decision", _nd_arg(False, _approve)), ("(b) supporting research", _nd_arg(True))):
         if _nd_errors(nd):
             errors.append(f"NEG needs-decision approved with {label} must pass but produced: {_nd_errors(nd)}")
+    # A decision with no active evidence rests on no producer, so the audit is human_owned (or unverified), never a
+    # producer-independence class.
+    for _class in ("distinct", "mixed", "same_model"):
+        _owned = _nd_arg(False, _approve)
+        _owned["audit"]["independence"] = _class
+        expect(lambda e, a=_owned: check_argument_view(_arg_env(a), registry, e, "neg"),
+               f"argument.audit.independence {_class!r} must be human_owned or unverified",
+               f"no reviewed claim has active evidence but independence is {_class}")
+    for _class in ("human_owned", "unverified"):
+        _owned = _nd_arg(False, _approve)
+        _owned["audit"]["independence"] = _class
+        if _nd_errors(_owned):
+            errors.append(f"NEG no active evidence with independence {_class} must pass but produced: {_nd_errors(_owned)}")
     _refuter = "sha256:" + "9" * 64
 
     def _with_refuting(nd: dict) -> dict:
