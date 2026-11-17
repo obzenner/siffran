@@ -482,7 +482,7 @@ class ReferenceLinkTests(unittest.TestCase):
     def test_a_valid_anchor_is_accepted_including_one_to_a_heading_that_has_punctuation(self):
         # "Governed initialization (public contract 6.0.0)": its slug drops the parentheses and the dots
         for target in ("claim-graph.md#construction-rules", "governance.md#governed-initialization-public-contract-600",
-                       "governance.md#timeout-and-recovery"):
+                       "governance.md#human-confirmations-are-not-configuration"):
             with self.subTest(target=target):
                 text = self.skill() + f"\n\nSee [rules](references/{target}).\n"
                 self.assertEqual(activation.skill_link_problems(text, self.REFERENCES), [])
