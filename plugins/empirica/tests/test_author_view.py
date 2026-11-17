@@ -241,6 +241,16 @@ class RedirectedObligationTests(unittest.TestCase):
                 self.assertIn(f"\n    missing: {row['missing']['code']}\n", text, name)
             self.assertNotIn("missing: " + rows[0]["missing"]["code"] + ";", text, name)
 
+    def test_a_redirected_residual_names_the_claim_to_discharge(self):
+        result = stored(json.loads((self.GOLDEN / "block-deferred-scope.json").read_text()))["result"]
+        residual = result["run"]["residuals"][0]
+        residual.update(claim_id="G0", target_claim_id="S1")
+        self.assertIn(" — affected: claim:G0; first discharge claim:S1\n", render_author_view(result, strict=True) + "\n")
+        residual["target_claim_id"] = "G0"
+        text = render_author_view(result, strict=True)
+        self.assertIn(" — affected: claim:G0", text)
+        self.assertNotIn("first discharge", text)
+
     def test_target_is_rendered_through_claim_id_safety(self):
         """A target that is not a claim id is fenced and escaped, exactly as a residual's is."""
         safety = author_view.TextSafety("<<<OPEN>>>", "<<<CLOSE>>>")
@@ -285,6 +295,20 @@ class ControlModeHeaderTests(unittest.TestCase):
             self.assertIn(f"governance: {state}; {mode}; passes/spawns/audits: ", line, name)
         auto = self.first_line("governance-wait-post-approval-auto")[1]["run"]["governance"]
         self.assertEqual((auto["control_mode"], auto["context"]["delegation"]), ("auto", False))
+
+    def test_unattended_follows_the_cores_delegated_auto_rule(self):
+        """``core.run.delegated_auto``: auto, delegation, and no interactive human. Interactive authority outranks
+        delegation, and a deliberative run is never unattended."""
+        for mode, delegation, interactive, expected in (
+                ("auto", True, False, "mode auto, unattended"), ("auto", True, True, "mode auto"),
+                ("auto", False, False, "mode auto"), ("deliberative", True, False, "mode deliberative"),
+                ("deliberative", True, True, "mode deliberative")):
+            result = stored(json.loads((self.GOLDEN / "governance-wait-delegated-auto.json").read_text()))["result"]
+            governed = result["run"]["governance"]
+            governed["control_mode"] = mode
+            governed["context"].update(delegation=delegation, interactive=interactive)
+            line = render_author_view(result, strict=True).splitlines()[0]
+            self.assertIn(f"; {expected}; passes/spawns/audits: ", line, (mode, delegation, interactive))
 
     def test_a_run_without_governance_has_no_mode(self):
         line, result = self.first_line("block-pending-audit")

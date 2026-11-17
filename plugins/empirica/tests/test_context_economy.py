@@ -452,6 +452,10 @@ class SizeBudgetTests(_ServiceHarness):
     only to be > 0.
     """
 
+    # A LOGICAL bound, not a fixture measurement: it bounds the text the renderer controls. The one line it does not
+    # control is the author's sizing rationale, which the ``configure_run`` schema caps at 600 characters (the bound is
+    # asserted separately, in ``AuditLaunchViewTests``); the ceiling applies to the view WITHOUT that line wherever the
+    # rationale can be long (``AuditLaunchViewTests.renderer_text``).
     CEILING = 1300
     ROLE_PROFILE = CLAUDE_PROFILE
 
@@ -610,6 +614,15 @@ class AuditLaunchViewTests(unittest.TestCase):
     reported by ``test_the_audit_owed_views_stay_under_the_ceiling`` failing with its numbers if the ceiling is crossed."""
 
     CEILING = SizeBudgetTests.CEILING
+    #: What the renderer adds around the author's rationale: the label, a space and the two untrusted-data delimiters.
+    RATIONALE_MARKERS = len(_proto.author_view_labels()["proposal_rationale"]) + 1 + len("<<<EMPIRICA_UNTRUSTED_DATA>>>") \
+        + len("<<<END_EMPIRICA_UNTRUSTED_DATA>>>")
+
+    @staticmethod
+    def renderer_text(text):
+        """The view without the rationale line: the part the renderer controls (the rationale is the author's, bounded
+        by its schema, see ``test_the_rationale_line_is_bounded_by_the_schema``)."""
+        return "\n".join(line for line in text.splitlines() if not line.startswith("proposal rationale:"))
 
     def _owed(self, profile, rationale=SIZED_RATIONALE, claims=1):
         """Drive a real run on ``profile`` to the audit-owed state; return (GetRun text, report_convergence Block text)."""
@@ -755,21 +768,26 @@ class AuditLaunchViewTests(unittest.TestCase):
     def test_the_audit_owed_views_stay_under_the_ceiling(self):
         for host in ("claude-code", "pi"):
             for label, text in zip(("GetRun", "report_convergence"), self._owed(host_profile_id(host))):
-                self.assertLess(len(text), self.CEILING, f"{host} audit-owed {label}: {len(text)} characters")
+                self.assertLess(len(self.renderer_text(text)), self.CEILING, f"{host} audit-owed {label}: {len(text)} characters")
 
-    #: Measured characters of the worst realistic audit-owed view: a 600-character rationale, 8 claims, the real
-    #: (fixed-size, ~200-character) handle. KNOWN OVER the 1,300 ceiling, by 290 (Pi GetRun) to 455 (Claude Block): the
-    #: rationale is printed in the header and each claim adds a "Satisfied obligations" line, so the ceiling was a fixture
-    #: measurement before S4 too. Capping the rationale is the coordinator's decision, not this test's. The pin fails if the
-    #: worst case grows or the launch is printed twice again.
+    #: INFORMATIONAL pin, not a limit: the measured characters of the worst realistic audit-owed view (a 600-character
+    #: rationale, 8 claims, the real ~200-character handle), rationale line included: 1,619 / 1,755 on Claude and 1,590 /
+    #: 1,726 on Pi. The limit is the logical bound in the test below (the renderer's own text, rationale line excluded,
+    #: stays within the ceiling; the rationale line is bounded by its schema). The pin fails if the worst case grows or the
+    #: launch is printed twice again.
     WORST = {"claude-code": (1619, 1755), "pi": (1590, 1726)}
 
-    def test_the_worst_audit_owed_view_is_measured_and_pinned(self):
+    def test_the_worst_audit_owed_view_is_bounded_by_what_the_renderer_controls(self):
         rationale = ("r" * 599) + "."
+        limit = _proto._REQUEST_SCHEMA["$defs"]["actionConfigureRun"]["properties"]["rationale"]["maxLength"]
+        self.assertEqual(limit, 600)
         for host, (read_max, block_max) in self.WORST.items():
             read, block = self._owed(host_profile_id(host), rationale=rationale, claims=8)
-            self.assertLessEqual(len(read), read_max, f"{host} GetRun: {len(read)}")
-            self.assertLessEqual(len(block), block_max, f"{host} Block: {len(block)}")
+            for label, text, pin in (("GetRun", read, read_max), ("Block", block, block_max)):
+                line = next(line for line in text.splitlines() if line.startswith("proposal rationale:"))
+                self.assertLessEqual(len(self.renderer_text(text)), self.CEILING, f"{host} {label}")
+                self.assertLessEqual(len(line), limit + self.RATIONALE_MARKERS, f"{host} {label}: the rationale line")
+                self.assertLessEqual(len(text), pin, f"{host} {label} measured: {len(text)}")
             self.assertEqual(block.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1)
 
 

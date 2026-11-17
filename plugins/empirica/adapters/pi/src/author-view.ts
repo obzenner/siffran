@@ -354,7 +354,9 @@ function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
   if (value === null) return trusted(LABELS.no_governance);
   // The mode is the public run view's own word; a delegated auto run has no human to ask, which the author must know.
-  const delegated = value.control_mode === "auto" && value.context.delegation === true;
+  // The rule is the core's `core/run.py` `delegated_auto`: interactive authority outranks delegation.
+  const delegated = value.control_mode === "auto" && value.context.delegation === true
+    && value.context.interactive !== true;
   const parts = [`${LABELS.governance} ${value.state}`,
     `${LABELS.mode} ${value.control_mode}${delegated ? `, ${LABELS.mode_delegated}` : ""}`];
   parts.push(`${LABELS.budget_usage} ${CEILINGS.map(

@@ -283,6 +283,25 @@ test("the first line names the control mode between the state and the budget, in
     assert.ok(!source.includes(word), word);
 });
 
+test("unattended follows the core's delegated-auto rule; a redirected residual names the claim to discharge", () => {
+  const read = (name: string): Json => JSON.parse(readStoredText(path.join(GOLDEN_DIR, `${name}.json`), "utf8")).result;
+  for (const [mode, delegation, interactive, expected] of [
+    ["auto", true, false, "mode auto, unattended"], ["auto", true, true, "mode auto"], ["auto", false, false, "mode auto"],
+    ["deliberative", true, false, "mode deliberative"], ["deliberative", true, true, "mode deliberative"]] as const) {
+    const result = read("governance-wait-delegated-auto");
+    result.run.governance.control_mode = mode;
+    Object.assign(result.run.governance.context, { delegation, interactive });
+    const line = renderAuthorView(result, { strict: true }).split("\n")[0];
+    assert.ok(line.includes(`; ${expected}; passes/spawns/audits: `), `${mode} ${delegation} ${interactive}: ${line}`);
+  }
+  const result = read("block-deferred-scope");
+  Object.assign(result.run.residuals[0], { claim_id: "G0", target_claim_id: "S1" });
+  assert.ok(renderAuthorView(result, { strict: true }).includes(" — affected: claim:G0; first discharge claim:S1\n"));
+  result.run.residuals[0].target_claim_id = "G0";
+  const own = renderAuthorView(result, { strict: true });
+  assert.ok(own.includes(" — affected: claim:G0\n") && !own.includes("first discharge"));
+});
+
 test("a redirected obligation names the blocking descendant claim", () => {
   const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
   const rendered = renderAuthorView(golden.result, { strict: true });

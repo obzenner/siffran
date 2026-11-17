@@ -335,7 +335,9 @@ def _governance(run: dict[str, Any]) -> Trusted:
     if governance is None:
         return Trusted(_LABELS["no_governance"])
     # The mode is the public run view's own word; a delegated auto run has no human to ask, which the author must know.
-    delegated = governance["control_mode"] == "auto" and governance["context"]["delegation"] is True
+    # The rule is the core's ``core.run.delegated_auto``: interactive authority outranks delegation.
+    context = governance["context"]
+    delegated = governance["control_mode"] == "auto" and context["delegation"] is True and context["interactive"] is not True
     parts = [f"{_LABELS['governance']} {governance['state']}",
              f"{_LABELS['mode']} {governance['control_mode']}{', ' + _LABELS['mode_delegated'] if delegated else ''}"]
     usage = " ".join(
