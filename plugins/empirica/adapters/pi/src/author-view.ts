@@ -173,6 +173,7 @@ class Launch {
   /** The launch, or a pointer to it, for a place under the `site` heading; undefined when the host has none. */
   at(site: string): string | undefined {
     if (this.text === undefined) return undefined;
+    if (this.home === undefined) return this.text; // no home found: print it where it is needed
     if (site === this.home && !this.printed) { this.printed = true; return this.text; }
     return `the auditor launch under ${(LABELS as Record<string, string>)[this.home!].replace(/:$/, "")}`;
   }
@@ -188,8 +189,9 @@ function surfaces(ids: readonly string[], launch: Launch, site: string, audit = 
 }
 
 /** The one heading that prints the launch, in the order the view reads: obligation, children, reasons, residuals, Next. */
-function launchHome(run: Json, reasons: Json[], auditChild: boolean): string | undefined {
-  const aboutAudit = (row: Json): boolean => String(row.code).startsWith("audit.") || (row.code === "child.terminal" && auditChild);
+function launchHome(run: Json, reasons: Json[]): string | undefined {
+  // A `child.terminal` reason is never a home: an audit child that stopped has a Children row, which is.
+  const aboutAudit = (row: Json): boolean => String(row.code).startsWith("audit.");
   if ((run.obligations.active as Json[]).some((row) => row.id === "obligation.audit" && row.status !== "satisfied"
     && (row.next as string[]).some((id) => launches(id, true)))) return "open_obligations";
   if ((run.children as Json[]).some((row) => row.resource_class === "audit" && row.recovery_action === "child.retry")) return "children";
@@ -310,20 +312,20 @@ function residualClaims(row: Json, safety: TextSafety): Trusted | null {
   const claim = `claim:${claimId(row.claim_id, safety)}`;
   const target = row.target_claim_id ?? row.claim_id;
   return trusted(target === row.claim_id
-    ? claim : `${claim} ${LABELS.via_claim}${claimId(target, safety)}`);
+    ? claim : `${claim}; ${LABELS.via_claim}${claimId(target, safety)}`);
 }
 
 /**
  * Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
  * `target_claim_id` is null for non-claim obligations and equals the obligation's own claim id when
- * it is not redirected; only a different target is named (`code via claim:<id>`).
+ * it is not redirected; only a different target is named (`code; <via_claim label><id>`).
  */
 function missing(row: Json, safety: TextSafety): Trusted {
   const target = row.missing.target_claim_id;
   if (target === null || target === String(row.id).replace(/^claim:/, "")) {
     return trusted(row.missing.code);
   }
-  return trusted(`${row.missing.code} ${LABELS.via_claim}${claimId(target, safety)}`);
+  return trusted(`${row.missing.code}; ${LABELS.via_claim}${claimId(target, safety)}`);
 }
 
 /** Parse one schema-valid reason row. */
@@ -351,7 +353,10 @@ function spikeBackend(run: Json): readonly Trusted[] {
 function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
   if (value === null) return trusted(LABELS.no_governance);
-  const parts = [`${LABELS.governance} ${value.state}`];
+  // The mode is the public run view's own word; a delegated auto run has no human to ask, which the author must know.
+  const delegated = value.control_mode === "auto" && value.context.delegation === true;
+  const parts = [`${LABELS.governance} ${value.state}`,
+    `${LABELS.mode} ${value.control_mode}${delegated ? `, ${LABELS.mode_delegated}` : ""}`];
   parts.push(`${LABELS.budget_usage} ${CEILINGS.map(
     ([ceiling, used]) => `${value.budgets[used]}/${value.proposal.budgets[ceiling]}`,
   ).join(" ")}`);
@@ -422,9 +427,11 @@ function parse(result: Json): AuthorView {
     hostNote: hostNote(run.host as Json),
   };
   const reasonRows = result.type === "Block" ? (result.reasons as Json[]) : []; // Only Block carries reasons.
-  const auditChild = (run.children as Json[]).some((row) => row.resource_class === "audit" && row.recovery_action);
+  const stopped = (run.children as Json[]).filter((row) => row.recovery_action);
+  // A `child.terminal` reason does not name its child, so it is about the audit only when every stopped child is the audit's.
+  const auditChild = stopped.length > 0 && stopped.every((row) => row.resource_class === "audit");
   const text = AUDIT_LAUNCHES.get(run.host.profile_id);
-  const launch = new Launch(text, text === undefined ? undefined : launchHome(run, reasonRows, auditChild));
+  const launch = new Launch(text, text === undefined ? undefined : launchHome(run, reasonRows));
   const aboutAudit = (row: Json): boolean => String(row.code).startsWith("audit.") || (row.code === "child.terminal" && auditChild);
   const terminalNext = surfaces(run.next_actions as string[], launch, "next");
   const terminal = run.status !== "active";

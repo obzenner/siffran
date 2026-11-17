@@ -10,6 +10,8 @@ export interface DecisionControls {
 export type AuthorViewLabel =
   | "no_governance"
   | "governance"
+  | "mode"
+  | "mode_delegated"
   | "budget_usage"
   | "converged"
   | "run_id"

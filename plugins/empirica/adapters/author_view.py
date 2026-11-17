@@ -75,7 +75,7 @@ class Obligation:
 
     obligation_id: Trusted
     required: Trusted | Untrusted | None
-    missing: Trusted | None  # code, plus ``via claim:<id>`` when a descendant claim blocks it
+    missing: Trusted | None  # code, plus the claim to discharge first when a descendant claim blocks it
     next_actions: tuple[Trusted, ...]
 
 
@@ -159,6 +159,8 @@ class _Launch:
         """The launch, or a pointer to it, for a place under the ``site`` heading; ``None`` when the host has no launch."""
         if self.text is None:
             return None
+        if self.home is None:  # no home found: print it where it is needed
+            return self.text
         if site == self.home and not self.printed:
             self.printed = True
             return self.text
@@ -175,10 +177,11 @@ def _actions(actions: list[str], launch: _Launch, site: str, audit: bool = False
     return tuple(render_surface(action, launch.at(site) if _launches(action, audit) else None, audit) for action in actions)
 
 
-def _home(run: dict[str, Any], reasons: list[dict[str, Any]], audit_child: bool) -> str | None:
+def _home(run: dict[str, Any], reasons: list[dict[str, Any]]) -> str | None:
     """The one heading that prints the launch, in the order the view reads: obligation, children, reasons, residuals, Next."""
     def audit_reason(row: dict[str, Any]) -> bool:
-        return row["code"].startswith("audit.") or (row["code"] == "child.terminal" and audit_child)
+        # A `child.terminal` reason is never a home: an audit child that stopped has a Children row, which is.
+        return row["code"].startswith("audit.")
     if any(row["id"] == "obligation.audit" and row["status"] != "satisfied"
            and any(_launches(action, True) for action in row["next"]) for row in run["obligations"]["active"]):
         return "open_obligations"
@@ -287,20 +290,20 @@ def _residual_claims(row: dict[str, Any], safety: TextSafety) -> Trusted | None:
     target = row.get("target_claim_id", row["claim_id"])
     if target == row["claim_id"]:
         return Trusted(claim)
-    return Trusted(f"{claim} {_LABELS['via_claim']}{safety.claim_id(target)}")
+    return Trusted(f"{claim}; {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
 def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
     """Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
 
     ``target_claim_id`` is ``None`` for non-claim obligations and equals the obligation's own claim
-    id when it is not redirected; only a different target is named (``code via claim:<id>``).
+    id when it is not redirected; only a different target is named (``code; <via_claim label><id>``).
     """
     missing = row["missing"]
     target = missing["target_claim_id"]
     if target is None or target == row["id"].removeprefix("claim:"):
         return Trusted(missing["code"])
-    return Trusted(f"{missing['code']} {_LABELS['via_claim']}{safety.claim_id(target)}")
+    return Trusted(f"{missing['code']}; {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
 def _reason(row: dict[str, Any], safety: TextSafety, launch: _Launch = _Launch(), audit: bool = False,
@@ -331,7 +334,10 @@ def _governance(run: dict[str, Any]) -> Trusted:
     governance = run["governance"]
     if governance is None:
         return Trusted(_LABELS["no_governance"])
-    parts = [f"{_LABELS['governance']} {governance['state']}"]
+    # The mode is the public run view's own word; a delegated auto run has no human to ask, which the author must know.
+    delegated = governance["control_mode"] == "auto" and governance["context"]["delegation"] is True
+    parts = [f"{_LABELS['governance']} {governance['state']}",
+             f"{_LABELS['mode']} {governance['control_mode']}{', ' + _LABELS['mode_delegated'] if delegated else ''}"]
     usage = " ".join(
         f"{governance['budgets'][used]}/{governance['proposal']['budgets'][ceiling]}"
         for ceiling, used in CEILINGS.items())
@@ -382,9 +388,11 @@ def _parse(result: dict[str, Any]) -> AuthorView:
                     Trusted(run["id"]), _spike_backend(run),
                     safety.untrusted(rationale) if rationale is not None else None, host_note)
     reasons = result["reasons"] if result["type"] == "Block" else []  # Only Block carries reasons.
-    audit_child = any(row["resource_class"] == "audit" and row.get("recovery_action") for row in run["children"])
+    stopped = [row for row in run["children"] if row.get("recovery_action")]
+    # A `child.terminal` reason does not name its child, so it is about the audit only when every stopped child is the audit's.
+    audit_child = bool(stopped) and all(row["resource_class"] == "audit" for row in stopped)
     text = audit_launch(run["host"]["profile_id"])
-    launch = _Launch(text, _home(run, reasons, audit_child) if text else None)
+    launch = _Launch(text, _home(run, reasons) if text else None)
 
     def about_audit(row: dict[str, Any]) -> bool:
         return row["code"].startswith("audit.") or (row["code"] == "child.terminal" and audit_child)

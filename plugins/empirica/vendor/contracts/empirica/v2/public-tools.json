@@ -144,6 +144,8 @@
     "labels": {
       "no_governance": "no governance",
       "governance": "governance:",
+      "mode": "mode",
+      "mode_delegated": "unattended",
       "budget_usage": "passes/spawns/audits:",
       "converged": "converged=",
       "run_id": "run_id:",
@@ -164,7 +166,7 @@
       "next_inline": "next:",
       "missing": "missing:",
       "recovery": "recovery:",
-      "via_claim": "via claim:",
+      "via_claim": "first discharge claim:",
       "argument": "Argument",
       "goal": "goal:",
       "root_claim_id": "root_claim_id:",

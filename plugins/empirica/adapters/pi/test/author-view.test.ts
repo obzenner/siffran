@@ -227,16 +227,72 @@ test("mixed audit summary and obligation are byte-identical", () => {
   assert.ok(rendered.includes("\n    missing: audit.producers_mixed\n"));
 });
 
+test("launch lookup: a mixed stopped pair, an audit residual retry, and a launch with no home", () => {
+  const profiles = JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "..", "..", "vendor", "contracts",
+    "empirica", "v2", "host-profiles.json"), "utf8")).profiles as Json[];
+  const golden = (name: string, host: string): Json => {
+    const result = JSON.parse(readStoredText(path.join(GOLDEN_DIR, `${name}.json`), "utf8")).result;
+    result.run.host.profile_id = profiles.find((row) => row.host_id === host)!.profile_id;
+    return result;
+  };
+  const launchOf = (host: string): string => profiles.find((row) => row.host_id === host)!.audit_launch;
+  const count = (text: string, part: string): number => text.split(part).length - 1;
+  for (const host of ["claude-code", "pi"]) {
+    const mixed = golden("block-child-terminal", host);
+    mixed.run.children.push({ child_id: "ch-spike-1", purpose: "spike", resource_class: "investigation",
+      state: "timed_out", recovery_action: "child.retry" });
+    const mixedText = renderAuthorView(mixed, { strict: true });
+    assert.ok(mixedText.includes("next: host: child_reserve; report_convergence intent=stop"), host);
+    assert.ok(mixedText.includes("recovery: host: child_reserve"), host);
+    assert.equal(count(mixedText, launchOf(host)), 1, host);
+
+    const residual = golden("audit-owed-pi", host);
+    delete residual.reasons;
+    Object.assign(residual, { type: "Allow", converged: false });
+    residual.run.obligations.active = [];
+    residual.run.residuals = [{ code: "audit.unreadable", parameters: {}, next_actions: ["child.retry"], sections: ["audit"] }];
+    const residualText = renderAuthorView(residual, { strict: true });
+    assert.ok(!residualText.includes("child_reserve"), host);
+    assert.equal(count(residualText, launchOf(host)), 1, host);
+
+    const homeless = golden("audit-owed-pi", host);
+    delete homeless.reasons;
+    Object.assign(homeless, { type: "Allow", converged: false });
+    homeless.run.obligations.active[0].id = "obligation.approval";
+    const homelessText = renderAuthorView(homeless, { strict: true });
+    assert.ok(!homelessText.includes("child_reserve") && !homelessText.includes("undefined"), host);
+    assert.equal(count(homelessText, launchOf(host)), 1, host);
+  }
+});
+
+test("the first line names the control mode between the state and the budget, in the contract's words", () => {
+  const firstLine = (name: string): [string, Json] => {
+    const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, `${name}.json`), "utf8"));
+    return [renderAuthorView(golden.result, { strict: true }).split("\n")[0], golden.result];
+  };
+  for (const [name, mode] of [["governance-approved", "mode deliberative"], ["governance-wait-pending", "mode deliberative"],
+    ["governance-wait-post-approval-auto", "mode auto"], ["governance-wait-delegated-auto", "mode auto, unattended"]]) {
+    const [line, result] = firstLine(name);
+    assert.ok(line.includes(`governance: ${result.run.governance.state}; ${mode}; passes/spawns/audits: `), `${name}: ${line}`);
+  }
+  assert.ok(!firstLine("block-pending-audit")[0].includes("mode"), "no governance, no mode");
+  const labels = PUBLIC_TOOLS.author_view.labels as Record<string, string>;
+  assert.deepEqual([labels.mode, labels.mode_delegated, labels.via_claim], ["mode", "unattended", "first discharge claim:"]);
+  const source = readFileSync(path.join(import.meta.dirname, "..", "src", "author-view.ts"), "utf8");
+  for (const word of ["unattended", "first discharge", "mode deliberative", "mode auto"])
+    assert.ok(!source.includes(word), word);
+});
+
 test("a redirected obligation names the blocking descendant claim", () => {
   const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim-redirected.json"), "utf8"));
   const rendered = renderAuthorView(golden.result, { strict: true });
   assert.ok(rendered.includes("\n  claim:G0: "));
-  assert.ok(rendered.includes("\n    missing: claim.spike_missing via claim:S1\n"));
+  assert.ok(rendered.includes("\n    missing: claim.spike_missing; first discharge claim:S1\n"));
   // An obligation that is its own target (or has none) renders the bare code.
   const plain = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "block-open-claim.json"), "utf8"));
   const bare = renderAuthorView(plain.result, { strict: true });
   assert.ok(bare.includes("\n    missing: claim.research_missing\n"));
-  assert.ok(!bare.includes(" via claim:"));
+  assert.ok(!bare.includes("first discharge"));
 });
 
 test("a redirected obligation's missing target is validated before it is rendered", () => {
@@ -271,7 +327,7 @@ test("a redirected obligation's missing target is validated before it is rendere
   assert.equal(renderAuthorView(golden.result, { strict: true }), golden.text);
   for (const [target, expected] of [["G0", "\n    missing: claim.spike_missing\n"],
     [null, "\n    missing: claim.spike_missing\n"],
-    ["S1", "\n    missing: claim.spike_missing via claim:S1\n"]] as const) {
+    ["S1", "\n    missing: claim.spike_missing; first discharge claim:S1\n"]] as const) {
     const rendered = renderAuthorView(withTarget((missing) => { missing.target_claim_id = target; }),
       { strict: true });
     assert.ok(rendered.includes(expected), String(target));

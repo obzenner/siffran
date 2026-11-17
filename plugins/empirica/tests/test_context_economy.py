@@ -703,6 +703,44 @@ class AuditLaunchViewTests(unittest.TestCase):
         result["run"]["children"][0].update(purpose="spike", resource_class="investigation")
         self.assertIn("next: host: child_reserve; report_convergence intent=stop", render_author_view(result, strict=True))
 
+    def test_a_mixed_stopped_pair_keeps_the_protocol_surface_for_the_reason(self):
+        """An audit child stopped earlier and an investigation child that just timed out: the reason cannot say which child
+        it names, so it keeps the protocol surface; each child's own row is exact."""
+        from adapters.author_view import render_author_view
+        for host in ("claude-code", "pi"):
+            result = self._golden("block-child-terminal", host)
+            result["run"]["children"].append({"child_id": "ch-spike-1", "purpose": "spike", "resource_class": "investigation",
+                                              "state": "timed_out", "recovery_action": "child.retry"})
+            text = render_author_view(result, strict=True)
+            self.assertIn("next: host: child_reserve; report_convergence intent=stop", text, host)
+            self.assertIn("recovery: host: child_reserve", text, host)
+            self.assertEqual(text.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1, host)
+
+    def test_an_audit_residual_with_a_retry_shows_the_launch(self):
+        from adapters.author_view import render_author_view
+        for host in ("claude-code", "pi"):
+            result = self._golden("audit-owed-pi", host)
+            result.pop("reasons")
+            result.update(type="Allow", converged=False)
+            result["run"]["obligations"]["active"] = []
+            result["run"]["residuals"] = [{"code": "audit.unreadable", "parameters": {}, "next_actions": ["child.retry"],
+                                           "sections": ["audit"]}]
+            text = render_author_view(result, strict=True)
+            self.assertNotIn("child_reserve", text, host)
+            self.assertEqual(text.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1, host)
+
+    def test_a_launch_without_a_home_is_printed_where_it_is_needed(self):
+        """The home lookup knows the audit obligation; an action on any other row still prints the launch, not a crash."""
+        from adapters.author_view import render_author_view
+        for host in ("claude-code", "pi"):
+            result = self._golden("audit-owed-pi", host)
+            result.pop("reasons")
+            result.update(type="Allow", converged=False)
+            result["run"]["obligations"]["active"][0]["id"] = "obligation.approval"
+            text = render_author_view(result, strict=True)
+            self.assertNotIn("child_reserve", text, host)
+            self.assertEqual(text.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1, host)
+
     def test_the_run_level_next_shows_the_launch_not_the_protocol_surface(self):
         from adapters.author_view import render_author_view
         result = self._golden("audit-owed-pi", "pi")
@@ -720,11 +758,11 @@ class AuditLaunchViewTests(unittest.TestCase):
                 self.assertLess(len(text), self.CEILING, f"{host} audit-owed {label}: {len(text)} characters")
 
     #: Measured characters of the worst realistic audit-owed view: a 600-character rationale, 8 claims, the real
-    #: (fixed-size, ~200-character) handle. KNOWN OVER the 1,300 ceiling, by 300 (Claude GetRun) to 436 (Claude Block): the
+    #: (fixed-size, ~200-character) handle. KNOWN OVER the 1,300 ceiling, by 290 (Pi GetRun) to 455 (Claude Block): the
     #: rationale is printed in the header and each claim adds a "Satisfied obligations" line, so the ceiling was a fixture
     #: measurement before S4 too. Capping the rationale is the coordinator's decision, not this test's. The pin fails if the
     #: worst case grows or the launch is printed twice again.
-    WORST = {"claude-code": (1600, 1736), "pi": (1571, 1707)}
+    WORST = {"claude-code": (1619, 1755), "pi": (1590, 1726)}
 
     def test_the_worst_audit_owed_view_is_measured_and_pinned(self):
         rationale = ("r" * 599) + "."

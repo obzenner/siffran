@@ -216,7 +216,7 @@ class NoFallbackTests(unittest.TestCase):
 
 
 class RedirectedObligationTests(unittest.TestCase):
-    """An obligation blocked by a descendant claim names that claim (``missing: <code> via claim:<id>``)."""
+    """An obligation blocked by a descendant claim names that claim (``missing: <code>; first discharge claim:<id>``)."""
 
     GOLDEN = ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" / "author-view-golden"
 
@@ -229,7 +229,7 @@ class RedirectedObligationTests(unittest.TestCase):
         text = render_author_view(golden["result"], strict=True)
         self.assertEqual(text, golden["text"])
         self.assertIn("\n  claim:G0: ", text)
-        self.assertIn("\n    missing: claim.spike_missing via claim:S1\n", text)
+        self.assertIn("\n    missing: claim.spike_missing; first discharge claim:S1\n", text)
 
     def test_unredirected_obligation_renders_the_bare_code(self):
         for name in ("block-open-claim", "audit-mixed"):
@@ -239,7 +239,7 @@ class RedirectedObligationTests(unittest.TestCase):
             self.assertTrue(rows, name)
             for row in rows:
                 self.assertIn(f"\n    missing: {row['missing']['code']}\n", text, name)
-            self.assertNotIn("missing: " + rows[0]["missing"]["code"] + " via", text, name)
+            self.assertNotIn("missing: " + rows[0]["missing"]["code"] + ";", text, name)
 
     def test_target_is_rendered_through_claim_id_safety(self):
         """A target that is not a claim id is fenced and escaped, exactly as a residual's is."""
@@ -249,7 +249,7 @@ class RedirectedObligationTests(unittest.TestCase):
                                              "target_claim_id": hostile, "parameters": {}}}
         rendered = str(author_view._missing(row, safety))
         self.assertEqual(
-            rendered, "claim.spike_missing via claim:"
+            rendered, "claim.spike_missing; first discharge claim:"
             + str(safety.untrusted(hostile)))
         self.assertNotIn("\n", rendered)
         self.assertNotIn("<x>", rendered)
@@ -258,12 +258,47 @@ class RedirectedObligationTests(unittest.TestCase):
             str(safety.untrusted(hostile))))
         # A safe id is raw; own id and null targets add nothing.
         row["missing"]["target_claim_id"] = "S1"
-        self.assertEqual(str(author_view._missing(row, safety)), "claim.spike_missing via claim:S1")
+        self.assertEqual(str(author_view._missing(row, safety)), "claim.spike_missing; first discharge claim:S1")
         row["missing"]["target_claim_id"] = "G0"
         self.assertEqual(str(author_view._missing(row, safety)), "claim.spike_missing")
         row.update(id="obligation.audit", missing={"code": "audit.failed", "target_claim_id": None,
                                                    "parameters": {}})
         self.assertEqual(str(author_view._missing(row, safety)), "audit.failed")
+
+
+class ControlModeHeaderTests(unittest.TestCase):
+    """The first line names the control mode, from the public run view, in the contract's own words."""
+
+    GOLDEN = RedirectedObligationTests.GOLDEN
+
+    def first_line(self, name):
+        result = stored(json.loads((self.GOLDEN / f"{name}.json").read_text()))["result"]
+        return render_author_view(result, strict=True).splitlines()[0], result
+
+    def test_each_mode_is_printed_between_the_state_and_the_budget(self):
+        for name, mode in (("governance-approved", "mode deliberative"),
+                           ("governance-wait-pending", "mode deliberative"),
+                           ("governance-wait-post-approval-auto", "mode auto"),
+                           ("governance-wait-delegated-auto", "mode auto, unattended")):
+            line, result = self.first_line(name)
+            state = result["run"]["governance"]["state"]
+            self.assertIn(f"governance: {state}; {mode}; passes/spawns/audits: ", line, name)
+        auto = self.first_line("governance-wait-post-approval-auto")[1]["run"]["governance"]
+        self.assertEqual((auto["control_mode"], auto["context"]["delegation"]), ("auto", False))
+
+    def test_a_run_without_governance_has_no_mode(self):
+        line, result = self.first_line("block-pending-audit")
+        self.assertIsNone(result["run"]["governance"])
+        self.assertNotIn("mode", line)
+
+    def test_the_words_are_the_contracts_and_the_renderers_hold_none(self):
+        labels = author_view.author_view_labels()
+        self.assertEqual((labels["mode"], labels["mode_delegated"], labels["via_claim"]),
+                         ("mode", "unattended", "first discharge claim:"))
+        for source in (PLUGIN / "adapters" / "author_view.py", PLUGIN / "adapters" / "pi" / "src" / "author-view.ts"):
+            text = source.read_text(encoding="utf-8")
+            for word in ("unattended", "first discharge", "mode deliberative", "mode auto"):
+                self.assertNotIn(word, text, f"{source.name}: {word}")
 
 
 class NoUnownedDigestsOrOpaqueIdsTests(unittest.TestCase):

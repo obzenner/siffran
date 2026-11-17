@@ -878,6 +878,8 @@
           "required": [
             "no_governance",
             "governance",
+            "mode",
+            "mode_delegated",
             "budget_usage",
             "converged",
             "run_id",
@@ -959,6 +961,14 @@
               "minLength": 1
             },
             "governance": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mode_delegated": {
               "type": "string",
               "minLength": 1
             },
