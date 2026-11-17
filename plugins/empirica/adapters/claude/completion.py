@@ -117,13 +117,19 @@ def _evidence_report_directive(result: Result) -> bool:
 
 
 def _budget_exhausted_wait(result: Result) -> bool:
-    """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0063 exhaustion rule).
+    """True only for the sole ``budget.exhausted`` blocker of an active run (ADR-0063 exhaustion rule) that has no recovery
+    left for the agent to take.
 
-    The core already refused the only recovery the Block once listed, so blocking the turn again
-    cannot help; mixed reasons and non-active runs keep blocking."""
+    Blocking the turn again cannot help a run whose recovery the core refused (a delegated auto run's raise) or
+    whose recovery is the human's to decide (a deliberative run's). An auto run the core still offers ``budget.raise``
+    (its human approves a raise) is not waiting: the agent proposes it, so the turn goes on. Mixed reasons and
+    non-active runs keep blocking."""
     run = result.run
-    return (run is not None and run.status == "active" and len(result.reasons) == 1
-            and result.reasons[0].code == "budget.exhausted")
+    if not (run is not None and run.status == "active" and len(result.reasons) == 1
+            and result.reasons[0].code == "budget.exhausted"):
+        return False
+    offered = "budget.raise" in (result.reasons[0].get("next_actions") or ())
+    return not (offered and run.governance is not None and run.governance["control_mode"] == "auto")
 
 
 def _turn_end_mode(result: Result) -> str | None:

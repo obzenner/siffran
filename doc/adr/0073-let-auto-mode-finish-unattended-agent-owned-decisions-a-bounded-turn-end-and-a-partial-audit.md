@@ -97,6 +97,23 @@ human: a `web` source always (neither host credits the web to the auditor); a `r
 local file only where the auditor child may not read it (Claude credits `local` and `workspace`, Pi credits `read`). A
 `runtime` record that names a workspace path is checked by the service and counts.
 
+#### D3.1 A budget raise is a further human episode in interactive auto
+
+This amends ADR-0063's "one human approval episode, then unattended". In an interactive auto run, after the first approval, a
+proposal that asks for more than the run approved is a second kind of human episode: the human approves or rejects it in the
+host's approval dialog. Nothing else is asked. A proposal that raises nothing stays automatic. A delegated auto run has nobody
+to ask and still refuses a raise (`governance.auto_ceiling`); a fresh run is its way on.
+
+"Raises" is derived, never stored: `core.governance.raises` compares each proposed ceiling with the approved `state.budgets`,
+and the run view publishes the answer as `governance.raises`. `expected_approval_kind` is `host_ui` for an interactive auto
+run that has not been approved yet or whose proposal raises, so both hosts read one fact. A rejected raise changes nothing and
+`human_wait` is false: the agent continues within the approved ceilings or stops. The stored state holds no new field. The
+validator allows a pending, rejected or human-approved raise in interactive auto only, with at most one approving `host_ui`
+receipt per revision, and any other second human episode stays invalid. The limits are unchanged: 3 dialogs per plan revision,
+8 post-approval material revisions, 128 interactions. `budget.exhausted` offers `budget.raise` in deliberative and interactive
+auto, and `recovery_exclusions` is keyed by the run's mode (`deliberative`, `auto_interactive`, `auto_delegated`). A host does
+not settle the turn on an exhausted budget when the core offers `budget.raise` to an auto run: the agent is the one to propose it.
+
 Two deliberate exceptions, both stated rather than hidden: a refuting web source still discards a claim in auto, with no
 human to confirm or reject it, and a stored 7.0.x human `confirm` or `reject` still counts in every mode.
 

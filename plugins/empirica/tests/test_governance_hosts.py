@@ -729,9 +729,13 @@ class GovernanceHostTests(unittest.TestCase):
         raised = self.dispatch({"type": "ObserveAction", "run_id": auto,
             "action": {"kind": "configure_run", "budgets": {
                 "max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2},
-                "rationale": "attempt to raise again"}})["result"]
-        self.assertEqual(raised["reasons"][0]["code"], "governance.auto_ceiling")
-        self.assertEqual(len(calls), 1)
+                "rationale": "raise the pass allowance back"}})["result"]
+        self.assertTrue(raised["run"]["governance"]["raises"])
+        self.assertTrue(raised["run"]["governance"]["human_wait"])
+        asked = mediator(raised)  # A11d: a raise above the approved ceilings is the human's to approve
+        self.assertEqual(asked["run"]["governance"]["approval_kind"], "host_ui")
+        self.assertEqual(asked["run"]["governance"]["state"], "approved")
+        self.assertEqual(len(calls), 2, "the raise opens the one further dialog")
 
     def test_interactive_auto_without_ui_fails_closed_despite_delegation(self):
         auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto no ui",
@@ -752,21 +756,26 @@ class GovernanceHostTests(unittest.TestCase):
 
     def test_python_and_pi_phase_rules_match_identical_neutral_facts(self):
         cases = [
-            {"control_mode": "deliberative", "first_approval": False,
+            {"control_mode": "deliberative", "first_approval": False, "raises": False,
              "context": {"interactive": True}},
-            {"control_mode": "auto", "first_approval": False,
+            {"control_mode": "auto", "first_approval": False, "raises": False,
              "context": {"interactive": True}},
-            {"control_mode": "auto", "first_approval": True,
+            {"control_mode": "auto", "first_approval": True, "raises": False,
              "context": {"interactive": True}},
-            {"control_mode": "auto", "first_approval": False,
+            {"control_mode": "auto", "first_approval": True, "raises": True,
+             "context": {"interactive": True}},
+            {"control_mode": "auto", "first_approval": True, "raises": True,
              "context": {"interactive": False}},
-            {"control_mode": "auto", "first_approval": False,
+            {"control_mode": "auto", "first_approval": False, "raises": False,
+             "context": {"interactive": False}},
+            {"control_mode": "auto", "first_approval": False, "raises": False,
              "context": {"interactive": None}},
-            {"control_mode": "deliberative", "first_approval": False,
+            {"control_mode": "deliberative", "first_approval": False, "raises": False,
              "context": {"interactive": False}},
         ]
         expected = [expected_approval_kind(case) for case in cases]
         self.assertEqual(expected[-2:], ["auto", "host_ui"])
+        self.assertEqual(expected[2:5], ["auto", "host_ui", "auto"])  # a raise is the interactive human's, once approved
         module = Path(__file__).resolve().parents[1] / "adapters" / "pi" / "src" / "governance-ui.ts"
         script = ("import {expectedApprovalKind as f} from " + json.dumps(module.as_uri()) + ";"
                   "const rows=JSON.parse(process.argv[1]);"

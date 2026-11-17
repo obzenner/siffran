@@ -754,6 +754,9 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Bootstrap obligations, ordered ``next_actions`` (empty for a terminal run or once bootstrap is complete), and readiness flags."""
     facts = _bootstrap_facts(snapshot)
     state, governed = snapshot.state, snapshot.state.governance
+    # the stuck and nobody-to-ask checks read who approves the standing proposal, which for an interactive auto run after its
+    # first approval depends on whether it raises a ceiling: derived here from the two, as the run view derives it
+    governed = {**governed, "raises": governance.raises(governed, state.budgets)}
     active = []
     for predicate, obligation_id, must in snapshot.bootstrap_requirements:
         if ((predicate == "governance.approved" and not facts["graph.selected"])
@@ -1569,7 +1572,8 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
     # (then the agent keeps working until the human tells it to stop again).
     approval = next(o for p, o, _ in snapshot.bootstrap_requirements if p == "governance.approved")
     configuration_waits = governance.human_wait(
-        snapshot.state.governance, governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
+        {**snapshot.state.governance, "raises": governance.raises(snapshot.state.governance, snapshot.state.budgets)},
+        governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
     requirements = []
     for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
         human = ((reason in HUMAN_WAITING_REASONS and not (reason == TERMINAL_STOP_REASON

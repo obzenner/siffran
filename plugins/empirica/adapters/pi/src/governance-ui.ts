@@ -18,6 +18,9 @@ interface Governance {
   proposal: Proposal; prompt_error: string | null;
   /** Whether the configuration waits on its human: the core's answer (`core.governance.human_wait`). */
   human_wait: boolean;
+  /** Whether the standing proposal asks for more than the run approved: the core's answer (`core.governance.raises`).
+   * Optional in the type, so a view that lacks it reads as no raise. */
+  raises?: boolean;
   context: { author: { provider_id: string; model_id: string } | null; ingress: string;
     interactive: boolean | null; delegation: boolean };
 }
@@ -196,8 +199,10 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
 
 export function expectedApprovalKind(governance: Governance): "host_ui" | "auto" {
   if (governance.control_mode === "deliberative") return "host_ui";
+  // After the first approval an interactive auto run's human is asked about a raise only: the core's fact, read from the view
+  // (`governance.raises`, derived from the proposal and the approved ceilings), never derived here. Fail closed: absent is not a raise.
   if (governance.context.interactive === true)
-    return governance.first_approval ? "auto" : "host_ui";
+    return !governance.first_approval || governance.raises === true ? "host_ui" : "auto";
   return "auto";
 }
 
@@ -219,12 +224,16 @@ export function humanApprovalWait(result: Response["result"]): boolean {
     && reasons.length === 1 && CONFIGURATION_REASONS.has(reasons[0].code);
 }
 
-/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule); mirrors
- * Python `completion._budget_exhausted_wait`. The core already refused the only recovery the Block
- * once listed, so denying the report again cannot help. */
+/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule) that has no recovery left
+ * for the agent to take; mirrors Python `completion._budget_exhausted_wait`. Denying the report again cannot help a run whose
+ * recovery the core refused (a delegated auto run's raise) or leaves to the human (a deliberative run's). An auto run the
+ * core still offers `budget.raise` (its human approves a raise) is not waiting: the agent proposes it. */
 export function budgetExhaustedWait(result: Response["result"]): boolean {
-  return result.type === "Block" && "run" in result && !!result.run && result.run.status === "active"
-    && result.reasons.length === 1 && result.reasons[0].code === "budget.exhausted";
+  if (!(result.type === "Block" && "run" in result && !!result.run && result.run.status === "active"
+    && result.reasons.length === 1 && result.reasons[0].code === "budget.exhausted")) return false;
+  const offered = (result.reasons[0].next_actions as string[] | undefined)?.includes("budget.raise") === true;
+  const governance = result.run.governance as { control_mode?: unknown } | null | undefined;
+  return !(offered && governance?.control_mode === "auto");
 }
 
 export const HUMAN_WAIT_NOTICE = PUBLIC_TOOLS.settlement_notices.human_wait;

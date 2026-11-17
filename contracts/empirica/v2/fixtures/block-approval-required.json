@@ -78,7 +78,8 @@
           "first_approval": false,
           "pre_approval_revisions": 0,
           "post_approval_revisions": 0,
-          "human_wait": true
+          "human_wait": true,
+          "raises": false
         },
         "contract": {
           "id": "empirica/public",

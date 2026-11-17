@@ -810,7 +810,8 @@
           "additionalProperties": false,
           "required": [
             "deliberative",
-            "auto"
+            "auto_interactive",
+            "auto_delegated"
           ],
           "properties": {
             "deliberative": {
@@ -820,7 +821,14 @@
               },
               "maxItems": 0
             },
-            "auto": {
+            "auto_interactive": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 0
+            },
+            "auto_delegated": {
               "type": "array",
               "prefixItems": [
                 {

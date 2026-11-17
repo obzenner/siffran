@@ -179,6 +179,11 @@ that a human would have to confirm") until the agent cites a workspace file, run
 written by an earlier 7.0.x: an active auto run that was waiting on a confirmation now waits on the agent's research, and a dialog
 left open across the upgrade can no longer land its answer.
 
+An interactive auto run may ask its person one more thing after the first approval: a budget raise. A proposal that raises a
+ceiling above the approved one waits for the person's approval in the host dialog; `governance.raises` says so. A proposal that
+raises nothing stays automatic, and a delegated auto run still refuses a raise and starts a fresh run instead. Stored runs need no
+migration: "raises" is derived from the proposal and the approved ceilings when the run is read.
+
 A human answer already recorded still decides its claim in every mode. Deliberative runs read as before. To confirm evidence
 yourself, start the run in deliberative mode.
 

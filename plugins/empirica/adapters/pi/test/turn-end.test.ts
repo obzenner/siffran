@@ -186,6 +186,22 @@ test("EHB-STOP-36: a settlement appends its notice and requests no continuation"
   assert.equal((budget?.entries?.[0] as { content: string }).content, fill(NOTICES.budget_exhausted, { resource: "pass" }));
 });
 
+test("A11d: an exhausted budget the core offers to raise continues interactive auto and settles deliberative", async () => {
+  // The core lists budget.raise only where a raise can be proposed: its human approves it (interactive auto), or the
+  // deliberative human decides. The turn goes on only where the agent is the one to propose it.
+  const offered = (mode: Mode) => {
+    const view = block(mode, "budget") as unknown as { reasons: Array<Record<string, unknown>> };
+    view.reasons[0].next_actions = ["budget.raise", "residual.accept"];
+    return view as never;
+  };
+  const continued = await (await wired(() => offered("auto-interactive-post"))).settle();
+  assert.equal(continued?.continue, true);
+  assert.equal((continued?.entries?.[0] as { content: string }).content, "pass budget exhausted.");
+  const settled = await (await wired(() => offered("deliberative"))).settle();
+  assert.equal(settled?.continue, undefined);
+  assert.equal((settled?.entries?.[0] as { content: string }).content, fill(NOTICES.budget_exhausted, { resource: "pass" }));
+});
+
 test("EHB-STOP-29: a converged run and no run append nothing", async () => {
   assert.equal(await (await wired(() => CONVERGED)).settle(), undefined);
   const none = new FakePi();
