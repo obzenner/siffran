@@ -58,7 +58,7 @@ def pi_interval(profile: dict) -> str:
 
 PI_PROFILE = pi_profile(json.loads(HOST_PROFILES.read_text(encoding="utf-8")))
 REQUIRED_SKILL_DISCLOSURES = (
-    ">=2.1.278,<2.2.0", pi_interval(PI_PROFILE), "external `pi-subagents`", SUPPORT_RANGE_DISCLOSURE,
+    ">=2.1.278,<2.2.0", pi_interval(PI_PROFILE), "external pi-subagents",
     "empirica_observe", "empirica_read", "report_convergence",
 )
 
@@ -143,7 +143,7 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
 # SKILL_MAX_CHARS may exceed the file by at most SKILL_MAX_HEADROOM, so shrinking the skill forces the ceiling down.
 # The rule across revisions: the constants test's upper bound is the CURRENT ceiling, and every PR that lowers
 # SKILL_MAX_CHARS lowers that bound in the same edit, so a later raise needs a visible test edit.
-SKILL_MAX_CHARS = 20_000
+SKILL_MAX_CHARS = 17_600
 SKILL_MAX_HEADROOM = 1_000
 # SKILL_TOP_CHARS is the early-anchor cut. 5,000 x 2.966 = 14,830; 13,300 is about 90% of that, because the ratio is a
 # whole-file average (a prefix dense in code or identifiers fits fewer characters) and the counter Claude Code uses for
@@ -169,6 +169,30 @@ REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
     "call it once with `intent: \"stop\"`",
     "**faulted** — state, artifacts, transport, or protocol failed closed.",
 )
+
+
+# The skill body names no host version, range, or `pi-subagents` range: the host profiles
+# (contracts/empirica/v2/host-profiles.json), the start refusals (`host.*`, `host.subagents_*`) and doc/hosts.md own them,
+# so a copy in the skill only drifts. Three shapes: a dotted version of three or more numbers (`2.1.296`), a comparator
+# before a version (`>=1.0`, `<2.0.0`), and a version right after `pi-subagents` (`@0.50.0`, ` 0.74`, ` (0.74, 1.0)`).
+# The frontmatter's `compatibility` field is install metadata, outside this guard.
+_HOST_LITERALS = (
+    re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?![\w.])"),
+    re.compile(r"(?:[<>]=?|~=|\^)\s*v?\d+(?:\.\d+)*"),
+    re.compile(r"pi-subagents[^\n]{0,40}?(?:@\s*v?\d|\bv?\d+\.\d+)"),
+)
+
+
+def skill_host_literal_problems(skill_text: str) -> list[str]:
+    """One problem when the rendered body carries a host version literal or range (see ``_HOST_LITERALS``)."""
+    body = rendered_body(skill_text)
+    found = []
+    for pattern in _HOST_LITERALS:
+        found += [" ".join(match.group(0).split()) for match in pattern.finditer(body)]
+    if not found:
+        return []
+    return [f"SKILL.md body names a host version or range ({', '.join(sorted(set(found))[:5])}); host compatibility "
+            "belongs to the host profiles and the start refusals, never to the skill"]
 
 
 def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[str]:
@@ -230,8 +254,6 @@ PRE_INVESTIGATION_REFERENCES = ("claim-graph.md", "governance.md", "budget-freez
 REFERENCE_LATER_HEADER = ("The rules needed before investigation are in the skill; "
                           "this reference adds the detail for later.")
 _LINK = re.compile(r"\]\((?:\./)?references/([A-Za-z0-9._-]+\.md)(?:#([^)]*))?\)")
-# The one way a reference link may stand in section 6: its own sentence says the read is optional.
-OPTIONAL_READ_MARK = "not a prerequisite read"
 _BEFORE_ROUTE_HEADER = re.compile(r"\b[Rr]ead\b[^.]*\bbefore\b[^.]*\b(?:seeding|routing|the route)\b")
 
 
@@ -242,8 +264,8 @@ def _slugs(text: str) -> set[str]:
 
 def skill_link_problems(skill_text: str, references: Path) -> list[str]:
     """Every reference link in the skill resolves (file, and heading when an anchor is named; a leading ``./`` is the same
-    link), and the route section (6) carries none unless its own sentence marks the read optional: the agent cannot read
-    any file until the `investigate` witness, so any other link there is an instruction it cannot follow."""
+    link), and the route section (6) carries no reference link at all: the agent cannot read any file until the
+    `investigate` witness, so a link there is an instruction it cannot follow."""
     problems = []
     for match in _LINK.finditer(skill_text):
         name, anchor = match.groups()
@@ -255,15 +277,9 @@ def skill_link_problems(skill_text: str, references: Path) -> list[str]:
     start = skill_text.find("\n## 6. ")
     end = skill_text.find("\n## 7. ", start + 1)
     if start != -1 and end != -1:
-        section = skill_text[start:end]
-        stops = [m.end() for m in re.finditer(r"[.!?](?=\s|$)|\n\s*\n", section)] + [len(section)]
-        for link in _LINK.finditer(section):
-            after = next(stop for stop in stops if stop > link.start())
-            before = max((stop for stop in stops if stop <= link.start()), default=0)
-            if OPTIONAL_READ_MARK not in " ".join(section[before:after].split()):
-                problems.append(f"SKILL.md section 6 links to references/{link.group(1)} before investigation is admitted "
-                                f"without marking it optional (\"{OPTIONAL_READ_MARK}\"); inline the judgment instead "
-                                "(every read is denied until the `investigate` witness)")
+        for link in _LINK.finditer(skill_text[start:end]):
+            problems.append(f"SKILL.md section 6 links to references/{link.group(1)} before investigation is admitted; "
+                            "inline the judgment instead (every read is denied until the `investigate` witness)")
     return problems
 
 
@@ -358,7 +374,8 @@ def main() -> int:
         fail("SKILL.md exceeds the 300-line progressive-disclosure budget")
     if len(skill_text.split()) > 3500:
         fail("SKILL.md exceeds the conservative 3,500-word context budget")
-    for problem in [*skill_size_problems(skill_text), *skill_anchor_problems(skill_text)]:
+    for problem in [*skill_size_problems(skill_text), *skill_anchor_problems(skill_text),
+                    *skill_host_literal_problems(skill_text)]:
         fail(problem)
     references = SKILL.parent / "references"
     for name in REQUIRED_SKILL_REFERENCES:

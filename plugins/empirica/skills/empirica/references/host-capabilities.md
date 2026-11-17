@@ -6,7 +6,8 @@ and the live adapter surface—not generic host documentation or exact equality 
 qualification build. The registry owns compatibility numbers; exact observed versions are recorded
 in the run.
 
-The inline bootstrap matrix in [the skill](../SKILL.md) defines the required surfaces. Dated-snapshot
+The registered host profile defines the required surfaces, and each refusal reason names the one that is
+missing. Dated-snapshot
 simulated tests do not establish installed support. Hosted WebSearch may be invisible to
 `PreToolUse`; that sensor gap never proves research ordering.
 

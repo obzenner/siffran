@@ -142,9 +142,7 @@ Do this before reading files, searching, browsing, or running commands.
    tool input schema, never from contract reads or guesses.
 5. Read `empirica_read(operation="GetRun")`, then size the run from the supplied task and selected graph. Count the gating claims, identify how many need experiments, and allow for expected audit rounds (normally 2: an initial audit and one retry). Propose all three ceilings explicitly with `configure_run`; the author agent chooses these ceilings, never the adapter or core. Include a rationale explaining that sizing. The rationale is explanation only—not a command, authority claim, evidence, or approvable conclusion. This requests approval of run configuration only: budget ceilings and control mode. Preserve the human's edited values rather than resending stale fields, and note explicit `--auto` has one up-front human approval episode and then stays within approved ceilings. Delegated auto has no dialog and stays within the fixed 8/1/2 envelope. Investigation children draw on `max_spawns` and the auditor on `max_audit_spawns`; neither borrows
    from the other, so size each for its own work. A pass is charged only when the derivation changes.
-   Timeout is dismissal, not rejection. Do not loop on refusal or exhaustion. The optional
-   [governance reference](references/governance.md) documents host-owned recovery details; it is
-   not a prerequisite read.
+   Timeout is dismissal, not rejection. Do not loop on refusal or exhaustion.
 6. Wait until the text view's governance summary says `approved` for the exact displayed
    configuration; do not expect or parse a `run.governance.state` JSON field.
    Configuration amendments need a second review; human numeric edits are not corruption.
@@ -176,7 +174,8 @@ Submit the graph through the active author-action surface. Once investigation is
 
 Graph changes do not revoke configuration approval. They do change the argument binding and
 invalidate prior audit coverage, so obtain a fresh bound audit after any graph change. Configuration
-changes require a fresh host decision through `configure_run`. Freeze is not a substitute for either
+changes require a fresh host decision through `configure_run`
+([references/governance.md](references/governance.md) has the host-owned recovery details). Freeze is not a substitute for either
 configuration authority or current audit coverage.
 
 After the graph is recorded, use the returned open obligations and rendered next actions as the
@@ -196,8 +195,7 @@ Apply the folds in order:
    is retrieved by the auditor where its host is observed to, otherwise confirmed by a human; a `runtime`
    observation must say why no spike can establish it (`spike_unavailable`) and is always confirmed by a
    human. What still needs a confirmation, who asks, when, and how often is owned by
-   [references/evidence.md](references/evidence.md) ("What still needs confirming"); a `needs-decision`
-   claim is human-owned and needs no research. A summary of what a source says is not a citation.
+   [references/evidence.md](references/evidence.md) ("What still needs confirming"). A summary of what a source says is not a citation.
 2. **Spike second only for `needs-experiment`.** After supporting research, first read the RunView's
    immutable `spike_backend`. If it is `spikes_unavailable`, do not submit an unchanged request:
    continue non-spike research or refine the graph, or stop with an honest residual. If it is
@@ -241,47 +239,4 @@ Apply the folds in order:
 
 ## 9. Preflight the host
 
-Identify the exact active host surface from the tools and lifecycle already present in context.
-Use this inline bootstrap matrix:
-
-- **Claude Code capability profile (qualified on `2.1.296`, compatible
-  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and
-  public MCP tools are active and trusted; record route first. Canonical audits
-  are host-owned async children; a current pending audit settles the parent turn
-  until Claude's native completion notification resumes it.
-- **Pi capability profile (qualified on `1.1.0`, compatible
-  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`
-  injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,
-  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact
-  version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed
-  (`>=0.74.0,<1.0.0`; the range and the reviewed versions are listed in `doc/hosts.md`); one inside it with no compat record is admitted
-  and shown as not reviewed. Any other state is a `host.subagents_*`
-  refusal.
-- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a
-  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is
-  refused with the reason on stderr and exit code 1.
-- **Codex:** Empirica is not available on Codex.
-- **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending
-  qualification rather than borrowing another profile's capabilities. After admission, consult
-[references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.
-
-A runnable convergence workflow requires all of these capabilities:
-
-1. read the complete public run view, including obligations;
-2. submit author actions for route, graph, research, spike request, and freeze;
-3. obtain the current audit argument through the host-bound workflow;
-4. launch and observe a bound independent auditor;
-5. submit the observed verdict through private host ingress;
-6. request the guarded convergence decision;
-7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).
-
-The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does
-not disable graph refinement, research, honest residual stopping, reads, or audit of claims that need
-no experiment. Do not submit an unchanged spike request in that state and never fabricate or replace
-spike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or
-`docker-networked-v1` value means this run is bound to the two published digests; it is not a
-claim that Docker is currently healthy.
-
-If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before
-investigation and report the exact unsupported capability. Do not imitate the missing operation
-in prose or write runtime artifacts by hand.
+Stop before investigation and report the exact unsupported capability when a needed operation is absent, or when the host is unknown or outside its qualified range; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.

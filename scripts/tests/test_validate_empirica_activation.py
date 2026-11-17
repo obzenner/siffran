@@ -28,7 +28,7 @@ class SkillRuntimeTests(unittest.TestCase):
                 self.assertIn(term, problems[0])
 
     def test_dropping_the_external_runtime_disclosure_is_rejected(self):
-        text = DISCLOSURES.replace("external `pi-subagents`", "")
+        text = DISCLOSURES.replace("external pi-subagents", "")
         self.assertEqual(len(activation.skill_runtime_problems(text)), 1)
 
 
@@ -113,7 +113,7 @@ class SkillSizeTests(unittest.TestCase):
     def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
         # The bound is the CURRENT ceiling: a PR that lowers SKILL_MAX_CHARS lowers this number in the same edit, so a later
         # raise needs a visible edit here. The cut is a rendered-window size, independent of the file size.
-        self.assertLessEqual(activation.SKILL_MAX_CHARS, 20_000)
+        self.assertLessEqual(activation.SKILL_MAX_CHARS, 17_600)
         self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
         self.assertTrue(5 <= len(activation.REQUIRED_EARLY_ANCHORS) <= 12, "the early anchors are chosen")
         limit = activation.SKILL_MAX_CHARS
@@ -200,10 +200,21 @@ class SkillOrderTests(unittest.TestCase):
                  '   - absent or stale evidence leaves the claim open;\n   - `needs-decision` is answered by the human at the end of the pass (approve or reject); until\n     then it is a human residual.'),
                 ('except a `needs-decision` claim**. Record',
                  "except a `needs-decision` claim** (human-owned: it needs the human's answer, not research). Record"),
+                ("Stop before investigation and report the exact unsupported capability when a needed operation is absent, or when the host is unknown or outside its qualified range; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure.",
+                 'If any capability is absent — including a Pi surface without one verifiable external `pi-subagents` owner, or any host missing one of the three public tools — stop before\ninvestigation and report the exact unsupported capability. Do not imitate the missing operation\nin prose or write runtime artifacts by hand.'),
+                ('Do not loop on refusal or exhaustion.\n6. Wait',
+                 'Do not loop on refusal or exhaustion. The optional\n   [governance reference](references/governance.md) documents host-owned recovery details; it is\n   not a prerequisite read.\n6. Wait'),
+                ('("What still needs confirming"). A summary',
+                 '("What still needs confirming"); a `needs-decision`\n   claim is human-owned and needs no research. A summary'),
+                ('through `configure_run`\n([references/governance.md](references/governance.md) has the host-owned recovery details). Freeze',
+                 'through `configure_run`. Freeze'),
                 )
     INLINED = ("- One gating claim per material unknown or invariant; scope you want to defer goes in non-gating claims below the root.\n- `needs-experiment` only when a deterministic spike plan can falsify the claim.\n- `needs-decision` only for an irreducible human choice: the human answers it when you report, it needs no research,\n  and where nobody can be asked it stays open and the run can only stop as a residual.\n- Every other claim is `ordinary`.\n- Rewording a claim stales its evidence and audit coverage, so keep claims stable once evidence binds; state no verdict or confidence in a claim's text.",)
+    HOST_SENTENCE = "Stop before investigation and report the exact unsupported capability when a needed operation is absent, or when the host is unknown or outside its qualified range; never borrow another host's capabilities, imitate a missing operation in prose, or write runtime artifacts by hand. After admission, [references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure."
     INLINED_SECTION_1 = ("Do delegated work through Empirica's children: work by an external agent CLI is neither budgeted nor attributed to a producer.",)
-    REMOVED = ('External actor CLIs are not metered or attributed (ADR 0061).',)
+    REMOVED = ('External actor CLIs are not metered or attributed (ADR 0061).',
+               # S8: the host matrix, deleted; host compatibility comes from the host profiles and the start refusals
+               *('Identify the exact active host surface from the tools and lifecycle already present in context.\nUse this inline bootstrap matrix:', "- **Claude Code capability profile (qualified on `2.1.296`, compatible\n  `>=2.1.278,<2.2.0`, documented and not checked: hook payloads carry no version):** continue when the Empirica hooks and\n  public MCP tools are active and trusted; record route first. Canonical audits\n  are host-owned async children; a current pending audit settles the parent turn\n  until Claude's native completion notification resumes it.\n- **Pi capability profile (qualified on `1.1.0`, compatible\n  `>=1.0.0,<2.0.0`, with external `pi-subagents` installed by the user):** continue when `/empirica`\n  injected an opaque handle, `empirica_observe`, `empirica_read`, and `report_convergence` are present,\n  and `/empirica` accepted the host (a Pi outside its range is refused at start) and exactly one active `subagent` owner (its canonical package root, exact\n  version, and that package's own launch preflight). A `pi-subagents` version outside the supported range fails closed\n  (`>=0.74.0,<1.0.0`; the range and the reviewed versions are listed in `doc/hosts.md`); one inside it with no compat record is admitted\n  and shown as not reviewed. Any other state is a `host.subagents_*`\n  refusal.\n- **Non-interactive Pi or Claude (print, JSON, SDK):** no human can approve a configuration or confirm evidence, so a\n  deliberative run is refused. Auto runs only with the operator's `EMPIRICA_AUTO_DELEGATION=1`; without it the start is\n  refused with the reason on stderr and exit code 1.\n- **Codex:** Empirica is not available on Codex.\n- **Unknown, partial, or outside a qualified compatibility range:** stop as unsupported pending\n  qualification rather than borrowing another profile's capabilities. After admission, consult\n[references/host-capabilities.md](references/host-capabilities.md) only to diagnose a capability failure.", 'A runnable convergence workflow requires all of these capabilities:', '1. read the complete public run view, including obligations;\n2. submit author actions for route, graph, research, spike request, and freeze;\n3. obtain the current audit argument through the host-bound workflow;\n4. launch and observe a bound independent auditor;\n5. submit the observed verdict through private host ingress;\n6. request the guarded convergence decision;\n7. obtain exact run-configuration approval through supported host UI (or explicit bounded auto).', "The public RunView separately reports this run's immutable `spike_backend`. `spikes_unavailable` does\nnot disable graph refinement, research, honest residual stopping, reads, or audit of claims that need\nno experiment. Do not submit an unchanged spike request in that state and never fabricate or replace\nspike evidence with ambient host execution. A `qualified` `docker-isolated-v1` or\n`docker-networked-v1` value means this run is bound to the two published digests; it is not a\nclaim that Docker is currently healthy."))
     # The facts a first read and a compacted run must keep in the first screenful, pinned by exact string. A later change
     # may add anchors or reword one only by editing this list, visibly.
     REQUIRED = ("Claude launches `empirica:empirica-auditor`, Pi calls the",
@@ -283,6 +294,32 @@ class SkillOrderTests(unittest.TestCase):
         self.assertEqual(text.count("human residual"), 0)
         self.assertEqual(text.count("the human answers it when you report"), 1)
 
+    def test_section_9_keeps_only_the_judgment_nothing_enforces(self):
+        text = self.skill()
+        section = text[text.index("\n## 9. "):]
+        self.assertEqual(text.count(self.HOST_SENTENCE), 1)
+        self.assertEqual(section.split("\n\n", 1)[1].strip(), self.HOST_SENTENCE, "section 9 is that one paragraph")
+        self.assertLess(len(section.strip()), 600)
+        # each judgment clause pinned by its exact words
+        for clause in ("Stop before investigation and report the exact unsupported capability when a needed operation is absent",
+                       "or when the host is unknown or outside its qualified range",
+                       "never borrow another host's capabilities, imitate a missing operation in prose, "
+                       "or write runtime artifacts by hand",
+                       "[references/host-capabilities.md](references/host-capabilities.md) helps diagnose a capability failure"):
+            self.assertIn(clause, self.HOST_SENTENCE)
+        for gone in ("capability profile", "qualified on", "inline bootstrap matrix", "not available on Codex",
+                     "EMPIRICA_AUTO_DELEGATION", "A runnable convergence workflow", "`spikes_unavailable` does"):
+            self.assertNotIn(gone, text)
+
+    def test_the_third_needs_decision_restatement_and_the_optional_link_sentence_are_gone(self):
+        text = self.skill()
+        self.assertNotIn("is human-owned and needs no research", text)
+        self.assertEqual(text.count("needs no research"), 1, "section 7 carries the rule")
+        self.assertNotIn("not a prerequisite read", text)
+        self.assertNotIn("The optional", text)
+        self.assertEqual(text.count("](references/governance.md)"), 1)
+        self.assertGreater(text.index("](references/governance.md)"), text.index("\n## 7. "), "linked after section 6")
+
     def test_the_terminal_call_is_not_called_the_only_call(self):
         text = self.skill()
         self.assertNotIn("exactly once", text)
@@ -321,6 +358,37 @@ class SkillOrderTests(unittest.TestCase):
                 self.assertLessEqual(body.index(anchor) + len(anchor), invocation, "no anchor needs the goal allowance")
 
 
+class HostLiteralTests(unittest.TestCase):
+    """The skill body names no host version or range: the host profiles and the start refusals own them."""
+
+    def committed(self):
+        return (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
+
+    def problems(self, body):
+        return activation.skill_host_literal_problems("---\nname: x\n---\n" + body)
+
+    def test_the_committed_skill_names_no_host_version(self):
+        self.assertEqual(activation.skill_host_literal_problems(self.committed()), [])
+
+    def test_a_version_literal_or_range_is_rejected(self):
+        for literal in ("qualified on `2.1.296`", "compatible `>=1.0.0,<2.0.0`", "the range `<2.0.0`", "needs >=2.1",
+                        "pi-subagents >=0.74.0,<1.0.0", "pi-subagents@0.50.0", "pi-subagents 0.50.0", "`pi-subagents` v0.74",
+                        "a pi-subagents version in (0.74, 1.0)"):
+            with self.subTest(literal=literal):
+                self.assertEqual(len(self.problems(f"Text. {literal}. More.")), 1, literal)
+
+    def test_other_numbers_and_the_runtime_name_are_accepted(self):
+        for text in ("`docker-isolated-v1` and the fixed 8/1/2 envelope", "normally 2: an initial audit and one retry",
+                     "a 1\u2013600 character rationale", "`empirica.spike-plan-draft/2`", "section 7", "up to 4,096 characters",
+                     "an external `pi-subagents` owner", "Pi outside its range is refused", "1. read the view;\n2. submit"):
+            with self.subTest(text=text):
+                self.assertEqual(self.problems(text), [])
+
+    def test_the_frontmatter_is_outside_the_guard(self):
+        text = "---\ncompatibility: Claude Code >=2.1.278,<2.2.0\n---\nBody."
+        self.assertEqual(activation.skill_host_literal_problems(text), [])
+
+
 class ReferenceLinkTests(unittest.TestCase):
     """The skill's reference links resolve, and no reference is presented as a read before the route."""
 
@@ -343,23 +411,25 @@ class ReferenceLinkTests(unittest.TestCase):
         return self.skill().replace("## 6. Invocation, and route before investigating\n",
                                     "## 6. Invocation, and route before investigating\n\n" + sentence + "\n")
 
-    def test_any_reference_link_in_the_route_section_is_named_unless_marked_optional(self):
+    def test_no_reference_link_stands_in_the_route_section(self):
         for sentence in ("Read [the graph rules](references/claim-graph.md) first.",
                          "See [the graph rules](references/claim-graph.md) first.",
                          "Consult [the graph rules](references/claim-graph.md) before routing.",
                          "First open [the governance reference](references/governance.md).",
-                         "Do not read [the graph rules](references/claim-graph.md) yet."):
+                         "Do not read [the graph rules](references/claim-graph.md) yet.",
+                         "The detail is in [the graph rules](./references/claim-graph.md); it is not a prerequisite read."):
             with self.subTest(sentence=sentence):
                 problems = activation.skill_link_problems(self.route_section_with(sentence), self.REFERENCES)
                 self.assertEqual(len(problems), 1, problems)
                 self.assertIn("before investigation is admitted", problems[0])
 
-    def test_a_link_marked_not_a_prerequisite_read_is_accepted_in_the_route_section(self):
-        marked = "The detail is in [the graph rules](references/claim-graph.md); it is not a prerequisite read."
-        self.assertEqual(activation.skill_link_problems(self.route_section_with(marked), self.REFERENCES), [])
-        # the mark belongs to its own sentence: a marked neighbour does not excuse an unmarked link
-        mixed = "See [the graph rules](references/claim-graph.md) first. Nothing here is a prerequisite read."
-        self.assertEqual(len(activation.skill_link_problems(self.route_section_with(mixed), self.REFERENCES)), 1)
+    def test_the_references_are_linked_after_the_route_section(self):
+        text = self.skill()
+        start, end = text.index("\n## 6. "), text.index("\n## 7. ")
+        self.assertNotIn("](references/", text[start:end])
+        self.assertNotIn("](./references/", text[start:end])
+        for name in activation.REQUIRED_SKILL_REFERENCES:
+            self.assertIn(f"references/{name}", text, name)
 
     def test_a_punctuated_anchor_is_validated_against_the_headings(self):
         """The whole fragment is read, so punctuation in an anchor cannot hide a mistyped link (a heading's slug has none)."""
