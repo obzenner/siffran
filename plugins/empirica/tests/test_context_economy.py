@@ -785,6 +785,14 @@ class DismissalRecoveryTests(_ServiceHarness):
         self.assertEqual(closed_code({"run": {"governance": governed}}), "governance.approval_unavailable")
         governed["context"]["approval_capability"] = "human_configuration"
         self.assertEqual(closed_code({"run": {"governance": governed}}), "governance.configuration_shown")
+        # onto-S F2: no human can approve a pending raise while a non-raising proposal is admitted (the view says propose):
+        # the way on is "propose within the approved ceilings, or stop"; the view naming the stop alone wins
+        way_on = {"prompt_error": None, "human_wait": False, "raises": True, "next_action": "governance.propose",
+                  "interactions_remaining": {"proposal": 3, "total": 100}, "context": {"approval_capability": "unavailable"}}
+        self.assertEqual(closed_code({"run": {"governance": way_on}}), "governance.raise_unavailable")
+        self.assertEqual(closed_code({"run": {"governance": {**way_on, "next_action": "residual.accept"}}}),
+                         "governance.approval_unavailable")
+        self.assertEqual(closed_code({"run": {"governance": {**way_on, "raises": False}}}), "governance.approval_unavailable")
 
     def test_a_document_that_cannot_be_bound_lets_the_chooser_decide_and_agrees_with_next(self):
         from adapters.governance import HostGovernance
@@ -801,6 +809,8 @@ class DismissalRecoveryTests(_ServiceHarness):
         self.assertEqual(reasons["governance.configuration_shown"]["next_actions"], ["governance.propose", "residual.accept"])
         self.assertIn("three times", reasons["governance.configuration_shown"]["message"])
         # the core's own sites name the run's total allowance: nothing can be shown, so only the stop
+        self.assertEqual(reasons["governance.raise_unavailable"]["next_actions"], ["governance.propose", "residual.accept"])
+        self.assertIn("within the approved ceilings", reasons["governance.raise_unavailable"]["message"])
         self.assertEqual(reasons["governance.interaction_limit"]["next_actions"], ["residual.accept"])
         self.assertNotIn("three times", reasons["governance.interaction_limit"]["message"])
 

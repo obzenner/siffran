@@ -995,6 +995,21 @@
           ],
           "properties": {
             "code": {
+              "const": "governance.raise_unavailable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "governance.configuration_shown"
             },
             "parameters": {

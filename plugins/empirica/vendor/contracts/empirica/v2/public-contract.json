@@ -2014,6 +2014,22 @@
       "message": "The human interactions for this run are spent, so no dialog can be shown; stop honestly or start a fresh run.",
       "disposition": "host_recovery"
     },
+    "governance.raise_unavailable": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "Nobody can be asked to approve a raise now, so it cannot proceed; propose again within the approved ceilings, which needs no approval, or stop.",
+      "disposition": "host_recovery"
+    },
     "governance.configuration_shown": {
       "params": {
         "type": "object",

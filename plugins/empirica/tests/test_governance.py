@@ -2689,6 +2689,72 @@ class GovernanceServiceTests(unittest.TestCase):
         refused = self._propose(passes + 1, "one raise too many")
         self.assertEqual(refused["reasons"][0]["code"], "governance.revision_exhausted")
 
+    # --- onto-S review F2: a pending raise whose human cannot be asked, or has no presentation or revision left ---
+
+    def _raise_pending(self, approved_raises=0):
+        """Interactive auto after its first approval, ``approved_raises`` further raises approved, then one more raise
+        proposed and waiting (it is a post-approval revision too: with ``MAX_REVISIONS - 1`` approved it is the last)."""
+        self._interactive_approved()
+        passes = 8
+        for number in range(approved_raises):
+            passes += 1
+            self.assertEqual(self._propose(passes, f"raise {passes}")["type"], "Allow")
+            self.assertEqual(self.admit(self.decision(f"raise-{passes}"))["type"], "Allow")
+        self.assertEqual(self._propose(passes + 1, "the raise that waits")["type"], "Allow")
+        governed = self.view()["governance"]
+        self.assertEqual((governed["state"], governed["raises"]), ("revision_pending", True))
+
+    def _no_ingress(self):
+        reported = self.service.trusted_governance_context(
+            run_id=self.run_id, payload={"author": AUTHOR, "ingress": "unavailable"})
+        self.assertEqual(reported["result"]["type"], "Allow", reported)
+
+    def _next(self):
+        return self.view()["next_actions"], self.view()["governance"]["next_action"]
+
+    def test_F2_a_pending_raise_with_nothing_left_to_show_or_change_names_the_stop_alone(self):
+        """Presentations and revisions both spent while a raise waits: no dialog opens and no change is admitted, so only
+        the stop remains (``configuration_stuck``, reading the raise). Before the third showing a dialog can still open."""
+        self._raise_pending(governance.MAX_REVISIONS - 1)
+        governed = self.view()["governance"]
+        self.assertEqual(governed["post_approval_revisions"], governance.MAX_REVISIONS)
+        self.assertEqual(self._next(), (["governance.propose"], "governance.propose"))
+        for number in range(governance.PROPOSAL_INTERACTIONS):
+            self.assertEqual(self.admit(self.decision(f"shown-{number}", "present", reserve=False))["type"], "Allow", number)
+        self.assertEqual(self.view()["governance"]["interactions_remaining"]["proposal"], 0)
+        self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
+
+    def test_F2_a_pending_raise_with_one_revision_left_still_offers_the_change_after_three_showings(self):
+        self._raise_pending(governance.MAX_REVISIONS - 2)
+        for number in range(governance.PROPOSAL_INTERACTIONS):
+            self.assertEqual(self.admit(self.decision(f"shown-{number}", "present", reserve=False))["type"], "Allow", number)
+        actions, next_action = self._next()
+        self.assertIn("governance.propose", actions)
+        self.assertEqual(next_action, "governance.propose")
+
+    def test_F2_a_pending_raise_with_nobody_to_ask_offers_a_revision_within_the_ceilings_and_the_stop(self):
+        """No human ingress, revisions left: a non-raising revision is automatic after the first approval and needs nobody, so
+        the way on is that proposal or the stop (the stop alone was too narrow); with no revision left it is the stop."""
+        self._raise_pending(0)
+        self._no_ingress()
+        self.assertEqual(self._next(), (["governance.propose", "residual.accept"], "governance.propose"))
+        # the offered way works: a proposal within the approved ceilings is admitted with nobody asked
+        self.assertEqual(self._propose(6, "within the approved ceilings")["type"], "Allow")
+        governed = self.view()["governance"]
+        self.assertEqual((governed["raises"], governed["human_wait"]), (False, False))
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        self.assertEqual(self.view()["governance"]["budgets"]["max_passes"], 6)
+
+    def test_F2_a_pending_raise_with_nobody_to_ask_and_no_revision_left_names_the_stop_alone(self):
+        self._raise_pending(governance.MAX_REVISIONS - 1)
+        self._no_ingress()
+        self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
+
+    def test_F2_before_the_first_approval_nobody_to_ask_is_still_the_stop_alone(self):
+        self._prepare_auto(self.INTERACTIVE)
+        self._no_ingress()
+        self.assertEqual(self._next(), (["residual.accept"], "residual.accept"))
+
     def test_A11d_a_delegated_raise_is_still_refused(self):
         self._prepare_auto(DELEGATED_INVOCATION)
         self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")

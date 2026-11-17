@@ -295,6 +295,18 @@ test("a closed dialog, a spent configuration, a spent run and no UI each choose 
     ["governance.approval_unavailable", ["residual.accept"]]);
   assert.deepEqual(await codes(h => shownOut(h, "governance.propose"), []),
     ["governance.configuration_shown", again]);
+  // Onto-S F2: nobody can approve a pending raise, while a proposal within the approved ceilings is admitted (the view's
+  // next action is propose): the way on is that proposal or the stop; the view naming the stop alone wins.
+  const noRaiseIngress = (h: ReturnType<typeof harness>, next: string, raises = true) => {
+    h.g.human_wait = false; h.ctx.hasUI = false; h.g.context.approval_capability = "unavailable";
+    (h.g as Record<string, unknown>).raises = raises; (h.g as Record<string, unknown>).next_action = next;
+  };
+  assert.deepEqual(await codes(h => noRaiseIngress(h, "governance.propose"), []),
+    ["governance.raise_unavailable", again]);
+  assert.deepEqual(await codes(h => noRaiseIngress(h, "residual.accept"), []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => noRaiseIngress(h, "governance.propose", false), []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
   // N1: three showings, then resumed where nothing can be shown: the core's refresh reports an unavailable
   // capability, and nobody to ask outranks the spent configuration (the same order as Claude's closed_code).
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";

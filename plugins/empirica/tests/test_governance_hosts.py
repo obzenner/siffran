@@ -737,6 +737,36 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(asked["run"]["governance"]["state"], "approved")
         self.assertEqual(len(calls), 2, "the raise opens the one further dialog")
 
+    def test_F2_a_raise_nobody_can_approve_names_the_proposal_within_the_ceilings_and_the_stop(self):
+        """Onto-S F2: after the first approval a pending raise needs a human; with none to ask and a revision left, the reason
+        and the run's Next agree on "propose within the approved ceilings, or stop" (not the stop alone)."""
+        auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto raise no ui",
+                              "invocation": {**TEST_INVOCATION, "delegation": True},
+                              "selector": {"project": "p", "session": "auto-raise-no-ui"}})["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {"kind": "route", "reason": "supplied context"}})
+        self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {"kind": "graph", "payload": GRAPH}})
+        ingress = dict(context_ingress=lambda _p, r, v: self.service.trusted_governance_context(run_id=r, payload=v),
+                       decision_ingress=lambda _p, r, v: self.service.trusted_governance_decision(run_id=r, payload=v),
+                       documents=self.documents)
+        mediator = HostGovernance(self.profile, elicit=lambda message, schema: {"action": "accept", "content": {}}, **ingress)
+        budgets = {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}
+        first = self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {
+            "kind": "configure_run", "budgets": {**budgets, "max_passes": 7}, "rationale": SIZED_RATIONALE}})["result"]
+        self.assertEqual(mediator(first)["run"]["governance"]["state"], "approved")
+        raised = self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {
+            "kind": "configure_run", "budgets": budgets, "rationale": "raise the pass allowance back"}})["result"]
+        self.assertTrue(raised["run"]["governance"]["raises"])
+        # the host's start hook reported its author, so "nobody can be asked" is a fact the core holds, not "not reported yet"
+        self.service.trusted_governance_context(run_id=auto, payload={"author": AUTHOR, "ingress": "mcp_elicitation"})
+        raised = self.dispatch({"type": "GetRun", "run_id": auto})["result"]
+        no_ui = HostGovernance(self.profile, elicit=None, **ingress)  # this host can show no dialog now
+        out = no_ui(raised)
+        reason = out["reasons"][0]
+        self.assertEqual((out["type"], reason["code"], reason["next_actions"]),
+                         ("Block", "governance.raise_unavailable", ["governance.propose", "residual.accept"]))
+        self.assertEqual(out["run"]["next_actions"], ["governance.propose", "residual.accept"])
+        self.assertIn("within the approved ceilings", reason["message"])
+
     def test_interactive_auto_without_ui_fails_closed_despite_delegation(self):
         auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto no ui",
                               "invocation": {**TEST_INVOCATION, "delegation": True},

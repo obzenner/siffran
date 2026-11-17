@@ -99,16 +99,19 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
 /**
  * The one contract code for a mediation that ended without a decision, chosen from the run's own governance facts
  * (never from the adapter's guess): the row it names owns the actions. Python: `closed_code`. The run's allowance
- * spent, nobody who can be asked, or nothing left to show or change (the view's `next_action` is the stop) → the stop alone; this configuration's presentations spent → `configuration_shown`;
+ * spent, nobody who can be asked with no automatic way on, or nothing left to show or change (the view's `next_action` is the
+ * stop) → the stop alone; a raise nobody can approve while a proposal within the approved ceilings is admitted → `raise_unavailable`; this configuration's presentations spent → `configuration_shown`;
  * a human who closed the dialog → `dialog_closed`.
  */
 function closedCode(response: Response): string {
   const run = "run" in response.result ? response.result.run : null;
-  const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean; next_action?: string;
+  const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean; next_action?: string; raises?: boolean;
     interactions_remaining?: { total?: number }; context?: { approval_capability?: string } };
-  // the view's own next action is the stop: nobody to ask, or nothing left to show or change
-  if (g.context?.approval_capability === "unavailable" || g.next_action === "residual.accept")
-    return "governance.approval_unavailable";
+  // the view's own next action is the stop: nobody to ask with no automatic way on, or nothing left to show or change
+  if (g.next_action === "residual.accept") return "governance.approval_unavailable";
+  // nobody can approve a pending raise, but a proposal within the approved ceilings is still admitted: propose it, or stop
+  if (g.context?.approval_capability === "unavailable")
+    return g.raises === true ? "governance.raise_unavailable" : "governance.approval_unavailable";
   if (g.prompt_error)
     return g.interactions_remaining?.total === 0 ? "governance.approval_unavailable" : "governance.configuration_shown";
   return g.human_wait === true ? "governance.dialog_closed" : "governance.approval_unavailable";

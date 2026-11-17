@@ -780,6 +780,9 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                     or governance.nobody_to_ask(governed, state.budgets)
                     or governance.configuration_stuck(governed, confirmations, state.budgets)):
                 actions.append("residual.accept")
+            elif governance.raise_without_ingress(governed, state.budgets):
+                # a raise nobody can approve: propose within the approved ceilings (automatic), or stop
+                actions.extend(("governance.propose", "residual.accept"))
             else:
                 actions.append("governance.propose")
         elif facts["route.recorded"] and not facts["investigation.recorded"]:

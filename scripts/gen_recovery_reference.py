@@ -79,6 +79,7 @@ AUTHOR_GUIDANCE = {
     "governance.receipt_replay": "A superseded or conflicting decision was replayed and changed nothing: read the current proposal and act on that.",
     "governance.interaction_limit": "The run's human interactions are spent, so no dialog can be shown: stop honestly or start a fresh run.",
     "governance.configuration_shown": "The dialog was shown three times for this configuration: once the human says which ceilings to change, `configure_run` with them, or stop honestly.",
+    "governance.raise_unavailable": "Nobody can approve a raise now: `configure_run` within the approved ceilings (it needs no approval), or stop honestly.",
     "governance.decision_conflict": "The submitted control and edited fields disagreed and nothing was approved: use one explicit decision path.",
     "governance.terminal_stop_pending": "A deliberative run does not end without converging until a human agrees: nothing was granted and the run stays active. The case in the parameters says what happens next (not asked yet, declined, no dialog, no interactions left); keep working, or stop again when the human is ready to be asked.",
     "audit.producers_mixed": "Covered evidence has mixed producers: if only the latest spike differs, re-run it under the research producer, otherwise accept the residual.",

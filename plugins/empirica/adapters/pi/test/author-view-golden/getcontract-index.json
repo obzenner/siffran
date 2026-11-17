@@ -416,6 +416,12 @@
             ]
           },
           {
+            "code": "governance.raise_unavailable",
+            "sections": [
+              "governance"
+            ]
+          },
+          {
             "code": "governance.configuration_shown",
             "sections": [
               "governance"

@@ -75,14 +75,17 @@ def closed_code(result: dict) -> str:
     """The one contract code for a mediation that ended without a decision, chosen from the run's own governance
     facts (never from the adapter's guess): the row it names owns the actions.
 
-    Nobody who can be asked now, the run's allowance spent, or no way left to change a shown-out configuration (the view's
-    own ``next_action`` is the stop) → ``governance.approval_unavailable`` (the stop alone); this configuration's
+    The run's allowance spent, nobody who can be asked with no automatic way on, or no way left to change a shown-out
+    configuration (the view's own ``next_action`` is the stop) → ``governance.approval_unavailable`` (the stop alone);
+    a raise nobody can approve while a proposal within the approved ceilings is still admitted (the view's ``next_action``
+    is to propose) → ``governance.raise_unavailable``; this configuration's
     presentations spent with a change still possible → ``governance.configuration_shown``; a human who closed the dialog
     → ``governance.dialog_closed``. Nobody to ask is tested first, so every host answers a resumed run the same way."""
     governed = (result.get("run") or {}).get("governance") or {}
-    if (governed.get("context") or {}).get("approval_capability") == "unavailable" \
-            or governed.get("next_action") == "residual.accept":
+    if governed.get("next_action") == "residual.accept":
         return "governance.approval_unavailable"
+    if (governed.get("context") or {}).get("approval_capability") == "unavailable":
+        return "governance.raise_unavailable" if governed.get("raises") is True else "governance.approval_unavailable"
     if governed.get("prompt_error"):
         return ("governance.approval_unavailable" if (governed.get("interactions_remaining") or {}).get("total") == 0
                 else "governance.configuration_shown")
@@ -343,7 +346,7 @@ class HostGovernance:
             # whatever an earlier context said; then the view names the stop alone.
             reported = self.context_ingress(self.profile, run["id"],
                                             {"author": g["context"]["author"], "ingress": "unavailable"}).get("result", {})
-            return unavailable(reported if reported.get("run") else result, "governance.approval_unavailable")
+            return unavailable(reported if reported.get("run") else result)
         context = {"author": g["context"]["author"], "ingress": approval_ingress}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
         if result.get("type") not in {"Allow", "Inert"} or not result.get("run"):
