@@ -165,11 +165,11 @@ If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
 ## Auto mode decides its own claims (7.1.0)
 
 In an auto run, a `needs-decision` claim that no human answered belongs to the agent: supporting research approves it and
-refuting research discards it. The observer shows these as `decided_by_author` and `rejected_by_evidence`. Every auto run
+refuting research discards it. The observer shows them as "Decided by the agent" and "Ruled out by evidence". Every auto run
 is read this way, active or ended, and nothing stored is rewritten: terminal statuses, audit verdicts and receipts stay as
 recorded. Two readings change for runs written by an earlier 7.0.x:
 
-- An ended auto run may show a decision that read `unanswered` as decided by its author.
+- An ended auto run may show a decision that read "Undecided when the run stopped" as "Decided by the agent".
 - An active auto run whose decision was left on Later now waits on the agent's research, not on a person.
 
 A human answer already recorded still decides its claim in every mode. Deliberative runs read as before.

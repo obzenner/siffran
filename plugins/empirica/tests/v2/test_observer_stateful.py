@@ -52,7 +52,7 @@ STARTS = {
     "unobserved-without-dialog": (None, False, True, {"invocation": invocation_for(PROFILE, human_surface="unobserved",
                                                                                    signal="host startup")}),
     "auto-delegated": ("unavailable", False, False, {"control_mode": "auto", "invocation": invocation_for(
-        PROFILE, delegation=True, human_surface="unavailable", signal="v2 harness")}),
+        PROFILE, delegation=True, interactive=False, human_surface="unavailable", signal="v2 harness")}),
 }
 FILES = ("src/probe.py", "src/other.py")
 
@@ -240,7 +240,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         argument = reader.a.dispatch(reader.drv, get_argument(run_id=self.run))["result"]["argument"]
         gate = reader.a.dispatch(reader.drv, evaluate(run_id=self.run, intent="report_convergence"))["result"]
         c = self.check
-        decided, self.decisions = decision_problems(row, detail, argument)
+        decided, self.decisions = decision_problems(row, detail, argument, core)
         assert decided == [], decided
         stepped, self.steps = step_problems(detail, argument)
         assert stepped == [], stepped

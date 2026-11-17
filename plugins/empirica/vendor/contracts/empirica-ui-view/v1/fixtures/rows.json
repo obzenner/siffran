@@ -270,7 +270,7 @@
  },
  {
   "ask": "confirm_source",
-  "asked_at": 1790597040.0,
+  "asked_at": 1790596980.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -344,14 +344,14 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790596500.0,
+  "started": 1790596440.0,
   "state": "active",
-  "updated": 1790597040.0,
-  "version": "sha256:83e94a18efd9d7d90eb433c9da560e94135c322bd140aad800d7892bc8f0d501"
+  "updated": 1790596980.0,
+  "version": "sha256:1e183f4b9a0e81c557c4810485337769349aedaf3218f1e2aceaaf9c37305501"
  },
  {
   "ask": "approve_configuration",
-  "asked_at": 1790602020.0,
+  "asked_at": 1790601960.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -408,10 +408,10 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790601780.0,
+  "started": 1790601720.0,
   "state": "active",
-  "updated": 1790602140.0,
-  "version": "sha256:81864c6f61616da2c10251336e2a9a1729bbbc6f8bbfa4bbb98aee5130121c73"
+  "updated": 1790602080.0,
+  "version": "sha256:31c909503cddb275f13471ab06d8b0e4f21012ce16ed8b82c6c81fb12dbd2867"
  },
  {
   "ask": "freeze_scope",
@@ -489,10 +489,10 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790602200.0,
+  "started": 1790602140.0,
   "state": "active",
-  "updated": 1790603160.0,
-  "version": "sha256:2a741b136018bd2e39ad403bd011fc6828ffcdf5ada7e6f6e01036ed4452a28b"
+  "updated": 1790603100.0,
+  "version": "sha256:c37baf8d4d20eb0a096333ad22d580ca9c685184796110687ec976c9118a77bf"
  },
  {
   "ask": null,
@@ -750,7 +750,7 @@
   "ended": null,
   "flags": {
    "changed_since_audit": false,
-   "decided": true,
+   "decided": false,
    "failed_audit": false,
    "refuted": true
   },
@@ -775,15 +775,15 @@
   "session": {
    "delegated": true,
    "host": "claude",
-   "interactive": true,
+   "interactive": false,
    "label": null,
    "locator": null
   },
   "standing": "not_ended",
   "started": 1790595900.0,
   "state": "active",
-  "updated": 1790596440.0,
-  "version": "sha256:24d71805a72b7c2d2f4d1be24c0700b9952d6161801601e1a2506e2624691a4f"
+  "updated": 1790596380.0,
+  "version": "sha256:cd84cb89dc1c1559d4ed545e7fd75f8b4e8a1fd52325ee28e3a2aeff94f00c9f"
  },
  {
   "ask": null,

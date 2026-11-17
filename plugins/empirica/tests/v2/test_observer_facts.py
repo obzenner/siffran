@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 import core.evaluation as evaluation
+import core.governance as core_governance
 import core.observer as core_observer
 from adapters.observer import civil
 from adapters.observer.server import Sources, serve
@@ -33,7 +34,7 @@ from assertions import observe_action
 from assertions import get_argument, get_run
 from governance_setup import invocation_for, sized_configure_run
 from observer_store import (PROFILE, STEP, T0, walk_pages, DemoSource, DriverSource, ScaleSource, _Builder, _graph,
-                            build_demo_store, build_store, decision_problems, demo_goals)
+                            build_demo_store, build_store, decision_problems, demo_goals, FixtureSource)
 
 import test_observer_agreement as agreement
 
@@ -309,7 +310,7 @@ class AutoDecisionStandingTests(unittest.TestCase):
     standing from the core's claim state, the run's mode and the run's status (D5)."""
 
     AUTO = dict(control_mode="auto", surface="unavailable",
-                invocation=invocation_for(PROFILE, delegation=True, human_surface="unavailable", signal="v2 harness"))
+                invocation=invocation_for(PROFILE, delegation=True, interactive=False, human_surface="unavailable", signal="v2 harness"))
 
     @classmethod
     def begin(cls, name, decisions, *, auto=True, gating=True, extra=()):
@@ -328,7 +329,8 @@ class AutoDecisionStandingTests(unittest.TestCase):
         row, = observer.rows()
         detail = observer.details()[row["key"]]
         argument = b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]
-        problems, wanted = decision_problems(row, detail, argument)
+        core = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]
+        problems, wanted = decision_problems(row, detail, argument, core)
         assert problems == [], problems
         return {c["id"]: c["decision"]["status"] for c in detail["claims"] if c["decision"]}, wanted
 
@@ -346,6 +348,19 @@ class AutoDecisionStandingTests(unittest.TestCase):
         b, run = self.begin("non-gating", ["C1"], gating=False)
         b.research(run, "C1")
         self.assertEqual(self.standings(b, run), ({"C1": "deferred"}, ["deferred"]))
+
+    def test_a_delegated_auto_run_and_its_fixture_ask_nobody(self):
+        """The configuration of a delegated auto run is approved by its host's policy: no human answered, so the sheet has
+        no decision and the run is not flagged as decided by a human."""
+        b, run = self.begin("delegated", ["C1"])
+        b.research(run, "C1")
+        fixtures = Observer(FixtureSource(build_store()))
+        row = next(r for r in fixtures.rows() if r["key"] == build_store().expect["auto-decided"])
+        for observer, key in ((Observer(DriverSource(b.store)), None), (fixtures, row["key"])):
+            rows = observer.rows()
+            detail = observer.details()[key or rows[0]["key"]]
+            self.assertEqual(detail["decisions"], [])
+            self.assertFalse(next(r for r in rows if r["key"] == (key or rows[0]["key"]))["flags"]["decided"])
 
     def test_a_deliberative_decision_keeps_its_standings(self):
         b, run = self.begin("deliberative", ["C1"], auto=False)
@@ -366,25 +381,29 @@ class AutoDecisionStandingTests(unittest.TestCase):
 
     @classmethod
     def answered(cls, outcome):
-        """The ``evidence_confirmation`` item a deliberative run's real human receipt wrote for ``C1``."""
+        """The presentation and the ``evidence_confirmation`` a deliberative run's real human receipt wrote for ``C1``."""
         human, hrun = cls.begin("answered", ["C1"], auto=False)
         digest = {c["claim_id"]: c["wording_digest"] for c in human.a.dispatch(
             human.drv, get_argument(run_id=hrun))["result"]["argument"]["claims"]}["C1"]
         human.present_and_answer(hrun, "answer-1", [{"subject": "claim", "claim_id": "C1", "outcome": outcome,
                                                       "claim_digest": digest}])
         human.a.dispatch(human.drv, get_run(run_id=hrun))
-        return next(a for a in human.drv._service._coordinator.last_snapshot.history
-                    if a.get("kind") == "evidence_confirmation" and a.get("subject") == "claim")
+        history = human.drv._service._coordinator.last_snapshot.history
+        answer = next(a for a in history if a.get("kind") == "evidence_confirmation" and a.get("subject") == "claim")
+        return [next(a for a in history if a.get("kind") == "evidence_presentation"
+                     and a.get("receipt_id") == answer.get("receipt_id")), answer]
 
     @staticmethod
-    def seed(b, run, item):
-        """Append ``item`` to the run's history through the store's own commit (the path a 7.0.2 answer took)."""
+    def seed(b, run, items):
+        """Append ``items`` to the run's history through the store's own commit (the path a 7.0.2 answer took)."""
         coordinator = b.drv._service._coordinator
         key = decode_handle(run)
         loaded = coordinator._load(key)
         snapshot = coordinator._assemble(key, loaded.state, {"type": "GetRun", "run_id": run}, require_graph=False)
-        body = {k: v for k, v in item.items() if k != "artifact_id"}
-        coordinator._commit(key, loaded.read.revision, snapshot, loaded.state, ({"artifact_id": item["artifact_id"], "body": body},))
+        coordinator._commit(key, loaded.read.revision, snapshot, loaded.state, tuple(
+            {"artifact_id": item["artifact_id"],
+             "body": core_governance.plain({k: v for k, v in item.items() if k != "artifact_id"})}
+            for item in items))
 
     def test_a_persisted_human_confirmation_decides_an_auto_run_in_the_same_shape(self):
         """A 7.0.2 auto run kept a human's answer to a decision as an ``evidence_confirmation`` artifact; an auto run read
@@ -396,6 +415,10 @@ class AutoDecisionStandingTests(unittest.TestCase):
                 claim = {c["claim_id"]: c for c in b.a.dispatch(b.drv, get_argument(run_id=run))["result"]["argument"]["claims"]}["C1"]
                 self.assertEqual((claim["state"], claim["human_decision"]["outcome"]), (state, outcome))
                 self.assertEqual(self.standings(b, run), ({"C1": standing}, [standing]))
+                observer = Observer(DriverSource(b.store))
+                row, = observer.rows()
+                asked = [(d["asked"], d["claim"], d["answer"]) for d in observer.details()[row["key"]]["decisions"]]
+                self.assertEqual(asked, [("decide_claim", "C1", outcome)], "the answer shows as the human's, beside its ask")
 
     def test_a_mixed_run_of_a_persisted_answer_and_a_researched_decision_has_a_distinct_auditor(self):
         b, run = self.begin("mixed", ["C1", "C2"])
