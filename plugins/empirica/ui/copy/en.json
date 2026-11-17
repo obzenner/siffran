@@ -54,6 +54,8 @@
   "decision.unanswered.label": "Unanswered when the run stopped",
   "decision.deferred.label": "Deferred · out of scope",
   "decision.not_asked.label": "Not asked",
+  "decision.decided_by_author.label": "Decided by the agent",
+  "decision.rejected_by_evidence.label": "Ruled out by evidence",
   "outcome.confirm.label": "confirmed",
   "outcome.reject.label": "rejected",
   "outcome.approve.label": "approved",

@@ -139,7 +139,9 @@
     "waiting",
     "unanswered",
     "deferred",
-    "not_asked"
+    "not_asked",
+    "decided_by_author",
+    "rejected_by_evidence"
   ],
   "spike": [
     "requested",

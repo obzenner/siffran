@@ -208,6 +208,16 @@ test("the claims are the support graph: each listed once, under the claim it sup
   }
   assert.ok(nested >= 10);
 });
+test("a decision the author made or the evidence ruled out has its own word on the claim", () => {
+  const sheet = Object.values(sheets).find((x) => x.claims?.some((c) => c.decision));
+  const claim = sheet.claims.find((c) => c.decision);
+  for (const [status, label] of [["decided_by_author", "Decided by the agent"], ["rejected_by_evidence", "Ruled out by evidence"]]) {
+    const s = structuredClone(sheet); s.claims.find((c) => c.id === claim.id).decision = { status, outcome: null, answer: null, where: null };
+    const html = sheetHtml(ctx(s, { claim: claim.id }));
+    assert.doesNotMatch(html, /⟦|undefined|NaN|\[object/, status);
+    assert.ok(visible(html).includes(label), status);
+  }
+});
 test("a decision is attached to what it decides: the claim by its words (a link to it), the source, or the plan; never a bare id", () => {
   const s = sheets[scenarios.verification];
   const html = sheetHtml(ctx(s));
