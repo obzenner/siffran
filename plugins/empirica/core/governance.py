@@ -231,7 +231,9 @@ def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
 
 def nobody_to_ask(governance: Mapping) -> bool:
     """Whether a sized proposal waits on a human's approval that a host which has reported its context cannot put to
-    one: the agent may only stop honestly. A host that has not reported yet (no ``author``) is not asked to give up."""
+    one: the agent may only stop honestly. A host that has not reported yet is not asked to give up. The run's initial
+    context (no ``author``, no ingress) is byte-identical to a report of "no author, no ingress", so a null ``author``
+    is read as "not reported yet": the core holds no separate fact that a report arrived."""
     return (sized(governance) and expected_approval_kind(governance) == "host_ui"
             and governance["context"]["author"] is not None
             and governance["context"]["approval_capability"] != HUMAN_CONFIGURATION)
@@ -336,8 +338,11 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping,
     if (decision["run_id"] != run_id or decision["proposal_digest"] != governance["proposal_digest"]
             or decision["plan_revision"] != governance["plan_revision"]):
         return "governance.stale_proposal"
-    if prior is None and (reason := interaction_error(governance, confirmations)):
-        return reason
+    if prior is None and interaction_error(governance, confirmations):
+        # the run's total allowance spent: nothing can be shown; only this configuration's three presentations: changed
+        # ceilings are a new configuration
+        return ("governance.interaction_limit" if interactions_remaining(governance, confirmations)["total"] == 0
+                else "governance.configuration_shown")
     expected = expected_approval_kind(governance)
     auto_authorized = (governance["first_approval"] or
                        governance["context"]["delegation"] is True)

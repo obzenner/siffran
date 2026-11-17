@@ -96,14 +96,16 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
 /**
  * The one contract code for a mediation that ended without a decision, chosen from the run's own governance facts
  * (never from the adapter's guess): the row it names owns the actions. Python: `closed_code`. The run's allowance
- * spent, or nobody who can be asked → the stop alone; this configuration's presentations spent → `interaction_limit`;
+ * spent, or nobody who can be asked → the stop alone; this configuration's presentations spent → `configuration_shown`;
  * a human who closed the dialog → `dialog_closed`.
  */
 function closedCode(response: Response): string {
   const run = "run" in response.result ? response.result.run : null;
   const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean;
-    interactions_remaining?: { total?: number } };
-  if (g.prompt_error) return g.interactions_remaining?.total === 0 ? "governance.approval_unavailable" : g.prompt_error;
+    interactions_remaining?: { total?: number }; context?: { approval_capability?: string } };
+  if (g.context?.approval_capability === "unavailable") return "governance.approval_unavailable";
+  if (g.prompt_error)
+    return g.interactions_remaining?.total === 0 ? "governance.approval_unavailable" : "governance.configuration_shown";
   return g.human_wait === true ? "governance.dialog_closed" : "governance.approval_unavailable";
 }
 
@@ -267,7 +269,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   // means governance.approval_unavailable, nothing spent. States that wait on no human carry
   // no document and never reach here by the state guard above. The auto lane binds nothing.
   const bound = approvalKind === "host_ui" ? boundDocument(presentationOf(response)) : undefined;
-  if (approvalKind === "host_ui" && !bound) return unavailable(response, "governance.approval_unavailable");
+  if (approvalKind === "host_ui" && !bound) return unavailable(response);
   const mediationEnvelope = bound ? { ...envelope, document_digest: bound.digest } : envelope;
   const dismiss = async (): Promise<Response> => {
     const stored = await trusted({ operation: "governance_decision", run_id: runId,

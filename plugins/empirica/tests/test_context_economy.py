@@ -691,10 +691,10 @@ class DismissalRecoveryTests(_ServiceHarness):
                     self._agree(self._call(answer)[0], "governance.dialog_closed", [self.AGAIN, self.STOP])
                 text, dialogs = self._call(answer)
                 self.assertEqual(dialogs, 1)
-                self._agree(text, "governance.interaction_limit", [self.AGAIN, self.STOP])
+                self._agree(text, "governance.configuration_shown", [self.AGAIN, self.STOP])
                 text, dialogs = self._call(answer)
                 self.assertEqual(dialogs, 0, "the same values are not shown a fourth time")
-                self._agree(text, "governance.interaction_limit", [self.AGAIN, self.STOP])
+                self._agree(text, "governance.configuration_shown", [self.AGAIN, self.STOP])
                 text, dialogs = self._call(answer, budgets={**self.BUDGETS, "max_passes": 7})
                 self.assertEqual(dialogs, 1, "changed ceilings are a new configuration and reopen the dialog")
                 self._agree(text, "governance.dialog_closed", [self.AGAIN, self.STOP])
@@ -727,6 +727,46 @@ class DismissalRecoveryTests(_ServiceHarness):
                 self.assertEqual(dialogs, 0)
                 self._agree(text, "governance.approval_unavailable", [self.STOP])
                 self.assertNotIn("configure_run", text)
+
+    def test_a_run_resumed_without_a_ui_after_three_showings_names_the_stop_alone(self):
+        """Nobody can be asked now outranks the spent configuration: both hosts answer the same (the choosers
+        read ``context.approval_capability`` before ``prompt_error``)."""
+        from adapters.governance import closed_code
+        for mode in ("deliberative", "auto"):
+            with self.subTest(mode=mode):
+                self._start(mode, "resumed")
+                # the start hook's report: the host's author and a human-capable ingress
+                self.service.trusted_governance_context(run_id=self.run_id, payload={"author": AUTHOR, "ingress": "pi_ui"})
+                for _ in range(3):
+                    self._call(self.CLOSE["dismissed"])
+                self._agree(self._call(self.CLOSE["dismissed"])[0], "governance.configuration_shown", [self.AGAIN, self.STOP])
+                text, dialogs = self._call(None)
+                self.assertEqual(dialogs, 0)
+                self._agree(text, "governance.approval_unavailable", [self.STOP])
+        governed = {"prompt_error": "governance.interaction_limit", "human_wait": False,
+                    "interactions_remaining": {"proposal": 0, "total": 100},
+                    "context": {"approval_capability": "unavailable"}}
+        self.assertEqual(closed_code({"run": {"governance": governed}}), "governance.approval_unavailable")
+        governed["context"]["approval_capability"] = "human_configuration"
+        self.assertEqual(closed_code({"run": {"governance": governed}}), "governance.configuration_shown")
+
+    def test_a_document_that_cannot_be_bound_lets_the_chooser_decide_and_agrees_with_next(self):
+        from adapters.governance import HostGovernance
+        for mode in ("deliberative", "auto"):
+            with self.subTest(mode=mode), patch.object(HostGovernance, "_bound_document", lambda *_a, **_k: None):
+                self._start(mode, "unbound")
+                self.service.trusted_governance_context(run_id=self.run_id, payload={"author": AUTHOR, "ingress": "pi_ui"})
+                text, dialogs = self._call(self.CLOSE["dismissed"])
+                self.assertEqual(dialogs, 0, "nothing is shown without its bound document")
+                self._agree(text, "governance.dialog_closed", [self.AGAIN, self.STOP])
+
+    def test_the_contract_rows_are_true_at_every_site_that_names_them(self):
+        reasons = _proto.public_contract()["reasons"]
+        self.assertEqual(reasons["governance.configuration_shown"]["next_actions"], ["governance.propose", "residual.accept"])
+        self.assertIn("three times", reasons["governance.configuration_shown"]["message"])
+        # the core's own sites name the run's total allowance: nothing can be shown, so only the stop
+        self.assertEqual(reasons["governance.interaction_limit"]["next_actions"], ["residual.accept"])
+        self.assertNotIn("three times", reasons["governance.interaction_limit"]["message"])
 
     def test_the_read_tool_does_not_forbid_the_recovery_the_view_names(self):
         description = next(d["description"] for d in PublicTools(CLAUDE).definitions() if d["name"] == _pt.READ_TOOL)

@@ -971,6 +971,21 @@
           ],
           "properties": {
             "code": {
+              "const": "governance.configuration_shown"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "governance.auto_ceiling"
             },
             "parameters": {

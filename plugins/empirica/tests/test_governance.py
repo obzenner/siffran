@@ -1818,7 +1818,7 @@ class GovernanceServiceTests(unittest.TestCase):
             self.runs.conflicts = 1
             self.assertEqual(self.admit(presented)["type"], "Allow")
         before = copy.deepcopy(self.runs.data)
-        self.assertEqual(self.admit(presents[3])["reasons"][0]["code"], "governance.interaction_limit")
+        self.assertEqual(self.admit(presents[3])["reasons"][0]["code"], "governance.configuration_shown")
         self.assertEqual(self.admit(presents[2])["type"], "Inert")
         self.assertEqual(self.runs.data, before)
         final = {k: v for k, v in presents[2].items() if k != "outcome"}
@@ -1867,7 +1867,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(g["interactions_remaining"]["proposal"], 0)
         self.assertEqual(g["prompt_error"], "governance.interaction_limit")
         self.assertEqual(self.admit(self.decision("overflow", "dismiss"))["reasons"][0]["code"],
-                         "governance.interaction_limit")
+                         "governance.configuration_shown")
         self.assertEqual(self.admit(first)["type"], "Inert")
 
 

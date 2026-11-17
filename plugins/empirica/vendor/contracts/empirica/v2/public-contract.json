@@ -1983,6 +1983,21 @@
         "properties": {}
       },
       "next_actions": [
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "The human interactions for this run are spent, so no dialog can be shown; stop honestly or start a fresh run.",
+      "disposition": "host_recovery"
+    },
+    "governance.configuration_shown": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
         "governance.propose",
         "residual.accept"
       ],

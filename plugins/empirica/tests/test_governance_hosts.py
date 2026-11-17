@@ -568,7 +568,7 @@ class GovernanceHostTests(unittest.TestCase):
                 self.mediator.elicit = lambda *_: (_ for _ in ()).throw(AssertionError("never elicit"))
                 result = self.propose()["result"]["structuredContent"]
                 self.assertEqual(result["type"], "Block")
-                self.assertEqual(result["reasons"][0]["code"], "governance.approval_unavailable")
+                self.assertEqual(result["reasons"][0]["code"], "governance.dialog_closed")  # nothing shown: the chooser reads the run's facts
                 self.assertEqual(presents, [])
                 self.assertEqual(len(self._stored_receipts()), 0)
                 self.assertIsNone(result["run"]["governance"]["approved_digest"])
@@ -596,7 +596,7 @@ class GovernanceHostTests(unittest.TestCase):
                 self.mediator.elicit = lambda *_: (_ for _ in ()).throw(AssertionError("never elicit"))
                 result = self.propose()["result"]["structuredContent"]
                 self.assertEqual(result["type"], "Block")
-                self.assertEqual(result["reasons"][0]["code"], "governance.approval_unavailable")
+                self.assertEqual(result["reasons"][0]["code"], "governance.dialog_closed")  # nothing shown: the chooser reads the run's facts
                 self.assertEqual(presents, [])
                 self.assertEqual(len(self._stored_receipts()), 0)
                 self.assertEqual(self.service._coordinator.last_snapshot.state.budgets["passes_used"], 0)
@@ -802,7 +802,7 @@ class GovernanceHostTests(unittest.TestCase):
             self.service = compose(Workspace(), Harness(), c.runs, c.artifacts, None, self.profile, {}, None)
         count = len(self.sent)
         result = self.propose()["result"]["structuredContent"]
-        self.assertEqual(result["reasons"][0]["code"], "governance.interaction_limit")
+        self.assertEqual(result["reasons"][0]["code"], "governance.configuration_shown")
         self.assertEqual(len(self.sent), count)
         self.assertEqual(result["run"]["governance"]["interactions_remaining"], {"proposal": 0, "total": 125})
         self.assertNotEqual(result["run"]["governance"]["state"], "rejected")

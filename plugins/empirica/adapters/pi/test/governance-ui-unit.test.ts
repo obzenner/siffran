@@ -144,7 +144,8 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
     plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
       rationale: dialog.rationale,
-    }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };
+    }, context: { author: null, ingress: "pi_ui", approval_capability: "human_configuration", interactive: true,
+      delegation: false } };
   const run = { id: "run", status: "active", spike_backend: { kind: "spikes_unavailable" }, governance: g };
   const decisions: Array<Record<string, unknown>> = [];
   const renders: string[][] = [];
@@ -277,11 +278,17 @@ test("a closed dialog, a spent configuration, a spent run and no UI each choose 
   assert.deepEqual(await codes(() => {}), ["governance.dialog_closed", again]);
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
     (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 }; }, []),
-    ["governance.interaction_limit", again]);
+    ["governance.configuration_shown", again]);
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
     (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 0 }; }, []),
     ["governance.approval_unavailable", ["residual.accept"]]);
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.ctx.hasUI = false; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  // N1: three showings, then resumed where nothing can be shown: the core's refresh reports an unavailable
+  // capability, and nobody to ask outranks the spent configuration (the same order as Claude's closed_code).
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 };
+    h.g.context.approval_capability = "unavailable"; h.g.context.ingress = "unavailable"; h.ctx.hasUI = false; }, []),
     ["governance.approval_unavailable", ["residual.accept"]]);
 });
 
@@ -516,7 +523,7 @@ test("no bound document on the context answer refuses before any present", async
     const result = await h.invoke();
     assert.equal(result.result.type, "Block");
     if (result.result.type === "Block")
-      assert.equal(result.result.reasons[0]!.code, "governance.approval_unavailable");
+      assert.equal(result.result.reasons[0]!.code, "governance.dialog_closed"); // the chooser reads the run's facts
     assert.deepEqual(h.decisions, [], "no present may accompany an unbindable document");
     assert.equal(h.customCalls, 0);
   }

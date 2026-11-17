@@ -371,6 +371,15 @@
       ]
     },
     "governance.interaction_limit": {
+      "message": "The human interactions for this run are spent, so no dialog can be shown; stop honestly or start a fresh run.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "governance.configuration_shown": {
       "message": "This configuration has been shown three times; once the human says which ceilings to change, propose them, or stop.",
       "sections": [
         "governance"

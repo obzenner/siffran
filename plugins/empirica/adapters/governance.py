@@ -75,13 +75,15 @@ def closed_code(result: dict) -> str:
     """The one contract code for a mediation that ended without a decision, chosen from the run's own governance
     facts (never from the adapter's guess): the row it names owns the actions.
 
-    The run's allowance spent, or nobody who can be asked → ``governance.approval_unavailable`` (the stop alone); this
-    configuration's presentations spent → ``governance.interaction_limit``; a human who closed the dialog →
-    ``governance.dialog_closed``."""
+    Nobody who can be asked now, or the run's allowance spent → ``governance.approval_unavailable`` (the stop alone);
+    this configuration's presentations spent → ``governance.configuration_shown``; a human who closed the dialog →
+    ``governance.dialog_closed``. Nobody to ask is tested first, so every host answers a resumed run the same way."""
     governed = (result.get("run") or {}).get("governance") or {}
+    if (governed.get("context") or {}).get("approval_capability") == "unavailable":
+        return "governance.approval_unavailable"
     if governed.get("prompt_error"):
         return ("governance.approval_unavailable" if (governed.get("interactions_remaining") or {}).get("total") == 0
-                else governed["prompt_error"])
+                else "governance.configuration_shown")
     return "governance.dialog_closed" if governed.get("human_wait") is True else "governance.approval_unavailable"
 
 
@@ -357,7 +359,7 @@ class HostGovernance:
             # present; a document this state cannot bind refuses the mediation outright
             document = self._bound_document(result)
             if document is None:
-                return unavailable(result, "governance.approval_unavailable")
+                return unavailable(result)
             envelope["document_digest"] = document["digest"]
             # PR 16 (A10/A11): the one Details link per presentation — a live observer of this
             # home's link to the decision row beside the short digest, else the honest fallback
