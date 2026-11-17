@@ -1415,10 +1415,9 @@ def earliest_stage(stages: Iterable[str]) -> int | None:
 
 
 def first_admissible(requirements: Sequence[Requirement]) -> Requirement | None:
-    """The requirement the gate names now: the first, in row order, of those at the earliest stage present, whatever
-    position the rows were appended in. ``None`` when nothing is owed."""
-    earliest = earliest_stage(r.stage for r in requirements)
-    return next((r for r in requirements if stage_rank(r.stage) == earliest), None)
+    """The requirement the gate names now: the first, in row order, that ``report_requirements`` marks ``admissible``,
+    the one owner of admissibility. ``None`` when nothing is owed, or when every row is held."""
+    return next((r for r in requirements if r.admissible), None)
 
 
 #: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
@@ -1467,7 +1466,7 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                         setup: bool = True) -> tuple[Requirement, ...]:
     """Everything an active run still owes before the report converges it, in the gate's order, each with who acts and where.
 
-    This is the one projection of the report's ordering. The gate blocks on the first admissible one (``first_admissible``); the author
+    This is the one projection of the report's ordering. The gate blocks on the first row marked ``admissible`` (``first_admissible`` reads that flag); the author
     view lists them as its obligations and holds the ones behind an earlier stage (``core.projection``); the observer
     publishes them as what the run owes and names the first admissible one next (``core.observer``). It is pure: nothing is
     committed, so what the gate reaches only after charging a pass is listed without charging it.
