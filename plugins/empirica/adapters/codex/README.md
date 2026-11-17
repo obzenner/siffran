@@ -27,7 +27,7 @@ use an approval-capable host interactively. Acceptance inside the envelope is de
 not human approval. Codex audit remains unsupported because the adapter cannot observe the
 verdict-producing reviewer identity. It does not read host model configuration or claim an
 identity mismatch, and delegated acceptance cannot prove the actual auditor model.
-See [governance](../../skills/empirica/references/governance.md) for configuration and limitations.
+See [governance](../../skills/empirica/references/governance.md) and the [operator facts](../../../../doc/governance-operations.md) for configuration and limitations.
 
 ## Surface
 

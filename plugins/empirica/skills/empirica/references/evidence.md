@@ -24,13 +24,13 @@ Public author action:
 ```
 
 `payload.source_ref` and a non-empty verbatim `payload.citation` are mandatory.
-Cite one source per record. The form of `source_ref` decides how the record is verified
-(ADR-0067); the service derives the class, you never state it:
+Cite one source per record. The form of `source_ref` decides how the record is verified;
+the service derives the class, you never state it:
 
 | `source_ref` | class | verified by |
 |---|---|---|
 | a repo-relative file, optionally with lines (`path`, `path:40`, `path:40-63`, `path:40-63,70-72`), any `source_kind` | `verbatim` | the service, when the record is submitted: `citation` must appear there verbatim (whitespace runs compare as one space; join separate excerpts with `…`), else `research.citation_unverified` and nothing is recorded |
-| an `http(s)` URL, or an absolute or `~` path outside the workspace | `retrievable` | the independent audit, only for a kind its host is observed to retrieve (Claude's auditor is not yet credited with the web: live row `webfetch_capture`, ADR-0069); otherwise a human, when you report, before the audit |
+| an `http(s)` URL, or an absolute or `~` path outside the workspace | `retrievable` | the independent audit, only for a kind its host is observed to retrieve (Claude's auditor is not yet credited with the web); otherwise a human, when you report, before the audit |
 | a `runtime` observation with neither of the above | `observed` | a human, always |
 
 A `code`, `docs` or `web` ref that is none of these forms is refused (`problem: source_ref_form`),
@@ -50,15 +50,21 @@ whenever one is possible; the reason is shown to the human verbatim.
 
 ### What still needs confirming
 
-The requirement is visible the moment the record exists: the claim's obligation row and the dossier
-(`verification: {class, status, retrieve}`) say where its confirmation goes. `confirm: audit` means the
-host's auditor retrieves the source (research awaiting audit still approves the claim; the audit gate
-covers it). `confirm: human` means a human confirms it: call `report_convergence` (default intent) and the host asks them. **A record that needs a human is confirmed when you report, before the audit**: do not launch the audit first. While the human is about to be asked the core refuses the audit launch with `evidence.confirmation_required`, and an audit run before the answer would be staled by it and spend an audit spawn; when nobody can be asked the audit is not held.
-`confirm: unobserved` means a human can be asked but the host has not yet looked for a dialog (Claude looks
-inside `report_convergence`): call `report_convergence` with the default intent, not `intent=stop`, and the
-human is asked in that call if the host has a dialog. `confirm: unavailable` means nobody can be asked (no
-human ingress, a delegated or non-interactive run, or a host that looked and found no dialog): the requirement
-stays open, and the run can only stop as a residual.
+The view says how each record is verified: `checked by the service`, `for the audit to retrieve`
+(the host's auditor retrieves the source; research awaiting audit still approves the claim, and the audit
+gate covers it), `waiting for a human`, `confirmed by a human` or `rejected by a human` (with a `human note:`).
+What waits on a human is listed under `Waiting on a human:`, each record as `source: <kind> <ref> for claim <id>`
+and each `needs-decision` claim as `decision needed on claim <id>`; the last line says whether a human can be asked:
+
+- `a human can be asked at the end of your next pass`, or `a human is asked when you report, if this host can show a dialog`:
+  call `report_convergence` (default intent, not `intent=stop`) and the host asks them.
+- `no human can be asked in this session`: the requirement stays open, and the run can only stop as a residual.
+- `already shown; an explicit report_convergence asks again, within the interaction limit` and
+  `the human interaction limit is reached`: the rule for asking again is in the paragraph on Claude below.
+
+**A record that waits on a human is confirmed when you report, before the audit**: do not launch the audit first.
+While the human is about to be asked the core refuses the audit launch with `evidence.confirmation_required`, and an
+audit run before the answer would be staled by it and spend an audit spawn; when nobody can be asked the audit is not held.
 
 Within one claim the blockers lead in a fixed order: the terminal states first; then what you can act
 on now, missing or stale research and then a missing or stale spike (`claim.spike_missing`,
@@ -89,7 +95,7 @@ answer. The human approves it (it is then approved and human-owned) or rejects i
 decisions are asked in the same batch as research records. Do not record research to stand in for the
 decision.
 
-In Claude the human is asked inside `report_convergence`, so a turn end never settles as an evidence wait: when the confirmation is the only thing left, an auto run's Stop blocks and tells you to call `report_convergence`, and a deliberative turn ends with a notice that tells the human to tell you to report (ADR-0068). If the host cannot record whether a human can be asked, or cannot show the batch, nobody was asked and the report says so (its waiting line reads "the host could not … so nobody was asked"); `report_convergence` is not offered now and the first `next:` is `report_convergence intent=stop`. Stop honestly, or call `report_convergence` again after a change, because the next observation may clear the failure. A limit or refusal the run already knows is said instead ("the human interaction limit is reached", "already shown", "no human can be asked"), with the same first `next:`. **Later, cancel and timeout grant nothing and are not final:** the view says "already shown" and nothing asks again by itself (neither a Stop nor an auto continuation presents), but an explicit `report_convergence` shows the pending items again, each showing spending one of the run's human interactions until the limit says "the human interaction limit is reached". Report again when the human asks you to, or when one more question is worth an interaction; do not loop on it. If Empirica cannot be reached in that call, the tool errors with no `next:`; call `report_convergence intent=stop`. The full rule is ADR-0067.
+In Claude the human is asked inside `report_convergence`, so a turn end never settles as an evidence wait: when the confirmation is the only thing left, an auto run's Stop blocks and tells you to call `report_convergence`, and a deliberative turn ends with a notice that tells the human to tell you to report. If the host cannot record whether a human can be asked, or cannot show the batch, nobody was asked and the report says so (its waiting line reads "the host could not … so nobody was asked"); `report_convergence` is not offered now and the first `next:` is `report_convergence intent=stop`. Stop honestly, or call `report_convergence` again after a change, because the next observation may clear the failure. A limit or refusal the run already knows is said instead ("the human interaction limit is reached", "already shown", "no human can be asked"), with the same first `next:`. **Later, cancel and timeout grant nothing and are not final:** the view says "already shown" and nothing asks again by itself (neither a Stop nor an auto continuation presents), but an explicit `report_convergence` shows the pending items again, each showing spending one of the run's human interactions until the limit says "the human interaction limit is reached". Report again when the human asks you to, or when one more question is worth an interaction; do not loop on it. If Empirica cannot be reached in that call, the tool errors with no `next:`; call `report_convergence intent=stop`.
 
 `payload.observed_content_digest` may additionally bind the bytes that were observed when the host
 can compute a SHA-256 digest.

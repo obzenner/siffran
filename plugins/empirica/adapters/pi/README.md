@@ -61,7 +61,7 @@ confirmation showing original versus amended values plus the warning that the ra
 regenerated. Interactive `--auto` opens this same dialog exactly once before investigation, then
 accepts only non-raising revisions without another dialog. Missing UI never downgrades to delegation.
 Delegated auto requires recorded operator provenance and remains inside 8/1/2. See
-[governance](../../skills/empirica/references/governance.md) for limits, identity classes,
+[governance](../../skills/empirica/references/governance.md) and the [operator facts](../../../../doc/governance-operations.md) for limits, identity classes,
 and fresh-generation compatibility. These UI flows have fast simulated-control coverage and
 real-service governance coverage; no automated test certifies native human
 approval. Follow the operator-led procedure printed by `make native-qualification` for

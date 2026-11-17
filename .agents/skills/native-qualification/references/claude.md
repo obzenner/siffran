@@ -9,7 +9,7 @@
 - A Stop continuation (`stop_hook_active: true`) is ended by control mode (ADR-0068, `HX-STOP-03`). Claude's own cap of
   eight continuations is a host limit, never the plan. Ledger rows: `stop_flag_reset`, `stop_pause_rendering`,
   `stop_unattended_directive`, `stop_host_cap`.
-- Reviewer configuration: see the [governance guide](../../../../plugins/empirica/skills/empirica/references/governance.md).
+- Reviewer configuration: see the [operator facts](../../../../doc/governance-operations.md) and the [governance guide](../../../../plugins/empirica/skills/empirica/references/governance.md).
 - Settings to snapshot and restore: `/model` rewrites `model` in `~/.claude/settings.json`. Settings `env` must reach
   hooks and MCP; the recorded entrypoint is `cli`.
 - Retained admission log: `make empirica-claude-mcp-log-check LOG=/absolute/evidence/claude.debug.log`.

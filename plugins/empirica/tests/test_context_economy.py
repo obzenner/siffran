@@ -1527,5 +1527,89 @@ class DocumentationGuardTests(unittest.TestCase):
         self.assertEqual(offenders, [], f"agent-facing text mentions target: full: {offenders}")
 
 
+class ReferenceCleanupTests(unittest.TestCase):
+    """S11: the references and the agent definitions carry no internal decision-record citation, no operator-only fact, and
+    no field the author view does not render; the auditor's duties live in the agent definition alone."""
+
+    ROOT = Path(__file__).resolve().parents[3]
+    SKILL_DIR = ROOT / "plugins/empirica/skills/empirica"
+    REFERENCES = sorted((SKILL_DIR / "references").glob("*.md"))
+    AGENTS = sorted((ROOT / "plugins/empirica/agents").glob("*.md"))
+    ADR = __import__("re").compile(r"\bADR[- ]?\d|\badr/\d|doc/adr/")
+
+    def reference(self, name):
+        return (self.SKILL_DIR / "references" / name).read_text(encoding="utf-8")
+
+    @staticmethod
+    def section(text, heading):
+        start = text.index(f"\n### {heading}\n")
+        following = text.find("\n## ", start + 1)
+        following_sub = text.find("\n### ", start + 5)
+        stops = [i for i in (following, following_sub) if i != -1]
+        return text[start:min(stops)] if stops else text[start:]
+
+    def test_no_skill_reference_or_agent_cites_a_decision_record(self):
+        offenders = []
+        for path in [self.SKILL_DIR / "SKILL.md", *self.REFERENCES, *self.AGENTS]:
+            for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+                if self.ADR.search(line):
+                    offenders.append(f"{path.relative_to(self.ROOT)}:{number}")
+        self.assertEqual(offenders, [])
+
+    def test_the_guard_sees_every_citation_shape(self):
+        for text in ("(ADR-0067)", "ADR 0063 owns it", "see ADR0068", "doc/adr/0061-x.md"):
+            self.assertTrue(self.ADR.search(text), text)
+        for text in ("an architecture decision record in the repository's normal ADR/MADR form", "the adr tool"):
+            self.assertFalse(self.ADR.search(text), text)
+
+    def test_the_confirmation_section_speaks_in_the_words_the_view_prints(self):
+        labels = json.loads((self.ROOT / "contracts/empirica/v2/public-contract.json").read_text())["author_view"]["labels"]
+        text = self.reference("evidence.md")
+        section = self.section(text, "What still needs confirming")
+        for field in ("confirm: audit", "confirm: human", "confirm: unobserved", "confirm: unavailable", "verification: {"):
+            self.assertNotIn(field, text, field)
+        for key in ("pending_human", "pending_audit", "confirmed_by_human", "rejected_by_human", "waiting",
+                    "waiting_none_error", "waiting_unobserved", "waiting_unavailable"):
+            self.assertIn(labels[key], section, key)
+
+    def test_the_audit_reference_keeps_the_host_procedure_and_points_to_the_agent_for_the_duties(self):
+        text = self.reference("audit.md")
+        for kept in ("## Procedure", "## Independence reporting", "Report only what the host observed:",
+                     '{"agent":"empirica.empirica-auditor","task":"Audit the host-provided dossier."}'):
+            self.assertIn(kept, text)
+        for deleted in ("## Preconditions", "## Stale pending retry", "## Authority", "## Terminal replay",
+                        "retrieves every record the dossier marks", "searches for missing material claims",
+                        "evaluates freeze honesty", "judged for coherence only", "Only `agent` and `task` are allowed"):
+            self.assertNotIn(deleted, text)
+        self.assertEqual(text.count("agents/empirica-auditor.md"), 1, "one pointer to the auditor's duties")
+        self.assertTrue((self.ROOT / "plugins/empirica/agents/empirica-auditor.md").is_file())
+        for step in ("1. Let the host bind", "2. On Claude, invoke exactly one", "3. Reread the run"):
+            self.assertIn(step, text)
+
+    def test_the_assurance_boundary_and_the_audit_limit_are_stated_where_they_are_read(self):
+        # S10 review F1, F2: the skill dropped these; the references read at the point of use carry them
+        boundary = "Convergence is design-time assurance, not a security boundary; CI remains the trust boundary for shipped code."
+        limit = "An audit may block but cannot manufacture deterministic machine evidence, so it never replaces a needed spike."
+        telemetry = "Counts and reason strings\n   are telemetry, not authority."
+        self.assertEqual(self.reference("handoff.md").count(boundary), 1)
+        self.assertEqual(self.reference("audit.md").count(limit), 1)
+        self.assertEqual(self.reference("audit.md").count(telemetry), 1)
+
+    def test_the_governance_reference_holds_no_operator_only_fact(self):
+        text = self.reference("governance.md")
+        for fact in ("empirica.hitl/1", "0400", "CAS", "fingerprint", "EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS",
+                     "CLAUDE_CODE_SUBAGENT_MODEL", "ANTHROPIC_DEFAULT", "EMPIRICA_AUTO_DELEGATION", "EMPIRICA_MAX_",
+                     "empirica.run/4", "host-boundaries.json", "ctx.hasUI", "native human-approval"):
+            self.assertNotIn(fact, text, fact)
+        self.assertIn("governance.terminal_stop_pending", text, "the agent-facing recovery stays")
+
+    def test_the_operator_facts_moved_to_the_operations_doc(self):
+        doc = (self.ROOT / "doc/governance-operations.md").read_text(encoding="utf-8")
+        for fact in ("empirica.hitl/1", "0400", "EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS", "CLAUDE_CODE_SUBAGENT_MODEL",
+                     "EMPIRICA_AUTO_DELEGATION", "EMPIRICA_MAX_", "empirica.run/4"):
+            self.assertIn(fact, doc, fact)
+        self.assertNotRegex(doc, self.ADR)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
