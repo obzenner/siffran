@@ -96,14 +96,16 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
 /**
  * The one contract code for a mediation that ended without a decision, chosen from the run's own governance facts
  * (never from the adapter's guess): the row it names owns the actions. Python: `closed_code`. The run's allowance
- * spent, or nobody who can be asked → the stop alone; this configuration's presentations spent → `configuration_shown`;
+ * spent, nobody who can be asked, or nothing left to show or change (the view's `next_action` is the stop) → the stop alone; this configuration's presentations spent → `configuration_shown`;
  * a human who closed the dialog → `dialog_closed`.
  */
 function closedCode(response: Response): string {
   const run = "run" in response.result ? response.result.run : null;
-  const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean;
+  const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean; next_action?: string;
     interactions_remaining?: { total?: number }; context?: { approval_capability?: string } };
-  if (g.context?.approval_capability === "unavailable") return "governance.approval_unavailable";
+  // the view's own next action is the stop: nobody to ask, or nothing left to show or change
+  if (g.context?.approval_capability === "unavailable" || g.next_action === "residual.accept")
+    return "governance.approval_unavailable";
   if (g.prompt_error)
     return g.interactions_remaining?.total === 0 ? "governance.approval_unavailable" : "governance.configuration_shown";
   return g.human_wait === true ? "governance.dialog_closed" : "governance.approval_unavailable";

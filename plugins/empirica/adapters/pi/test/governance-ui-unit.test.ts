@@ -284,6 +284,17 @@ test("a closed dialog, a spent configuration, a spent run and no UI each choose 
     ["governance.approval_unavailable", ["residual.accept"]]);
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.ctx.hasUI = false; }, []),
     ["governance.approval_unavailable", ["residual.accept"]]);
+  // Spent revisions and a shown-out configuration: no dialog opens and no change is allowed; the view's own next action is
+  // the stop, and the reason agrees with it (a change still possible keeps `configuration_shown`).
+  const shownOut = (h: ReturnType<typeof harness>, next: string) => {
+    h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 };
+    (h.g as Record<string, unknown>).next_action = next;
+  };
+  assert.deepEqual(await codes(h => shownOut(h, "residual.accept"), []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => shownOut(h, "governance.propose"), []),
+    ["governance.configuration_shown", again]);
   // N1: three showings, then resumed where nothing can be shown: the core's refresh reports an unavailable
   // capability, and nobody to ask outranks the spent configuration (the same order as Claude's closed_code).
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";

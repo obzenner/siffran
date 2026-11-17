@@ -170,13 +170,30 @@ def revise(goal: str, current: Mapping, *, proposal=None, context=None) -> dict:
 def revision_error(governance: Mapping, goal: str, proposal: Mapping) -> str | None:
     """Refuse an auto proposal/revision that would exceed its material-revision allowance
     before any mutation. Deliberative revisions return to the human and are not capped here."""
+    if not revisions_exhausted(governance) or not _material_revision(goal, governance, proposal):
+        return None
+    return "governance.revision_exhausted"
+
+
+def revisions_exhausted(governance: Mapping) -> bool:
+    """Whether the auto material-revision allowance of the phase the run is in is spent (before the first approval, then
+    after it): any further change to the configuration is refused. Deliberative revisions return to the human and are not
+    capped. The one predicate ``revision_error`` and the next action (``configuration_stuck``) both read; the run view
+    publishes the same keys, so an adapter reads it from the view too."""
     if governance["control_mode"] != "auto":
-        return None
-    if not _material_revision(goal, governance, proposal):
-        return None
+        return False
     used = (governance["post_approval_revisions"] if governance["first_approval"]
             else governance["pre_approval_revisions"])
-    return "governance.revision_exhausted" if used >= MAX_REVISIONS else None
+    return used >= MAX_REVISIONS
+
+
+def configuration_stuck(governance: Mapping, confirmations: int) -> bool:
+    """Whether a sized configuration waiting on a human's dialog can neither be shown nor changed: this configuration's
+    presentations are spent (an unchanged proposal opens no dialog) and the revision allowance is spent (a changed one is
+    refused with ``governance.revision_exhausted``). Nothing can proceed, so the only way on is the honest stop."""
+    return (sized(governance) and expected_approval_kind(governance) == "host_ui"
+            and revisions_exhausted(governance)
+            and interactions_remaining(governance, confirmations)["proposal"] == 0)
 
 
 def admission(governance: Mapping) -> str | None:

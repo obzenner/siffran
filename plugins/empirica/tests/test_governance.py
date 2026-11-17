@@ -2507,6 +2507,61 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(exhausted["reasons"][0]["code"], "governance.revision_exhausted")
         self.assertEqual(self.runs.data, before)
 
+    def _exhaust_pre_approval_revisions(self, left=0):
+        """Interactive auto before the first approval, with ``left`` material revisions remaining."""
+        interactive = {"host": "test", "interactive": True, "signal": "operator", "delegation": True,
+                       "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
+        self._prepare_auto(interactive)
+        for n in range(governance.MAX_REVISIONS - left):
+            self.assertEqual(self.action(**sized_configure_run(
+                budgets=SIZED_BUDGETS, rationale=f"pre-approval sizing revision {n}"))["type"], "Allow")
+
+    def _spend_the_current_configurations_presentations(self):
+        for n in range(governance.PROPOSAL_INTERACTIONS):
+            self.assertEqual(self.admit(self.decision(f"shown-{n}", "present", reserve=False))["type"], "Allow", n)
+
+    def test_spent_revisions_and_spent_presentations_leave_the_stop_alone(self):
+        """The stuck state: the eight material revisions are used and the current configuration has been shown three times.
+        The unchanged proposal opens no dialog and any change is refused with ``governance.revision_exhausted``, so
+        ``governance.propose`` would be a way on that does not exist: the run's Next is the honest stop."""
+        self._exhaust_pre_approval_revisions(left=0)
+        governed = self.view()["governance"]
+        self.assertEqual(governed["pre_approval_revisions"], governance.MAX_REVISIONS)
+        self.assertIn("governance.propose", self.view()["next_actions"], "a dialog can still be shown before the third showing")
+        self._spend_the_current_configurations_presentations()
+        view = self.view()
+        self.assertEqual(view["governance"]["interactions_remaining"]["proposal"], 0)
+        refused = self.action(**sized_configure_run(budgets=SIZED_BUDGETS, rationale="one more revision"))
+        self.assertEqual(refused["reasons"][0]["code"], "governance.revision_exhausted")
+        self.assertEqual(view["next_actions"], ["residual.accept"])
+        self.assertNotIn("governance.propose", view["next_actions"])
+        self.assertEqual(view["governance"]["next_action"], "residual.accept")
+
+    def test_with_one_revision_left_propose_is_still_offered_after_three_showings(self):
+        self._exhaust_pre_approval_revisions(left=1)
+        self._spend_the_current_configurations_presentations()
+        view = self.view()
+        self.assertEqual(view["governance"]["interactions_remaining"]["proposal"], 0)
+        self.assertIn("governance.propose", view["next_actions"], "one revision remains, so changed ceilings can be proposed")
+        self.assertNotIn("residual.accept", view["next_actions"])
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets=SIZED_BUDGETS, rationale="the last revision"))["type"], "Allow")
+
+    def test_the_exhausted_revision_allowance_is_the_one_of_the_phase_the_run_is_in(self):
+        """``revisions_exhausted`` is the one predicate ``revision_error`` and the next action both read: the allowance before
+        the first approval, then the one after it; deliberative revisions return to the human and are not capped."""
+        gov = governance.plain(_placeholder("auto", {"host": "test", "interactive": True, "signal": "t", "delegation": True,
+                                                     "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}))
+        gov["pre_approval_revisions"] = governance.MAX_REVISIONS
+        self.assertTrue(governance.revisions_exhausted(gov))
+        gov["first_approval"] = True
+        self.assertFalse(governance.revisions_exhausted(gov), "the pre-approval count does not carry over")
+        gov["post_approval_revisions"] = governance.MAX_REVISIONS
+        self.assertTrue(governance.revisions_exhausted(gov))
+        deliberative = governance.plain(_placeholder("deliberative"))
+        deliberative["pre_approval_revisions"] = governance.MAX_REVISIONS
+        self.assertFalse(governance.revisions_exhausted(deliberative), "deliberative revisions return to the human, uncapped")
+
     def test_historical_human_replay_after_auto_kind_transition_is_inert(self):
         self.run_id = self.request({"type": "StartRun", "goal": "kind transition",
                                    "control_mode": "auto",

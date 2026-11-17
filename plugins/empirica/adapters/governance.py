@@ -75,11 +75,13 @@ def closed_code(result: dict) -> str:
     """The one contract code for a mediation that ended without a decision, chosen from the run's own governance
     facts (never from the adapter's guess): the row it names owns the actions.
 
-    Nobody who can be asked now, or the run's allowance spent → ``governance.approval_unavailable`` (the stop alone);
-    this configuration's presentations spent → ``governance.configuration_shown``; a human who closed the dialog →
-    ``governance.dialog_closed``. Nobody to ask is tested first, so every host answers a resumed run the same way."""
+    Nobody who can be asked now, the run's allowance spent, or no way left to change a shown-out configuration (the view's
+    own ``next_action`` is the stop) → ``governance.approval_unavailable`` (the stop alone); this configuration's
+    presentations spent with a change still possible → ``governance.configuration_shown``; a human who closed the dialog
+    → ``governance.dialog_closed``. Nobody to ask is tested first, so every host answers a resumed run the same way."""
     governed = (result.get("run") or {}).get("governance") or {}
-    if (governed.get("context") or {}).get("approval_capability") == "unavailable":
+    if (governed.get("context") or {}).get("approval_capability") == "unavailable" \
+            or governed.get("next_action") == "residual.accept":
         return "governance.approval_unavailable"
     if governed.get("prompt_error"):
         return ("governance.approval_unavailable" if (governed.get("interactions_remaining") or {}).get("total") == 0

@@ -31,6 +31,7 @@ from core.projection import project_presentation
 from test_d7_transactions import Runs, Artifacts, Workspace, Harness
 from governance_setup import (AUTHOR, TEST_INVOCATION, SIZED_RATIONALE, approve_current, end_with_consent,
                               sized_configure_run)
+from core import governance
 from core.canonical import canonical_digest
 from application.protocol import host_profile_id  # noqa: E402
 force_absent_sandbox_home()
@@ -709,6 +710,41 @@ class DismissalRecoveryTests(_ServiceHarness):
                 self._agree(text, "governance.approval_unavailable", [self.STOP])
                 self._agree(self._call(self.CLOSE["dismissed"], budgets={**self.BUDGETS, "max_passes": 7})[0],
                             "governance.approval_unavailable", [self.STOP])
+
+    def _governed(self):
+        return self.req({"type": "GetRun", "run_id": self.run_id})["run"]["governance"]
+
+    def _show_out(self, left):
+        """Interactive auto: size once, make all but ``left`` of the eight material revisions (the first of the three
+        showings below is the last of them: its rationale differs), and dismiss the current configuration three times."""
+        self._call(self.CLOSE["dismissed"])
+        for n in range(governance.MAX_REVISIONS - left - 1):
+            self.action(**sized_configure_run(budgets=self.BUDGETS, rationale=f"material revision {n}"))
+        for _ in range(3):
+            self._call(self.CLOSE["dismissed"])
+        governed = self._governed()
+        self.assertEqual((governed["pre_approval_revisions"], governed["interactions_remaining"]["proposal"]),
+                         (governance.MAX_REVISIONS - left, 0))
+
+    def test_spent_revisions_and_a_shown_out_configuration_name_the_stop_alone(self):
+        """The stuck state: no change is allowed any more and the current configuration has been shown three times, so no
+        dialog can open and no change can be made. The run's Next and the adapter's reason agree on the stop (the Pi
+        chooser reads the same view: its test is in ``governance-ui-unit.test.ts``)."""
+        self._start("auto", "stuck")
+        self._show_out(left=0)
+        text, dialogs = self._call(self.CLOSE["dismissed"])
+        self.assertEqual(dialogs, 0, "the unchanged configuration opens no dialog")
+        self._agree(text, "governance.approval_unavailable", [self.STOP])
+        self.assertNotIn("configure_run", text)
+        self.assertEqual(self._governed()["next_action"], "residual.accept")
+        changed = self._call(self.CLOSE["dismissed"], budgets={**self.BUDGETS, "max_passes": 7})[0]
+        self.assertIn("governance.revision_exhausted", changed)
+
+    def test_with_one_revision_left_a_shown_out_configuration_still_offers_the_change(self):
+        self._start("auto", "one-left")
+        self._show_out(left=1)
+        self.assertEqual(self._governed()["next_action"], "governance.propose")
+        self._agree(self._call(self.CLOSE["dismissed"])[0], "governance.configuration_shown", [self.AGAIN, self.STOP])
 
     def test_no_approval_ui_names_only_the_stop_even_after_a_human_capable_context(self):
         for mode in ("deliberative", "auto"):

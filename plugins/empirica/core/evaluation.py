@@ -755,9 +755,12 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
             # The stop alone when no dialog can be shown: nobody to ask, or the run's allowance (not just this
-            # configuration's three presentations: changed ceilings are a new configuration) is spent.
-            if (governance.interactions_remaining(governed, confirmation.interactions(snapshot))["total"] == 0
-                    or governance.nobody_to_ask(governed)):
+            # configuration's three presentations: changed ceilings are a new configuration) is spent, or this
+            # configuration is shown out and no change is allowed any more (the revision allowance is spent).
+            confirmations = confirmation.interactions(snapshot)
+            if (governance.interactions_remaining(governed, confirmations)["total"] == 0
+                    or governance.nobody_to_ask(governed)
+                    or governance.configuration_stuck(governed, confirmations)):
                 actions.append("residual.accept")
             else:
                 actions.append("governance.propose")
