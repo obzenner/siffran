@@ -34,10 +34,10 @@ Each research artifact in the dossier carries `verification: {class, status, ret
 - An approved `needs-decision` claim without `human_decision` was decided by the author. Judge whether
   its cited evidence supports the chosen option over the alternatives the claim or its evidence names,
   and fail the claim, naming the missing comparison, when it does not; when neither names an
-  alternative, fail the claim and say which alternative needs a comparison.
-- Pass or fail the audit on the claims in `reviewed_claims`: apply rubric items 1–5 to those claims
-  only and items 6–9 to the whole graph, so a claim outside `reviewed_claims` is judged only through
-  items 6–9.
+  alternative, fail the claim and say which alternative, or the status quo, needs a comparison.
+- Pass or fail the audit on the claims in `reviewed_claims`: apply rubric item 1 (a Fold-1 source) to
+  those claims except those with `human_decision`, items 2–5 to those claims only, and items 6–9 to
+  the whole graph, so a claim outside `reviewed_claims` is judged only through items 6–9.
 
 ## Rubric
 

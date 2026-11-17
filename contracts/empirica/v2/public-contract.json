@@ -1009,7 +1009,7 @@
       }
     },
     "human.confirm_evidence": {
-      "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress.",
+      "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress.",
       "surface": {
         "owner": "human",
         "operation": "confirmation"
@@ -1021,7 +1021,7 @@
       }
     },
     "convergence.report": {
-      "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and decisions in one dialog, and when there is none the response says so.",
+      "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and, in deliberative mode, decisions in one dialog, and when there is none the response says so.",
       "surface": {
         "tool": "report_convergence",
         "intent": "report_convergence"
@@ -2273,11 +2273,11 @@
       "clauses": [
         {
           "id": "claims/residuals/human_decision",
-          "text": "A declared human or data hold that is valid and surfaced is a residual; a needs-decision claim waiting on a human is part of the one human batch (evidence.confirmation_required)."
+          "text": "A declared human or data hold that is valid and surfaced is a residual; in deliberative mode a needs-decision claim waiting on a human is part of the one human batch (evidence.confirmation_required)."
         },
         {
           "id": "claims/residuals/needs_decision",
-          "text": "A needs-decision claim cannot be agent-approved and becomes a human residual."
+          "text": "In deliberative mode a needs-decision claim is the human's: it cannot be agent-approved and becomes a human residual. In auto it is the author's: research that counts approves it, refuting evidence discards it, and a human answer, when present, still decides."
         },
         {
           "id": "claims/residuals/lossless_obligation",
@@ -2451,7 +2451,7 @@
       "clauses": [
         {
           "id": "audit/independence/derived",
-          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities, or human_owned when every reviewed claim is a human decision with no evidence behind it; it is never supplied in the verdict."
+          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities, or human_owned when every reviewed claim is a human-answered decision with no evidence behind it (a claim the author decided has a producer and is never human_owned); it is never supplied in the verdict."
         },
         {
           "id": "audit/independence/required",

@@ -1,0 +1,77 @@
+---
+number: 73
+title: "Let auto mode finish unattended: agent-owned decisions, a bounded turn end, and a partial audit"
+status: proposed
+date: 2026-11-17
+tags:
+- empirica
+- governance
+- evidence
+- auto
+links:
+- target: 63
+  kind: Amends
+- target: 67
+  kind: Amends
+- target: 20
+  kind: Amends
+---
+
+# Let auto mode finish unattended: agent-owned decisions, a bounded turn end, and a partial audit
+
+Amends ADR-0063, ADR-0067 and ADR-0020. Status *proposed*: this record grows with each PR of the stack, so that at every merge it describes only behaviour that has shipped, and it is accepted in the top PR of the landing. Only D1 is written so far.
+
+## Context and Problem Statement
+
+ADR-0063 defines auto as "one human approval episode, then unattended" (section "Auto mode: one human approval episode, then unattended"). ADR-0067 and ADR-0020 still make every `needs-decision` claim the human's, in every mode: ADR-0067 §"`needs-decision`" (line 139: "The claim is `blocked` until it is answered"), its scenario row H "Only a `needs-decision` claim" (`evidence.confirmation_required` with `claim_ids`, "Approve converges after an audit as `human_owned`"), and ADR-0020 line 141 ("`needs-decision` claims cannot be validated by the agent; surface to the human, blocked"). So an auto run with one decision claim cannot finish without a human, which contradicts "unattended"; in a delegated run nobody can be asked at all.
+
+## Decision Drivers
+
+* An auto run should end without a human once the configuration is approved.
+* A human's answer must keep deciding wherever one exists, and deliberative runs must not change.
+* The auditor, not the author, judges whether the author's choice is supported.
+
+## Considered Options
+
+* Refuse the `needs-decision` kind in auto. It erases the decision/fact distinction, and the hand-over loses the agent's choices.
+* A human batch at the end of an auto run. It is contrary to the operator's direction.
+* Make the claim the author's in auto and derive it by fold 1, after the existing order (chosen).
+
+## Decision Outcome
+
+### D1 In auto, a `needs-decision` claim is author-owned and derived by fold 1
+
+* **State.** `claim_state_cause` keeps its order: conflict, failed spike, refuting research, human answer. A `needs-decision` claim with no answer is then derived like an `ordinary` claim in auto (supporting research that counts approves it; none leaves it open with `claim.research_missing`; supporting plus refuting is a conflict). In deliberative it stays `blocked` on the human, exactly as in ADR-0067. An existing human answer decides in every mode.
+* **Batch.** `pending_decisions` is empty in auto, so no decision is in the human batch. A retrievable record that supports a decision still waits for its own confirmation.
+* **Independence.** An approved author-decided claim rests on research that has a producer, so it is never `human_owned`; `human_owned` is kept for a human-answered decision with no evidence (ADR-0067 §"Human-owned claims sit outside producer independence").
+* **Auditor.** The shared rubric judges that an approved decision without `human_decision` was decided by the author: its cited evidence must support the chosen option over the alternatives the claim names, or the claim fails. The verdict covers the claims in `reviewed_claims`.
+* **Validator.** `scripts/validate_contracts.py` invariant 13 accepts an approved `needs-decision` claim with an approving `human_decision`, or with active supporting research and no refuting or failing evidence, and rejects a non-approving `human_decision` always. The view carries no control mode, so the mode rule is the core's.
+* **Contract and registry.** `public-contract.json` qualifies by mode every sentence that made a decision human-only. `host-boundaries.json` scopes EHB-DLG-07 to deliberative runs and adds EHB-DLG-08 for auto decisions.
+* **UI view.** `decided_by_author` and `rejected_by_evidence` are added to the decision `status` enum of `empirica-ui-view/v1` (produced from A5 of the stack).
+
+### Additive closed-enum values
+
+An additive value in a closed enum is admissible within `empirica/v2` and `empirica-ui-view/v1`, without a new contract version. The consumers (the core, the observer, the UI and the hosts) ship together and are validated against the contract by `make contract-check`, so a value no consumer knows cannot reach one.
+
+### Consequences
+
+* Good, because an auto run with decisions converges unattended, and the auditor reviews the choice.
+* Bad, because an author can now approve its own decision; the audit rubric and its independence classification are the check, and the reversal condition below watches for it.
+
+### Reversal condition
+
+Field runs or the native qualification show agent-decided claims passing the audit with unsupported choices.
+
+## To be filled by later PRs of the stack
+
+### D2 Auto turn end
+
+To come: continue while author work remains, a bound on unchanged continuations, and a core-owned signal for the notice.
+
+### D3 and D6 Human-only evidence in auto, and a partial audit
+
+To come: when human-only evidence is asked in interactive auto, and an audit of the claims that do not wait on a human.
+
+### D5 Persisted runs
+
+To come: the policy for runs persisted before this change.

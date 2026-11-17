@@ -515,11 +515,11 @@
           },
           {
             "id": "human.confirm_evidence",
-            "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress."
+            "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress."
           },
           {
             "id": "convergence.report",
-            "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and decisions in one dialog, and when there is none the response says so."
+            "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and, in deliberative mode, decisions in one dialog, and when there is none the response says so."
           }
         ]
       }
