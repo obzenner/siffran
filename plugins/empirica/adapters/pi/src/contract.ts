@@ -201,8 +201,12 @@ export interface RunSnapshot {
   basis?: string;
   /** What a human would be shown now, or null (the core's projection; the host presents when `prompt_error` is null). */
   confirmation_batch?: ConfirmationBatch | null;
-  /** Who the run waits on at a turn end (the core's `turn_end_actor`): a host reads it and derives nothing else. */
-  turn_end_actor?: "author" | "human" | "none";
+  /**
+   * Who the run waits on at a turn end (the core's `turn_end_actor`): a host reads it and derives nothing else. The
+   * response schema requires it, so a missing value is a contract fault, never "continue": a host fails closed to
+   * the behaviour it has without the field. (Optional here only because this interface also types partial views.)
+   */
+  turn_end_actor?: "author" | "auditor" | "human" | "none";
   [key: string]: unknown;
 }
 

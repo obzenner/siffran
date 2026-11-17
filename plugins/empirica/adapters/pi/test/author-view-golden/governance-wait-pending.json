@@ -154,7 +154,7 @@
         ]
       },
       "confirmation_batch": null,
-      "turn_end_actor": "author"
+      "turn_end_actor": "human"
     },
     "reasons": [
       {

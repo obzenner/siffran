@@ -1422,21 +1422,22 @@ def first_admissible(requirements: Sequence[Requirement]) -> Requirement | None:
 
 
 
-#: Who a host's turn end waits on, by the actor of the first admissible requirement. The auditor's step is the author's to
-#: wait for, or to relaunch when it fails, so a pending audit is the author's turn.
-_TURN_END_ACTORS = {"agent": "author", "auditor": "author", "human": "human"}
+#: Who a host's turn end waits on, by the actor of the first admissible requirement. A running audit child is the auditor's
+#: step: the turn settles and the child's result continues the run (``audit.required``, and the audit that failed, are the
+#: agent's to launch again).
+_TURN_END_ACTORS = {"agent": "author", "auditor": "auditor", "human": "human"}
 
 
 def turn_end_actor(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
                    owed: Sequence[Requirement]) -> str:
-    """``author``, ``human`` or ``none``: who the run waits on at a turn end, for a host to read and not to recompute. It
-    is the actor of the first admissible requirement of ``owed`` (``report_requirements``), ``none`` when nothing is owed,
-    when the run has ended, and when the root claim is refuted or conflicted: no further work can approve it, so the
-    author's only step is to say so by stopping."""
+    """``author``, ``auditor``, ``human`` or ``none``: who the run waits on at a turn end, for a host to read and not to
+    recompute. It is the actor of the first admissible requirement of ``owed`` (``report_requirements``), ``none`` when
+    nothing is owed and when the run has ended, and ``none`` when the root claim is refuted or conflicted: no further work
+    can approve it, so the author's only step is to say so by stopping. A human who is being asked is never hidden."""
     first = first_admissible(owed)
     if snapshot.state.status != "active" or first is None:
         return "none"
-    if snapshot.graph is not None and derivation is not None:
+    if first.actor != "human" and snapshot.graph is not None and derivation is not None:
         root = next((c for c in snapshot.graph["claims"] if c["id"] == snapshot.graph["root"]), None)
         if root is not None and (derivation.states.get(root["id"]) == "discarded" or claim_conflicted(snapshot, root)):
             return "none"

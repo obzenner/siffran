@@ -99,6 +99,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         self.b = None
         self.edits = 0
         self.receipts = 0  # every host answer has a receipt of its own
+        self.turn_ends: set = set()  # the turn end actors the invariant has met
 
     # --- the run ---------------------------------------------------------------------------------------------------
 
@@ -248,9 +249,9 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         self.b.present_and_answer(self.run, f"answer-{self.receipts}", decisions)
 
     def _turn_end_actor(self, snapshot, core, argument) -> None:
-        """``turn_end_actor`` is the actor of the report's first admissible requirement (the author, whether it owes claim
-        work or an audit, or the human), ``none`` when nothing is owed, when the root is refuted or conflicted
-        (read from the public argument), and when the run has ended."""
+        """``turn_end_actor`` is the actor of the report's first admissible requirement (``author``, ``auditor`` or
+        ``human``), ``none`` when nothing is owed and when the run has ended, and ``none`` too when the root is refuted or
+        conflicted (read from the public argument) unless a human is being asked."""
         if core["status"] != "active":
             want = "none"
         else:
@@ -259,8 +260,10 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
             outcomes = {a["outcome"] for a in argument["artifacts"] if a["kind"] == "research" and a["active"]
                         and root is not None and a["claim_id"] == root["claim_id"]}
             ruled_out = root is not None and (root["state"] == "discarded" or outcomes >= {"supporting", "refuting"})
-            want = ("none" if first is None or ruled_out else "human" if first.actor == "human" else "author")
+            want = ("none" if first is None else "human" if first.actor == "human" else "none" if ruled_out
+                    else "auditor" if first.actor == "auditor" else "author")
         assert core["turn_end_actor"] == want, (core["turn_end_actor"], want)
+        self.turn_ends.add(want)
 
     # --- the invariant -----------------------------------------------------------------------------------------------
 
@@ -374,6 +377,14 @@ REPLAYS = {
         ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=True, ref="a.md"))],
     "an auto decision left open by a stop": [
         ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("stop", dict(consent=True))],
+    "a root refuted by research has no turn end to wait for": [
+        ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=True, ref="a.md"))],
+    "a root with research for and against it is in conflict": [
+        ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
+        ("research", dict(claim="C0", against=True, ref="b.md"))],
+    "an audit left running is the auditor's turn": [
+        ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
+        ("research", dict(claim="C3", against=False, ref="b.md")), ("a_re_audit_is_left_pending", {})],
     "a stop shown and declined": [
         ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
         ("stop", dict(consent=False))],
@@ -382,7 +393,7 @@ REPLAYS = {
 
 class ReplayTests(unittest.TestCase):
     def test_each_named_sequence_keeps_the_invariant_after_every_step(self):
-        decisions, steps_seen = set(), set()
+        decisions, steps_seen, turn_ends = set(), set(), set()
         for name, steps in REPLAYS.items():
             with self.subTest(name):
                 machine = ObserverEqualsCoreMachine()
@@ -391,10 +402,13 @@ class ReplayTests(unittest.TestCase):
                     machine.the_observer_says_what_the_core_says()
                     decisions |= set(machine.decisions)
                     steps_seen |= set(machine.steps)
+                    turn_ends |= machine.turn_ends
         # The oracles must see every answer they tell apart, or an observer that always says one would pass.
         self.assertEqual(decisions, {"approved", "rejected", "waiting", "unanswered", "deferred", "not_asked",
                                      "decided_by_author", "rejected_by_evidence"})
         self.assertEqual(steps_seen, {"current", "replaced", "gone"})
+        # Likewise every turn end actor, including the two the generator rarely reaches: a ruled-out root, and an audit running.
+        self.assertEqual(turn_ends, {"author", "auditor", "human", "none"})
 
 
 class FoundByTheMachineTests(unittest.TestCase):

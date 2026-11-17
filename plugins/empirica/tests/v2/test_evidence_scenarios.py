@@ -6,13 +6,19 @@ and shows the test fail. The host is the shared Claude mediator with a scripted 
 Pi gate rules over the same facts are tested in their own suites."""
 from __future__ import annotations
 
+from pathlib import Path
 from unittest import mock
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts"))
+import regen_contract_fixtures  # noqa: E402
 
 from adapters import confirmation
 from core import evaluation
 from application import protocol
-from assertions import ConformanceCase, action_freeze, observe_action
+from assertions import ConformanceCase, action_freeze, get_run, observe_action
 from governance_setup import TEST_INVOCATION
+from observer_store import _Builder, _graph
 from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
 from application.protocol import host_profile_id  # noqa: E402
@@ -513,14 +519,19 @@ class RestoreCells(ScenarioFixture):
 
 class TurnEndActorCells(ScenarioFixture):
     """The run view's ``turn_end_actor`` (D2.3): who a host's turn end waits on, owned by the core. It is the actor of the
-    report's first admissible requirement (the author's, whether it owes claim work or an audit, or the human's), and
-    ``none`` when nothing is owed, when the root claim is refuted or conflicted (no further work can approve it), and
-    when the run has ended."""
+    report's first admissible requirement (``author`` for the agent's work, ``auditor`` while an audit child runs, ``human``),
+    and ``none`` when nothing is owed, when the run has ended, and when the root claim is refuted or conflicted (no further
+    work can approve it) unless a human is being asked."""
 
     MODES = ("deliberative", "auto")
 
-    def actor(self, drv, run_id) -> str:
-        return self.run_view(drv, run_id)["turn_end_actor"]
+    def actor(self, drv, run_id, ruled_out=False) -> str:
+        """The core's value, which the fixtures' own derivation (from a view's reasons, obligations and governance, as the
+        fixture generators set it) must agree with wherever the view states what is owed; a view cannot show a ruled-out root."""
+        view = self.run_view(drv, run_id)
+        if not ruled_out and any(row["status"] != "satisfied" for row in view["obligations"]["active"]):
+            self.assertEqual(regen_contract_fixtures.turn_end_actor_of({"run": view}), view["turn_end_actor"])
+        return view["turn_end_actor"]
 
     def test_author_while_the_agent_owes_research(self):
         for mode in self.MODES:
@@ -540,14 +551,27 @@ class TurnEndActorCells(ScenarioFixture):
             self.research(drv, run_id, "web", URL)
             self.assertEqual((mode, self.actor(drv, run_id)), (mode, "human"))
 
-    def test_author_while_an_audit_is_owed_or_pending(self):
+    def test_the_auditor_while_an_audit_child_runs_and_the_author_before_it_is_launched(self):
         for mode in self.MODES:
             drv, run_id = self.start(mode=mode)
             self.research(drv, run_id, "code", WORKSPACE_REF)
             self.assertEqual((self.codes(self.report(drv, run_id)), self.actor(drv, run_id)),
-                             (["audit.required"], "author"), mode)
+                             (["audit.required"], "author"), mode)  # the author launches it
             self.require_pending_audit_child(drv, run_id)
-            self.assertEqual(self.actor(drv, run_id), "author", mode)  # it waits for the audit, or relaunches it
+            self.assertEqual(self.actor(drv, run_id), "auditor", mode)  # the turn settles; the child's result continues
+
+    def test_human_while_its_configuration_waits_on_a_human(self):
+        for mode in self.MODES:  # deliberative, and interactive auto (nobody delegated its approval)
+            b = _Builder()
+            run = b.begin("probe", f"s-{mode}", "Configure first.", _graph("C0", [("C0", "ordinary", "Root")], []),
+                          approve=False, control_mode=mode)
+
+            def view() -> dict:
+                return b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]
+
+            self.assertEqual((view()["governance"]["human_wait"], view()["turn_end_actor"]), (False, "author"), mode)
+            b.ask_configuration(run, f"rc-{mode}", outcome="present")
+            self.assertEqual((view()["governance"]["human_wait"], view()["turn_end_actor"]), (True, "human"), mode)
 
     def test_none_when_nothing_is_owed(self):
         for mode in self.MODES:
@@ -565,7 +589,7 @@ class TurnEndActorCells(ScenarioFixture):
             drv, run_id = self.start(mode=mode)
             self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
             self.assertEqual(self.codes(self.report(drv, run_id)), ["claim.refuted"])
-            self.assertEqual(self.actor(drv, run_id), "none", mode)
+            self.assertEqual(self.actor(drv, run_id, ruled_out=True), "none", mode)
 
     def test_none_for_a_conflicted_root(self):
         for mode in self.MODES:
@@ -573,12 +597,22 @@ class TurnEndActorCells(ScenarioFixture):
             self.research(drv, run_id, "code", WORKSPACE_REF)
             self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
             self.assertEqual(self.codes(self.report(drv, run_id)), ["evidence.conflict"])
-            self.assertEqual(self.actor(drv, run_id), "none", mode)
+            self.assertEqual(self.actor(drv, run_id, ruled_out=True), "none", mode)
 
     def test_a_refuted_leaf_is_not_a_refuted_root(self):
         drv, run_id = self.start(graph=self.chain())
         self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1", result="refutes")
         self.assertEqual(self.actor(drv, run_id), "author")
+
+    def test_a_ruled_out_root_does_not_hide_a_human_who_is_being_asked(self):
+        drv, run_id = self.start()
+        self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
+        snapshot = self.snapshot(drv, run_id)
+        derivation = evaluation.derive_claims(snapshot)
+        asked = evaluation.Requirement("terminal", "t", "t", None, {}, (), None, "human", "next_report", True)
+        held = evaluation.Requirement("claim", "c", "c", None, {}, (), None, "agent", "next_turn", True)
+        self.assertEqual(evaluation.turn_end_actor(snapshot, derivation, (asked,)), "human")
+        self.assertEqual(evaluation.turn_end_actor(snapshot, derivation, (held,)), "none")
 
     def test_none_for_a_terminal_run(self):
         for mode in self.MODES:

@@ -48,6 +48,30 @@ def _spike_binding(document: dict) -> dict:
     return dict(_QUALIFIED_SPIKES if requires_spikes else _UNAVAILABLE_SPIKES)
 
 
+#: What the gate's first reason says about who the turn end waits on: a human who is asked, and an audit child that runs.
+_CONFIGURATION_REASONS = {"governance.approval_required", "governance.revision_required", "obligation.approval"}
+
+
+def turn_end_actor_of(result: dict) -> str:
+    """The run view's ``turn_end_actor`` as its own reasons, obligations and governance say it (the core's first admissible
+    requirement; ``core.evaluation.turn_end_actor``), for hand-authored fixtures and goldens, which set it from here and never
+    by hand. The first reason is the gate's; a view without one names its first unmet, unheld obligation; one that names
+    nothing owed is an active run with its work still to do. A refuted or conflicted root (``none``) is not visible in a view."""
+    run = result["run"]
+    if run["status"] != "active" or any(r["code"] == "run.corrupt" for r in result.get("reasons", ())):
+        return "none"
+    owed = [(r["code"], r.get("parameters", {})) for r in result.get("reasons", ())]
+    owed = owed or [((row.get("missing") or {}).get("code") or row["id"], (row.get("missing") or {}).get("parameters", {}))
+                    for row in run["obligations"]["active"]
+                    if row["status"] != "satisfied" and not row.get("hold") and (row.get("missing") or row["id"].startswith("obligation."))]
+    code, parameters = owed[0] if owed else (None, {})
+    configuring = (run.get("governance") or {}).get("human_wait") is True
+    if (code == "evidence.confirmation_required" or (code == "governance.terminal_stop_pending" and parameters.get("case") != "declined")
+            or (code in _CONFIGURATION_REASONS and configuring)):
+        return "human"
+    return "auditor" if code == "audit.pending" else "author"
+
+
 def _audit_summary(result: dict, run: dict) -> dict[str, object]:
     """Derive the bounded RunView audit summary for hand-authored conformance fixtures.
 
@@ -151,6 +175,7 @@ def generated(path: Path) -> str:
         run["audit"] = _audit_summary(result, run)
         # Hand-authored fixtures wait on no human unless they say so (ADR-0067).
         run.setdefault("confirmation_batch", None)
+        run["turn_end_actor"] = turn_end_actor_of(result)
     # Hand-authored fixtures observed no human surface unless they say so (ADR-0067).
     for invocation in (run.get("invocation"), document.get("invocation"),
                        document.get("request", {}).get("command", {}).get("invocation"),
