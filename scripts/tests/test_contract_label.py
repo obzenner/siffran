@@ -42,6 +42,36 @@ class ContractLabelTests(unittest.TestCase):
         self.assertEqual(wrong, [])
 
 
+class TurnEndBoundsTests(unittest.TestCase):
+    """The bound on an auto chain is defined once, in the registry's ``turn_end.bounds``; the documents that state it carry
+    that definition word for word, so a rewording in one place cannot drift from the others."""
+
+    def definition(self) -> str:
+        return json.loads(text(CONTRACTS / "host-boundaries.json"))["turn_end"]["bounds"]["definition"]
+
+    def test_the_definition_names_its_own_numbers(self):
+        bounds = json.loads(text(CONTRACTS / "host-boundaries.json"))["turn_end"]["bounds"]
+        self.assertEqual(int(re.search(r"\bK = (\d+)", bounds["definition"]).group(1)), bounds["K"])
+        self.assertEqual(int(re.search(r"\bT = (\d+)", bounds["definition"]).group(1)), bounds["T"])
+        self.assertIn("K-th turn end of a chain on one observation basis, or the T-th turn end in a chain, ends the chain",
+                      bounds["definition"])
+        self.assertIn("at most K \u2212 1 continuations on one basis and T \u2212 1 in a chain", bounds["definition"])
+
+    def test_every_document_that_states_the_bound_carries_the_definition(self):
+        wanted = " ".join(self.definition().split())
+        adr = next((ROOT / "doc" / "adr").glob("0073-*.md"))
+        for path in (adr, PLUGIN / "adapters" / "pi" / "README.md", ROOT / "doc" / "design" / "empirica-host-boundary-registry.md",
+                     ROOT / ".agents" / "skills" / "native-qualification" / "references" / "scenarios.md"):
+            self.assertIn(wanted, " ".join(text(path).split()), str(path.relative_to(ROOT)))
+
+    def test_no_prose_of_the_table_restates_the_numbers(self):
+        table = json.loads(text(CONTRACTS / "host-boundaries.json"))["turn_end"]
+        prose = {name: cell for name, cell in table["outcomes"].items()}
+        prose.update({f"{host}.loop_bound": surface["loop_bound"] for host, surface in table["hosts"].items()})
+        for name, sentence in prose.items():
+            self.assertNotRegex(sentence, r"\b[KT] = \d+", name)
+
+
 class TurnEndNoticeTests(unittest.TestCase):
     """The ``unattended_residual`` settlement notice (the honest end of an auto turn) is one name in the contract, its
     schema, the vendored copy, the tools file Pi reads, and the turn-end table's validator."""
@@ -102,6 +132,8 @@ class TurnEndNoticeTests(unittest.TestCase):
         self.assertIn("report_convergence intent=stop", notice)
         # true for every cause of `none` (a graph revision is a step) and for a turn that goes on (it does not hand the turn back)
         self.assertIn("revise the claim graph and continue", notice)
+        # a frozen graph admits no revision, so the way on is offered only where it exists
+        self.assertIn("unless the claim graph is frozen", notice)
         self.assertNotIn("hand the turn back", notice)
         self.assertNotIn("No step left", notice)
 

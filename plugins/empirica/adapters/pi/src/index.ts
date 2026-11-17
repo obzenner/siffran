@@ -61,7 +61,7 @@ import { loadInventory, type SubagentInventory } from "./subagent-inventory.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 import type { SpikeProfile } from "./contract.ts";
 import { startObserver, type ObserverServer } from "./observer-ui.ts";
-import { turnEnd, type Basis } from "./turn-end.ts";
+import { turnEnd, type Memory } from "./turn-end.ts";
 import {
   REPORT_CONVERGENCE_INTENT,
   REPORT_CONVERGENCE_TOOL,
@@ -498,8 +498,11 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     const ownerDetail = (refusal: OwnerRefusal): string => `${refusal.code}: ${refusal.message}`;
 
     const completedAuditCalls = new Set<string>();
-    // The Pi turn-end bound (`turn-end.ts`): adapter memory only, never run state.
-    let lastContinuation: Basis | null = null;
+    // The Pi turn-end bound (`turn-end.ts`): adapter memory only, never run state. It belongs to one run and one chain: it is
+    // read only for the run it was written for, and forgotten when no run is active, when a person's prompt starts a new
+    // chain (`before_agent_start`; a continuation requested at `agent_before_settle` runs `agent_start` and never
+    // `before_agent_start`, docs/extensions.md "Lifecycle Overview"), and after any turn end that is not a continuation.
+    let lastContinuation: { run: string; memory: Memory } | null = null;
     type ChildCorrelation = { runHandle: string; childId: string; nativeId: string };
     const children = new Map<string, ChildCorrelation>();
     const reportEvaluations = new Map<string, { intent: string; response: Response }>();
@@ -836,6 +839,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
         }
       },
     });
+
+    // A person's prompt (or a message that starts a run while idle) begins a new chain of turn ends.
+    pi.on("before_agent_start", () => { lastContinuation = null; });
 
     let onAgentStart: (() => void) | null = null;
     pi.on("agent_start", () => { onAgentStart?.(); });
@@ -1212,14 +1218,15 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
     // read through the same guarded dispatch as the gate; an unreadable run ends the turn with nothing appended, because
     // the gate at `tool_call` still holds.
     pi.on("agent_before_settle", async (event: BoundaryEvent) => {
-      if (runHandle === null) return;
+      const run = runHandle;
+      if (run === null) { lastContinuation = null; return; }
       let action;
       try {
-        const response = await dispatch(evaluateRunRequest(runHandle, REPORT_CONVERGENCE_INTENT, randomUUID()));
-        action = turnEnd(response.result, lastContinuation);
+        const response = await dispatch(evaluateRunRequest(run, REPORT_CONVERGENCE_INTENT, randomUUID()));
+        action = turnEnd(response.result, lastContinuation?.run === run ? lastContinuation.memory : null);
         onTerminal(response);
       } catch { lastContinuation = null; return; }
-      lastContinuation = action.kind === "continue" ? action.basis : null;
+      lastContinuation = action.kind === "continue" ? { run, memory: action.memory } : null;
       if (action.kind === "nothing") return;
       const text = action.kind === "continue" ? action.message : action.notice;
       if (action.kind === "no-progress") pi.appendEntry?.("empirica.turn_end", { outcome: "no-progress" });

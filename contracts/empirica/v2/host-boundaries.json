@@ -11,15 +11,23 @@
     "auto-delegated"
   ],
   "turn_end": {
+    "bounds": {
+      "K": 3,
+      "T": 16,
+      "definition": "With K = 3 and T = 16: the K-th turn end of a chain on one observation basis, or the T-th turn end in a chain, ends the chain with the `unattended_residual` notice, so at most K − 1 continuations on one basis and T − 1 in a chain. A changed basis restarts the count on the new basis; any turn end that is not a continuation ends the chain and clears both counts. A continuation that carries the `unattended_residual` directive (the actor `none`) counts like any other.",
+      "enforced_by": [
+        "pi"
+      ]
+    },
     "outcomes": {
       "allow": "End the turn: the run converged and the view says so (`Allow(converged=true)` is the only convergence claim).",
       "settle": "End the turn with the run view and no notice: exactly one audit is pending and its result continues the run.",
       "settle-notice": "End the turn with the contract notice of the settlement; the run stays active and not converged, and nothing was approved or confirmed by the settlement.",
       "pause": "End the turn with a contract notice that is not a convergence claim and names the real next step the human can relay to the agent; the run stays active, nobody was asked, nothing was granted. The same on a first and a later turn end.",
-      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; `unattended_continue` on a later turn end of the same chain). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else. The contract bounds a chain: at most K = 3 continuations on an unchanged basis (a changed basis resets the count and so does the end of a chain), and on Pi a total of T = 16 continuations in one chain whatever the basis does; when a bound is reached the turn ends instead (`end-no-progress`). K, T and the residual at the bound are the contract; hosts that do not yet count end at the first repeat on an unchanged basis with `unattended_continue`. A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason.",
-      "end-no-progress": "End the turn because the chain made no progress: on the basis the previous continuation saw today (the notice is `unattended_continue`; Pi records `no-progress`). The contract is that the K-th continuation (K = 3) on one observation basis (the core's `run.basis`), or on Pi the T-th (T = 16) in one chain, ends the turn with the `unattended_residual` notice, which offers `report_convergence intent=stop` as the honest end. K, T and the residual at the bound are the contract; hosts that do not yet count end at the first repeat on an unchanged basis with `unattended_continue`.",
+      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; `unattended_continue` on a later turn end of the same chain). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else. A chain is bounded by `bounds` (the K-th turn end on one basis and the T-th in a chain end it instead, `end-no-progress`). A host in `bounds.enforced_by` counts them; any other host ends at the first repeat on an unchanged basis with `unattended_continue`. A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason.",
+      "end-no-progress": "End the turn because the chain reached its bound (`bounds`): the notice is `unattended_residual`, which offers `report_convergence intent=stop` as the honest end, and Pi records `no-progress`. A host that does not count (not in `bounds.enforced_by`) ends at the first repeat on an unchanged basis with `unattended_continue`.",
       "unreachable": "The state cannot arise in this control mode (the core never produces it there); no host outcome is defined, and a scenario names the test that proves it.",
-      "continue-with-notice": "Keep the turn going with the cell's notice as the directive on every turn end of the chain, the first included: the run needs a decision from the agent (end honestly, or revise the claim graph), and a settled turn would hand it to nobody. It is bounded like `continue`: a turn end on the basis the previous one saw ends the turn instead (`end-no-progress`)."
+      "continue-with-notice": "Keep the turn going with the cell's notice as the directive, once per observation basis: the run needs a decision from the agent (end honestly, or revise the claim graph), and a settled turn would hand it to nobody. The continuation is counted like any other (`bounds`), and a turn end on the basis the previous one saw ends the turn instead with `unattended_continue` (`end-no-progress`)."
     },
     "states": [
       {
@@ -302,7 +310,7 @@
         "settle": "exit 0; the run view (async audit) or `systemMessage` with the notice",
         "pause": "exit 0 with `systemMessage`",
         "continue": "exit 2 with the reason on stderr (the real reason), and `unattended_continue` when `stop_hook_active` is true; on any later turn end whose `run.basis` is the one the previous Stop saw, the turn ends (exit 0) with `unattended_continue`",
-        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule). The adapter adds the same rule as Pi: it remembers the core's `run.basis` per session and a continuation on an unchanged basis ends with `unattended_continue`; the cap is the backstop, no longer the bound that matters. The contract adds K = 3 on one basis, ending with `unattended_residual`; Claude does not count it yet.",
+        "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule). The adapter adds the same rule as Pi: it remembers the core's `run.basis` per session and a continuation on an unchanged basis ends with `unattended_continue`; the cap is the backstop, no longer the bound that matters. Claude is not in `bounds.enforced_by`: it does not count K and T, and ends at the first repeat on one basis.",
         "table_driven": "EHB-STOP-23"
       },
       "pi": {
@@ -311,7 +319,7 @@
         "settle": "nothing is appended, or a `custom_message` (`display: true`) with the settlement notice",
         "pause": "append a `custom_message` entry (`display: true`) holding the notice, with no `continue`",
         "continue": "`continue: true`, with the next obligation as the appended message",
-        "loop_bound": "None from the host. The adapter keeps its own: it requests a continuation only when the core's `run.basis` changed since the adapter's previous continuation; otherwise it ends with the `unattended_continue` notice and records `no-progress`. The contract adds K = 3 on one basis and T = 16 per chain, ending with `unattended_residual`; Pi does not count them yet.",
+        "loop_bound": "None from the host. The adapter keeps its own, in memory only: it remembers `{basis, count, total}` for the chain it is in and applies `bounds`: a changed basis restarts `count` at 1, every continuation adds one to `total`, and the K-th turn end on a basis or the T-th in the chain ends with the `unattended_residual` notice and records `no-progress`. Any outcome that is not a continuation clears the memory, and so do the end of the run, a change of run and a new prompt; a memory it cannot read (a bare basis from an older version, or a malformed one) reads as a changed basis with zeroed counts.",
         "table_driven": "EHB-STOP-34"
       }
     }
@@ -583,7 +591,7 @@
       "boundary": "HB-STOP",
       "title": "Pi ends a turn at `agent_before_settle` by the turn-end table, and bounds its own continuations",
       "control_mode_dependent": true,
-      "outcomes": "Pi (1.0.0 and later): `allow` and `settle` append nothing (a settlement appends its notice) | `pause` (a `custom_message` with `display: true`, no `continue`) | `continue` (`continue: true`, the next obligation appended) | `end-no-progress` (today the `unattended_continue` notice on the first repeat, `no-progress` recorded; the contract is `unattended_residual` at K = 3 and T = 16, which Pi does not count yet); an auto run whose `turn_end_actor` is `none` continues with `unattended_residual` as the directive. Only `agent_before_settle` acts; `agent_settled` is a notification and `turn_end` is not used, so a settle carries one notice.",
+      "outcomes": "Pi (1.0.0 and later): `allow` and `settle` append nothing (a settlement appends its notice) | `pause` (a `custom_message` with `display: true`, no `continue`) | `continue` (`continue: true`, the next obligation appended) | `end-no-progress` (the `unattended_residual` notice at the bound of `turn_end.bounds`, `no-progress` recorded); an auto run whose `turn_end_actor` is `none` continues with `unattended_residual` as the directive. Only `agent_before_settle` acts; `agent_settled` is a notification and `turn_end` is not used, so a settle carries one notice.",
       "scenarios": [
         "EHB-STOP-29",
         "EHB-STOP-35",
@@ -595,7 +603,7 @@
         "EHB-STOP-37"
       ],
       "sources": "ADR-32, ADR-68, `dist/core/extensions/types.d.ts:729-779,805` and `docs/extensions.md:66,117` of Pi 1.1.0 (Q3 surface §1), PI-T (`agent_before_settle`).",
-      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; an auto run continues while the core's `run.basis` changes between continuations and ends with `no-progress` otherwise. The contract bounds a chain at K = 3 continuations on one basis and T = 16 in total, ending with `unattended_residual`; hosts that do not yet count end at the first repeat with `unattended_continue`."
+      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; an auto run continues while the core's `run.basis` changes between continuations, and a chain is bounded by `turn_end.bounds` (Pi enforces it; a host not in `enforced_by` ends at the first repeat with `unattended_continue`)."
     },
     {
       "id": "HX-STOP-05",
@@ -2730,7 +2738,7 @@
       ],
       "setup": "an auto run whose `turn_end_actor` is `none` (the root claim is refuted or conflicted)",
       "action": "Stop (Claude) / `agent_before_settle` (Pi)",
-      "expected": "C/P: the turn goes on (Claude exit 2; Pi `continue: true`) with the `unattended_residual` notice as the directive: it names the core's reason and offers `report_convergence intent=stop` or a revised claim graph, on the first turn end and on a later one on a changed basis; a turn end on the basis the previous one saw ends the turn with `unattended_continue` (the no-progress rule); deliberative pauses with `paused_for_human`",
+      "expected": "C/P: the turn goes on (Claude exit 2; Pi `continue: true`) with the `unattended_residual` notice as the directive: it names the core's reason and offers `report_convergence intent=stop` or a revised claim graph, on the first turn end and on a later one on a changed basis; the continuation is counted against `turn_end.bounds`, and a turn end on the basis the previous one saw ends the turn with `unattended_continue` (the no-progress rule); deliberative pauses with `paused_for_human`",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_an_auto_run_whose_author_has_no_step_left_continues_with_the_residual_as_its_directive",
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_a_none_actor_that_does_not_move_the_run_ends_the_turn_on_the_no_progress_rule",
@@ -2816,7 +2824,7 @@
       "action": "`agent_before_settle`",
       "expected": "P: `continue: true` with the next obligation (the core's reason) appended as the message",
       "covered_by": [
-        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues twice on one basis, then ends with the residual and no-progress",
         "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32: an auto run asks no one: every auto mode is handed the core's reason, never the evidence directive"
       ],
       "ledger_rows": [
@@ -2831,11 +2839,24 @@
         "auto-interactive-post",
         "auto-delegated"
       ],
-      "setup": "Pi, an auto run that already continued on this observation basis and whose basis has not changed",
+      "setup": "Pi, an auto run at the bound of `turn_end.bounds`: its next turn end would be the K-th on one observation basis, or the T-th in the chain whatever the basis did",
       "action": "`agent_before_settle` again",
-      "expected": "P: no `continue`; the `unattended_continue` notice is appended and `no-progress` is recorded; a changed `run.basis` (the core's digest of the blockers and the run state recorded work can change) allows one more continuation; a tool result that leaves it as it was, such as a read of the run, does not",
+      "expected": "P: no `continue`; the `unattended_residual` notice is appended (it offers `report_convergence intent=stop`) and `no-progress` is recorded; turn ends 1 and 2 on one basis continue and the third ends; a changed `run.basis` (the core's digest of the blockers and the run state recorded work can change) restarts the count, and a tool result that leaves it as it was, such as a read of the run, does not; the T-th turn end of a chain ends it however the basis moved; a continuation that carries the `none` directive is counted like any other, and the bound is checked ahead of it; the memory is forgotten after any outcome that is not a continuation, after an error reading the run, when no run is active, when another run becomes active, and when a person's prompt starts a new chain; a memory a 7.0.x adapter wrote (a bare basis) or an unreadable one reads as a changed basis with zeroed counts",
       "covered_by": [
-        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress"
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues twice on one basis, then ends with the residual and no-progress",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: on an unchanged basis continuations 1 and 2 continue and the third end is the residual",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: a changed basis resets the count, and the chain still ends at T with the residual",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: a changed basis between repeats holds the count below K",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: a chain whose basis keeps changing ends at T with the residual, through the handler",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: any non-continue outcome clears the memory, so the next chain starts at 1",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: a memory from 7.0.x (a bare basis) and an unreadable one read as a changed basis with zeroed counts",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: K and T are the registry's: one place in the adapter, read from the registry's `turn_end.bounds`",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: the deliberative run and the human and auditor actors do not depend on the counts",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9: the none continuation is counted, and the bound check comes ahead of its directive",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9 F4: a dispatch that throws during a chain clears the memory, so the next chain starts at 1",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9 F2: the memory belongs to one run: another run in the same session starts its chain at 1",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9 F2: a run that ends between continuations leaves no memory for the next run",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A9 F2: a new prompt starts a new chain: the host's `before_agent_start` clears the memory, a continuation does not"
       ],
       "ledger_rows": [
         "pi_auto_continue_bound"
