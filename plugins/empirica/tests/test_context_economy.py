@@ -1535,7 +1535,9 @@ class ReferenceCleanupTests(unittest.TestCase):
     SKILL_DIR = ROOT / "plugins/empirica/skills/empirica"
     REFERENCES = sorted((SKILL_DIR / "references").glob("*.md"))
     AGENTS = sorted((ROOT / "plugins/empirica/agents").glob("*.md"))
-    ADR = __import__("re").compile(r"\bADR[- ]?\d|\badr/\d|doc/adr/")
+    # a decision-record citation in any spelling: case, plural, `#`, and a Unicode hyphen (U+2011) as an editor may produce
+    ADR = __import__("re").compile(r"\bADRs?\s*[-\u2011#]?\s*\d|\badr[-/]\d|doc/adr/", __import__("re").IGNORECASE)
+    ISSUE = __import__("re").compile(r"\bissue\s*#?\d+", __import__("re").IGNORECASE)
 
     def reference(self, name):
         return (self.SKILL_DIR / "references" / name).read_text(encoding="utf-8")
@@ -1552,15 +1554,20 @@ class ReferenceCleanupTests(unittest.TestCase):
         offenders = []
         for path in [self.SKILL_DIR / "SKILL.md", *self.REFERENCES, *self.AGENTS]:
             for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
-                if self.ADR.search(line):
+                if self.ADR.search(line) or self.ISSUE.search(line):
                     offenders.append(f"{path.relative_to(self.ROOT)}:{number}")
         self.assertEqual(offenders, [])
 
     def test_the_guard_sees_every_citation_shape(self):
-        for text in ("(ADR-0067)", "ADR 0063 owns it", "see ADR0068", "doc/adr/0061-x.md"):
+        for text in ("(ADR-0067)", "ADR 0063 owns it", "see ADR0068", "doc/adr/0061-x.md", "adr-0067", "ADRs 63 and 67",
+                     "ADR #67", "ADR\u20110067", "Adr-63", "../adr/0067"):
             self.assertTrue(self.ADR.search(text), text)
-        for text in ("an architecture decision record in the repository's normal ADR/MADR form", "the adr tool"):
+        for text in ("an architecture decision record in the repository's normal ADR/MADR form", "the adr tool", "the ADR tool"):
             self.assertFalse(self.ADR.search(text), text)
+        for text in ("issue #71", "see Issue 71", "issue#7"):
+            self.assertTrue(self.ISSUE.search(text), text)
+        for text in ("an issue with the host", "the issue tracker", "issue: none"):
+            self.assertFalse(self.ISSUE.search(text), text)
 
     def test_the_confirmation_section_speaks_in_the_words_the_view_prints(self):
         labels = json.loads((self.ROOT / "contracts/empirica/v2/public-contract.json").read_text())["author_view"]["labels"]
@@ -1569,8 +1576,13 @@ class ReferenceCleanupTests(unittest.TestCase):
         for field in ("confirm: audit", "confirm: human", "confirm: unobserved", "confirm: unavailable", "verification: {"):
             self.assertNotIn(field, text, field)
         for key in ("pending_human", "pending_audit", "confirmed_by_human", "rejected_by_human", "waiting",
-                    "waiting_none_error", "waiting_unobserved", "waiting_unavailable"):
+                    "waiting_none_error", "waiting_unobserved", "waiting_unavailable", "waiting_terminal",
+                    "waiting_already_presented", "waiting_interaction_limit"):
             self.assertIn(labels[key], section, key)
+        self.assertIn("governance.terminal_stop_pending", section, "the terminal-consent row says what the human consents to")
+        # the host-neutral rule for asking again is not filed under one host's name
+        self.assertNotIn("paragraph on Claude", text)
+        self.assertEqual(section.count("the rule for asking again below"), 1)
 
     def test_the_audit_reference_keeps_the_host_procedure_and_points_to_the_agent_for_the_duties(self):
         text = self.reference("audit.md")
@@ -1602,6 +1614,12 @@ class ReferenceCleanupTests(unittest.TestCase):
                      "empirica.run/4", "host-boundaries.json", "ctx.hasUI", "native human-approval"):
             self.assertNotIn(fact, text, fact)
         self.assertIn("governance.terminal_stop_pending", text, "the agent-facing recovery stays")
+
+    def test_the_hosts_doc_links_the_operations_doc_beside_the_host_ranges(self):
+        hosts = (self.ROOT / "doc/hosts.md").read_text(encoding="utf-8")
+        self.assertEqual(hosts.count("](governance-operations.md)"), 1)
+        self.assertLess(hosts.index("](governance-operations.md)"), hosts.index("## Empirica 7 spike authority"),
+                        "linked in the opening supported-surfaces block")
 
     def test_the_operator_facts_moved_to_the_operations_doc(self):
         doc = (self.ROOT / "doc/governance-operations.md").read_text(encoding="utf-8")

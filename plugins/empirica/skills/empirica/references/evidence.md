@@ -53,14 +53,14 @@ whenever one is possible; the reason is shown to the human verbatim.
 The view says how each record is verified: `checked by the service`, `for the audit to retrieve`
 (the host's auditor retrieves the source; research awaiting audit still approves the claim, and the audit
 gate covers it), `waiting for a human`, `confirmed by a human` or `rejected by a human` (with a `human note:`).
-What waits on a human is listed under `Waiting on a human:`, each record as `source: <kind> <ref> for claim <id>`
-and each `needs-decision` claim as `decision needed on claim <id>`; the last line says whether a human can be asked:
+What waits on a human is listed under `Waiting on a human:`, each record as `source: <kind> <ref> for claim <id>`,
+each `needs-decision` claim as `decision needed on claim <id>`, and, in deliberative mode, a stop that would end the run without converging as `decision needed to end the run as <status>` (the human consents to the non-converged end: `governance.terminal_stop_pending`). The last line says whether a human can be asked:
 
 - `a human can be asked at the end of your next pass`, or `a human is asked when you report, if this host can show a dialog`:
   call `report_convergence` (default intent, not `intent=stop`) and the host asks them.
 - `no human can be asked in this session`: the requirement stays open, and the run can only stop as a residual.
 - `already shown; an explicit report_convergence asks again, within the interaction limit` and
-  `the human interaction limit is reached`: the rule for asking again is in the paragraph on Claude below.
+  `the human interaction limit is reached`: the rule for asking again below.
 
 **A record that waits on a human is confirmed when you report, before the audit**: do not launch the audit first.
 While the human is about to be asked the core refuses the audit launch with `evidence.confirmation_required`, and an
@@ -79,7 +79,7 @@ batch is capped (at most 64 items, decisions first) and owned by the service, ne
 presentation shows is exactly what it records as shown, so an item that was not on screen is never marked
 shown. The choices are **Confirm**, **Reject** (with an optional note to you) or **Later**. There is no "approve all", a
 decided item is never asked again, and **Later**, a cancelled dialog and a timeout leave it pending and
-spend the presentation (the re-ask rule is below, in the paragraph on Claude). The human reads the whole verbatim quote; nothing is truncated. The short form keeps each record's source line and quote and each
+spend the presentation (the rule for asking again is below). The human reads the whole verbatim quote; nothing is truncated. The short form keeps each record's source line and quote and each
 needs-decision claim's full text; each record's per-claim context and the reason an observed record has no
 deterministic check live in the immutable document every shown dialog names by its short digest and absolute
 path. `empirica_read GetRun` and `empirica_read GetArgument` show
