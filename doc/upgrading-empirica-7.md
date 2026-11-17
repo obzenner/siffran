@@ -167,7 +167,7 @@ If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
 An auto run asks a person once, for its configuration. An interactive auto run asks one more thing after that, a budget raise.
 It asks nothing else. A delegated auto run approves its configuration automatically inside the fixed envelope and has nobody to ask.
 
-- **Evidence.** A source that needs a person to confirm it is inert: a web page, a runtime note with no workspace path, or a file
+- **Evidence.** A source that needs a person to confirm it is inert: an `http(s)` URL, a `runtime` note with no file path, or a file
   the auditor's host cannot read. It stays in the dossier and neither approves nor blocks a claim, so a claim resting only on such
   sources stays open (`claim.research_missing`, with the text "has only research that a human would have to confirm") until the
   agent cites a workspace file or a local file the auditor can read, runs a spike, or ends the run with the claim as a residual. A
@@ -178,9 +178,14 @@ It asks nothing else. A delegated auto run approves its configuration automatica
 - **Budget raise.** After its first approval, an interactive auto run's proposal that raises a ceiling above the approved one waits
   for the person's approval in the host dialog (`governance.raises` says so); a proposal that raises nothing stays automatic. A
   delegated auto run has nobody to ask, so an exhausted ceiling ends in the honest stop or a fresh run.
-- **Turn ends.** An auto run's turn end continues the agent's work while the view says the agent has a step. Claude continues a
-  turn once while nothing changed. Pi continues at most two turn ends on one observation basis and fifteen in a chain. With no step
-  left, the run is offered the honest stop (`report_convergence intent=stop`).
+- **Turn ends.** An auto run's turn end continues the agent's work while the view says the agent has a step. Both hosts bound the
+  continuations by `turn_end.bounds`: the K-th turn end on one observation basis (K = 3), or the T-th in a chain (T = 16), ends the
+  chain with the `unattended_residual` notice, which offers `report_convergence intent=stop`. The last continuation before a bound
+  carries that notice as its directive, so the stop is offered while the agent is still reading; `unattended_continue` no longer
+  offers the stop. A run whose view names nobody to act (`turn_end_actor` `none`) continues once, with `unattended_residual` as the
+  directive, and ends with it at its next turn end on that basis.
+- **A shorter skill.** The `empirica` skill keeps the judgment and is shorter: the view, the tool descriptions and the references
+  carry the rules. Read the view's Next action and the reference it names.
 
 Readings that change for a run written by an earlier 7.0.x, active or ended; nothing stored is rewritten, and terminal statuses,
 audit verdicts and receipts stay as recorded. "Raises" is derived from the proposal and the approved ceilings when the run is read,

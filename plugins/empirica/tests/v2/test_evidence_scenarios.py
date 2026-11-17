@@ -599,7 +599,7 @@ class InertEvidenceCells(ScenarioFixture):
         snapshot = self.snapshot(drv, run_id)
         _row, detail = core_observer.project(snapshot, reasons)
         shown = detail["claims"][0]["blocker_message"]
-        self.assertEqual(shown, "Claim C0 has only sources a person must confirm and this run asks no one; it needs a workspace file or a spike.")
+        self.assertEqual(shown, "Claim C0 has only sources a person must confirm; it needs a source the service or auditor can check, or a spike.")
         self.assertNotIn("report_convergence", shown)
         blocked = self.report(drv, run_id)["reasons"][0]
         self.assertIn("report_convergence intent=stop", blocked["message"])  # the author is told what to do about it

@@ -1551,9 +1551,9 @@ class DocumentationGuardTests(unittest.TestCase):
 
 
 class AutoTextTests(unittest.TestCase):
-    """A12: what the skill, the references, the contract texts and the upgrade guide say about auto mode is true. An auto run
-    asks a human once, for its configuration (an interactive run also for a raise above the approved ceilings) and nothing
-    else; evidence that needs a human is inert; a `needs-decision` claim is decided by research."""
+    """A12: what the skill, the references, the contract texts and the upgrade guide say about auto mode is true. An interactive
+    auto run asks a human for its configuration and for a raise above the approved ceilings, and a delegated run asks nobody;
+    neither asks about evidence or decisions. Evidence that needs a human is inert; a `needs-decision` claim is decided by research."""
 
     ROOT = Path(__file__).resolve().parents[3]
     REFERENCES = ROOT / "plugins/empirica/skills/empirica/references"
@@ -1571,8 +1571,8 @@ class AutoTextTests(unittest.TestCase):
         start = raw.index("\n### In an auto run, evidence that needs a human is inert\n")
         section = " ".join(raw[start:raw.index("\n### ", start + 5)].split())
         for pinned in (
-            "An auto run asks a human once, for its configuration; it asks nothing about evidence or decisions.",
-            "Evidence that needs a human is inert: a `web` source, a `runtime` note with no workspace path, or a file the auditor's host cannot read.",
+            "An auto run asks a human nothing about evidence or decisions.",
+            "Evidence that needs a human is inert: an `http(s)` URL, a `runtime` note with no file path, or a file the auditor's host cannot read.",
             "so a claim resting only on it reads `claim.research_missing` with the text \"has only research that a human would have to confirm\".",
             "cite a workspace file (the service checks it) or a local file your auditor can read; run a spike; or call `report_convergence` with `intent: \"stop\"`",
             "A refuting source of that kind still discards the claim.",
@@ -1590,8 +1590,8 @@ class AutoTextTests(unittest.TestCase):
     def test_governance_names_the_two_auto_questions_and_the_delegated_stop(self):
         text = self.reference("governance.md")
         for pinned in (
-            "**What auto asks.** An auto run asks a human for its configuration, and an interactive run also for a raise above the approved ceilings;"
-            " it asks nothing else: no evidence confirmation and no `needs-decision` answer, since research decides that claim.",
+            "**What auto asks.** An interactive auto run asks a human for its configuration and for a raise above the approved ceilings;"
+            " a delegated run asks nobody. Neither asks anything else: no evidence confirmation and no `needs-decision` answer, since research decides that claim.",
             "A delegated run approves its configuration automatically inside the fixed 8/1/2 envelope and has nobody to ask for a raise,"
             " so an exhausted ceiling ends in the honest stop or a fresh run ([budget-freeze](budget-freeze.md)).",
             "In deliberative mode, confirming research or answering a `needs-decision` claim is a separate human decision",
@@ -1606,6 +1606,10 @@ class AutoTextTests(unittest.TestCase):
         self.assertEqual(text.count("propose a raise with `configure_run` for the human to approve"), 1)
         self.assertIn("A delegated auto run is never offered `budget.raise`: it needs a fresh run with a larger up-front approved size.", text)
         self.assertNotIn("auto cannot raise them", text)
+        # the settlement sentence is true for a deliberative run: it is offered the raise and is settled all the same, because
+        # the raise is the human's to decide; a delegated auto run is settled because it is offered none
+        self.assertNotIn("when the core offers no `budget.raise`", text)
+        self.assertIn("a deliberative run, whose raise is the human's to decide, or a delegated auto run, which is offered none", text)
 
     def test_the_recovery_reference_is_generated_from_the_contract(self):
         generator = (self.ROOT / "scripts/gen_recovery_reference.py").read_text(encoding="utf-8")
@@ -1615,40 +1619,112 @@ class AutoTextTests(unittest.TestCase):
         self.assertIn(line, generator)
         self.assertIn(line, recovery)
 
-    # --- no reference says auto asks about evidence or decisions ---------------------------------------------------------
+    # --- no text says auto asks about evidence or decisions ----------------------------------------------------------------
 
-    NEGATION = ("no one", "nobody", "never", "nothing", "not ", "no human", "none", "neither", "without", "cannot", "no longer",
-                "inert", "start the run in deliberative")
-    ASKS = __import__("re").compile(r"\bask(?:s|ed)?\b|\bpresents?\b|\bshows? (?:the |a )?(?:human|person)", __import__("re").IGNORECASE)
-    ABOUT = __import__("re").compile(r"\b(?:evidence|decisions?|sources?|records?|confirm\w*|research)\b", __import__("re").IGNORECASE)
-    AUTO = __import__("re").compile(r"\bauto\b|\bunattended\b", __import__("re").IGNORECASE)
+    _re = __import__("re")
+    # a negation that governs the asking: within a few words before the verb, or right after it ("asks no one", "asks nothing")
+    NEGATION_BEFORE = _re.compile(r"\b(?:no|not|never|nothing|nobody|neither|nor|cannot|can't|don't|doesn't|won't|none)\b", _re.IGNORECASE)
+    NEGATION_AFTER = _re.compile(r"^\W*(?:\w+\W+){0,2}?(?:no one|nobody|nothing|none|no human|no person|not)\b", _re.IGNORECASE)
+    CLAUSE_END = _re.compile(r"[;:,]|\b(?:but|yet|and|while|whereas)\b", _re.IGNORECASE)
+    HUMAN = r"(?:the |a )?(?:human|person)"
+    # the verbs by which a text says a person is asked, shown, or made to confirm
+    ASKS = _re.compile(
+        r"(?<!proposal )\bask(?:s|ed|ing)?\b|(?<!when )(?<!is )(?<!are )\bpresents?\b|\bshows? " + HUMAN + r"\b"
+        r"|\bconfirm(?:s|ed)? by " + HUMAN + r"\b|\b" + HUMAN + r" confirms?\b"
+        r"|\bputs?\b[^.;]{0,60}?\bto " + HUMAN + r"\b|\b(?:is|are) shown to\b|\bwaits? (?:for|on) " + HUMAN + r"\b",
+        _re.IGNORECASE)
+    ABOUT = _re.compile(r"\b(?:evidence|decisions?|sources?|records?|confirm\w*|research|runtime notes?|urls?)\b", _re.IGNORECASE)
+    AUTO = _re.compile(r"\bauto\b|\bunattended\b", _re.IGNORECASE)
+    # a sentence that sends the reader to deliberative mode for a human's confirmation says where a human confirms
+    DELIBERATIVE = _re.compile(r"\bstart (?:the run|a run|it) in deliberative mode|\bstart a deliberative run", _re.IGNORECASE)
+
+    @classmethod
+    def _asked(cls, flat):
+        """Whether some asking verb of the sentence is not itself negated: no negation within four words before it, none
+        right after it."""
+        for verb in cls.ASKS.finditer(flat):
+            clause = cls.CLAUSE_END.split(flat[:verb.start()])[-1]  # a negation of an earlier clause governs nothing here
+            before = clause.split()[-4:]
+            if any(cls.NEGATION_BEFORE.search(word) for word in before):
+                continue
+            if cls.NEGATION_AFTER.search(flat[verb.end():]):
+                continue
+            return True
+        return False
 
     @classmethod
     def auto_asks_about_evidence(cls, text):
-        """Sentences that say an auto run asks a human about evidence or a decision (a sentence that denies it, or that names
-        deliberative mode as the place a human confirms, is not one)."""
+        """Sentences that say an auto run asks a human about evidence or a decision. A negation vetoes only the verb it
+        governs (a few words before it, or "asks no one"/"asks nothing" right after it), and a sentence that names deliberative
+        mode as the place a human confirms is not one."""
         found = []
-        for sentence in __import__("re").split(r"(?<=[.!?])\s+|\n\s*\n|\n[-*] ", text):
+        for sentence in cls._re.split(r"(?<=[.!?])\s+|\n\s*\n|\n[-*] ", text):
             flat = " ".join(sentence.split())
-            if (cls.AUTO.search(flat) and cls.ASKS.search(flat) and cls.ABOUT.search(flat)
-                    and not any(word in flat.lower() for word in cls.NEGATION)):
+            if (cls.AUTO.search(flat) and cls.ABOUT.search(flat) and not cls.DELIBERATIVE.search(flat) and cls._asked(flat)):
                 found.append(flat)
         return found
 
-    def test_no_reference_or_the_skill_says_auto_asks_a_human_about_evidence_or_decisions(self):
-        offenders = {path.name: self.auto_asks_about_evidence(path.read_text(encoding="utf-8"))
-                     for path in [self.ROOT / "plugins/empirica/skills/empirica/SKILL.md", *sorted(self.REFERENCES.glob("*.md"))]}
+    @classmethod
+    def contract_texts(cls):
+        """Every string of the public contract: the texts an agent or a host reads."""
+        found = []
+
+        def walk(node):
+            if isinstance(node, str):
+                found.append(node)
+            elif isinstance(node, dict):
+                for value in node.values():
+                    walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    walk(value)
+
+        walk(cls.CONTRACT)
+        return found
+
+    def test_no_text_the_agent_reads_says_auto_asks_a_human_about_evidence_or_decisions(self):
+        """The scope: the skill, the references, every string of the contract, and the upgrade guide."""
+        files = [self.ROOT / "plugins/empirica/skills/empirica/SKILL.md", *sorted(self.REFERENCES.glob("*.md")),
+                 self.ROOT / "doc/upgrading-empirica-7.md"]
+        offenders = {path.name: self.auto_asks_about_evidence(path.read_text(encoding="utf-8")) for path in files}
+        offenders["public-contract.json"] = [flat for text in self.contract_texts() for flat in self.auto_asks_about_evidence(text)]
         self.assertEqual({name: found for name, found in offenders.items() if found}, {})
 
+    FLAGGED = (
+        "An auto run asks the human to confirm a web source at the end of the pass.",
+        "In auto mode the human is asked to decide each needs-decision claim.",
+        "Auto presents the pending records to a person when you report.",
+        "- Unattended mode asks a human about the evidence.",
+        "In auto mode the agent shows the human each web source before the audit.",
+        "An auto run's dialog presents the pending evidence.",
+        "A deliberative run presents records; auto runs do too.",
+        "An auto run puts each record to the human when you report.",
+        "In an auto run, a person confirms each runtime note.",
+        "In an auto run each source is confirmed by a person.",
+        "Auto mode waits for the human to confirm web sources.",
+        "In auto mode a batch of records is shown to the person.",
+        "An auto run asks the human to confirm a web source, not the configuration.",
+        "In auto, the human is asked about each decision without delay.",
+        "An auto run never skips asking a human about evidence; it asks at each report.",
+        "Auto presents nothing about evidence but asks about decisions.",
+    )
+    ACCEPTED = (
+        "An auto run asks a human nothing about evidence or decisions.",
+        "An auto run asks nobody about evidence.", "An auto run asks no one about evidence.",
+        "In auto mode the human is never asked about evidence.", "No human is asked about evidence in an auto run.",
+        "In auto mode research decides it and nobody is asked.",
+        "An interactive auto run asks a human for its configuration and for a raise above the approved ceilings; a delegated run asks nobody.",
+        "An auto run asks a human for its configuration and an interactive run for a raise.",
+        "To have a human confirm evidence in an auto run, start the run in deliberative mode.",
+        "A deliberative run asks the human to confirm each record.", "The run is automatic.",
+        # a proposal "asks for" a raise, and "present" can be an adjective: neither is a person being asked
+        "An interactive auto run may propose a raise (governance.raises says a proposal asks for one), and a human answer, when present, decides.",
+    )
+
     def test_the_guard_flags_a_sentence_that_says_auto_asks_and_accepts_the_true_ones(self):
-        for text in ("An auto run asks the human to confirm a web source at the end of the pass.",
-                     "In auto mode the human is asked to decide each needs-decision claim.",
-                     "Auto presents the pending records to a person when you report.",
-                     "- Unattended mode asks a human about the evidence."):
+        for text in self.FLAGGED:
             self.assertEqual(len(self.auto_asks_about_evidence(text)), 1, text)
-        for text in ("An auto run asks a human once, for its configuration; it asks nothing about evidence or decisions.",
-                     "An auto run asks nobody about evidence.", "To have a human confirm evidence, start the run in deliberative mode.",
-                     "A deliberative run asks the human to confirm each record.", "The run is automatic."):
+        for text in self.ACCEPTED:
             self.assertEqual(self.auto_asks_about_evidence(text), [], text)
 
     # --- the contract texts, reworded (the writing pass) ----------------------------------------------------------------
@@ -1657,9 +1733,9 @@ class AutoTextTests(unittest.TestCase):
         "Claim {claim_id} has only research that a human would have to confirm, and an auto run asks no one, so that research does not count. "
         "Cite a file in the workspace (the service checks it) or a local file your auditor can read, or run a spike; or call "
         "report_convergence intent=stop to end with the claim as a residual. To have a human confirm sources, start a deliberative run.")
-    UNCONFIRMED_OBSERVER = "Claim {claim_id} has only sources a person must confirm and this run asks no one; it needs a workspace file or a spike."
+    UNCONFIRMED_OBSERVER = "Claim {claim_id} has only sources a person must confirm; it needs a source the service or auditor can check, or a spike."
     BUDGET_NOTICE = ("Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this "
-                     "pause. End honestly with report_convergence intent=stop. A deliberative or interactive auto run may instead "
+                     "pause. End honestly with report_convergence intent=stop. A deliberative run may instead "
                      "propose a raise for human approval; a delegated auto run starts a fresh run.")
     AUTO_CEILING = "A delegated auto run cannot raise its ceilings, audit retries included. Keep or lower them, or start a fresh run with a larger approved size."
     AUTO_CEILING_APPROVED = ("A delegated auto run cannot raise its approved ceilings: keep or lower them, or start a fresh run "
@@ -1679,7 +1755,7 @@ class AutoTextTests(unittest.TestCase):
     def test_each_reworded_text_names_the_next_action_and_is_positive(self):
         reasons = self.CONTRACT["reasons"]
         texts = {"unconfirmed (agent)": (self.UNCONFIRMED, ("report_convergence intent=stop", "run a spike", "Cite a file")),
-                 "unconfirmed (observer)": (self.UNCONFIRMED_OBSERVER, ("workspace file", "a spike")),
+                 "unconfirmed (observer)": (self.UNCONFIRMED_OBSERVER, ("the service or auditor can check", "a spike")),
                  "budget_exhausted": (self.BUDGET_NOTICE, ("report_convergence intent=stop", "propose a raise", "fresh run")),
                  "auto_ceiling": (self.AUTO_CEILING, ("Keep or lower", "fresh run")),
                  "auto_ceiling approved": (self.AUTO_CEILING_APPROVED, ("keep or lower", "fresh run"))}
@@ -1731,6 +1807,32 @@ class AutoTextTests(unittest.TestCase):
         self.assertEqual(section.count("To confirm evidence yourself"), 0)
         self.assertEqual(section.count("start the run in deliberative mode"), 1)
         self.assertEqual(section.count("`governance.raises`"), 1)
+
+    def test_the_upgrade_guide_names_the_auto_turn_end_bounds_and_the_lean_skill(self):
+        text = (self.ROOT / "doc/upgrading-empirica-7.md").read_text(encoding="utf-8")
+        start = text.index("## Auto mode asks once and decides its own claims (7.1.0)")
+        section = " ".join(text[start:text.index("\n## ", start + 5)].split())
+        bounds = json.loads((self.ROOT / "contracts/empirica/v2/host-boundaries.json").read_text())["turn_end"]["bounds"]
+        self.assertEqual(bounds["enforced_by"], ["claude", "pi"])
+        for pinned in (
+            "An auto run's turn end continues the agent's work while the view says the agent has a step.",
+            f"Both hosts bound the continuations by `turn_end.bounds`: the K-th turn end on one observation basis (K = {bounds['K']}), "
+            f"or the T-th in a chain (T = {bounds['T']}), ends the chain with the `unattended_residual` notice, which offers `report_convergence intent=stop`.",
+            "The last continuation before a bound carries that notice as its directive,",
+            "`unattended_continue` no longer offers the stop.",
+            "A run whose view names nobody to act (`turn_end_actor` `none`) continues once, with `unattended_residual` as the directive,",
+            "- **A shorter skill.**",
+            "the view, the tool descriptions and the references carry the rules",
+        ):
+            self.assertIn(pinned, section)
+        for stale in ("Claude continues a turn once while nothing changed", "Pi continues at most two turn ends", "fifteen in a chain"):
+            self.assertNotIn(stale, section)
+
+    def test_the_inert_kinds_are_named_by_their_form_wherever_the_text_names_a_kind(self):
+        guide = " ".join((self.ROOT / "doc/upgrading-empirica-7.md").read_text(encoding="utf-8").split())
+        self.assertIn("an `http(s)` URL, a `runtime` note with no file path, or a file the auditor's host cannot read", guide)
+        self.assertNotIn("a web page", guide)
+        self.assertNotIn("a `web` source", self.reference("evidence.md"))
 
 
 class ReferenceCleanupTests(unittest.TestCase):
