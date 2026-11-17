@@ -382,6 +382,13 @@ class HostLiteralTests(unittest.TestCase):
             with self.subTest(literal=literal):
                 self.assertEqual(len(self.problems(f"Text. {literal}. More.")), 1, literal)
 
+    def test_a_v_prefixed_version_and_a_host_name_with_inline_code_are_rejected(self):
+        for literal in ("qualified on `v2.1.296`", "qualified on v2.1.296", "Pi `1.0` or later", "Claude Code `2.1` or later",
+                        "`Pi` 1.0 or later", "`Claude Code` `2.1` or later", "Claude Code 2.1 or later", "Pi 1.0 or later",
+                        "`pi-subagents` `0.74` or later", "Pi@1.0"):
+            with self.subTest(literal=literal):
+                self.assertEqual(len(self.problems(f"Text. {literal}. More.")), 1, literal)
+
     def test_other_numbers_and_the_runtime_name_are_accepted(self):
         for text in ("`docker-isolated-v1` and the fixed 8/1/2 envelope", "normally 2: an initial audit and one retry",
                      "a 1\u2013600 character rationale", "`empirica.spike-plan-draft/2`", "section 7", "up to 4,096 characters",

@@ -186,16 +186,17 @@ REQUIRED_EARLY_ANCHORS: tuple[str, ...] = (
 
 # The skill body names no host version, range, or `pi-subagents` range: the host profiles
 # (contracts/empirica/v2/host-profiles.json), the start refusals (`host.*`, `host.subagents_*`) and doc/hosts.md own them,
-# so a copy in the skill only drifts. Shapes: a dotted version of three or more numbers (`2.1.296`, also at the end of a
-# sentence), a comparator before a version (`>=1.0`, `\u2265 1.0`, `<2.0.0`), a two-part version after a host name
-# (`Claude Code 2.1`), a version right after `pi-subagents` (`@0.50.0`, ` 0.74`), and interval notation (`[1.0, 2.0)`).
+# so a copy in the skill only drifts. Shapes: a dotted version of three or more numbers (`2.1.296`, `v2.1.296`, also at
+# the end of a sentence), a comparator before a version (`>=1.0`, `\u2265 1.0`, `<2.0.0`), a two-part version after a host
+# name (`Claude Code 2.1`; inline-code backticks around the name or the version do not hide it), a version right after
+# `pi-subagents` (`@0.50.0`, ` 0.74`), and interval notation (`[1.0, 2.0)`).
 # The frontmatter's `compatibility` field is install metadata, outside this guard.
 _HOST_LITERALS = (
     # a dotted version of three or more numbers; a trailing full stop (a sentence-final version) still counts
-    re.compile(r"(?<![\w.])\d+\.\d+\.\d+(?!\w|\.\d)"),
+    re.compile(r"(?<![\w.])v?\d+\.\d+\.\d+(?!\w|\.\d)"),
     re.compile(r"(?:[<>]=?|[\u2265\u2264]|~=|\^)\s*v?\d+(?:\.\d+)*"),
-    # a two-part version right after a host name (`Claude Code 2.1 or later`, `Pi 1.0`)
-    re.compile(r"\b(?:Claude Code|Pi|pi-subagents)\s+v?\d+\.\d+"),
+    # a two-part version right after a host name, with or without inline-code backticks around either (`Claude Code 2.1`)
+    re.compile(r"\b(?:Claude Code|Pi|pi-subagents)\b`?[\s@]*`?v?\d+\.\d+"),
     re.compile(r"pi-subagents[^\n]{0,40}?(?:@\s*v?\d|\bv?\d+\.\d+)"),
     # interval notation: `[1.0, 2.0)`, `(1.0.0, 2.0.0]`
     re.compile(r"[\[(]\s*v?\d+(?:\.\d+)+\s*,\s*v?\d+(?:\.\d+)+\s*[\])]"),
