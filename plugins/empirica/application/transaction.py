@@ -1046,6 +1046,7 @@ class Coordinator:
         run_id = encode_handle(key) if isinstance(key, RunKey) else str(key)
         run = {
             "id": run_id, "goal": goal, "status": "active", "governance": None, "confirmation_batch": None,
+            "turn_end_actor": "none",  # an unreadable run is nobody's turn: the host reports it
             "basis": digest({"unreadable_run": code}),  # an unreadable run has no state to move: one fixed basis per reason
             "contract": {"id": _proto.public_contract()["id"],
                          "version": _proto.public_contract()["version"],

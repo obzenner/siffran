@@ -90,6 +90,7 @@
           "findings": []
         },
         "confirmation_batch": null,
+        "turn_end_actor": "none",
         "spike_backend": {
           "kind": "qualified",
           "backend": "docker",

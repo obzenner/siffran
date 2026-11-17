@@ -12,7 +12,8 @@ from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSU
                          claim_blockers, claim_digest, confirmation_batch, derive_claims,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
-                         progress_basis, report_requirements, terminal_batch, earliest_stage, stage_rank, Requirement)
+                         progress_basis, report_requirements, terminal_batch, earliest_stage, stage_rank, turn_end_actor,
+                         Requirement)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -188,7 +189,7 @@ def _rejected(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> list[di
 def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[str, str],
                  blockers: tuple[dict[str, Any], ...],
                  metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
-                 stale: set[str], terminal_next: list[str] | None = None,
+                 stale: set[str], terminal_next: list[str] | None = None, *, owed: tuple[Requirement, ...],
                  ) -> dict[str, list[dict[str, Any]]]:
     state = snapshot.state
     late = (snapshot.command["type"] == "ObserveAction"
@@ -206,7 +207,6 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
     _, deferred = _scope(snapshot)
     # What the report requires, in the gate's order (``core.evaluation.report_requirements``): the claim rows below are its
     # claim stage, the rows after them its human, pass, audit and consent stages, and a row behind an earlier stage is held.
-    owed = report_requirements(snapshot, derivation, blockers)
     early = earliest_stage(r.stage for r in owed)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
@@ -403,7 +403,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     bootstrap = bootstrap_status(snapshot)
     terminal = snapshot.state.status != "active"
     terminal_next = _reason_metadata(metadata, "run.terminal")[0] if terminal else None
-    obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next)
+    owed = report_requirements(snapshot, derivation, blockers)
+    obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next, owed=owed)
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
     control_mode = snapshot.state.governance["control_mode"]
     exclusions = snapshot.contract.recovery_exclusions[control_mode]
@@ -429,6 +430,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                  | {"findings": audit["findings"] if audit["verdict"] == "failed" else []},
         "governance": project_governance(snapshot),
         "confirmation_batch": batch,
+        # Who a host's turn end waits on, decided once here so that no host derives it (D2.3).
+        "turn_end_actor": turn_end_actor(snapshot, derivation, owed),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None

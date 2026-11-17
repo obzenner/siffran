@@ -1426,6 +1426,29 @@ def first_admissible(requirements: Sequence[Requirement]) -> Requirement | None:
     return next((r for r in requirements if r.admissible), None)
 
 
+
+
+#: Who a host's turn end waits on, by the actor of the first admissible requirement. The auditor's step is the author's to
+#: wait for, or to relaunch when it fails, so a pending audit is the author's turn.
+_TURN_END_ACTORS = {"agent": "author", "auditor": "author", "human": "human"}
+
+
+def turn_end_actor(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
+                   owed: Sequence[Requirement]) -> str:
+    """``author``, ``human`` or ``none``: who the run waits on at a turn end, for a host to read and not to recompute. It
+    is the actor of the first admissible requirement of ``owed`` (``report_requirements``), ``none`` when nothing is owed,
+    when the run has ended, and when the root claim is refuted or conflicted: no further work can approve it, so the
+    author's only step is to say so by stopping."""
+    first = first_admissible(owed)
+    if snapshot.state.status != "active" or first is None:
+        return "none"
+    if snapshot.graph is not None and derivation is not None:
+        root = next((c for c in snapshot.graph["claims"] if c["id"] == snapshot.graph["root"]), None)
+        if root is not None and (derivation.states.get(root["id"]) == "discarded" or claim_conflicted(snapshot, root)):
+            return "none"
+    return _TURN_END_ACTORS[first.actor]
+
+
 #: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
 HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON})
 #: Where a requirement waits that is not admissible yet: for the stages before it.

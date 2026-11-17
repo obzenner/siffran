@@ -201,6 +201,8 @@ export interface RunSnapshot {
   basis?: string;
   /** What a human would be shown now, or null (the core's projection; the host presents when `prompt_error` is null). */
   confirmation_batch?: ConfirmationBatch | null;
+  /** Who the run waits on at a turn end (the core's `turn_end_actor`): a host reads it and derives nothing else. */
+  turn_end_actor?: "author" | "human" | "none";
   [key: string]: unknown;
 }
 

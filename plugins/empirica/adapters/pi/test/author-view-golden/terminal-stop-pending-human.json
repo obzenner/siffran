@@ -103,6 +103,7 @@
           "digest": "sha256:9999999999999999999999999999999999999999999999999999999999999999"
         }
       },
+      "turn_end_actor": "author",
       "spike_backend": {
         "kind": "spikes_unavailable"
       }

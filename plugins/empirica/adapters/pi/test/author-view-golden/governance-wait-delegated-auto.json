@@ -153,7 +153,8 @@
           "host.async_unsupported"
         ]
       },
-      "confirmation_batch": null
+      "confirmation_batch": null,
+      "turn_end_actor": "author"
     },
     "reasons": [
       {

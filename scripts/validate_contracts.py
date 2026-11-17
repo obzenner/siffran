@@ -3598,7 +3598,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"governance": None, "confirmation_batch": None, "id": "r", "goal": "g", "status": "active",
+    full_rv = {"governance": None, "confirmation_batch": None, "turn_end_actor": "author", "id": "r", "goal": "g",
+               "status": "active",
                "basis": "sha256:" + "5" * 64,
                "audit": {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
@@ -3907,6 +3908,13 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return {"protocol": "empirica/v2", "request_id": "x",
                 "result": {"type": "Allow", "converged": False, "run": full_rv, "argument": argument}}
 
+    # D2.3: the run view's turn_end_actor is required and closed (author | human | none).
+    for label, change in (("missing", lambda rv: rv.pop("turn_end_actor")),
+                          ("another value", lambda rv: rv.update(turn_end_actor="agent"))):
+        env = copy.deepcopy(_full_env(_d2c_arg()))
+        change(env["result"]["run"])
+        if not schema_rejects(env, "response"):
+            errors.append(f"NEG a run view with turn_end_actor {label}: expected the response schema to reject it")
     # The valid base argument must pass both the raw schema and the procedural check.
     if schema_rejects(_full_env(_d2c_arg()), "response"):
         errors.append("NEG D2C base argument: expected schema-valid but rejected")

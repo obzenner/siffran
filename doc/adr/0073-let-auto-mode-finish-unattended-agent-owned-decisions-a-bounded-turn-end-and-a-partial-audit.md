@@ -66,7 +66,11 @@ Field runs or the native qualification show agent-decided claims passing the aud
 
 ### D2 Auto turn end
 
-To come: continue while author work remains, a bound on unchanged continuations, and a core-owned signal for the notice.
+To come: continue while author work remains, and a bound on unchanged continuations.
+
+#### D2.3 A core-owned signal for the turn end
+
+The run view gains `turn_end_actor`, an additive closed enum: `author`, `human` or `none`. The core computes it in `core.evaluation.turn_end_actor` from the actor of the first admissible requirement of the report (`first_admissible`): an agent or an auditor step is `author`, because the author's next move is to do the work or to wait for and relaunch the audit; a human step is `human`. It is `none` when nothing is owed, when the run has ended, and when the root claim is refuted or conflicted (`claim.refuted`, or `evidence.conflict` on the root), because no further work can approve the root and the only honest step left is to stop. The value is core-owned so that both hosts read one answer and derive nothing from reasons, obligations or notices. It is carried by every response that carries the run view and is not rendered in the author view.
 
 ### D3 and D6 Human-only evidence in auto, and a partial audit
 
