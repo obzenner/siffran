@@ -134,36 +134,68 @@ def skill_runtime_problems(skill_text: str) -> list[str]:
     return problems
 
 
-# The size ratchet for SKILL.md, measured in characters (frontmatter included) as a proxy for tokens.
+# The size ratchet for SKILL.md, measured in characters (code points) as a proxy for tokens.
 # Measured: 19,502 characters = 6,576 tokens (Bedrock Sonnet 5.5, `usage.input_tokens`), 2.966 characters per token.
 # After compaction Claude Code re-attaches only the first 5,000 tokens of an invoked skill
-# (https://code.claude.com/docs/en/skills, "skill content lifecycle"), so what matters most must sit in the top
-# SKILL_TOP_CHARS (5,000 tokens x 2.966, rounded down). END TARGET: 7,400 characters, about 2,500 tokens.
-# A ratchet: later changes lower SKILL_MAX_CHARS toward the target and must never raise it.
+# (https://code.claude.com/docs/en/skills, "skill content lifecycle"). Re-attached skills share a 25,000-token budget and
+# older skills can be dropped entirely, so even the top 5,000 tokens are not guaranteed. END TARGET: 7,400 characters,
+# about 2,500 tokens. A ratchet: later changes lower SKILL_MAX_CHARS toward the target and must never raise it;
+# SKILL_MAX_CHARS may exceed the file by at most SKILL_MAX_HEADROOM, so shrinking the skill forces the ceiling down.
 SKILL_MAX_CHARS = 20_000
-SKILL_TOP_CHARS = 14_800
-# Literal strings that must appear entirely within the first SKILL_TOP_CHARS characters (none chosen yet).
+SKILL_MAX_HEADROOM = 1_000
+# SKILL_TOP_CHARS is the early-anchor cut. 5,000 x 2.966 = 14,830; 13,300 is about 90% of that, because the ratio is a
+# whole-file average (a prefix dense in code or identifiers fits fewer characters) and the counter Claude Code uses for
+# the cut is undocumented. The basis is the RENDERED body: the text after the closing frontmatter `---` (Claude strips
+# it), in code points, plus GOAL_ALLOWANCE characters for any anchor that comes after the first `$ARGUMENTS` (Claude
+# substitutes the user's goal before it cuts). The `- len("$ARGUMENTS")` of that substitution is ignored, which only errs
+# safe. The prefix's own ratio is to be measured when the anchors are chosen.
+SKILL_TOP_CHARS = 13_300
+GOAL_ALLOWANCE = 2_000
+ARGUMENTS_TOKEN = "$ARGUMENTS"
+# Literal strings that must appear entirely within the rendered top SKILL_TOP_CHARS characters (none chosen yet).
 REQUIRED_EARLY_ANCHORS: tuple[str, ...] = ()
 
 
-def skill_size_problems(skill_text: str, max_chars: int = SKILL_MAX_CHARS) -> list[str]:
-    """Whether the whole SKILL.md (frontmatter included) is within the character ceiling."""
-    if len(skill_text) <= max_chars:
-        return []
-    return [f"SKILL.md is {len(skill_text):,} characters, over the {max_chars:,}-character ceiling; "
-            "move sometimes-needed material to references/ (Claude re-attaches only ~5,000 tokens after compaction)"]
+def skill_size_problems(skill_text: str, max_chars: int | None = None) -> list[str]:
+    """The whole SKILL.md (frontmatter included) is within the ceiling, and the ceiling within SKILL_MAX_HEADROOM of it."""
+    limit = SKILL_MAX_CHARS if max_chars is None else max_chars
+    size = len(skill_text)
+    if size > limit:
+        return [f"SKILL.md is {size:,} characters, over the {limit:,}-character ceiling; "
+                "move sometimes-needed material to references/ (Claude re-attaches only ~5,000 tokens after compaction)"]
+    if limit - size > SKILL_MAX_HEADROOM:
+        return [f"SKILL.md is {size:,} characters, {limit - size:,} under the {limit:,}-character ceiling "
+                f"(more than {SKILL_MAX_HEADROOM:,}); lower SKILL_MAX_CHARS to {-(-size // 100) * 100:,}"]
+    return []
 
 
-def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] = REQUIRED_EARLY_ANCHORS,
+def rendered_body(skill_text: str) -> str:
+    """The text Claude keeps for the cut: ``skill_text`` without its frontmatter."""
+    if skill_text.startswith("---\n"):
+        end = skill_text.find("\n---\n", 3)
+        if end != -1:
+            return skill_text[end + len("\n---\n"):]
+    return skill_text
+
+
+def skill_anchor_problems(skill_text: str, anchors: tuple[str, ...] | list[str] | None = None,
                           top_chars: int = SKILL_TOP_CHARS) -> list[str]:
-    """Anchors absent from SKILL.md, or not entirely within its first ``top_chars`` characters."""
-    top = skill_text[:top_chars]
+    """Anchors that are empty, absent from the body, or not entirely within its first ``top_chars`` rendered characters."""
+    body = rendered_body(skill_text)
+    goal_at = body.find(ARGUMENTS_TOKEN)
     problems = []
-    for anchor in anchors:
-        if anchor in top:
+    for anchor in REQUIRED_EARLY_ANCHORS if anchors is None else anchors:
+        if not anchor.strip():
+            problems.append(f"SKILL.md early anchor {anchor!r} is empty")
             continue
-        problems.append(f"SKILL.md anchor {anchor!r} appears only after the first {top_chars:,} characters"
-                        if anchor in skill_text else f"SKILL.md anchor {anchor!r} is missing")
+        at = body.find(anchor)
+        if at == -1:
+            problems.append(f"SKILL.md anchor {anchor!r} is missing")
+            continue
+        end = at + len(anchor) + (GOAL_ALLOWANCE if goal_at != -1 and at + len(anchor) > goal_at else 0)
+        if end > top_chars:
+            problems.append(f"SKILL.md anchor {anchor!r} is not entirely within the first {top_chars:,} rendered characters "
+                            f"(ends at {end:,}, counting {GOAL_ALLOWANCE:,} for the goal after `{ARGUMENTS_TOKEN}`)")
     return problems
 
 

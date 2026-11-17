@@ -60,20 +60,92 @@ class SkillSizeTests(unittest.TestCase):
         problems = activation.skill_anchor_problems(text, ["ANCHOR"])
         self.assertEqual(len(problems), 1)
         self.assertIn("ANCHOR", problems[0])
-        self.assertIn(f"{activation.SKILL_TOP_CHARS:,}", problems[0])
+        self.assertIn(f"is not entirely within the first {activation.SKILL_TOP_CHARS:,} rendered characters", problems[0])
 
     def test_an_anchor_missing_entirely_is_rejected(self):
         problems = activation.skill_anchor_problems("x" * 100, ["ANCHOR"])
         self.assertEqual(len(problems), 1)
         self.assertIn("ANCHOR", problems[0])
+        self.assertIn("missing", problems[0])
 
     def test_an_anchor_before_the_cut_is_accepted(self):
         text = self.anchored(activation.SKILL_TOP_CHARS - len("ANCHOR"))  # ends exactly at the cut
         self.assertEqual(activation.skill_anchor_problems(text, ["ANCHOR"]), [])
 
-    def test_the_ratchet_constants_are_the_recorded_ones(self):
-        self.assertEqual((activation.SKILL_MAX_CHARS, activation.SKILL_TOP_CHARS), (20_000, 14_800))
+    def test_empty_and_whitespace_anchors_are_rejected(self):
+        for anchor in ("", " ", "\n\t"):
+            with self.subTest(anchor=anchor):
+                problems = activation.skill_anchor_problems("x" * 100, [anchor])
+                self.assertEqual(len(problems), 1)
+                self.assertIn("empty", problems[0])
+
+    def test_the_cut_is_measured_after_the_frontmatter(self):
+        front = "---\nname: x\ndescription: " + "d" * 900 + "\n---\n"
+        body = "y" * activation.SKILL_TOP_CHARS
+        fits = front + body[:-len("ANCHOR")] + "ANCHOR"  # ends exactly at the cut of the body, far past it in the file
+        self.assertEqual(activation.skill_anchor_problems(fits, ["ANCHOR"]), [])
+        late = front + body + "ANCHOR"
+        self.assertEqual(len(activation.skill_anchor_problems(late, ["ANCHOR"])), 1)
+        in_front = "---\nname: ANCHOR\n---\nbody"
+        self.assertIn("missing", activation.skill_anchor_problems(in_front, ["ANCHOR"])[0])
+
+    def test_an_anchor_after_the_arguments_substitution_carries_the_goal_allowance(self):
+        allowance = activation.GOAL_ALLOWANCE
+        head = "The user invocation is `$ARGUMENTS`.\n"
+        def at(end):  # a skill whose ANCHOR ends at body offset `end`
+            return head + "y" * (end - len(head) - len("ANCHOR")) + "ANCHOR"
+        self.assertEqual(activation.skill_anchor_problems(at(activation.SKILL_TOP_CHARS - allowance), ["ANCHOR"]), [])
+        problems = activation.skill_anchor_problems(at(activation.SKILL_TOP_CHARS - allowance + 1), ["ANCHOR"])
+        self.assertEqual(len(problems), 1)
+        # An anchor before the substitution carries no allowance.
+        before = "ANCHOR" + "y" * 50 + head
+        self.assertEqual(activation.skill_anchor_problems(before, ["ANCHOR"]), [])
+
+    def test_the_ceiling_may_only_be_lowered_and_stays_within_headroom_of_the_skill(self):
+        self.assertLessEqual(activation.SKILL_MAX_CHARS, 20_000)
+        self.assertLessEqual(activation.SKILL_TOP_CHARS, 13_300)
+        self.assertLessEqual(activation.SKILL_TOP_CHARS, activation.SKILL_MAX_CHARS)
         self.assertEqual(list(activation.REQUIRED_EARLY_ANCHORS), [])
+        limit = activation.SKILL_MAX_CHARS
+        self.assertEqual(activation.skill_size_problems("x" * (limit - 1_000)), [], "exactly 1,000 of headroom is allowed")
+        problems = activation.skill_size_problems("x" * (limit - 1_001))
+        self.assertEqual(len(problems), 1)
+        self.assertIn("lower SKILL_MAX_CHARS to", problems[0])
+        self.assertEqual(activation.skill_size_problems(self.committed()), [], "the committed skill is within the headroom")
+
+
+class SkillSizeWiringTests(unittest.TestCase):
+    """main() enforces the size ratchet: the checks are called, with the module's own constants."""
+
+    def run_main(self, skill_text, **patches):
+        import contextlib
+        import io
+        import tempfile
+        from unittest import mock
+        with tempfile.TemporaryDirectory() as tmp:
+            skill = Path(tmp) / "SKILL.md"
+            skill.write_text(skill_text, encoding="utf-8")
+            err = io.StringIO()
+            with mock.patch.object(activation, "SKILL", skill), contextlib.redirect_stderr(err):
+                for name, value in patches.items():
+                    mock.patch.object(activation, name, value).start()
+                try:
+                    with self.assertRaises(SystemExit) as raised:
+                        activation.main()
+                finally:
+                    mock.patch.stopall()
+        return raised.exception.code, err.getvalue()
+
+    def test_an_oversize_skill_fails_the_validator(self):
+        code, err = self.run_main("x" * (activation.SKILL_MAX_CHARS + 1))
+        self.assertEqual(code, 1)
+        self.assertIn("characters, over the", err)
+
+    def test_a_missing_required_anchor_fails_the_validator(self):
+        committed = (Path(__file__).resolve().parents[2] / activation.SKILL).read_text(encoding="utf-8")
+        code, err = self.run_main(committed, REQUIRED_EARLY_ANCHORS=("NO SUCH ANCHOR",))
+        self.assertEqual(code, 1)
+        self.assertIn("anchor 'NO SUCH ANCHOR' is missing", err)
 
 
 HOSTS_DOC = Path(__file__).resolve().parents[2] / activation.HOSTS_DOC
