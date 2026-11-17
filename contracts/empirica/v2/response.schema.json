@@ -187,6 +187,30 @@
         }
       }
     },
+    "researchMissingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/claimId"
+        },
+        "support": {
+          "enum": [
+            "unconfirmed"
+          ]
+        },
+        "record_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
+        }
+      }
+    },
     "auditorExcludedParams": {
       "type": "object",
       "additionalProperties": false,
@@ -434,7 +458,7 @@
               "const": "claim.research_missing"
             },
             "parameters": {
-              "$ref": "#/$defs/claimNamedParams"
+              "$ref": "#/$defs/researchMissingParams"
             }
           }
         },

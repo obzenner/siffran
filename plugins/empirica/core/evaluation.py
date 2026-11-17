@@ -444,12 +444,18 @@ def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
     return ("approved" if approved else "open"), None
 
 
-def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
-    """Ids of the supporting records a claim waits on, when none of them can approve it yet."""
+def _uncounted_support(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
+    """Ids of the supporting records a claim has when none of them can approve it yet."""
     supporting = [a for a in research if a["outcome"] == "supporting"]
     if not supporting or any(confirmation.counts(snapshot, a) for a in supporting):
         return []
     return [a["artifact_id"] for a in supporting]
+
+
+def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
+    """Ids of the supporting records a claim waits on a human for (none in auto, whose records are inert)."""
+    uncounted = set(_uncounted_support(snapshot, research))
+    return [a["artifact_id"] for a in research if a["artifact_id"] in uncounted and confirmation.asks_human(snapshot, a)]
 
 
 CONFIRMATION_REASON = "evidence.confirmation_required"
@@ -466,7 +472,7 @@ def pending_human(snapshot: EvaluationSnapshot, scope: tuple[str, ...]) -> dict[
         if claim["id"] in scope and (records := [
                 a["artifact_id"] for a in active_evidence(snapshot, claim)
                 if a["kind"] == "research"
-                and confirmation.pending_route(snapshot, a) in confirmation.HUMAN_ROUTES]):
+                and confirmation.asks_human(snapshot, a)]):
             pending[claim["id"]] = records
     return pending
 
@@ -647,8 +653,13 @@ def claim_blockers(snapshot: EvaluationSnapshot,
                 item.get("kind") == "research" and item.get("claim_id") == target_id
                 and item.get("claim_digest") != claim_digest(claim)
                 for item in snapshot.history)
-            reason = ("claim.research_unbound" if historical_research
-                      else "claim.research_missing")
+            # Rebinding is the more direct fix, so it ranks before research that no human will confirm.
+            if historical_research:
+                reason = "claim.research_unbound"
+            elif unconfirmed := _uncounted_support(snapshot, research):
+                reason, parameters = "claim.research_missing", {"support": "unconfirmed", "record_ids": unconfirmed}
+            else:
+                reason = "claim.research_missing"
         if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
             parameters = {**parameters, "claim_id": target_id}
         blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
@@ -1175,15 +1186,22 @@ def approved_claim_ids(snapshot: EvaluationSnapshot) -> list[str]:
             if c["id"] in derivation.scope and derivation.states[c["id"]] == "approved"]
 
 
+def _inert_research(snapshot: EvaluationSnapshot, artifact: Mapping[str, Any]) -> bool:
+    """Whether an artifact is research that needs a human in a run that asks none: it stays in the dossier and in the
+    evidence digest, but supports nothing, so its producer is not one the audit's independence is classified against."""
+    return artifact.get("kind") == "research" and confirmation.inert(snapshot, artifact)
+
+
 def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
-    """Return the exact active evidence set whose producer identity an audit covers."""
+    """Return the exact active evidence set whose producer identity an audit covers (inert research is not in it)."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
         return []
     derivation = derive_claims(snapshot)
     gating = set(derivation.scope)
     return [artifact["artifact_id"] for claim in snapshot.graph["claims"]
             if claim["id"] in gating and derivation.states[claim["id"]] == "approved"
-            for artifact in active_evidence(snapshot, claim)]
+            for artifact in active_evidence(snapshot, claim)
+            if not _inert_research(snapshot, artifact)]
 
 
 def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> bool:
@@ -1325,7 +1343,8 @@ def independence_then(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) 
                     and item.get("subject_kind") == "auditor" and item.get("child_id") == verdict.get("child_id")), None)
     reviewed = [c for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
     by_id = {item.get("artifact_id"): item for item in before}
-    producers = [by_id.get(artifact_id, {}).get("producer") for c in reviewed for artifact_id in c["active_evidence_ids"]]
+    producers = [by_id.get(artifact_id, {}).get("producer") for c in reviewed for artifact_id in c["active_evidence_ids"]
+                 if not _inert_research(snapshot, by_id.get(artifact_id, {}))]
     return _independence(auditor, producers, bool(reviewed))
 
 

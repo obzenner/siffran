@@ -172,8 +172,10 @@ class ClaudeStopEvidenceByControlMode(MediatorFixture):
             "UI, both writes raise": (True, "raise", False),
         }
 
-    def test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded(self):
-        for label, (has_form, reply, may_show) in self.cells().items():
+    def test_L4_the_stop_blocks_with_the_real_reason_in_every_cell_and_nobody_is_shown_a_dialog(self):
+        """An auto run asks no one after its configuration: whatever the surface, a source that needs a human is inert, so
+        the Stop hands the author the core's own reason, never the directive to report, and the mediator shows nothing."""
+        for label, (has_form, reply, _may_show) in self.cells().items():
             with self.subTest(label):
                 drv, run_id = self.start()  # the stored surface is `human`
                 self.research(drv, run_id, "web", URL)
@@ -183,15 +185,15 @@ class ClaudeStopEvidenceByControlMode(MediatorFixture):
                     mediator._surface = self.broken(None if reply == "raise" else reply)
                 mediator.observe(run_id)
                 response = self.evaluated(drv, run_id)
+                self.assertEqual(self.codes(response), ["claim.research_missing"], label)
+                self.assertIsNone(response["run"]["confirmation_batch"], label)  # nobody is asked
                 stop = stop_result(typed(response), stop_hook_active=False)
-                if has_form or label.startswith("no UI"):
-                    self.assertEqual(self.codes(response), [CONFIRMATION], label)
                 self.assertEqual(stop.exit_code, 2, label)
-                if label != "recorded unavailable (no form)":
-                    self.assertEqual(stop.stderr, EVIDENCE_REPORT_NOTICE + "\n", label)
+                self.assertNotEqual(stop.stderr, EVIDENCE_REPORT_NOTICE + "\n", label)
+                self.assertEqual(stop.stderr, " ".join(response["reasons"][0]["message"].split()) + "\n", label)
                 self.assertEqual(stop.stdout, "", label)  # never a settlement
                 mediator(response, self.reevaluator(drv, run_id, look=False))
-                self.assertEqual(len(human.shown), 1 if may_show else 0, label)
+                self.assertEqual(human.shown, [], label)
 
     def test_D_a_deliberative_stop_pauses_for_evidence_where_the_human_is_present(self):
         """The same cells in deliberative mode: the turn ends with ``paused_for_evidence`` (or, once nobody can be asked,

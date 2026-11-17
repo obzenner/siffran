@@ -74,6 +74,12 @@ class AuditorDefinitionTests(unittest.TestCase):
                          "judged only through items 6\u20139"):
             self.assertIn(required, text)
 
+    def test_I10_the_shared_rubric_ignores_a_record_nobody_confirmed(self):
+        text = " ".join((self.agents / "empirica-auditor.md").read_text(encoding="utf-8").split())
+        for required in ("`status` is `pending` and `retrieve` is `false`", "supports no claim",
+                         "fail the claim, naming it, when no other record supports it"):
+            self.assertIn(required, text)
+
     def test_the_pi_wrapper_carries_no_rubric_copy(self):
         text = (self.agents / "pi/empirica-auditor.md").read_text(encoding="utf-8")
         for absent in ("decided by the author", "outside the verdict", "`human_decision`", "## Rubric",

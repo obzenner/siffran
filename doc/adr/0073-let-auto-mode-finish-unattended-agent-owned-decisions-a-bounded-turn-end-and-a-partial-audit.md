@@ -72,9 +72,47 @@ To come: continue while author work remains, and a bound on unchanged continuati
 
 The run view gains `turn_end_actor`, an additive closed enum: `author`, `auditor`, `human` or `none`. The core computes it in `core.evaluation.turn_end_actor` from the actor of the first admissible requirement of the report (`first_admissible`): an agent step is `author` (claim work, and launching an audit, or launching it again after one failed); a human step is `human`; a running audit child (`audit.pending`) is `auditor`, because the turn settles and the child's result continues the run, which is what both hosts already do on a pending async audit and a continuation would only spin until the bound. It is `none` when nothing is owed, when the run has ended, and when the root claim is refuted or conflicted (`claim.refuted`, or `evidence.conflict` on the root) and no human is being asked, because no further work can approve the root and the only honest step left is to stop; a human who is being asked is never hidden. The value is core-owned so that both hosts read one answer and derive nothing from reasons, obligations or notices. It is carried by every response that carries the run view and is not rendered in the author view.
 
-### D3 and D6 Human-only evidence in auto, and a partial audit
+### D3 and D6 An auto run asks a human only at its configuration
 
-To come: when human-only evidence is asked in interactive auto, and an audit of the claims that do not wait on a human.
+The rule: an auto run asks a human at its configuration, and later only to approve a budget increase in interactive
+auto. It asks nothing else until the run ends: no evidence confirmation, no decision, no consent to end. A human who wants
+to confirm evidence starts the run in deliberative mode.
+
+The lock: `core.confirmation.human_route` returns `unavailable` for every auto run, as it already did for a delegated
+one, whatever surface the host recorded. Every ask reads that one fact. The batch's `prompt_error` is `unavailable`, so a
+host shows no dialog and directs no report to a human, and the core refuses a presentation or a receipt
+(`governance.approval_unavailable`). A dialog opened before an upgrade cannot land its answer. Both hosts and the observer
+read the core's route and decide nothing themselves. A deliberative run is unchanged, and so is an auto run's first
+configuration approval.
+
+The inert rule, a second guard that stands without the lock: in an auto run a research record that needs a human
+(`core.confirmation.asks_human` is false in auto) is inert. It stays in the dossier as the author recorded it and in the
+evidence digest, so the auditor sees it with `status: pending` and `retrieve: false` and the rubric tells the auditor to
+ignore it. It supports no claim, is in no batch, and its producer is not one the audit's independence classifies. A claim
+resting only on such records is open and reads `claim.research_missing` with the case `unconfirmed` and the record ids,
+and the text says what counts: a workspace file the service checks, a local file the auditor child may read, a spike, or
+a stop that leaves the claim as a residual. `claim.research_unbound` (research bound to an earlier wording) ranks before
+`unconfirmed`, because rebinding is the more direct fix. `confirmation.counts` reads the route only and never the mode.
+The observer shows no wait for an inert record: its `status` already says it was never confirmed. Which records need a
+human: a `web` source always (neither host credits the web to the auditor); a `runtime` note with no workspace path; a
+local file only where the auditor child may not read it (Claude credits `local` and `workspace`, Pi credits `read`). A
+`runtime` record that names a workspace path is checked by the service and counts.
+
+Two deliberate exceptions, both stated rather than hidden: a refuting web source still discards a claim in auto, with no
+human to confirm or reject it, and a stored 7.0.x human `confirm` or `reject` still counts in every mode.
+
+What neither guard changes: a stored human receipt still counts in every mode (D5).
+
+Rejected alternatives:
+
+- Let interactive auto ask when it can. It makes the same run finish or wait by who happens to be at the keyboard, and the
+  turn end cannot tell whether a dialog will come.
+- Hold the confirmation batch until the author's work is done, then ask. It keeps a human in the loop that the rule removes
+  and needs a second order in the gate and the view.
+- Refuse a citation that needs a human at submission. It adds a rule beside the derivation and cannot reach records
+  already stored.
+
+Reversal condition: operators of interactive auto runs need the confirmation dialog and will not use deliberative mode.
 
 ### D5 Persisted runs
 

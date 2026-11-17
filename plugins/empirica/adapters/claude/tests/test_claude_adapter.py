@@ -609,7 +609,10 @@ class ResponseMappingTests(unittest.TestCase):
             auto["run"]["governance"].update({"control_mode": "auto", "first_approval": True})
             self.assertEqual(_stop(auto).exit_code, 2)
 
-    def test_an_interactive_auto_stop_never_settles_for_evidence_and_directs_the_author_to_report(self) -> None:
+    def test_the_stop_directs_the_author_to_report_only_where_the_core_says_a_human_can_be_asked(self) -> None:
+        """The adapter reads one core fact, the batch's ``prompt_error``: only an askable one directs a report. The core
+        derives no askable batch for an auto run (``human_route``), so this view is built by hand and the real flow is
+        ``ClaudeStopEvidenceByControlMode.test_L4_*``."""
         from application import protocol
         notice = getattr(protocol, "EVIDENCE_REPORT_NOTICE", "<not defined>")
         record = "sha256:" + "a" * 64
@@ -774,9 +777,10 @@ class StopModeTests(unittest.TestCase):
                   "next_actions": ["research.record"], "sections": ["evidence/research"], "message": cls.REASON}
         if kind == "evidence":
             run["confirmation_batch"] = {"key": "sha256:" + "b" * 64, "record_ids": [cls.RECORD], "claim_ids": [],
-                                         "prompt_error": None, "records": [
+                                         "prompt_error": None if mode == "deliberative" else "unavailable", "records": [
                                              {"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/x"}]}
-            reason = {"code": "evidence.confirmation_required", "parameters": {"route": "human", "record_ids": [cls.RECORD]},
+            route = "human" if mode == "deliberative" else "unavailable"  # an auto run asks no one: the core's route
+            reason = {"code": "evidence.confirmation_required", "parameters": {"route": route, "record_ids": [cls.RECORD]},
                       "next_actions": ["human.confirm_evidence"], "sections": ["evidence"],
                       "message": "Research waits on a human."}
         elif kind == "budget":
@@ -807,17 +811,17 @@ class StopModeTests(unittest.TestCase):
 
     def test_EHB_STOP_06_the_first_stop_of_an_auto_run_gives_the_reason_and_keeps_the_settlements(self):
         """A first Stop (``stop_hook_active`` false; an absent key is the hook's concern, STOP_18) of an auto run gives the
-        core's reason or the evidence directive; the settlements are the same in every mode."""
+        core's reason; the settlements are the same in every mode."""
         notices = self.notices()
-        budget, evidence, human_wait = notices["budget_exhausted"], notices["evidence_report"], notices["human_wait"]
+        budget, human_wait = notices["budget_exhausted"], notices["human_wait"]
         for mode in self.MODES:
             with self.subTest(mode=mode):
                 if mode != "deliberative":  # a deliberative first Stop pauses (STOP_21, STOP_22)
                     real = self.stop(self.block(mode, "real"))
                     self.assertEqual((real.exit_code, real.stdout, real.stderr), (2, "", self.REASON + "\n"))
-                if mode in ("auto-interactive-pre", "auto-interactive-post"):  # a delegated route is `unavailable`: no directive
-                    directive = self.stop(self.block(mode, "evidence"))
-                    self.assertEqual((directive.exit_code, directive.stdout, directive.stderr), (2, "", evidence + "\n"))
+                    waiting = self.stop(self.block(mode, "evidence"))  # an auto run asks no one: the reason, no directive
+                    self.assertEqual((waiting.exit_code, waiting.stdout, waiting.stderr),
+                                     (2, "", "Research waits on a human.\n"))
                 spent = self.stop(self.block(mode, "budget"))
                 self.assertEqual((spent.exit_code, json.loads(spent.stdout), spent.stderr),
                                  (0, {"systemMessage": render_notice(budget, resource="pass")}, ""))
@@ -886,20 +890,22 @@ class StopModeTests(unittest.TestCase):
                 self.assertIn("does not hand the turn back", blocked.stderr)
                 self.assertNotIn("unattended", blocked.stderr)  # interactive auto has a human present
 
-    def test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off(self):
-        """An interactive auto continuation keeps the evidence directive; deliberative hands off with `paused_for_human`."""
-        directive = self.notices()["evidence_report"]
-        for mode in ("auto-interactive-pre", "auto-interactive-post"):  # a delegated run has no human route to ask
+    def test_EHB_STOP_20_an_auto_continuation_has_no_evidence_directive_and_deliberative_hands_off(self):
+        """An auto continuation on an evidence wait is the way out with the real reason (nobody is asked, in any auto mode);
+        deliberative hands off with `paused_for_evidence`."""
+        for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
             with self.subTest(mode=mode):
                 blocked = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
-                self.assertEqual((blocked.exit_code, blocked.stdout, blocked.stderr), (2, "", directive + "\n"))
+                self.assertEqual((blocked.exit_code, blocked.stdout), (2, ""))
+                self.assertEqual(blocked.stderr, render_notice(self.notices()["unattended_continue"],
+                                                               reason="Research waits on a human.") + "\n")
         paused = self.stop(self.block("deliberative", "evidence"), stop_hook_active=True)
         self.assertEqual((paused.exit_code, paused.stderr), (0, ""))
         self.assertEqual(json.loads(paused.stdout), {"systemMessage": self.notices()["paused_for_evidence"]})
 
     def test_INVARIANT_across_turn_ends_read_only_calls_earn_one_continuation_and_a_changed_basis_one_more(self):
         """G17b item 2 (the Pi twin is `turn-end.test.ts`): every sequence of up to 6 events between Stops, each a read-only call
-        (the core's `run.basis` is unchanged) or a recorded observation (it moves), for the evidence directive and for a plain
+        (the core's `run.basis` is unchanged) or a recorded observation (it moves), for an evidence wait and for a plain
         auto reason. A Stop that continues is exit 2; a continuation (`stop_hook_active`) on the basis the previous Stop saw
         ends with `unattended_continue` (exit 0)."""
         import uuid
@@ -921,7 +927,7 @@ class StopModeTests(unittest.TestCase):
                             self.assertIn("intent=stop", json.loads(out)["systemMessage"])
                         active, previous = code == 2, revision
 
-    def test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_the_evidence_directive(self):
+    def test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_has_no_evidence_directive(self):
         notices = self.notices()
         mode = "auto-interactive-pre"
         for flag in ({}, {"stop_hook_active": True}):  # an approvable first approval settles on either Stop
@@ -929,8 +935,9 @@ class StopModeTests(unittest.TestCase):
             self.assertEqual(json.loads(settled.stdout), {"systemMessage": notices["human_wait"]}, flag)
         first = self.stop(self.block(mode, "real"))  # an auto first turn end gives the core's reason
         self.assertEqual((first.exit_code, first.stderr), (2, self.REASON + "\n"))
-        directive = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
-        self.assertEqual((directive.exit_code, directive.stderr), (2, notices["evidence_report"] + "\n"))
+        waiting = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
+        self.assertEqual((waiting.exit_code, waiting.stderr),
+                         (2, render_notice(notices["unattended_continue"], reason="Research waits on a human.") + "\n"))
 
     def test_EHB_STOP_19_an_approval_that_cannot_be_asked_ends_the_loop_by_mode(self):
         """Interactive auto before its first approval, when ``human_wait`` does not apply (no MCP ingress, a prompt error
@@ -1012,7 +1019,7 @@ class StopModeTests(unittest.TestCase):
             return self.block(mode, "budget")
         if state == "evidence-wait":
             result = self.block(mode, "evidence")
-            if mode == "auto-delegated":  # no human route to ask: the batch carries no askable prompt
+            if mode != "deliberative":  # an auto run asks no one: the core derives no human route, so no askable prompt
                 result["run"]["confirmation_batch"]["prompt_error"] = "unavailable"
             return result
         return self.block(mode, "real")

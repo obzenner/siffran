@@ -213,13 +213,22 @@ class LiteralAgentOnClaude(HostFaithful):
         self.assertEqual(len(self.human.shown), 1)
         self.assertIn("approve", self.human.shown[0][0].lower() + str(self.human.shown[0][1]).lower())
 
-    def test_a_client_without_a_form_ends_in_an_honest_stop(self):
-        drv, run_id = self.claude(form=False, mode="auto")
+    def test_an_interactive_auto_run_ends_in_an_honest_stop_in_one_call_whatever_the_client_can_show(self):
+        for form in (False, True):
+            with self.subTest(form=form):
+                drv, run_id = self.claude(form=form, mode="auto")
+                view = self.after_research(run_id)
+                self.assertIn(NO_HUMAN, view)  # an auto run asks no one: said before the host has looked, as after
+                self.assertNotIn("report_convergence intent=report_convergence", next_actions(view))
+                outcome, calls = self.literal_agent(run_id, view)
+                self.assertEqual((outcome, calls), ("stopped", ["report_convergence intent=stop"]))
+                self.assertEqual(self.human.shown, [])
+
+    def test_a_deliberative_client_without_a_form_ends_without_a_dialog(self):
+        drv, run_id = self.claude(form=False)
         view = self.after_research(run_id)
         self.assertNotIn(NO_HUMAN, view)  # not known yet: the host has not looked
-        outcome, calls = self.literal_agent(run_id, view)
-        self.assertEqual(outcome, "stopped", calls)
-        self.assertEqual(calls[0], "report_convergence intent=report_convergence")  # it looked before it gave up
+        self.assertEqual(self.literal_agent(run_id, view, steps=1)[1], ["report_convergence intent=report_convergence"])
         self.assertEqual(self.human.shown, [])
         self.assertIn(NO_HUMAN, self.views[1])  # said only once the host had looked and found no form
 
@@ -307,14 +316,17 @@ class StopHookLoopOnClaude(HostFaithful):
         self.assertEqual(json.loads(stops[0].stdout), {"systemMessage": protocol.PAUSED_FOR_EVIDENCE_NOTICE})
         self.assertEqual(self.human.shown, [])
 
-    def test_EHB_STOP_16_an_evidence_directive_the_agent_ignores_to_the_cap_in_interactive_auto(self):
-        """Interactive auto keeps the directive on every turn end (the report is what asks the human); an agent that
-        ignores it runs into Claude's own cap, which is the host's bound (`host-capped`, `stop_host_cap`)."""
+    def test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_runs_to_the_cap_with_no_directive_in_interactive_auto(self):
+        """An auto run asks no one, so the Stop never directs a report: the first turn end gives the core's reason and each
+        later one the way out; an agent that ignores them runs into Claude's own cap, the host's bound (`host-capped`,
+        `stop_host_cap`), and nobody is shown a dialog."""
         drv, run_id = self.claude(mode="auto")
         self.after_research(run_id)
         stops = self.hook_loop(drv, run_id, lambda text: None)
         self.assertEqual(len(stops), self.CAP)
-        self.assertTrue(all(s.exit_code == 2 and "report_convergence" in s.stderr for s in stops))
+        self.assertTrue(all(s.exit_code == 2 for s in stops))
+        self.assertFalse(any(protocol.EVIDENCE_REPORT_NOTICE in s.stderr for s in stops))
+        self.assertIn("intent=stop", stops[1].stderr)  # the way out, from the second turn end on
         self.assertEqual(self.human.shown, [])
 
     def unattended(self, **session):
@@ -426,9 +438,10 @@ class HostFailure(HostFaithful):
     def failing(self, *, surface: bool = False, presentation: bool = False, how: str = "fault"):
         """A Claude run whose private ingress answers a typed Fault (``how="fault"``) or raises (``how="raise"``).
 
-        It is an interactive ``auto`` run: the agent ends it alone with ``intent=stop``, which is what these tests are
-        about. A deliberative run cannot end without its human (ADR-0063 amendment), see the test at the end."""
-        drv, run_id = self.claude(mode="auto")
+        It is a deliberative run, the only mode that asks a human about evidence (an auto run asks no one, so its host has
+        nothing to fail at). The agent's honest ``intent=stop`` is answered with the closed terminal reason, because nobody
+        could be asked to consent (ADR-0063 amendment): ``stop_call``."""
+        drv, run_id = self.claude(mode="deliberative")
         for wanted, name in ((surface, "_surface"), (presentation, "_presentation")):
             if wanted:
                 self.inject(self.tools._confirm, name, how)
@@ -439,17 +452,34 @@ class HostFailure(HostFaithful):
         return (sum(a.get("kind") == "evidence_presentation" for a in snapshot.history),
                 self.interactions(drv, run_id)["total"])
 
+    def follow(self, run_id: str, view: str, steps: int = 2) -> tuple[list[str], list[str]]:
+        """Take the first actionable ``next:`` of each view, ``steps`` times: the calls made and every view read."""
+        calls, views = [], [view]
+        for _ in range(steps):
+            calls.append(first_actionable(views[-1]))
+            views.append(self.say(call_of(calls[-1], run_id)))
+        return calls, views
+
+    def stop_call(self, run_id: str) -> str:
+        """An honest stop of a deliberative run whose host cannot ask: the closed terminal reason, the run still active."""
+        text = self.say(("report_convergence", {"run_id": run_id, "intent": "stop"}))
+        self.assertFalse(TERMINAL.match(text), text)
+        self.assertIn("governance.terminal_stop_pending", text)
+        return text
+
     def check(self, **fault):
         for how in ("fault", "raise"):
             with self.subTest(how=how):
                 drv, run_id = self.failing(how=how, **fault)
                 before = self.spent(drv, run_id)
-                outcome, calls = self.literal_agent(run_id, self.after_research(run_id))
-                self.assertEqual((outcome, self.human.shown), ("stopped", []), calls)
-                self.assertEqual(calls, ["report_convergence intent=report_convergence", "report_convergence intent=stop"])
-                self.assertIn(NOTICE, self.views[1])
-                self.assertEqual(first_actionable(self.views[1]), "report_convergence intent=stop")
-                self.assertNotIn("a human is asked when you report, if this host can show a dialog", self.views[1])
+                calls, views = self.follow(run_id, self.after_research(run_id))
+                self.assertEqual((calls, self.human.shown),
+                                 (["report_convergence intent=report_convergence", "report_convergence intent=stop"], []))
+                self.assertIn(NOTICE, views[1])
+                self.assertEqual(first_actionable(views[1]), "report_convergence intent=stop")
+                self.assertNotIn("a human is asked when you report, if this host can show a dialog", views[1])
+                self.assertIn("governance.terminal_stop_pending", views[2])  # the stop is not a consent nobody gave
+                self.assertEqual(self.run_view(drv, run_id)["status"], "active")
                 self.assertEqual(self.spent(drv, run_id), before)  # nothing spent, approved or invented
 
     def test_a_surface_that_cannot_be_recorded_ends_in_an_honest_stop_within_two_calls(self):
@@ -536,7 +566,7 @@ class HostFailure(HostFaithful):
         self.after_research(run_id)
         first = self.say(("report_convergence", {"run_id": run_id}))   # the one report the Stop directive asks for
         self.assertEqual(first_actionable(first), "report_convergence intent=stop")
-        self.assertTrue(TERMINAL.match(self.say(("report_convergence", {"run_id": run_id, "intent": "stop"}))))
+        self.stop_call(run_id)
 
     def test_unobserved_and_exhausted_offers_no_report_and_says_the_limit(self):
         drv, run_id = self.claude()
@@ -566,11 +596,11 @@ class HostFailure(HostFaithful):
             with self.subTest(how=how):
                 drv, run_id, view = self.double_fault(how)
                 before = self.spent(drv, run_id)
-                outcome, calls = self.literal_agent(run_id, view)
-                self.assertEqual((outcome, self.human.shown), ("stopped", []), calls)
-                self.assertEqual(calls, ["report_convergence intent=report_convergence", "report_convergence intent=stop"])
-                self.assertIn(NOTICE, self.views[1])
-                self.assertEqual(first_actionable(self.views[1]), "report_convergence intent=stop")
+                calls, views = self.follow(run_id, view)
+                self.assertEqual((calls, self.human.shown),
+                                 (["report_convergence intent=report_convergence", "report_convergence intent=stop"], []))
+                self.assertIn(NOTICE, views[1])
+                self.assertEqual(first_actionable(views[1]), "report_convergence intent=stop")
                 self.assertEqual(self.spent(drv, run_id), before)
 
     def test_repeated_default_reports_under_the_double_fault_never_offer_the_report_first(self):
@@ -583,7 +613,7 @@ class HostFailure(HostFaithful):
                     self.assertIn(NOTICE, view)
                     self.assertNotIn("a human can be asked at the end of your next pass", view)
                 self.assertEqual(self.human.shown, [])
-                self.assertTrue(TERMINAL.match(self.say(("report_convergence", {"run_id": run_id, "intent": "stop"}))))
+                self.stop_call(run_id)
 
     def test_a_failed_failure_report_after_a_surface_failure_is_a_closed_error_not_a_stale_view(self):
         for how in ("raise", "fault"):
@@ -594,7 +624,8 @@ class HostFailure(HostFaithful):
                 reply = self.tools.call("report_convergence", {"run_id": run_id})
                 self.assertNotIn("report_convergence intent=report_convergence", reply["content"][0]["text"])
                 self.assertEqual(self.human.shown, [])
-                self.assertTrue(TERMINAL.match(self.say(("report_convergence", {"run_id": run_id, "intent": "stop"}))))
+                self.assertFalse(TERMINAL.match(self.say(("report_convergence", {"run_id": run_id, "intent": "stop"}))))
+                self.assertEqual(self.run_view(drv, run_id)["status"], "active")  # a stop nobody consented to ends nothing
 
     def test_the_in_process_projection_is_the_cores_own_response(self):
         """The fallback is one pure function of the core's rule: for each failure, and before and after the host's look, it

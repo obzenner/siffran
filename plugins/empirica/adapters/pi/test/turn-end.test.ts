@@ -46,7 +46,7 @@ function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "hum
   if (kind === "budget") reason = { code: "budget.exhausted", parameters: { resource: "pass" }, message: "pass budget exhausted." };
   if (kind === "evidence") {
     run.confirmation_batch = { key: "sha256:b", record_ids: [], claim_ids: [], records: [],
-      prompt_error: mode === "auto-delegated" ? "unavailable" : null };
+      prompt_error: mode === "deliberative" ? null : "unavailable" };  // an auto run asks no one: the core's route is unavailable
     reason = { code: "evidence.confirmation_required", parameters: { route: "human" }, message: "Research waits on a human." };
   }
   if (kind === "audit") {
@@ -283,12 +283,12 @@ test("INVARIANT (G17b item 2): across turn ends, any run of read-only calls earn
   }
 });
 
-test("EHB-STOP-32: interactive auto hands the evidence directive and a delegated run does not", async () => {
-  const interactive = await (await wired(() => block("auto-interactive-post", "evidence"))).settle();
-  assert.equal(interactive?.continue, true);
-  assert.equal((interactive?.entries?.[0] as { content: string }).content, NOTICES.evidence_report);
-  const delegated = await (await wired(() => block("auto-delegated", "evidence"))).settle();
-  assert.equal((delegated?.entries?.[0] as { content: string }).content, "Research waits on a human.");
+test("EHB-STOP-32: an auto run asks no one: every auto mode is handed the core's reason, never the evidence directive", async () => {
+  for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const) {
+    const out = await (await wired(() => block(mode, "evidence"))).settle();
+    assert.equal(out?.continue, true, mode);
+    assert.equal((out?.entries?.[0] as { content: string }).content, "Research waits on a human.", mode);
+  }
 });
 
 test("an unreadable run ends the turn silently; the gate at tool_call still holds", async () => {

@@ -172,7 +172,15 @@ recorded. Two readings change for runs written by an earlier 7.0.x:
 - An ended auto run may show a decision that read "Undecided when the run stopped" as "Decided by the agent".
 - An active auto run whose decision was left on Later now waits on the agent's research, not on a person.
 
-A human answer already recorded still decides its claim in every mode. Deliberative runs read as before.
+An auto run asks a person once: to approve its configuration. After that it asks nothing about evidence. A source that needs
+a person to confirm it (a web page, or a runtime note with no workspace path) no longer waits: it stays in the dossier, supports
+no claim, and a claim resting only on such sources stays open (`claim.research_missing`, with the text "rests only on research
+that a human would have to confirm") until the agent cites a workspace file, runs a spike, or stops. A refuting source of that kind still discards the claim. Two readings change for runs
+written by an earlier 7.0.x: an active auto run that was waiting on a confirmation now waits on the agent's research, and a dialog
+left open across the upgrade can no longer land its answer.
+
+A human answer already recorded still decides its claim in every mode. Deliberative runs read as before. To confirm evidence
+yourself, start the run in deliberative mode.
 
 ## Qualified hosts
 
