@@ -74,7 +74,7 @@
       },
       {
         "id": "settlement",
-        "title": "the sole blocker is a human governance wait or an exhausted budget",
+        "title": "the sole blocker is a human governance wait or an exhausted budget the core offers no raise for",
         "outcomes": {
           "deliberative": {
             "outcome": "settle-notice",
@@ -108,10 +108,12 @@
         "scenarios": {
           "claude": [
             "EHB-STOP-03",
-            "EHB-STOP-04"
+            "EHB-STOP-04",
+            "EHB-STOP-37"
           ],
           "pi": [
-            "EHB-STOP-36"
+            "EHB-STOP-36",
+            "EHB-STOP-37"
           ]
         }
       },
@@ -471,7 +473,8 @@
         "EHB-STOP-20",
         "EHB-STOP-21",
         "EHB-STOP-22",
-        "EHB-STOP-23"
+        "EHB-STOP-23",
+        "EHB-STOP-37"
       ],
       "sources": "CC \"Stop input\" and \"Stop decision control\"; Q2; ADR-0019 (G2), ADR-0051, ADR-0063, ADR-0064 interim (`fb1106b`), ADR-0067 A2-1/A2-2, ADR-0068; HEATH AS3 (`pause`); CODE `P/adapters/claude/completion.py:_turn_end_mode`."
     },
@@ -2557,6 +2560,22 @@
       "ledger_rows": [
         "pi_settle_notice"
       ]
+    },
+    {
+      "id": "EHB-STOP-37",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "deliberative",
+        "auto-interactive-post"
+      ],
+      "setup": "the sole blocker is an exhausted budget, and the core offers `budget.raise` (deliberative, and interactive auto after its first approval, whose human approves a raise)",
+      "action": "Stop (Claude) / `agent_before_settle` (Pi)",
+      "expected": "C/P: deliberative settles with `budget_exhausted`, as before; interactive auto continues with the core's reason (Claude exit 2; Pi `continue: true`), because the agent is the one to propose the raise; a delegated auto run's view never offers `budget.raise`, so it settles",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::ResponseMappingTests::test_A11d_an_exhausted_budget_the_core_offers_to_raise_continues_interactive_auto_only",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A11d: an exhausted budget the core offers to raise continues interactive auto and settles deliberative"
+      ],
+      "ledger_rows": []
     },
     {
       "id": "EHB-STOP-31",

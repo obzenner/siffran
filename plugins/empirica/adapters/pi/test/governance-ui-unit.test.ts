@@ -141,7 +141,7 @@ interface HarnessSettings {
 function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
   const dialog = structuredClone(reviewDialog);
   const g = { state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, proposal: {
+    plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, raises: false, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
       rationale: dialog.rationale,
     }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };
@@ -309,6 +309,19 @@ test("interactive auto presents initially, then accepts automatically without a 
   assert.equal(later.customCalls, 0);
 });
 
+test("A11d: interactive auto after its first approval asks its human about a raise only, reading the core's fact", async () => {
+  const raising = harness(); raising.g.control_mode = "auto"; raising.g.first_approval = true; raising.g.raises = true;
+  await raising.invoke();
+  assert.deepEqual(outcomes(raising), ["present", "approve"]);
+  assert.equal(raising.customCalls, 1, "the human sees the dialog");
+
+  const delegated = harness(); delegated.g.control_mode = "auto"; delegated.g.first_approval = true;
+  delegated.g.raises = true; delegated.g.context.interactive = false; delegated.g.context.delegation = true;
+  await delegated.invoke();
+  assert.deepEqual(outcomes(delegated), ["approve"], "a delegated run is never asked");
+  assert.equal(delegated.customCalls, 0);
+});
+
 test("interactive auto with unavailable UI fails closed and never delegates", async () => {
   const h = harness(); h.g.control_mode = "auto"; h.g.context.delegation = true;
   h.ctx.hasUI = false; h.g.context.ingress = "unavailable"; delete h.ctx.ui.custom;
@@ -342,6 +355,9 @@ test("phase decision matches deliberative, interactive-auto, and delegated autho
   assert.equal(expectedApprovalKind(h.g), "host_ui");
   h.g.first_approval = true;
   assert.equal(expectedApprovalKind(h.g), "auto");
+  h.g.raises = true;  // the core's fact: the proposal asks for more than the run approved
+  assert.equal(expectedApprovalKind(h.g), "host_ui");
+  h.g.raises = false;
   h.g.first_approval = false; h.g.context.interactive = false; h.g.context.delegation = true;
   assert.equal(expectedApprovalKind(h.g), "auto");
 });

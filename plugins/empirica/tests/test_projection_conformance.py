@@ -150,10 +150,11 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
 class ProjectionConformanceTests(unittest.TestCase):
     def test_contract_recovery_exclusions_are_the_projection_policy(self):
         table = protocol.CONTRACT_VIEW.recovery_exclusions
-        self.assertEqual(dict(table), {"deliberative": (), "auto": ("budget.raise",)})
+        self.assertEqual(dict(table), {"deliberative": (), "auto_interactive": (), "auto_delegated": ("budget.raise",)})
         actions = ["budget.raise", "residual.accept"]
         self.assertEqual(recovery_actions(table["deliberative"], actions), actions)
-        self.assertEqual(recovery_actions(table["auto"], actions), ["residual.accept"])
+        self.assertEqual(recovery_actions(table["auto_interactive"], actions), actions)  # its human approves a raise
+        self.assertEqual(recovery_actions(table["auto_delegated"], actions), ["residual.accept"])
 
     def test_the_confirmation_rule_and_the_exclusions_commute_through_project_prompt_error(self):
         """``project_prompt_error`` patches rows that already carry the mode's exclusions and applies none itself. That is

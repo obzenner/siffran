@@ -347,7 +347,7 @@ def governance_facts(state: Any, spent: int | None) -> dict:
                  prompt_error=governance.interaction_error(state.governance, spent) if known else None)
     value.pop("receipts")
     value.pop("delegation_envelope")
-    value.update(budgets=dict(state.budgets),
+    value.update(raises=governance.raises(state.governance, state.budgets), budgets=dict(state.budgets),
                  remaining={ceiling: state.budgets[ceiling] - state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()})
     return value
@@ -406,8 +406,7 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     owed = report_requirements(snapshot, derivation, blockers)
     obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next, owed=owed)
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
-    control_mode = snapshot.state.governance["control_mode"]
-    exclusions = snapshot.contract.recovery_exclusions[control_mode]
+    exclusions = snapshot.contract.recovery_exclusions[governance.exclusion_key(snapshot.state.governance)]
     batch = _batch(snapshot, derivation)
     for residual in residuals:
         residual["next_actions"] = recovery_actions(exclusions, confirmation_actions(

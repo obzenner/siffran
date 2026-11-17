@@ -211,6 +211,23 @@ def interaction_error(governance: Mapping, confirmations: int) -> str | None:
 HUMAN_WAIT_STATES = frozenset({"pending", "revision_pending", "rejected"})
 
 
+def raises(governance: Mapping, budgets: Mapping) -> bool:
+    """Whether the standing proposal asks for more than the run has approved: the run holds a first approval and some
+    proposed ceiling is above the approved one in ``budgets``. Derived at read time from the two (nothing stores it) and
+    published in the run view's governance (``raises``), so a host reads the fact and never re-derives it. Before the first
+    approval nothing is approved yet, so nothing is raised."""
+    return bool(governance["first_approval"]
+                and any(governance["proposal"]["budgets"][ceiling] > budgets[ceiling] for ceiling in CEILINGS))
+
+
+def exclusion_key(governance: Mapping) -> str:
+    """The key of the contract's ``recovery_exclusions`` that applies to the run: ``deliberative``, ``auto_interactive``
+    (its human can approve a raise) or ``auto_delegated`` (nobody can be asked: the honest stop is the way on)."""
+    if governance["control_mode"] == "deliberative":
+        return "deliberative"
+    return "auto_interactive" if governance["context"]["interactive"] is True else "auto_delegated"
+
+
 def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
     """Whether the run's configuration waits on its human now: the agent has asked (a sized ``configure_run``, not the
     StartRun placeholder), the configuration is in ``HUMAN_WAIT_STATES`` (not approved yet, or rejected), this phase is a
@@ -224,9 +241,17 @@ def human_wait(governance: Mapping, prompt_error: str | None) -> bool:
     answer as ``governance.human_wait``. The one predicate of who acts on a configuration: the report's requirements
     (``evaluation.report_requirements``) and so the observer's standing and ask, and the hosts' turn-end wait, which reads
     the view's answer and adds only its own approval ingress and the sole-blocker check."""
-    return (governance["state"] in HUMAN_WAIT_STATES and sized(governance)
+    return (governance["state"] in _waiting_states(governance) and sized(governance)
             and expected_approval_kind(governance) == "host_ui"
             and governance["context"]["approval_capability"] == HUMAN_CONFIGURATION and prompt_error is None)
+
+
+def _waiting_states(governance: Mapping) -> frozenset:
+    """The states a configuration waits on its human in. A rejected raise of an interactive auto run is the human's
+    answer: the agent acts (it stops, or proposes within the approved ceilings), so ``rejected`` does not wait there."""
+    if governance["control_mode"] == "auto" and governance["first_approval"]:
+        return HUMAN_WAIT_STATES - {"rejected"}
+    return HUMAN_WAIT_STATES
 
 
 def expected_approval_kind(governance: Mapping) -> str:
@@ -234,12 +259,13 @@ def expected_approval_kind(governance: Mapping) -> str:
 
     Deliberative runs are always human. Delegated auto (no interactive human) is always
     automatic. Interactive auto requires one human approval episode before the first
-    successful approval, then is automatic thereafter; interactive authority outranks
-    delegation and never silently downgrades (ADR-0063)."""
+    successful approval, then is automatic thereafter, except that a proposal that raises a ceiling
+    (``governance["raises"]``, the fact ``raises`` derives and the run view publishes) is a further human
+    episode; interactive authority outranks delegation and never silently downgrades (ADR-0063, ADR-0073)."""
     if governance["control_mode"] == "deliberative":
         return "host_ui"
     if governance["context"]["interactive"] is True:
-        return "host_ui" if not governance["first_approval"] else "auto"
+        return "host_ui" if not governance["first_approval"] or governance["raises"] else "auto"
     return "auto"  # delegated auto: no human episode
 
 
@@ -250,17 +276,18 @@ def configuration_error(state, proposed: Mapping) -> str | None:
     (including above the seed) except in delegated auto, where the durable operator-narrowed
     envelope caps every proposal. After the first successful approval an automatic acceptance must
     be componentwise no greater than the currently effective approved ceilings; a
-    deliberative human may still raise through the dialog."""
+    deliberative human may still raise through the dialog, and so may the human of an interactive
+    auto run (a raise is theirs to approve); a delegated auto run has nobody to ask and is refused."""
     for ceiling, used in CEILINGS.items():
         if proposed["budgets"][ceiling] < state.budgets[used]:
             return "governance.budget_invalid"
     gov = state.governance
     if gov["first_approval"]:
-        if gov["control_mode"] == "auto":
+        if gov["control_mode"] == "auto" and gov["context"]["interactive"] is not True:
             for ceiling in CEILINGS:
                 if proposed["budgets"][ceiling] > state.budgets[ceiling]:
                     return "governance.auto_ceiling"
-        return None  # deliberative after first approval: the human may raise
+        return None  # after the first approval a human may raise: deliberative, and interactive auto
     if gov["control_mode"] == "auto" and gov["context"]["interactive"] is not True:
         envelope = gov["delegation_envelope"]
         for ceiling in CEILINGS:
@@ -302,9 +329,9 @@ def resolve_submission(governance: Mapping, submission: Mapping,
 
 
 def decision_error(run_id: str, governance: Mapping, decision: Mapping,
-                   confirmations: int) -> str | None:
-    """Validate one governance decision against current policy; ``inert`` signals an exact
-    historical replay that must not reopen authority."""
+                   confirmations: int, budgets: Mapping) -> str | None:
+    """Validate one governance decision against current policy (``budgets``: the ceilings in force, which say whether the
+    proposal raises one); ``inert`` signals an exact historical replay that must not reopen authority."""
     outcome = decision.get("outcome")
     fingerprint = canonical_digest(decision)
     prior = next((r for r in governance["receipts"] if r["id"] == decision["receipt_id"]), None)
@@ -330,7 +357,7 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping,
         return "governance.stale_proposal"
     if prior is None and (reason := interaction_error(governance, confirmations)):
         return reason
-    expected = expected_approval_kind(governance)
+    expected = expected_approval_kind({**governance, "raises": raises(governance, budgets)})
     auto_authorized = (governance["first_approval"] or
                        governance["context"]["delegation"] is True)
     if (decision["approval_kind"] == "auto" and not auto_authorized):
@@ -485,9 +512,11 @@ def invariant(doc: Mapping) -> bool:
         if any(value["proposal"]["budgets"][ceiling] < doc["budgets"][used]
                for ceiling, used in CEILINGS.items()):
             return False
-        if value["control_mode"] == "auto" and value["first_approval"] and any(
-                value["proposal"]["budgets"][ceiling] > doc["budgets"][ceiling]
-                for ceiling in CEILINGS):
+        # A pending proposal above the approved ceilings is a raise: only an interactive auto run (its human decides it) holds one.
+        if (value["control_mode"] == "auto" and value["first_approval"]
+                and value["context"]["interactive"] is not True and any(
+                    value["proposal"]["budgets"][ceiling] > doc["budgets"][ceiling]
+                    for ceiling in CEILINGS)):
             return False
 
     if delegated and any(receipt["approval_kind"] != "auto" for receipt in receipts):
@@ -495,19 +524,26 @@ def invariant(doc: Mapping) -> bool:
     interactive_auto = (value["control_mode"] == "auto"
                         and value["context"]["interactive"] is True)
     if interactive_auto:
-        human_approvals = [receipt for receipt in approving
-                           if receipt["approval_kind"] == "host_ui"]
-        if len(human_approvals) > 1:
+        # One human episode opens the run; after it a human is asked again only about a raise. The stored history
+        # cannot say which earlier revision raised, so it is held to what it can show: later human receipts follow the
+        # first approval, no revision is approved twice by a human, and the standing proposal holds a human receipt
+        # only if it raises a ceiling.
+        human_approvals = sorted((receipt for receipt in approving if receipt["approval_kind"] == "host_ui"),
+                                 key=lambda receipt: receipt["plan_revision"])
+        if len({receipt["plan_revision"] for receipt in human_approvals}) != len(human_approvals):
             return False
-        if any(receipt["approval_kind"] == "auto" for receipt in receipts):
-            if len(human_approvals) != 1:
-                return False
+        if any(receipt["approval_kind"] == "auto" for receipt in receipts) and not human_approvals:
+            return False
         if human_approvals:
             human_epoch = human_approvals[0]["plan_revision"]
-            if (any(receipt["approval_kind"] == "auto"
-                    and receipt["plan_revision"] <= human_epoch for receipt in receipts)
-                    or any(receipt["approval_kind"] == "host_ui"
-                           and receipt["plan_revision"] > human_epoch for receipt in receipts)):
+            if any(receipt["approval_kind"] == "auto" and receipt["plan_revision"] <= human_epoch
+                   for receipt in receipts):
+                return False
+            if value["state"] != "approved" and any(
+                    receipt["approval_kind"] == "host_ui" and receipt["plan_revision"] == value["plan_revision"]
+                    for receipt in receipts) and not (
+                    value["first_approval"] and any(
+                        value["proposal"]["budgets"][ceiling] > doc["budgets"][ceiling] for ceiling in CEILINGS)):
                 return False
 
     if value["state"] == "approved":

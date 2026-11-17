@@ -1563,7 +1563,8 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
     # (then the agent keeps working until the human tells it to stop again).
     approval = next(o for p, o, _ in snapshot.bootstrap_requirements if p == "governance.approved")
     configuration_waits = governance.human_wait(
-        snapshot.state.governance, governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
+        {**snapshot.state.governance, "raises": governance.raises(snapshot.state.governance, snapshot.state.budgets)},
+        governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
     requirements = []
     for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
         human = ((reason in HUMAN_WAITING_REASONS and not (reason == TERMINAL_STOP_REASON

@@ -2491,7 +2491,7 @@
         },
         {
           "id": "budget/exhausted",
-          "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted. Deliberative runs may recover with budget.raise or residual.accept; automatic runs exclude budget.raise and recover only by residual.accept or by starting a fresh run. Exhaustion never borrows from another account."
+          "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted. Deliberative runs and interactive auto runs may recover with budget.raise (a proposal above the approved ceilings, which the human approves) or residual.accept; a delegated auto run excludes budget.raise and recovers only by residual.accept or by starting a fresh run. Exhaustion never borrows from another account."
         }
       ]
     },
@@ -2697,7 +2697,7 @@
         },
         {
           "id": "governance/auto",
-          "text": "Every run starts with author-sized ceilings and rationale. Deliberative and interactive-auto runs require one initial human-approved sizing episode; delegated auto instead accepts initial sizing only inside the persisted operator-narrowed 8/1/2 envelope. After the first successful approval, automatic revisions are componentwise monotone and cannot raise installed ceilings; deliberative human locked confirmation may amend them. Automatic exhaustion is restart-only rather than budget.raise. Auto is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
+          "text": "Every run starts with author-sized ceilings and rationale. Deliberative and interactive-auto runs require one initial human-approved sizing episode; delegated auto instead accepts initial sizing only inside the persisted operator-narrowed 8/1/2 envelope. After the first successful approval, automatic revisions are componentwise monotone and cannot raise installed ceilings; deliberative human locked confirmation may amend them, and an interactive auto run may propose a raise, which the human approves or rejects (governance.raises says a proposal asks for one). A delegated auto run has nobody to ask: its exhaustion is restart-only rather than budget.raise. Auto is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
         },
         {
           "id": "governance/limits",
@@ -2769,7 +2769,8 @@
     },
     "recovery_exclusions": {
       "deliberative": [],
-      "auto": [
+      "auto_interactive": [],
+      "auto_delegated": [
         "budget.raise"
       ]
     }
@@ -2777,7 +2778,7 @@
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
     "evidence_wait": "Empirica is paused: this deliberative run's research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative or interactive auto mode propose a raise for human approval; in delegated auto mode start a fresh run.",
     "evidence_report": "This deliberative run's research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
     "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",

@@ -208,12 +208,12 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
         self.assertIsNone(g["proposal"]["rationale"])
         decision = {"run_id": "r", "receipt_id": "x", "proposal_digest": g["proposal_digest"],
                     "plan_revision": 0, "approval_kind": "host_ui", "outcome": "present"}
-        self.assertEqual(governance.decision_error("r", _capable(g), decision, 0),
+        self.assertEqual(governance.decision_error("r", _capable(g), decision, 0, _seed_budgets()),
                          "governance.approval_required")
         submission = {k: v for k, v in decision.items() if k != "outcome"}
         submission["submission"] = {"action": "approve", "configuration": {
             "budgets": g["proposal"]["budgets"]}}
-        self.assertEqual(governance.decision_error("r", _capable(g), submission, 0),
+        self.assertEqual(governance.decision_error("r", _capable(g), submission, 0, _seed_budgets()),
                          "governance.approval_required")
 
     # --- initial proposal above the seed is allowed before the first approval ---
@@ -236,7 +236,7 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
         self.assertIsNone(governance.configuration_error(_opstate(within), within["proposal"]))
 
     # --- a later raise after a decrease is refused (post-approval auto) ---
-    def test_post_approval_auto_refuses_raise_after_decrease(self):
+    def test_post_approval_interactive_auto_leaves_a_raise_after_a_decrease_to_the_human(self):
         gov = _sized(_placeholder("auto", {"interactive": True, "delegation": False}),
                      {**SIZED_BUDGETS, "max_passes": 6}, SIZED_RATIONALE)
         gov = governance.plain(gov)
@@ -248,7 +248,7 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
         self.assertIsNone(governance.configuration_error(state, lowered))  # decrease accepted
         raised = {"budgets": {"max_passes": 7, "max_spawns": 1, "max_audit_spawns": 2},
                   "rationale": gov["proposal"]["rationale"]}
-        self.assertEqual(governance.configuration_error(state, raised), "governance.auto_ceiling")
+        self.assertIsNone(governance.configuration_error(state, raised))  # the human decides a raise
 
     # --- delegated lower-then-raise is refused ---
     def test_delegated_lower_then_raise_refused(self):
@@ -304,15 +304,17 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
 
     # --- expected approval kind per phase ---
     def test_expected_approval_kind_matrix(self):
-        self.assertEqual(governance.expected_approval_kind(_placeholder("deliberative")), "host_ui")
+        flat = {"raises": False}
+        self.assertEqual(governance.expected_approval_kind({**_placeholder("deliberative"), **flat}), "host_ui")
         delegated = _placeholder("auto", {"interactive": False, "delegation": True})
-        self.assertEqual(governance.expected_approval_kind(delegated), "auto")
+        self.assertEqual(governance.expected_approval_kind({**delegated, **flat}), "auto")
         interactive = _sized(_placeholder("auto", {"interactive": True, "delegation": True}),
                              SIZED_BUDGETS, SIZED_RATIONALE)
-        self.assertEqual(governance.expected_approval_kind(interactive), "host_ui")
+        self.assertEqual(governance.expected_approval_kind({**interactive, **flat}), "host_ui")
         interactive = governance.plain(interactive)
         interactive["first_approval"] = True
-        self.assertEqual(governance.expected_approval_kind(interactive), "auto")
+        self.assertEqual(governance.expected_approval_kind({**interactive, **flat}), "auto")
+        self.assertEqual(governance.expected_approval_kind({**interactive, "raises": True}), "host_ui")  # a raise is the human's
 
     # --- auto decisions without delegated or prior-human authority are refused ---
     def test_auto_decision_without_authority_refused(self):
@@ -326,7 +328,7 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
                         "proposal_digest": gov["proposal_digest"],
                         "plan_revision": gov["plan_revision"], "approval_kind": "auto",
                         "outcome": "approve"}
-            self.assertEqual(governance.decision_error("r", gov, decision, 0),
+            self.assertEqual(governance.decision_error("r", gov, decision, 0, _seed_budgets()),
                              "governance.approval_unavailable")
 
     # --- a human amendment keeps the rationale ---
@@ -463,6 +465,163 @@ class GovernanceTransitionMatrixTests(unittest.TestCase):
                      {**SIZED_BUDGETS, "max_audit_spawns": 0}, SIZED_RATIONALE)
         self.assertTrue(governance.sized(gov))
         self.assertIsNone(governance.configuration_error(_opstate(gov), gov["proposal"]))
+
+
+def _approving(gov, *, revision, kind="host_ui", receipt_id=None, outcome="approve"):
+    """A receipt as the core writes it for ``gov``'s proposal at ``revision``."""
+    host = kind == "host_ui"
+    return {"id": receipt_id or f"{outcome}-{revision}-{kind}",
+            "fingerprint": "sha256:" + ("b" if outcome == "present" else "a") * 64,
+            "presentation_fingerprint": "sha256:" + "b" * 64 if host else None,
+            "outcome": outcome, "plan_revision": revision, "proposal_digest": gov["proposal_digest"],
+            "approval_kind": kind, "superseded_budgets": None,
+            "document_digest": "sha256:" + "c" * 64 if host else None}
+
+
+def _first_approved(passes=8, **budgets):
+    """An interactive auto run after its first human approval, as a governance mapping and its operational state."""
+    gov = governance.plain(_sized(_capable(_placeholder("auto", {"interactive": True, "delegation": True})),
+                                  {**SIZED_BUDGETS, "max_passes": passes}, SIZED_RATIONALE))
+    gov.update(state="approved", approved_digest=gov["proposal_digest"], approval_kind="host_ui", first_approval=True,
+               receipts=[_approving(gov, revision=gov["plan_revision"])])
+    return gov, _opstate(gov, max_passes=passes, **budgets)
+
+
+class InteractiveAutoRaiseCoreTests(unittest.TestCase):
+    """After its first approval an interactive auto run may propose a raise, which is the human's to approve; any other
+    revision stays automatic, and a delegated run's raise stays refused (A11d)."""
+
+    def raise_to(self, gov, state, passes):
+        proposed = {"budgets": {**gov["proposal"]["budgets"], "max_passes": passes}, "rationale": SIZED_RATIONALE}
+        revised = governance.revise("goal", gov, proposal=proposed)
+        return revised, replace_budgets(state, revised)
+
+    def test_the_fact_is_derived_from_the_proposal_and_the_approved_ceilings(self):
+        gov, state = _first_approved()
+        self.assertFalse(governance.raises(gov, state.budgets))  # nothing proposed beyond the approval
+        raised, _ = self.raise_to(gov, state, 9)
+        self.assertTrue(governance.raises(raised, state.budgets))
+        lowered, _ = self.raise_to(gov, state, 6)
+        self.assertFalse(governance.raises(lowered, state.budgets))
+        before_first, _ = self.raise_to(_sized(_capable(_placeholder("auto")), SIZED_BUDGETS, SIZED_RATIONALE), state, 9)
+        self.assertFalse(governance.raises(before_first, state.budgets))  # the first approval is not a raise
+
+    def test_a_raise_is_refused_only_when_the_run_is_not_interactive(self):
+        gov, state = _first_approved(passes=6)
+        raised = {"budgets": {**SIZED_BUDGETS, "max_passes": 7}, "rationale": SIZED_RATIONALE}
+        self.assertIsNone(governance.configuration_error(state, raised))
+        delegated = governance.plain(_sized(_placeholder("auto", {"interactive": False, "delegation": True}),
+                                            {**SIZED_BUDGETS, "max_passes": 6}, SIZED_RATIONALE))
+        delegated.update(state="approved", approved_digest=delegated["proposal_digest"], approval_kind="auto",
+                         first_approval=True)
+        self.assertEqual(governance.configuration_error(_opstate(delegated, max_passes=6), raised),
+                         "governance.auto_ceiling")
+        self.assertEqual(governance.ceiling_bound(delegated), "approved")
+
+    def test_the_approval_kind_is_host_ui_exactly_when_the_pending_proposal_raises(self):
+        gov, state = _first_approved()
+        raised, _ = self.raise_to(gov, state, 9)
+        lowered, _ = self.raise_to(gov, state, 6)
+        view = lambda g: {**g, "raises": governance.raises(g, state.budgets)}  # noqa: E731
+        self.assertEqual(governance.expected_approval_kind(view(raised)), "host_ui")
+        self.assertEqual(governance.expected_approval_kind(view(lowered)), "auto")
+        self.assertEqual(governance.expected_approval_kind(view(gov)), "auto")
+        delegated = _placeholder("auto", {"interactive": False, "delegation": True})
+        self.assertEqual(governance.expected_approval_kind({**delegated, "first_approval": True, "raises": True}), "auto")
+
+    def test_a_forged_auto_decision_for_a_raise_is_refused(self):
+        gov, state = _first_approved()
+        raised, _ = self.raise_to(gov, state, 9)
+        decision = {"run_id": "r", "receipt_id": "x", "proposal_digest": raised["proposal_digest"],
+                    "plan_revision": raised["plan_revision"], "approval_kind": "auto", "outcome": "approve"}
+        self.assertEqual(governance.decision_error("r", raised, decision, 0, state.budgets),
+                         "governance.approval_unavailable")
+        lowered, _ = self.raise_to(gov, state, 6)
+        self.assertIsNone(governance.decision_error("r", lowered, {**decision, "proposal_digest": lowered["proposal_digest"],
+                                                                   "plan_revision": lowered["plan_revision"]}, 0, state.budgets))
+
+    def test_the_human_waits_while_a_raise_is_pending_and_the_agent_acts_after_a_rejection(self):
+        gov, state = _first_approved()
+        raised, _ = self.raise_to(gov, state, 9)
+        view = {**raised, "raises": True}
+        self.assertEqual(raised["state"], "revision_pending")
+        self.assertTrue(governance.human_wait(view, None))
+        self.assertFalse(governance.human_wait({**view, "state": "rejected"}, None))  # the human answered: the agent acts
+        self.assertFalse(governance.human_wait(view, "unavailable"))
+        deliberative = governance.plain(_sized(_capable(_placeholder()), SIZED_BUDGETS, SIZED_RATIONALE))
+        deliberative.update(state="rejected", raises=False)
+        self.assertTrue(governance.human_wait(deliberative, None))  # a deliberative rejection still waits on the human
+
+    def test_each_raise_spends_one_of_the_post_approval_revisions(self):
+        gov, state = _first_approved()
+        first, _ = self.raise_to(gov, state, 9)
+        self.assertEqual((first["post_approval_revisions"], first["plan_revision"]), (1, gov["plan_revision"] + 1))
+        second, _ = self.raise_to(first, state, 10)
+        self.assertEqual(second["post_approval_revisions"], 2)
+        used = {**first, "post_approval_revisions": governance.MAX_REVISIONS}
+        self.assertEqual(governance.revision_error(used, "goal", {"budgets": {**SIZED_BUDGETS, "max_passes": 11},
+                                                                   "rationale": SIZED_RATIONALE}),
+                         "governance.revision_exhausted")
+
+    def test_the_recovery_exclusion_key_names_delegated_auto_only(self):
+        gov, _ = _first_approved()
+        delegated = _placeholder("auto", {"interactive": False, "delegation": True})
+        deliberative = _placeholder()
+        self.assertEqual([governance.exclusion_key(g) for g in (gov, delegated, deliberative)],
+                         ["auto_interactive", "auto_delegated", "deliberative"])
+
+    # --- the stored state: what a raise writes must decode on reload ---
+
+    def stored(self, passes_proposed, *, receipts, state, budgets_passes=8, post=1):
+        gov, _ = _first_approved()
+        value = governance.revise("goal", gov, proposal={"budgets": {**SIZED_BUDGETS, "max_passes": passes_proposed},
+                                                         "rationale": SIZED_RATIONALE})
+        value = {**value, "post_approval_revisions": post, "state": state,
+                 "receipts": [gov["receipts"][0], *[_approving(value, **spec) for spec in receipts]]}
+        if state == "approved":
+            value.update(approved_digest=value["proposal_digest"], approval_kind="host_ui")
+        return _invariant_doc(value, max_passes=budgets_passes)
+
+    def test_a_pending_raise_and_its_dialog_receipts_are_valid_for_interactive_auto(self):
+        revision = _first_approved()[0]["plan_revision"] + 1
+        pending = self.stored(9, receipts=[dict(revision=revision, outcome="present")], state="revision_pending")
+        self.assertTrue(governance.invariant(pending))
+        self.assertTrue(governance.invariant(self.stored(9, receipts=[], state="revision_pending")))
+        rejected = self.stored(9, receipts=[dict(revision=revision, outcome="present", receipt_id="p"),
+                                            dict(revision=revision, outcome="reject", receipt_id="r")], state="rejected")
+        self.assertTrue(governance.invariant(rejected))
+
+    def test_an_approved_raise_is_valid_and_a_second_approval_for_one_revision_is_not(self):
+        revision = _first_approved()[0]["plan_revision"] + 1
+        approved = self.stored(9, receipts=[dict(revision=revision)], state="approved", budgets_passes=9)
+        self.assertTrue(governance.invariant(approved))
+        twice = self.stored(9, receipts=[dict(revision=revision), dict(revision=revision, receipt_id="again")],
+                            state="approved", budgets_passes=9)
+        self.assertFalse(governance.invariant(twice))
+
+    def test_a_second_human_episode_without_a_raise_is_still_invalid(self):
+        revision = _first_approved()[0]["plan_revision"] + 1
+        for outcome, state in (("present", "revision_pending"), ("dismiss", "revision_pending"), ("reject", "rejected")):
+            with self.subTest(outcome=outcome):
+                lowered = self.stored(6, receipts=[dict(revision=revision, outcome=outcome)], state=state,
+                                      budgets_passes=8)
+                self.assertFalse(governance.invariant(lowered))
+
+    def test_a_delegated_run_never_holds_a_human_receipt_or_a_pending_raise(self):
+        delegated = governance.plain(_sized(_placeholder("auto", {"interactive": False, "delegation": True}),
+                                            SIZED_BUDGETS, SIZED_RATIONALE))
+        delegated.update(state="approved", approved_digest=delegated["proposal_digest"], approval_kind="auto",
+                         first_approval=True, receipts=[_approving(delegated, revision=1, kind="auto")])
+        self.assertTrue(governance.invariant(_invariant_doc(delegated)))
+        pending = governance.revise("goal", delegated, proposal={"budgets": {**SIZED_BUDGETS, "max_passes": 9},
+                                                                  "rationale": SIZED_RATIONALE})
+        self.assertFalse(governance.invariant(_invariant_doc({**pending, "state": "revision_pending"})))
+        forged = {**delegated, "receipts": [*delegated["receipts"], _approving(delegated, revision=1, outcome="present")]}
+        self.assertFalse(governance.invariant(_invariant_doc(forged)))
+
+
+def replace_budgets(state, governed):
+    return SimpleNamespace(budgets=state.budgets, governance=governed)
 
 
 class GovernanceServiceTests(unittest.TestCase):
@@ -1356,8 +1515,8 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.runs.data, before)
         self.assertEqual(self.admit(self.decision())["type"], "Allow")
         self.assertEqual(self.action(**sized_configure_run(
-            budgets={**SIZED_BUDGETS, "max_passes": 9}, rationale=SIZED_RATIONALE))
-            ["reasons"][0]["code"], "governance.auto_ceiling")
+            budgets={**SIZED_BUDGETS, "max_passes": 9}, rationale=SIZED_RATIONALE))["type"], "Allow")  # a human's to decide
+        self.assertEqual(self.view()["governance"]["state"], "revision_pending")
         approved = self.view()["governance"]
         graph = copy.deepcopy(GRAPH)
         graph["claims"][0]["text"] = "changed work"
@@ -2154,6 +2313,18 @@ class GovernanceServiceTests(unittest.TestCase):
             rationale="auto postapproval revision"))["type"], "Allow")
         auto_post = copy.deepcopy(self.runs.data[decode_handle(self.run_id)].value)
         self.assertEqual(classify_and_decode(auto_post).kind, "valid")
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets={**SIZED_BUDGETS, "max_passes": 9}, rationale="a raise for the human"))["type"], "Allow")
+        auto_raise = copy.deepcopy(self.runs.data[decode_handle(self.run_id)].value)
+        self.assertEqual(classify_and_decode(auto_raise).kind, "valid")  # a pending raise is a stored state of interactive auto
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+        self._prepare_auto(DELEGATED_INVOCATION)
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        self.assertEqual(self.action(**sized_configure_run(
+            budgets={**SIZED_BUDGETS, "max_passes": 7}, rationale="delegated postapproval revision"))["type"], "Allow")
+        delegated_post = copy.deepcopy(self.runs.data[decode_handle(self.run_id)].value)
+        self.assertEqual(classify_and_decode(delegated_post).kind, "valid")
 
         mutations = {
             "placeholder must remain pending": (placeholder, lambda raw:
@@ -2191,7 +2362,7 @@ class GovernanceServiceTests(unittest.TestCase):
                 raw["governance"].update(post_approval_revisions=1)),
             "pending proposal respects consumed passes": (post_pending, lambda raw:
                 raw["budgets"].update(passes_used=7)),
-            "post-first auto proposal is monotone": (auto_post, lambda raw:
+            "post-first delegated proposal is monotone": (delegated_post, lambda raw:
                 raw["governance"]["proposal"]["budgets"].update(max_passes=9)),
             "ingress capability follows contract mapping": (capability_loss, lambda raw:
                 raw["governance"]["context"].update(
@@ -2353,7 +2524,7 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(row["message"], "Auto cannot raise the approved ceilings; lower or keep them, or start a fresh run "
                                          "with a larger approved size.")
 
-    def test_every_ceiling_raise_is_refused_after_auto_approval(self):
+    def test_every_ceiling_raise_after_approval_is_refused_for_delegated_auto_and_the_humans_for_interactive(self):
         interactive = {"host": "test", "interactive": True,
                        "signal": "operator", "delegation": True, "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
         raises = (("max_passes", 9), ("max_spawns", 2), ("max_audit_spawns", 3))
@@ -2370,9 +2541,14 @@ class GovernanceServiceTests(unittest.TestCase):
                     refused = self.action(**sized_configure_run(
                         budgets={**SIZED_BUDGETS, ceiling: value},
                         rationale=SIZED_RATIONALE))
-                    self.assertEqual(refused["type"], "Block", refused)
-                    self.assertEqual(refused["reasons"][0]["code"],
-                                     "governance.auto_ceiling")
+                    if approval_kind == "auto":
+                        self.assertEqual(refused["type"], "Block", refused)
+                        self.assertEqual(refused["reasons"][0]["code"],
+                                         "governance.auto_ceiling")
+                    else:
+                        self.assertEqual(refused["type"], "Allow", refused)
+                        raised = self.view()["governance"]
+                        self.assertEqual((raised["state"], raised["raises"]), ("revision_pending", True))
 
     def test_post_approval_auto_accepts_lower_and_refuses_raise(self):
         self._prepare_auto(DELEGATED_INVOCATION)
@@ -2405,6 +2581,103 @@ class GovernanceServiceTests(unittest.TestCase):
         self.assertEqual(self.action(**sized_configure_run(
             budgets={**SIZED_BUDGETS, "max_passes": 6}, rationale=SIZED_RATIONALE))["type"], "Allow")
         self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+
+    # --- A11d: an interactive auto run's raise is the human's to approve ---
+
+    INTERACTIVE = {"host": "test", "interactive": True, "signal": "operator", "delegation": True,
+                   "audit_retrieval": ["local", "workspace"], "human_surface": "unavailable"}
+
+    def _interactive_approved(self):
+        self._prepare_auto(self.INTERACTIVE)
+        self.assertEqual(self.admit(self.decision())["type"], "Allow")  # the first approval, the human's
+
+    def _propose(self, passes, rationale=SIZED_RATIONALE):
+        return self.action(**sized_configure_run(budgets={**SIZED_BUDGETS, "max_passes": passes}, rationale=rationale))
+
+    def _stored_kind(self):
+        return classify_and_decode(self.runs.data[decode_handle(self.run_id)].value).kind
+
+    def test_A11d_a_raise_waits_on_the_human_and_its_approval_decodes_on_reload(self):
+        from core.governance import expected_approval_kind
+        self._interactive_approved()
+        self.assertEqual(self._propose(9)["type"], "Allow")  # today: governance.auto_ceiling
+        run = self.request({"type": "GetRun", "run_id": self.run_id})["run"]
+        g = run["governance"]
+        self.assertEqual((g["state"], g["raises"], g["human_wait"], expected_approval_kind(g)),
+                         ("revision_pending", True, True, "host_ui"))
+        self.assertEqual(run["turn_end_actor"], "human")
+        forged = self.admit(self.decision(approval_kind="auto"))
+        self.assertEqual((forged["type"], forged["reasons"][0]["code"]), ("Block", "governance.approval_unavailable"))
+        self.assertEqual(self._stored_kind(), "valid")  # the dialog's present receipt is a stored state too
+        self.assertEqual(self.admit(self.decision("raise"))["type"], "Allow")
+        g = self.view()["governance"]
+        self.assertEqual((g["state"], g["budgets"]["max_passes"], g["raises"], g["post_approval_revisions"]),
+                         ("approved", 9, False, 1))
+        self.assertEqual(self._stored_kind(), "valid")
+
+    def test_A11d_a_rejected_raise_changes_nothing_and_the_agent_acts(self):
+        self._interactive_approved()
+        self._propose(9)
+        self.assertEqual(self.admit(self.decision("no", outcome="reject"))["type"], "Allow")
+        run = self.request({"type": "GetRun", "run_id": self.run_id})["run"]
+        g = run["governance"]
+        self.assertEqual((g["state"], g["budgets"]["max_passes"], g["human_wait"]), ("rejected", 8, False))
+        self.assertEqual(run["turn_end_actor"], "author")
+        self.assertEqual(self._stored_kind(), "valid")
+        # the agent re-proposes within the approved ceilings: no dialog, as for any non-raising revision
+        self.assertEqual(self._propose(6, "within budget after the rejection")["type"], "Allow")
+        g = self.view()["governance"]
+        self.assertEqual((g["state"], g["raises"], g["human_wait"]), ("revision_pending", False, False))
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        self.assertEqual((self.view()["governance"]["budgets"]["max_passes"], self._stored_kind()), (6, "valid"))
+
+    def test_A11d_a_non_raising_revision_stays_automatic_and_each_raise_spends_a_revision(self):
+        self._interactive_approved()
+        self._propose(6)
+        g = self.view()["governance"]
+        self.assertEqual((g["raises"], g["human_wait"], g["post_approval_revisions"]), (False, False, 1))
+        self.assertEqual(self.request({"type": "GetRun", "run_id": self.run_id})["run"]["turn_end_actor"], "author")
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        for number, passes in enumerate((9, 10), start=2):
+            self.assertEqual(self._propose(passes, f"raise {passes}")["type"], "Allow")
+            self.assertEqual(self.admit(self.decision(f"raise-{passes}"))["type"], "Allow")
+            g = self.view()["governance"]
+            self.assertEqual((g["budgets"]["max_passes"], g["post_approval_revisions"]), (passes, number))
+        self.assertEqual(self._stored_kind(), "valid")
+
+    def test_A11d_the_eight_revisions_bound_the_raises(self):
+        self._interactive_approved()
+        passes = 8
+        for _ in range(governance.MAX_REVISIONS):
+            passes += 1
+            self.assertEqual(self._propose(passes, f"raise {passes}")["type"], "Allow")
+            self.assertEqual(self.admit(self.decision(f"raise-{passes}"))["type"], "Allow")
+        refused = self._propose(passes + 1, "one raise too many")
+        self.assertEqual(refused["reasons"][0]["code"], "governance.revision_exhausted")
+
+    def test_A11d_a_delegated_raise_is_still_refused(self):
+        self._prepare_auto(DELEGATED_INVOCATION)
+        self.assertEqual(self.admit(self.decision(approval_kind="auto"))["type"], "Allow")
+        refused = self._propose(9)
+        self.assertEqual((refused["type"], refused["reasons"][0]["code"]), ("Block", "governance.auto_ceiling"))
+        self.assertFalse(self.view()["governance"]["raises"])
+
+    def test_A11d_budget_exhaustion_offers_the_raise_to_interactive_auto_only(self):
+        for label, invocation, approval_kind, offered in (("interactive", self.INTERACTIVE, "host_ui", True),
+                                                          ("delegated", DELEGATED_INVOCATION, "auto", False)):
+            with self.subTest(label):
+                self.runs, self.artifacts = Runs(), Artifacts()
+                self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+                self._prepare_auto(invocation, budgets={**SIZED_BUDGETS, "max_audit_spawns": 0})
+                self.assertEqual(self.admit(self.decision(approval_kind=approval_kind))["type"], "Allow")
+                self.assertEqual(self.action("investigate")["type"], "Allow")
+                self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                             payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+                denied = self.action("child_reserve", purpose="audit", resource_class="audit",
+                                     role_profile="empirica:empirica-auditor", execution="foreground")
+                reason = denied["reasons"][0]
+                self.assertEqual(reason["code"], "budget.exhausted")
+                self.assertEqual("budget.raise" in reason["next_actions"], offered)
 
     def test_unavailable_ingress_fails_closed_for_human_approval(self):
         self.prepare()

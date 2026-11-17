@@ -573,6 +573,21 @@ class ResponseMappingTests(unittest.TestCase):
                     self.assertIn("paused for you", message)
                     self.assertNotEqual(message, HUMAN_WAIT_NOTICE)
 
+    def test_A11d_an_exhausted_budget_the_core_offers_to_raise_continues_interactive_auto_only(self) -> None:
+        """``budget.raise`` is listed only where a raise can be proposed: its human approves it in interactive auto, or the
+        deliberative human decides. The agent is the one to propose it only in the first, so only there does the turn go on."""
+        from application.protocol import BUDGET_EXHAUSTED_NOTICE
+        for mode, continues in (("auto-interactive-post", True), ("deliberative", False)):  # the core offers it in no other
+            with self.subTest(mode=mode):
+                view = StopModeTests.block(mode, "budget")
+                view["reasons"][0]["next_actions"] = ["budget.raise", "residual.accept"]
+                got = _stop(view)
+                if continues:
+                    self.assertEqual((got.exit_code, got.stdout, got.stderr), (2, "", "pass budget exhausted.\n"))
+                else:
+                    self.assertEqual((got.exit_code, json.loads(got.stdout), got.stderr), (0, {"systemMessage":
+                                     render_notice(BUDGET_EXHAUSTED_NOTICE, resource="pass")}, ""))
+
     def test_sole_budget_exhausted_settles_turn_with_the_contract_notice(self) -> None:
         from application.protocol import BUDGET_EXHAUSTED_NOTICE
 

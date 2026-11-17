@@ -239,7 +239,7 @@ The host finishes responding and would hand control to the human. **One table de
 |---|---|---|---|---|
 | the run converged (`converged`) | `allow` | `allow` | `allow` | `allow` |
 | exactly one async audit is pending (`async-audit-pending`) | `settle` | `settle` | `settle` | `settle` |
-| the sole blocker is a human governance wait or an exhausted budget (`settlement`) | `settle-notice` (`human_wait`, `budget_exhausted`) | `settle-notice` (`human_wait`, `budget_exhausted`) | `settle-notice` (`human_wait`, `budget_exhausted`) | `settle-notice` (`human_wait`, `budget_exhausted`) |
+| the sole blocker is a human governance wait or an exhausted budget the core offers no raise for (`settlement`) | `settle-notice` (`human_wait`, `budget_exhausted`) | `settle-notice` (`human_wait`, `budget_exhausted`) | `settle-notice` (`human_wait`, `budget_exhausted`) | `settle-notice` (`human_wait`, `budget_exhausted`) |
 | the sole blocker is an evidence confirmation (a deliberative run's human can be asked); in an auto run a source that needs a human is inert, and the author gets the claim's own reason (`evidence-wait`) | `pause` (`paused_for_evidence`) | `continue` (`unattended_continue`) | `continue` (`unattended_continue`) | `continue` (`unattended_continue`) |
 | any other active, non-converged state (`active-other`) | `pause` (`paused_for_human`) | `continue` (`unattended_continue`) | `continue` (`unattended_continue`) | `continue` (`unattended_continue`) |
 
@@ -252,7 +252,7 @@ The host finishes responding and would hand control to the human. **One table de
 |---|---|---|
 | `converged` | `EHB-STOP-12` | `EHB-STOP-29` |
 | `async-audit-pending` | `EHB-STOP-12` | `EHB-STOP-35` |
-| `settlement` | `EHB-STOP-03`, `EHB-STOP-04` | `EHB-STOP-36` |
+| `settlement` | `EHB-STOP-03`, `EHB-STOP-04`, `EHB-STOP-37` | `EHB-STOP-36`, `EHB-STOP-37` |
 | `evidence-wait` | `EHB-STOP-02`, `EHB-STOP-08`, `EHB-STOP-22` | `EHB-STOP-31`, `EHB-STOP-32` |
 | `active-other` | `EHB-STOP-06`, `EHB-STOP-07`, `EHB-STOP-08`, `EHB-STOP-21` | `EHB-STOP-31`, `EHB-STOP-32` |
 <!-- END GENERATED -->
@@ -314,7 +314,7 @@ The host finishes responding and would hand control to the human. **One table de
 <!-- BEGIN GENERATED: HX-STOP-03 (make registry-doc) -->
 - **outcomes.** Claude: `pause` (exit 0, `systemMessage`, `paused_for_human`/`paused_for_evidence`; the same on the first and on a later Stop; ADR-0068 owns the `stop_hook_active` rule) | `continue` (exit 2; `unattended_continue` when `stop_hook_active` is true) | unchanged settlements (see `HX-STOP-01`). If the host resets `stop_hook_active` between continuations, an auto run's post-tool Stop blocks again and the outcome is `host-capped` (`report-limitation`). Pi: `HX-STOP-04`.
 - **outcomes_by_mode.** See the turn-end table (`turn_end`): deliberative pauses on any other active state; every auto mode continues; the settlements apply in every mode.
-- **conformance_scenarios.** `EHB-STOP-05`, `EHB-STOP-06`, `EHB-STOP-07`, `EHB-STOP-08`, `EHB-STOP-11`, `EHB-STOP-12`, `EHB-STOP-13`, `EHB-STOP-14`, `EHB-STOP-15`, `EHB-STOP-16`, `EHB-STOP-17`, `EHB-STOP-18`, `EHB-STOP-19`, `EHB-STOP-20`, `EHB-STOP-21`, `EHB-STOP-22`, `EHB-STOP-23`
+- **conformance_scenarios.** `EHB-STOP-05`, `EHB-STOP-06`, `EHB-STOP-07`, `EHB-STOP-08`, `EHB-STOP-11`, `EHB-STOP-12`, `EHB-STOP-13`, `EHB-STOP-14`, `EHB-STOP-15`, `EHB-STOP-16`, `EHB-STOP-17`, `EHB-STOP-18`, `EHB-STOP-19`, `EHB-STOP-20`, `EHB-STOP-21`, `EHB-STOP-22`, `EHB-STOP-23`, `EHB-STOP-37`
 - **sources.** CC "Stop input" and "Stop decision control"; Q2; ADR-0019 (G2), ADR-0051, ADR-0063, ADR-0064 interim (`fb1106b`), ADR-0067 A2-1/A2-2, ADR-0068; HEATH AS3 (`pause`); CODE `P/adapters/claude/completion.py:_turn_end_mode`.
 <!-- END GENERATED -->
 
@@ -702,6 +702,7 @@ Each row is falsifiable: it names the setup, the action, and the expected observ
 | `EHB-STOP-29` | any | Pi, a converged run or no run | `agent_before_settle` | P: nothing is appended and no continuation is requested (a converged run, or no run) | 1 test |
 | `EHB-STOP-35` | deliberative, auto-interactive-pre, auto-interactive-post, auto-delegated | Pi, one pending async audit | `agent_before_settle` | P: no continuation and nothing appended: the pending audit's result continues the run | 1 test |
 | `EHB-STOP-36` | deliberative, auto-interactive-pre, auto-interactive-post, auto-delegated | Pi, the sole blocker is the initial approval or an exhausted budget | `agent_before_settle` | P: no continuation; the settlement notice (`human_wait`, `budget_exhausted`) is appended as a visible `custom_message` | 1 test; ledger `pi_settle_notice` |
+| `EHB-STOP-37` | deliberative, auto-interactive-post | the sole blocker is an exhausted budget, and the core offers `budget.raise` (deliberative, and interactive auto after its first approval, whose human approves a raise) | Stop (Claude) / `agent_before_settle` (Pi) | C/P: deliberative settles with `budget_exhausted`, as before; interactive auto continues with the core's reason (Claude exit 2; Pi `continue: true`), because the agent is the one to propose the raise; a delegated auto run's view never offers `budget.raise`, so it settles | 2 tests |
 | `EHB-STOP-31` | deliberative | Pi, a deliberative run, active, non-converged (including the evidence-wait case) | `agent_before_settle` | P: a `custom_message` entry with `display: true` holding `paused_for_human` (or `paused_for_evidence`) is appended; no `continue`; exactly one notice per settle (`turn_end` is not used) | 1 test; ledger `pi_settle_notice` |
 | `EHB-STOP-32` | auto-interactive-pre, auto-interactive-post, auto-delegated | Pi, an auto run, active, non-converged | `agent_before_settle` | P: `continue: true` with the next obligation (the core's reason) appended as the message | 2 tests; ledger `pi_auto_continue_bound` |
 | `EHB-STOP-33` | auto-interactive-pre, auto-interactive-post, auto-delegated | Pi, an auto run that already continued on this observation basis and whose basis has not changed | `agent_before_settle` again | P: no `continue`; the `unattended_continue` notice is appended and `no-progress` is recorded; a changed `run.basis` (the core's digest of the blockers and the run state recorded work can change) allows one more continuation; a tool result that leaves it as it was, such as a read of the run, does not | 1 test; ledger `pi_auto_continue_bound` |
