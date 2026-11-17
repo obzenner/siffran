@@ -67,9 +67,10 @@ class AuditorDefinitionTests(unittest.TestCase):
     def test_the_shared_rubric_judges_author_decided_decisions_and_partial_coverage(self):
         text = " ".join((self.agents / "empirica-auditor.md").read_text(encoding="utf-8").split())
         self.assertRegex(text, r"An approved `needs-decision` claim without `human_decision` was decided by the author\.")
-        for required in ("naming the missing comparison", "say which alternative needs a comparison",
+        for required in ("naming the missing comparison", "say which alternative, or the status quo, needs a comparison",
                          "Pass or fail the audit on the claims in `reviewed_claims`",
-                         "items 1\u20135 to those claims only", "items 6\u20139 to the whole graph",
+                         "item 1 (a Fold-1 source) to those claims except those with `human_decision`",
+                         "items 2\u20135 to those claims only", "items 6\u20139 to the whole graph",
                          "judged only through items 6\u20139"):
             self.assertIn(required, text)
 

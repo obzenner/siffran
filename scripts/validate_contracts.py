@@ -3003,7 +3003,7 @@ def main() -> int:
         "block-stale-spike-missing", "block-deferred-scope",
         "block-child-cancelled", "block-child-timeout", "block-child-orphaned",
         # D2C added GetArgument provenance fixtures.
-        "getargument-spike-approved", "getargument-superseded",
+        "getargument-spike-approved", "getargument-superseded", "getargument-human-decision",
         # Trusted reviewer ingress; covered producers live on evidence artifacts.
         "observe-attribution-auditor",
         "observe-audit-verdict", "observe-audit-verdict-frozen",
@@ -4279,22 +4279,23 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                                               "research present in active_evidence_ids"]:
             errors.append(f"NEG needs-decision approved with {label} plus refuting research: "
                           f"expected only the refuting error, got {_nd_errors(nd)}")
-    # A failed active spike vetoes an approving decision.
+    # A failed active spike vetoes an approving decision: it supersedes the passing spike, which is no longer active.
     nd = _nd_arg(True, _approve)
+    _fail_id = "sha256:" + "a" * 64
     _fail_req = _validation_spike_request(
-        sequence=2, artifact_id="sha256:" + "b" * 64, claim_digest=d64,
+        sequence=4, artifact_id="sha256:" + "b" * 64, claim_digest=d64,
         prerequisites=[R1, R2], paths=REQ_FILES, backend=nd["spike_backend"])
+    nd["artifacts"].append(_fail_req)
     nd["artifacts"].append(_validation_spike_result(
-        sequence=4, artifact_id="sha256:" + "a" * 64, request=_fail_req, claim_digest=d64,
-        exit_code=1, active=True, supersedes=None))
-    nd["artifacts"].insert(2, _fail_req)
-    for idx, art in enumerate(nd["artifacts"]):
-        art["sequence"] = idx
-    nd["claims"][0]["active_evidence_ids"] = [R1, R2, "sha256:" + "a" * 64, P1]
-    nd["claims"][0]["evidence_digest"] = registry_digest(nd["claims"][0]["active_evidence_ids"])
+        sequence=5, artifact_id=_fail_id, request=_fail_req, claim_digest=d64,
+        exit_code=1, active=True, supersedes=P1))
+    next(a for a in nd["artifacts"] if a["artifact_id"] == P1)["active"] = False
+    nd["claims"][0]["active_evidence_ids"] = [R1, R2, _fail_id]
+    nd["claims"][0]["evidence_digest"] = registry_digest([R1, R2, _fail_id])
     nd["audit"]["reviewed_claims"][0]["evidence_digest"] = nd["claims"][0]["evidence_digest"]
-    expect(lambda e: check_argument_view(_arg_env(nd), registry, e, "neg"),
-           "approved but active failing spike", "needs-decision approved (a) with a failed spike")
+    if _nd_errors(nd) != ["neg: argument.claims[0] approved but active failing spike present in active_evidence_ids"]:
+        errors.append(f"NEG needs-decision approved (a) with a failed spike: expected only the failing-spike error, "
+                      f"got {_nd_errors(nd)}")
     # A non-approving decision wins over supporting research.
     expect(lambda e: check_argument_view(_arg_env(_nd_arg(True, {"outcome": "reject", "answer": None})),
                                          registry, e, "neg"),
