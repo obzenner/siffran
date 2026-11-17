@@ -414,8 +414,10 @@ def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
                       stale: set[str]) -> tuple[str, Mapping[str, Any] | None]:
     """A claim's own state, before its supporters are considered, and for a ``discarded`` one the recorded artifact that
     discarded it: the failed spike, else the first refuting research, else the human's answer that rejected a
-    ``needs-decision`` claim (``None`` for every other state). The one rule of a claim's own state: the gate's
-    ``local_claim_state`` is its first element, and the observer's dropped claims read their cause from it."""
+    ``needs-decision`` claim (``None`` for every other state). A ``needs-decision`` claim with no answer is ``blocked``
+    on the human, except in auto, where it is the author's and derived like an ``ordinary`` claim (supporting research
+    that counts approves it). The one rule of a claim's own state: the gate's ``local_claim_state`` is its first
+    element, and the observer's dropped claims read their cause from it."""
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
     supporting = any(a["outcome"] == "supporting" and confirmation.counts(snapshot, a)
@@ -433,10 +435,11 @@ def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
         return "discarded", next(a for a in research if a["outcome"] == "refuting")
     if claim["kind"] == "needs-decision":
         answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
-        if answer is None:
+        if answer is not None:
+            return ("approved", None) if answer["outcome"] == confirmation.APPROVE else ("discarded", answer)
+        if snapshot.state.governance["control_mode"] != "auto":
             return "blocked", None
-        return ("approved", None) if answer["outcome"] == confirmation.APPROVE else ("discarded", answer)
-    approved = supporting and (claim["kind"] == "ordinary" or
+    approved = supporting and (claim["kind"] in ("ordinary", "needs-decision") or
                                (claim["kind"] == "needs-experiment" and spike_ok))
     return ("approved" if approved else "open"), None
 
@@ -469,7 +472,8 @@ def pending_human(snapshot: EvaluationSnapshot, scope: tuple[str, ...]) -> dict[
 
 
 def pending_decisions(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> list[str]:
-    """Ids of the gating ``needs-decision`` claims still waiting for the human's answer."""
+    """Ids of the gating ``needs-decision`` claims still waiting for the human's answer (none in auto: its claims are
+    derived by fold 1, so none is ``blocked``)."""
     return [c["id"] for c in snapshot.graph["claims"]
             if c["id"] in derivation.scope and c["kind"] == "needs-decision"
             and derivation.states[c["id"]] == "blocked"]

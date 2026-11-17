@@ -6,7 +6,10 @@ and shows the test fail. The host is the shared Claude mediator with a scripted 
 Pi gate rules over the same facts are tested in their own suites."""
 from __future__ import annotations
 
+from unittest import mock
+
 from adapters import confirmation
+from core import evaluation
 from application import protocol
 from assertions import action_freeze, observe_action
 from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
@@ -281,6 +284,92 @@ class HumanSurfaceCells(ScenarioFixture):
         batch = self.batch(drv, run_id)
         self.assertEqual((sorted(batch), len(batch["record_ids"]), batch["prompt_error"]),
                          (["claim_ids", "key", "prompt_error", "record_ids", "records"], 1, "unavailable"))
+
+
+class AutoDecisionCells(ScenarioFixture):
+    """In auto an unanswered ``needs-decision`` claim is the author's, derived by fold 1 after the usual order; a human's
+    answer and deliberative runs are as before (F1-F3, a-d, h of the auto-completion plan)."""
+
+    audit = HumanSurfaceCells.audit
+
+    def pending(self, drv, run_id) -> list[str]:
+        snapshot = self.snapshot(drv, run_id)
+        return evaluation.pending_decisions(snapshot, evaluation.derive_claims(snapshot))
+
+    def state(self, drv, run_id, claim="C0") -> str:
+        return self.claim(drv, run_id, claim)["state"]
+
+    def test_F1_an_auto_decision_without_research_is_open_and_asks_nobody(self):
+        drv, run_id = self.start(kind="needs-decision", mode="auto")
+        self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id))),
+                         ("open", ["claim.research_missing"]))
+        self.assertEqual((self.pending(drv, run_id), self.batch(drv, run_id)), ([], None))
+
+    def test_F2_auto_research_approves_or_discards_a_decision(self):
+        drv, run_id = self.start(kind="needs-decision", mode="auto")
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        self.assertEqual((self.state(drv, run_id), self.pending(drv, run_id)), ("approved", []))
+        drv, run_id = self.start(kind="needs-decision", mode="auto")
+        self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
+        self.assertEqual((self.state(drv, run_id), self.pending(drv, run_id)), ("discarded", []))
+
+    def test_a_deliberative_needs_decision_with_only_research_stays_blocked(self):
+        drv, run_id = self.start(kind="needs-decision")
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        self.assertEqual((self.state(drv, run_id), self.pending(drv, run_id), self.batch(drv, run_id)["claim_ids"]),
+                         ("blocked", ["C0"], ["C0"]))
+
+    def test_F3_a_human_answer_keeps_the_order_in_every_mode(self):
+        drv, run_id = self.start(kind="needs-decision")
+        self.mediate(drv, run_id, Human(accept(d1="approve")))
+        self.assertEqual(self.state(drv, run_id), "approved")
+        self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
+        self.assertEqual(self.state(drv, run_id), "discarded")  # a refutation beats the human's approval
+        for mode, outcome, want in (("auto", "approve", "approved"), ("auto", "reject", "discarded"),
+                                    ("deliberative", "reject", "discarded")):
+            drv, run_id = self.start(kind="needs-decision", mode=mode)
+            snapshot = self.snapshot(drv, run_id)
+            with mock.patch.object(evaluation.confirmation, "decision", return_value={"outcome": outcome}):
+                self.assertEqual(evaluation.claim_state_cause(snapshot, snapshot.graph["claims"][0], set())[0], want,
+                                 (mode, outcome))
+
+    def test_a_independence_never_calls_an_agent_decided_claim_human_owned(self):
+        auditor, producer = {"model": "a"}, {"model": "p"}
+        with mock.patch.object(evaluation, "identity_pair", side_effect=lambda x: None if x is None else x["model"]):
+            self.assertEqual(evaluation._independence(auditor, [producer], True), "distinct")
+            self.assertEqual(evaluation._independence(auditor, [None], True), "unverified")
+            self.assertEqual(evaluation._independence(auditor, [], True), "human_owned")  # only decisions a human answered
+            self.assertEqual(evaluation._independence(auditor, [producer, None], True), "unverified")  # mixed run
+
+    def test_b_a_decision_resting_on_a_retrievable_record_waits_on_the_records_confirmation(self):
+        drv, run_id = self.start(kind="needs-decision", mode="auto")
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id))), ("open", [CONFIRMATION]))
+        batch = self.batch(drv, run_id)
+        self.assertEqual((batch["claim_ids"], len(batch["record_ids"]), self.pending(drv, run_id)), ([], 1, []))
+
+    def test_c_non_gating_and_conflicted_decisions_follow_the_ordinary_rules(self):
+        graph = graph_with_decision()
+        graph["claims"][1]["gating"] = False
+        drv, run_id = self.start(graph=graph, mode="auto")
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        self.assertEqual((self.codes(self.report(drv, run_id)), self.state(drv, run_id, "C1")),
+                         (["audit.required"], "open"))
+        drv, run_id = self.start(kind="needs-decision", mode="auto")
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        self.research(drv, run_id, "docs", WORKSPACE_REF, result="refutes")
+        self.assertEqual((self.state(drv, run_id), self.pending(drv, run_id), self.codes(self.report(drv, run_id))),
+                         ("open", [], ["evidence.conflict"]))
+
+    def test_d_a_researched_decision_converges_in_delegated_auto_with_nobody_asked(self):
+        drv, run_id = self.start(kind="needs-decision", mode="auto", delegation=True, interactive=False)
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        self.assertEqual(self.codes(self.report(drv, run_id)), ["audit.required"])
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_freeze()))
+        self.assertTrue(self.audit(drv, run_id)["converged"])
+        self.assertEqual(self.run_view(drv, run_id)["audit"]["independence"], "distinct")  # never human_owned
+        kinds = {a["kind"] for a in drv._service._coordinator.last_snapshot.history}
+        self.assertFalse(kinds & {"evidence_presentation", "evidence_confirmation"})
 
 
 class BatchSizeCells(ScenarioFixture):
