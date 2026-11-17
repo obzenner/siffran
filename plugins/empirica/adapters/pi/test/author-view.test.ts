@@ -56,11 +56,28 @@ test("an owed audit shows the host profile's launch byte for byte; a host with n
     const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, `audit-owed-${host.replace(/-code$|-cli$/, "")}.json`), "utf8"));
     const launch = profiles.find((row) => row.profile_id === golden.result.run.host.profile_id)!.audit_launch as string | undefined;
     const text = renderAuthorView(golden.result, { strict: true });
-    assert.equal(text.split(`next: ${launch}`).length - 1, launch === undefined ? 0 : 2, host);
+    assert.equal(text.split(`next: ${launch}`).length - 1, launch === undefined ? 0 : 1, `${host}: printed once`);
+    if (launch !== undefined) assert.ok(text.includes("next: the auditor launch under Open obligations"), host);
     if (launch === undefined) assert.ok(text.includes("next: host: child_reserve"), host);
     else assert.ok(!text.includes("child_reserve"), host);
   }
   assert.ok(!readFileSync(path.join(import.meta.dirname, "..", "src", "author-view.ts"), "utf8").includes("empirica-auditor"));
+});
+
+test("a terminal audit child never offers the protocol surface, on either host with a launch", () => {
+  const profiles = JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "..", "..", "vendor", "contracts",
+    "empirica", "v2", "host-profiles.json"), "utf8")).profiles as Json[];
+  for (const name of ["block-child-terminal", "block-child-cancelled"]) {
+    for (const host of ["claude-code", "pi"]) {
+      const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, `${name}.json`), "utf8"));
+      const profile = profiles.find((row) => row.host_id === host)!;
+      golden.result.run.host.profile_id = profile.profile_id;
+      const text = renderAuthorView(golden.result, { strict: true });
+      assert.ok(!text.includes("child_reserve"), `${name} ${host}`);
+      assert.equal(text.split(profile.audit_launch).length - 1, 1, `${name} ${host}: once`);
+      assert.ok(text.includes("next: the auditor launch under Children"), `${name} ${host}`);
+    }
+  }
 });
 
 test("every contract label drives the rendered text", () => {

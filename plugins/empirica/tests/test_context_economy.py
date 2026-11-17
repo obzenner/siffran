@@ -611,7 +611,7 @@ class AuditLaunchViewTests(unittest.TestCase):
 
     CEILING = SizeBudgetTests.CEILING
 
-    def _owed(self, profile):
+    def _owed(self, profile, rationale=SIZED_RATIONALE, claims=1):
         """Drive a real run on ``profile`` to the audit-owed state; return (GetRun text, report_convergence Block text)."""
         from governance_setup import invocation_for
         runs, artifacts = Runs(), Artifacts()
@@ -626,12 +626,16 @@ class AuditLaunchViewTests(unittest.TestCase):
         run_id = req({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
                       "invocation": invocation_for(profile), "selector": {"project": "p", "session": "s"}})["run"]["id"]
         act("route", reason="supplied context")
-        act("graph", payload=copy.deepcopy(GRAPH))
-        act(**sized_configure_run(budgets={"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, rationale=SIZED_RATIONALE))
+        graph = copy.deepcopy(GRAPH)
+        graph["claims"] += [_claim(f"C{n}") for n in range(1, claims)]
+        graph["edges"] = [{"from": "C0", "to": f"C{n}", "type": "SupportedBy"} for n in range(1, claims)]
+        act("graph", payload=graph)
+        act(**sized_configure_run(budgets={"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, rationale=rationale))
         approve_current(service._coordinator, run_id)
         act("investigate")
-        act("research", claim_id="C0", source_kind="code", result="supports",
-            payload={"source_ref": "plugins/empirica/tests/test_context_economy.py", "citation": "observed directly"})
+        for n in range(claims):
+            act("research", claim_id=f"C{n}", source_kind="code", result="supports",
+                payload={"source_ref": "plugins/empirica/tests/test_context_economy.py", "citation": "observed directly"})
         act("freeze")
         tools = PublicTools(profile, dispatch=lambda request, _profile: service.dispatch(request))
         read = tools.call_internal("empirica_read", {"operation": "GetRun", "run_id": run_id})["content"][0]["text"]
@@ -644,8 +648,11 @@ class AuditLaunchViewTests(unittest.TestCase):
             launch = _proto.host_profile(profile)["audit_launch"]
             read, block = self._owed(profile)
             for label, text in (("GetRun", read), ("report_convergence", block)):
-                self.assertIn(f"next: {launch}", text, f"{host} {label}")
+                self.assertEqual(text.count(launch), 1, f"{host} {label}: the launch is printed once")
+                self.assertIn(f"    next: {launch}", text, f"{host} {label}")
                 self.assertNotIn("child_reserve", text, f"{host} {label}")
+            self.assertIn("next: the auditor launch under Open obligations", block, host)
+            self.assertNotIn("the auditor launch under", read, host)
         # No renderer carries a copy of a launch: the profile is the only place that names the auditor.
         root = Path(__file__).resolve().parents[1] / "adapters"
         for source in (root / "author_view.py", root / "pi" / "src" / "author-view.ts"):
@@ -658,7 +665,11 @@ class AuditLaunchViewTests(unittest.TestCase):
         self.assertEqual(tool, "Agent")
         self.assertEqual(fields["subagent_type"], "empirica:empirica-auditor")  # the hook's role check
         self.assertTrue(fields["prompt"].strip() and fields["description"].strip())  # real purpose: the hook replaces both
-        self.assertLessEqual(set(fields), {"subagent_type", "description", "prompt"}, "no model override: the hook denies it")
+        self.assertEqual(set(fields), {"subagent_type", "description", "prompt"}, "no model override: the hook denies it")
+        # The spawn hook's own admission functions accept it as an executable auditor launch.
+        from adapters.claude import lifecycle
+        self.assertTrue(lifecycle._launch_is_executable(fields))
+        self.assertEqual(lifecycle._agent_identity(fields), (fields["prompt"], "empirica:empirica-auditor"))
 
     def test_a_host_with_no_launch_renders_without_a_hole(self):
         self.assertNotIn("audit_launch", _proto.host_profile(host_profile_id("codex-cli")))
@@ -668,10 +679,60 @@ class AuditLaunchViewTests(unittest.TestCase):
         self.assertEqual(render_surface("child.retry", "launch"), "host: child_reserve", "an ordinary child's retry is not an audit")
         self.assertEqual(render_surface("child.retry", "launch", audit=True), "launch")
 
+    @staticmethod
+    def _golden(name, host):
+        """A checked-in result, as it would arrive from ``host``."""
+        path = Path(__file__).resolve().parents[1] / "adapters/pi/test/author-view-golden" / f"{name}.json"
+        result = _proto.stored(json.loads(path.read_text(encoding="utf-8")))["result"]
+        result["run"]["host"]["profile_id"] = host_profile_id(host)
+        return result
+
+    def test_a_terminal_audit_child_never_offers_the_protocol_surface(self):
+        from adapters.author_view import render_author_view
+        for name in ("block-child-terminal", "block-child-cancelled"):
+            for host in ("claude-code", "pi"):
+                text = render_author_view(self._golden(name, host), strict=True)
+                launch = _proto.host_profile(host_profile_id(host))["audit_launch"]
+                self.assertNotIn("child_reserve", text, f"{name} {host}")
+                self.assertEqual(text.count(launch), 1, f"{name} {host}: once")
+                self.assertIn("next: the auditor launch under Children", text, f"{name} {host}")
+
+    def test_an_investigation_childs_terminal_reason_keeps_the_protocol_surface(self):
+        from adapters.author_view import render_author_view
+        result = self._golden("block-child-terminal", "pi")
+        result["run"]["children"][0].update(purpose="spike", resource_class="investigation")
+        self.assertIn("next: host: child_reserve; report_convergence intent=stop", render_author_view(result, strict=True))
+
+    def test_the_run_level_next_shows_the_launch_not_the_protocol_surface(self):
+        from adapters.author_view import render_author_view
+        result = self._golden("audit-owed-pi", "pi")
+        result["run"]["obligations"]["active"] = []
+        result.pop("reasons")
+        result.update(type="Allow", converged=False)
+        result["run"]["next_actions"] = ["child.spawn_auditor"]
+        text = render_author_view(result, strict=True)
+        self.assertNotIn("child_reserve", text)
+        self.assertEqual(text.count(_proto.host_profile(host_profile_id("pi"))["audit_launch"]), 1)
+
     def test_the_audit_owed_views_stay_under_the_ceiling(self):
         for host in ("claude-code", "pi"):
             for label, text in zip(("GetRun", "report_convergence"), self._owed(host_profile_id(host))):
                 self.assertLess(len(text), self.CEILING, f"{host} audit-owed {label}: {len(text)} characters")
+
+    #: Measured characters of the worst realistic audit-owed view: a 600-character rationale, 8 claims, the real
+    #: (fixed-size, ~200-character) handle. KNOWN OVER the 1,300 ceiling, by 300 (Claude GetRun) to 436 (Claude Block): the
+    #: rationale is printed in the header and each claim adds a "Satisfied obligations" line, so the ceiling was a fixture
+    #: measurement before S4 too. Capping the rationale is the coordinator's decision, not this test's. The pin fails if the
+    #: worst case grows or the launch is printed twice again.
+    WORST = {"claude-code": (1600, 1736), "pi": (1571, 1707)}
+
+    def test_the_worst_audit_owed_view_is_measured_and_pinned(self):
+        rationale = ("r" * 599) + "."
+        for host, (read_max, block_max) in self.WORST.items():
+            read, block = self._owed(host_profile_id(host), rationale=rationale, claims=8)
+            self.assertLessEqual(len(read), read_max, f"{host} GetRun: {len(read)}")
+            self.assertLessEqual(len(block), block_max, f"{host} Block: {len(block)}")
+            self.assertEqual(block.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1)
 
 
 #: What a human can be asked: the one batch of evidence and decisions (ADR-0067).

@@ -332,7 +332,7 @@ const AUDITOR_MODEL_FIX = 'set subagents.agentOverrides["empirica.empirica-audit
 const AUDIT_STILL_OPEN = "The run is still active and nothing was spent: once this is fixed, launch the auditor "
   + "again. Do not stop the run because of this refusal.";
 /** The audit launch /empirica checks before starting a run: the one the skill tells the author to make. */
-const CANONICAL_AUDIT_CALL = { agent: "empirica.empirica-auditor", task: "Audit the host-provided dossier." };
+export const CANONICAL_AUDIT_CALL = { agent: "empirica.empirica-auditor", task: "Audit the host-provided dossier." };
 
 /**
  * Where a notice goes when Pi has no UI. Print and JSON mode have none (`ctx.hasUI` is false; Pi docs `extensions.md`:

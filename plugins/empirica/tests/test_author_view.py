@@ -394,8 +394,13 @@ class ContentCompletenessTests(unittest.TestCase):
                   if row.get("recovery_action")),
             }
             text = render_author_view(result, strict=True)
+            launch = author_view.audit_launch(run["host"]["profile_id"]) if run else None
             for action in sorted(emitted):
-                self.assertIn(author_view.render_surface(action), text, f"{name}: {action}")
+                # An audit's child action is the host's auditor launch, printed once, and pointed to elsewhere.
+                shown = [author_view.render_surface(action)]
+                if launch and action in ("child.spawn_auditor", "child.retry"):
+                    shown += [launch, "the auditor launch under"]
+                self.assertTrue(any(item in text for item in shown), f"{name}: {action}")
 
     def test_every_open_obligation_id_appears(self):
         for name in RUNVIEW_FIXTURES:

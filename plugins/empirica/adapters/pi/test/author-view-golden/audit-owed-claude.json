@@ -81,5 +81,5 @@
       }
     ]
   },
-  "text": "Block active — no governance\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nReasons:\n  audit.required: Audit is owed; spawn an independent auditor. — affected: obligation.audit\n    next: Agent {\"subagent_type\":\"empirica:empirica-auditor\",\"description\":\"Audit\",\"prompt\":\"Audit the host-provided dossier.\"}\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.required\n    next: Agent {\"subagent_type\":\"empirica:empirica-auditor\",\"description\":\"Audit\",\"prompt\":\"Audit the host-provided dossier.\"}"
+  "text": "Block active — no governance\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nReasons:\n  audit.required: Audit is owed; spawn an independent auditor. — affected: obligation.audit\n    next: the auditor launch under Open obligations\n\nOpen obligations:\n  obligation.audit: Obtain a current independent audit of every approved gating claim.\n    missing: audit.required\n    next: Agent {\"subagent_type\":\"empirica:empirica-auditor\",\"description\":\"Audit\",\"prompt\":\"Audit the host-provided dossier.\"}"
 }

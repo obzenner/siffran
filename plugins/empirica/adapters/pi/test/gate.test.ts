@@ -7,7 +7,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
-import { AUDIT_LAUNCH_POLICY, HOST_COMPATIBILITY, SUBAGENTS_COMPATIBILITY, spellRange } from "../src/host-profile.ts";
+import { VENDORED_CONTRACT_DIR as HOST_PROFILES_DIR } from "../src/public-tools.ts";
+import { AUDIT_LAUNCH_POLICY, HOST_COMPATIBILITY, HOST_PROFILE_ID, SUBAGENTS_COMPATIBILITY, spellRange } from "../src/host-profile.ts";
 import { auditLaunchInput } from "../src/audit-launch.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { EVIDENCE_WAIT_NOTICE } from "../src/evidence-ui.ts";
@@ -15,7 +16,7 @@ import {
   BUDGET_EXHAUSTED_NOTICE, budgetExhaustedWait, HUMAN_WAIT_NOTICE, humanApprovalWait,
 } from "../src/governance-ui.ts";
 import {
-  createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, enabledAuditorCandidates, piAuditorModelSource,
+  CANONICAL_AUDIT_CALL, createEmpiricaExtension, DEFAULT_SKILLS_DIR, defaultAuditContractResolver, enabledAuditorCandidates, piAuditorModelSource,
   resolvePiAuditorModel,
 } from "../src/index.ts";
 import { AUDIT_LAUNCH_PARAMETERS, loadInventory, type SubagentInventory } from "../src/subagent-inventory.ts";
@@ -1344,6 +1345,21 @@ test("subagent: canonical input errors are specific and have no audit side effec
     assert.equal(w.auditResolutions.length, 0);
     assert.equal(w.privateRequests.length, 0);
   });
+});
+
+test("the Pi profile's audit_launch is the canonical audit call, and the gate admits it", async () => {
+  const profiles = JSON.parse(readFileSync(path.join(HOST_PROFILES_DIR, "host-profiles.json"), "utf8")).profiles as
+    { profile_id: string; audit_launch?: string }[];
+  const launch = profiles.find((row) => row.profile_id === HOST_PROFILE_ID)!.audit_launch!;
+  const [tool, ...rest] = launch.split(" ");
+  const parsed = JSON.parse(rest.join(" ")) as Record<string, unknown>;
+  assert.equal(tool, SUBAGENT_TOOL);
+  assert.deepEqual(parsed, CANONICAL_AUDIT_CALL);
+  const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }));
+  await startRun(w);
+  const decision = await w.pi.toolCall()({ toolName: SUBAGENT_TOOL, toolCallId: "profile-launch", input: parsed }, fakeCtx());
+  assert.equal(decision, undefined, "canonicalAuditorInputError accepts the printed launch");
+  assert.equal(w.auditResolutions.length, 1);
 });
 
 test("subagent: empty string task retains its existing accepted meaning", async () => {
