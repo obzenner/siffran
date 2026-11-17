@@ -165,7 +165,7 @@ def _observed(snapshot: EvaluationSnapshot, item: Mapping[str, Any], stale: set[
            "stale": item["kind"] == "spike" and item["artifact_id"] in stale}
     if item["kind"] != "research":
         return row
-    route = confirmation.pending_route(snapshot, item)
+    route = confirmation.wait_route(snapshot, item)
     decided = confirmation.receipt(snapshot, item)
     return {**row, **({"confirm": route} if route is not None else {}),
             **({"note": decided["note"]} if decided is not None and "note" in decided else {})}

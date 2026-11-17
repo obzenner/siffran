@@ -217,7 +217,7 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertEqual(self.routes(drv, run_id), ["audit"])
         self.assertNotIn("evidence.confirmation_required", self.codes(self.report(drv, run_id)))
 
-    def test_without_a_human_ingress_a_record_is_unavailable_from_the_moment_it_is_recorded(self):
+    def test_without_a_human_ingress_a_record_is_inert_from_the_moment_it_is_recorded(self):
         drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", audit_retrieval=[],
                                  delegation=True, interactive=False)
         for kind, ref, extra in (("web", URL, {}), ("runtime", NO_REF, {"spike_unavailable": "No harness."})):
@@ -225,17 +225,17 @@ class EvidenceConfirmationTests(EvidenceFixture):
                 recorded = self.research(drv, run_id, kind, ref, **extra)
                 self.assertEqual(recorded["type"], "Allow")
                 observed = [row for o in recorded["run"]["obligations"]["active"] for row in o["observed"]]
-                self.assertEqual(observed[-1]["confirm"], "unavailable")
+                self.assertNotIn("confirm", observed[-1])  # nobody is waited on for it
         blocked = self.report(drv, run_id)
-        reason = next(r for r in blocked["reasons"] if r["code"] == "evidence.confirmation_required")
-        self.assertEqual(reason["parameters"]["route"], "unavailable")
-        self.assertEqual(reason["next_actions"], ["residual.accept"])  # nobody can be asked
+        reason = next(r for r in blocked["reasons"] if r["code"] == "claim.research_missing")
+        self.assertEqual(reason["next_actions"], ["research.record"])  # the author's to fix, nobody can be asked
+        self.assertEqual(reason["parameters"]["support"], "unconfirmed")
         claim = next(o for o in self.run_view(drv, run_id)["obligations"]["active"] if o["id"] == "claim:C0")
-        self.assertEqual(claim["next"], ["residual.accept"])
-        self.assertEqual(self.present(drv, run_id)["type"], "Block")
-        self.assertEqual(self.answer(drv, run_id, "r1", confirm(self.last_id(drv, run_id)))["type"], "Block")
+        self.assertEqual(claim["next"], ["research.record"])
+        self.assertNotEqual(self.present(drv, run_id)["type"], "Allow")  # there is no batch to present
+        self.assertNotEqual(self.answer(drv, run_id, "r1", confirm(self.last_id(drv, run_id)))["type"], "Allow")
         stopped = self.stop(drv, run_id)["result"]
-        residual = next(r for r in stopped["run"]["residuals"] if r["code"] == "evidence.confirmation_required")
+        residual = next(r for r in stopped["run"]["residuals"] if r["code"] == "claim.research_missing")
         self.assertNotIn("human.confirm_evidence", residual["next_actions"])
 
     # ---- the gate -------------------------------------------------------------------------

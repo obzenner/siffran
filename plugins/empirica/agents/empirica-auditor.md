@@ -29,6 +29,8 @@ Each research artifact in the dossier carries `verification: {class, status, ret
   you relied on it, and do not re-fail a claim merely because you could not retrieve it.
 - If a `retrieve: true` source is missing, unreadable, or lacks the cited text, fail the claim that
   rests on it and name the artifact.
+- A record whose `status` is `pending` and `retrieve` is `false` was never confirmed by anyone: it supports no
+  claim. Judge the claim on its other records, and fail the claim, naming it, when no other record supports it.
 - A `needs-decision` claim with `human_decision` is the human's own decision. Judge only that the
   argument around it is coherent; do not second-guess the choice or ask for research for it.
 - An approved `needs-decision` claim without `human_decision` was decided by the author. Judge whether

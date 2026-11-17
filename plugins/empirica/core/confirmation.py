@@ -5,7 +5,8 @@ confirmation the service cannot give. Its *route* is derived, never stored:
 
 * ``audit`` — a ``retrievable`` record whose retrieval kind the host's auditor is observed to cover
   (``invocation.audit_retrieval``); the audit gate confirms it.
-* ``human`` — every other record, when a human can be shown a dialog now (``human_available``).
+* ``human`` — every other record of a deliberative run, when a human can be shown a dialog now (``human_available``).
+  An ``auto`` run asks a human at its configuration only, so its other records are ``unavailable``.
 * ``unobserved`` — every other record, when the run could be asked (a human ingress, interactive or not known
   otherwise, not delegated) but the host has not yet observed a surface (it looks inside ``report_convergence``). The
   requirement stays open and the author is told a human is asked when it reports, if the host can show a dialog.
@@ -87,12 +88,14 @@ def audit_retrieval(snapshot: Any) -> frozenset[str]:
 def human_route(snapshot: Any) -> str:
     """Where everything that waits on a human goes, from the run and what its host has observed.
 
-    ``unavailable`` for a profile without a human approval ingress, a delegated run and a non-interactive run, whatever
-    the host observes (they have the ingress on paper and nobody to ask); otherwise the host's last observation of its
-    surface (``invocation.human_surface``): ``human``, ``unavailable``, or ``unobserved`` while it has not looked."""
+    ``unavailable`` for every ``auto`` run (it asks a human only at its configuration), a profile without a human approval
+    ingress, a delegated run and a non-interactive run, whatever the host observes (they have the ingress on paper and
+    nobody to ask); otherwise, for a deliberative run, the host's last observation of its surface
+    (``invocation.human_surface``): ``human``, ``unavailable``, or ``unobserved`` while it has not looked."""
     context = snapshot.state.governance["context"]
     invocation = snapshot.state.invocation
-    if (context["approval_capability"] != governance.HUMAN_CONFIGURATION
+    if (snapshot.state.governance["control_mode"] == "auto"
+            or context["approval_capability"] != governance.HUMAN_CONFIGURATION
             or invocation["delegation"] or invocation["interactive"] is False):
         return UNAVAILABLE
     surface = invocation["human_surface"]
@@ -161,8 +164,34 @@ def pending_route(snapshot: Any, record: Any) -> str | None:
 
 
 def counts(snapshot: Any, record: Any) -> bool:
-    """Whether the record may support approval: nothing waits on a human for it."""
+    """Whether the record may support approval: nothing waits on a human for it. It reads the route and nothing about the
+    mode: in an ``auto`` run a record that needs a human does not count either (it is inert, ``asks_human`` is false)."""
     return pending_route(snapshot, record) not in HUMAN_ROUTES
+
+
+def is_auto(snapshot: Any) -> bool:
+    """Whether the run is an ``auto`` run, which asks a human at its configuration only."""
+    return snapshot.state.governance["control_mode"] == "auto"
+
+
+def asks_human(snapshot: Any, record: Any) -> bool:
+    """Whether a human is asked about the record: it still needs confirming on a human route, in a run that asks. An
+    ``auto`` run asks no one about evidence, so a record that needs a human is inert there: it supports nothing, waits
+    on nobody and is in no batch. Not an input of ``counts``."""
+    return not is_auto(snapshot) and pending_route(snapshot, record) in HUMAN_ROUTES
+
+
+def inert(snapshot: Any, record: Any) -> bool:
+    """Whether the record needs a human in a run that asks none (``auto``): it stays in the dossier as recorded, supports
+    no claim, and has no producer the audit classifies."""
+    return is_auto(snapshot) and pending_route(snapshot, record) in HUMAN_ROUTES
+
+
+def wait_route(snapshot: Any, record: Any) -> str | None:
+    """The route of a record somebody is waited on for: the audit, or a human who is asked (``asks_human``); ``None`` when
+    the record is verified, answered, or inert. What a view shows as the record's wait."""
+    route = pending_route(snapshot, record)
+    return route if route == AUDIT or asks_human(snapshot, record) else None
 
 
 def retrieve(snapshot: Any, record: Any) -> bool:

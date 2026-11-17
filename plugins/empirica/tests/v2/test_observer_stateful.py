@@ -56,6 +56,8 @@ STARTS = {
                                                                                    signal="host startup")}),
     "auto-delegated": ("unavailable", False, False, {"control_mode": "auto", "invocation": invocation_for(
         PROFILE, delegation=True, interactive=False, human_surface="unavailable", signal="v2 harness")}),
+    # an interactive auto run: its human approved the configuration, and nothing after it is asked
+    "auto-interactive": ("human", True, False, {"control_mode": "auto"}),
 }
 FILES = ("src/probe.py", "src/other.py")
 
@@ -108,13 +110,13 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
     def begin(self, start, extra, approve):
         surface, self.can_present, self.unknown, kw = STARTS[start]
         self.b = _Builder()
-        self.auto = start == "auto-delegated"
+        self.auto = start.startswith("auto-")
         self.claims = ["C0", *sorted(extra)]
         self.reworded: set = set()
         self.run = self.b.begin("probe", "s-machine", "Generated run.", _graph_of(self.claims), surface=surface,
                                 qualified=True,
                                 # an auto run is approved by its host's policy, never by a waiting human
-                                approve=approve or start == "auto-delegated", **copy.deepcopy(kw))
+                                approve=approve or self.auto, **copy.deepcopy(kw))
 
     def _core(self) -> dict:
         return self.b.a.dispatch(self.b.drv, get_run(run_id=self.run))["result"]["run"]
@@ -265,6 +267,16 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         assert core["turn_end_actor"] == want, (core["turn_end_actor"], want)
         self.turn_ends.add(want)
 
+    def _auto_asks_nobody(self, core, gate) -> None:
+        """An approved auto run asks a human nothing: no evidence batch, no confirmation or consent blocker, and the turn
+        never waits on a human."""
+        if not (self.auto and core["status"] == "active" and core["governance"]["state"] == "approved"):
+            return
+        codes = {reason["code"] for reason in gate.get("reasons", [])}
+        assert core["confirmation_batch"] is None, core["confirmation_batch"]
+        assert not codes & {"evidence.confirmation_required", "governance.terminal_stop_pending"}, codes
+        assert core["turn_end_actor"] != "human", core["turn_end_actor"]
+
     # --- the invariant -----------------------------------------------------------------------------------------------
 
     @invariant()
@@ -288,6 +300,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         gate = reader.a.dispatch(reader.drv, evaluate(run_id=self.run, intent="report_convergence"))["result"]
         c = self.check
         self._turn_end_actor(seen, core, argument)
+        self._auto_asks_nobody(core, gate)
         decided, self.decisions = decision_problems(row, detail, argument, core)
         assert decided == [], decided
         stepped, self.steps = step_problems(detail, argument)
@@ -352,6 +365,12 @@ REPLAYS = {
         ("research", dict(claim="C0", against=False, ref="a.md"))],
     "an unattended delegated run asks nobody": [
         ("begin", dict(start="auto-delegated", extra={"C2", "C3"}, approve=True)), ("cite_the_web", dict(claim="C3"))],
+    "an interactive auto run asks nobody about a web source": [
+        ("begin", dict(start="auto-interactive", extra={"C2", "C3"}, approve=True)), ("cite_the_web", dict(claim="C3")),
+        ("cite_the_web", dict(claim="C2")), ("report", {})],
+    "an interactive auto run with a source for and against the root": [
+        ("begin", dict(start="auto-interactive", extra={"C3"}, approve=True)), ("cite_the_web", dict(claim="C0")),
+        ("research", dict(claim="C0", against=True, ref="a.md"))],
     "a passing audit by the same model is not independent": [
         ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
         ("research", dict(claim="C3", against=False, ref="b.md")), ("audit", dict(verdict="pass", auditor="same_model"))],

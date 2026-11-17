@@ -515,7 +515,7 @@
           },
           {
             "id": "human.confirm_evidence",
-            "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress."
+            "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only in a deliberative run whose host has a human ingress: an auto run asks no one after its configuration."
           },
           {
             "id": "convergence.report",

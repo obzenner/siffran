@@ -169,7 +169,7 @@ def _record(snapshot: EvaluationSnapshot, record: Mapping[str, Any], prompt_erro
             "quote": record["citation"], "outcome": record["outcome"],
             "class": citations.verification_class(record["source_kind"], record["source_ref"]),
             "status": confirmation.status(snapshot, record),
-            "wait": _wait(confirmation.pending_route(snapshot, record), prompt_error,
+            "wait": _wait(confirmation.wait_route(snapshot, record), prompt_error,
                           snapshot.state.status == "active", audit_pending),
             "retrieve": confirmation.retrieve(snapshot, record),
             "spike_unavailable": record.get("spike_unavailable"),

@@ -6,6 +6,7 @@ and shows the test fail. The host is the shared Claude mediator with a scripted 
 Pi gate rules over the same facts are tested in their own suites."""
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from unittest import mock
 import sys
@@ -14,16 +15,40 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[4] / "scripts"))
 import regen_contract_fixtures  # noqa: E402
 
 from adapters import confirmation
-from core import evaluation
+from adapters.author_view import render_author_view
+from core import confirmation as core_confirmation, evaluation
 from application import protocol
-from assertions import ConformanceCase, action_freeze, get_run, observe_action
+from assertions import ConformanceCase, action_freeze, action_graph, get_run, observe_action
 from governance_setup import TEST_INVOCATION
 from observer_store import _Builder, _graph
-from test_evidence_confirmation import URL, WORKSPACE_REF, graph_with_decision
+from test_evidence_confirmation import URL, WORKSPACE_REF, confirm, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
 from application.protocol import host_profile_id  # noqa: E402
 
 CONFIRMATION = "evidence.confirmation_required"
+
+
+def lock_only():
+    """A run whose records are asked about whatever the mode (the inert rule removed), so that the route lock is the one
+    guard standing: what the lock refuses when nothing upstream keeps the record out of a batch."""
+    return mock.patch.object(core_confirmation, "asks_human", lambda snapshot, record: (
+        core_confirmation.pending_route(snapshot, record) in core_confirmation.HUMAN_ROUTES))
+
+
+def inert_only():
+    """A run whose human route is open whatever the mode (the lock removed), so that the inert rule is the one guard
+    standing: what keeps a record that needs a human out of a batch."""
+    return mock.patch.object(core_confirmation, "human_route", return_value="human")
+
+
+def asked_as_before():
+    """A run as an earlier version asked it: a human route, and a record that needs a human is in the batch whatever the
+    mode. The stored presentations and receipts it leaves are what a persisted run holds."""
+    from contextlib import ExitStack
+    stack = ExitStack()
+    stack.enter_context(inert_only())
+    stack.enter_context(lock_only())
+    return stack
 
 
 class ScenarioFixture(MediatorFixture):
@@ -284,6 +309,10 @@ class HumanSurfaceCells(ScenarioFixture):
     # ---- U: no human to ask -----------------------------------------------------------------
 
     def unavailable(self, **start):
+        with lock_only():
+            return self._unavailable(**start)
+
+    def _unavailable(self, **start):
         drv, run_id = self.start(**start)
         self.research(drv, run_id, "web", URL)
         human = Human(accept(d1="confirm"))
@@ -298,6 +327,47 @@ class HumanSurfaceCells(ScenarioFixture):
 
     def test_D_a_delegated_auto_run_has_nobody_to_ask(self):
         self.unavailable(mode="auto", delegation=True, interactive=False)
+
+    def test_L1_an_interactive_auto_run_has_nobody_to_ask_before_and_after_the_host_looks(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        with lock_only():
+            self.assertEqual(self.batch(drv, run_id)["prompt_error"], "unavailable")  # before the host has looked
+        self.unavailable(mode="auto")  # after it recorded a human surface: the reason, the actions, no dialog, the Block
+
+    def test_L2_an_interactive_auto_presentation_or_receipt_is_refused_whatever_the_surface(self):
+        drv, run_id = self.unavailable(mode="auto")
+        self.assertEqual(self.run_view(drv, run_id)["invocation"]["human_surface"], "human")
+        with lock_only():
+            refused = self.present(drv, run_id)
+            self.assertEqual((refused["type"], refused["reasons"][0]["code"]), ("Block", "governance.approval_unavailable"))
+            self.assertEqual(self.answer(drv, run_id, "p1", confirm(self.last_id(drv, run_id)))["type"], "Block")
+        self.assertEqual(self.verification(drv, run_id)["status"], "pending")
+
+    def test_L5_the_first_configuration_of_an_interactive_auto_run_still_waits_on_a_human(self):
+        b = _Builder()
+        run = b.begin("probe", "s-l5", "Configure first.", _graph("C0", [("C0", "ordinary", "Root")], []),
+                      approve=False, control_mode="auto")
+        b.ask_configuration(run, "rc-l5", outcome="present")
+        view = b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]
+        self.assertEqual((view["governance"]["human_wait"], view["turn_end_actor"]), (True, "human"))
+
+    def test_L6_a_deliberative_run_keeps_asking_with_the_same_surface(self):
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual(self.report(drv, run_id)["reasons"][0]["parameters"]["route"], "human")
+        self.assertIsNone(self.batch(drv, run_id)["prompt_error"])
+
+    def test_L8_a_dialog_opened_before_the_upgrade_cannot_land_its_answer(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        self.look(drv, run_id)
+        with asked_as_before():  # what the run was shown under
+            self.assertEqual(self.present_now(drv, run_id)["type"], "Allow")
+        with lock_only():
+            refused = self.answer(drv, run_id, "p1", confirm(self.last_id(drv, run_id)))
+        self.assertEqual((refused["type"], refused["reasons"][0]["code"]), ("Block", "governance.approval_unavailable"))
+        self.assertEqual(self.verification(drv, run_id)["status"], "pending")
 
     def test_D_a_client_without_form_elicitation_has_nobody_to_ask(self):
         drv, run_id = self.start()
@@ -325,9 +395,11 @@ class HumanSurfaceCells(ScenarioFixture):
         drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", audit_retrieval=[], delegation=True,
                                  interactive=False)
         self.research(drv, run_id, "web", URL)
-        batch = self.batch(drv, run_id)
-        self.assertEqual((sorted(batch), len(batch["record_ids"]), batch["prompt_error"]),
-                         (["claim_ids", "key", "prompt_error", "record_ids", "records"], 1, "unavailable"))
+        self.assertIsNone(self.batch(drv, run_id))  # the record is inert: nobody is asked
+        with lock_only():  # and were it asked about, the route would be unavailable
+            batch = self.batch(drv, run_id)
+            self.assertEqual((sorted(batch), len(batch["record_ids"]), batch["prompt_error"]),
+                             (["claim_ids", "key", "prompt_error", "record_ids", "records"], 1, "unavailable"))
 
 
 class AutoDecisionCells(ScenarioFixture):
@@ -385,12 +457,11 @@ class AutoDecisionCells(ScenarioFixture):
             self.assertEqual(evaluation._independence(auditor, [], True), "human_owned")  # only decisions a human answered
             self.assertEqual(evaluation._independence(auditor, [producer, None], True), "unverified")  # mixed run
 
-    def test_b_a_decision_resting_on_a_retrievable_record_waits_on_the_records_confirmation(self):
+    def test_b_a_decision_resting_on_a_record_that_needs_a_human_is_open_and_asks_nobody(self):
         drv, run_id = self.start(kind="needs-decision", mode="auto")
         self.research(drv, run_id, "web", URL)
-        self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id))), ("open", [CONFIRMATION]))
-        batch = self.batch(drv, run_id)
-        self.assertEqual((batch["claim_ids"], len(batch["record_ids"]), self.pending(drv, run_id)), ([], 1, []))
+        self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id)), self.batch(drv, run_id),
+                          self.pending(drv, run_id)), ("open", ["claim.research_missing"], None, []))
 
     def test_c_non_gating_and_conflicted_decisions_follow_the_ordinary_rules(self):
         graph = graph_with_decision()
@@ -414,6 +485,145 @@ class AutoDecisionCells(ScenarioFixture):
         self.assertEqual(self.run_view(drv, run_id)["audit"]["independence"], "distinct")  # never human_owned
         kinds = {a["kind"] for a in drv._service._coordinator.last_snapshot.history}
         self.assertFalse(kinds & {"evidence_presentation", "evidence_confirmation"})
+
+
+class InertEvidenceCells(ScenarioFixture):
+    """In auto, research that needs a human neither approves a claim nor blocks it, and nobody is asked: the claim reads
+    ``claim.research_missing`` (support ``unconfirmed``), and the record stays in the dossier as recorded (I1-I9)."""
+
+    AUTO = (("interactive auto", {"mode": "auto"}),
+            ("delegated auto", {"mode": "auto", "delegation": True, "interactive": False}))
+    audit = HumanSurfaceCells.audit
+
+    def state(self, drv, run_id, claim="C0") -> str:
+        return self.claim(drv, run_id, claim)["state"]
+
+    def test_I1_a_claim_resting_only_on_a_source_that_needs_a_human_is_open_and_says_what_to_do(self):
+        for label, start in self.AUTO:
+            with self.subTest(label):
+                drv, run_id = self.start(**start)
+                self.research(drv, run_id, "web", URL)
+                record = self.last_id(drv, run_id)
+                report = self.report(drv, run_id)
+                self.assertEqual((self.state(drv, run_id), self.codes(report), self.batch(drv, run_id)),
+                                 ("open", ["claim.research_missing"], None))
+                self.assertEqual(report["reasons"][0]["parameters"],
+                                 {"support": "unconfirmed", "record_ids": [record], "claim_id": "C0"})
+                self.assertEqual(self.run_view(drv, run_id)["turn_end_actor"], "author")
+                text = render_author_view(report)
+                for named in ("workspace", "spike", "report_convergence intent=stop", "deliberative"):
+                    self.assertIn(named, text)
+                self.assertNotIn("Waiting on a human", text)
+
+    def test_I2_another_record_approves_the_claim_and_the_inert_one_blocks_nothing(self):
+        for label, start in self.AUTO:
+            with self.subTest(label):
+                drv, run_id = self.start(**start)
+                self.research(drv, run_id, "web", URL)
+                self.research(drv, run_id, "code", WORKSPACE_REF)
+                self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id)), self.batch(drv, run_id)),
+                                 ("approved", ["audit.required"], None))
+                self.dispatch(drv, observe_action(run_id=run_id, action=action_freeze()))
+                self.assertEqual(self.audit(drv, run_id)["type"], "Allow")
+                self.assertEqual(self.run_view(drv, run_id)["status"], "converged")
+
+    def test_I3_an_auto_decision_resting_on_a_source_that_needs_a_human_is_open(self):
+        drv, run_id = self.start(kind="needs-decision", mode="auto")
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id)), self.batch(drv, run_id)),
+                         ("open", ["claim.research_missing"], None))
+
+    def test_I4_a_refuting_source_that_needs_a_human_still_discards_the_claim(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL, result="refutes")
+        self.assertEqual((self.state(drv, run_id), self.codes(self.report(drv, run_id)), self.batch(drv, run_id)),
+                         ("discarded", ["claim.refuted"], None))
+
+    def test_I6_each_guard_alone_keeps_the_batch_empty_or_the_route_closed(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        with inert_only():  # the lock removed: nothing is in a batch, so nobody is asked
+            self.assertEqual((self.batch(drv, run_id), self.codes(self.report(drv, run_id))), (None, ["claim.research_missing"]))
+        with lock_only():  # the inert rule removed: the route is closed
+            self.assertEqual((self.batch(drv, run_id)["prompt_error"], self.present(drv, run_id)["type"]), ("unavailable", "Block"))
+
+    def test_I5_a_deliberative_run_still_asks_about_the_same_source(self):
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual((self.codes(self.report(drv, run_id)), len(self.batch(drv, run_id)["record_ids"])), ([CONFIRMATION], 1))
+
+    def test_I7_a_stored_human_answer_still_counts_in_an_auto_run(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        record = self.last_id(drv, run_id)
+        self.look(drv, run_id)
+        with asked_as_before():  # how a 7.0.x run was asked
+            self.assertEqual(self.present_now(drv, run_id)["type"], "Allow")
+            self.assertEqual(self.answer(drv, run_id, "p1", confirm(record))["type"], "Allow")
+        self.assertEqual((self.state(drv, run_id), self.verification(drv, run_id)["status"]),
+                         ("approved", "confirmed_by_human"))
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        record = self.last_id(drv, run_id)
+        self.look(drv, run_id)
+        with asked_as_before():
+            self.present_now(drv, run_id)
+            self.answer(drv, run_id, "p1", {"subject": "research", "artifact_id": record, "outcome": "reject"})
+        self.assertEqual((self.state(drv, run_id), self.verification(drv, run_id)["status"]),
+                         ("open", "rejected_by_human"))
+
+    def test_I8_a_stopped_auto_run_leaves_the_claim_as_a_residual_that_says_so(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        stopped = self.stop(drv, run_id)["run"]
+        codes = [(r["code"], r["parameters"].get("support")) for r in stopped["residuals"]]
+        self.assertEqual(codes, [("claim.research_missing", "unconfirmed")])
+        self.assertIsNone(stopped["confirmation_batch"])
+
+    def test_I9_the_observer_waits_on_nobody_for_an_inert_record(self):
+        from core import observer as core_observer
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        snapshot = self.snapshot(drv, run_id)
+        record = next(a for a in snapshot.history if a.get("kind") == "research")
+        row = core_observer._record(snapshot, record, None, False)
+        self.assertEqual((row["status"], row["wait"]), ("pending", None))
+        self.assertIsNone(core_confirmation.wait_route(snapshot, record))
+
+    def test_F5_research_that_no_longer_binds_is_named_before_research_nobody_confirms(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        self.dispatch(drv, observe_action(run_id=run_id, action=action_graph(self.reworded_graph())))
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual(self.codes(self.report(drv, run_id)), ["claim.research_unbound"])
+
+    def test_F3_an_inert_record_is_in_the_dossier_but_not_among_the_producers_the_audit_classifies(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        inert = self.last_id(drv, run_id)
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        counted = self.last_id(drv, run_id)
+        snapshot = self.snapshot(drv, run_id)
+        claim = snapshot.graph["claims"][0]
+        self.assertEqual([a["artifact_id"] for a in evaluation.active_evidence(snapshot, claim)], [inert, counted])
+        self.assertEqual(evaluation.covered_artifact_ids(snapshot), [counted])
+        _auditor, producers = evaluation.audit_attributions(snapshot, {"child_id": None})
+        self.assertEqual(len(producers), 1)
+        argument = self.argument(drv, run_id)
+        self.assertEqual(argument["claims"][0]["active_evidence_ids"], [inert, counted])  # the auditor sees it as recorded
+        # an inert record whose producer nobody knows leaves the classification as it was
+        history = [{**a, "producer": None} if a["artifact_id"] == inert else a for a in snapshot.history]
+        unknown = dataclasses.replace(snapshot, history=history)
+        self.assertEqual(evaluation.audit_attributions(unknown, {"child_id": None})[1],
+                         evaluation.audit_attributions(snapshot, {"child_id": None})[1])
+        self.assertEqual(self.audit(drv, run_id)["type"], "Allow")  # a distinct auditor passes over the counted record
+
+    @staticmethod
+    def reworded_graph() -> dict:
+        from assertions import canonical_graph
+        graph = canonical_graph(kind="ordinary")
+        graph["claims"][0]["text"] += " (reworded)"
+        return graph
 
 
 class BatchSizeCells(ScenarioFixture):
@@ -546,10 +756,14 @@ class TurnEndActorCells(ScenarioFixture):
         self.assertEqual(self.actor(drv, run_id), "author")
 
     def test_human_while_a_confirmation_waits_on_a_human(self):
-        for mode in self.MODES:
-            drv, run_id = self.start(mode=mode)
-            self.research(drv, run_id, "web", URL)
-            self.assertEqual((mode, self.actor(drv, run_id)), (mode, "human"))
+        drv, run_id = self.start()
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual(self.actor(drv, run_id), "human")
+
+    def test_author_in_auto_while_a_source_needs_a_human_who_is_not_asked(self):
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        self.assertEqual(self.actor(drv, run_id), "author")
 
     def test_the_auditor_while_an_audit_child_runs_and_the_author_before_it_is_launched(self):
         for mode in self.MODES:

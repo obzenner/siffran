@@ -16,7 +16,7 @@
       "settle": "End the turn with the run view and no notice: exactly one audit is pending and its result continues the run.",
       "settle-notice": "End the turn with the contract notice of the settlement; the run stays active and not converged, and nothing was approved or confirmed by the settlement.",
       "pause": "End the turn with a contract notice that is not a convergence claim and names the real next step the human can relay to the agent; the run stays active, nobody was asked, nothing was granted. The same on a first and a later turn end.",
-      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; the evidence directive when a human can be asked about the sole blocker; `unattended_continue` on a later turn end of the same chain, except the evidence directive: it is the one exception and is kept on later turn ends while the observation basis changes). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else; on an unchanged basis the turn ends instead (`end-no-progress`). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason, or the evidence directive where one is named.",
+      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; `unattended_continue` on a later turn end of the same chain). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else; on an unchanged basis the turn ends instead (`end-no-progress`). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason.",
       "end-no-progress": "End the turn with the `unattended_continue` notice because the host has already continued once on this observation basis (the core's `run.basis`); Pi records `no-progress`."
     },
     "states": [
@@ -117,7 +117,7 @@
       },
       {
         "id": "evidence-wait",
-        "title": "the sole blocker is an evidence confirmation a human can be asked about",
+        "title": "the sole blocker is an evidence confirmation (a deliberative run's human can be asked); in an auto run a source that needs a human is inert, and the author gets the claim's own reason",
         "outcomes": {
           "deliberative": {
             "outcome": "pause",
@@ -128,13 +128,13 @@
           "auto-interactive-pre": {
             "outcome": "continue",
             "notices": [
-              "evidence_report"
+              "unattended_continue"
             ]
           },
           "auto-interactive-post": {
             "outcome": "continue",
             "notices": [
-              "evidence_report"
+              "unattended_continue"
             ]
           },
           "auto-delegated": {
@@ -205,7 +205,7 @@
         "allow": "exit 0 with the run view",
         "settle": "exit 0; the run view (async audit) or `systemMessage` with the notice",
         "pause": "exit 0 with `systemMessage`",
-        "continue": "exit 2 with the reason on stderr (the real reason, or the `evidence_report` directive), and `unattended_continue` when `stop_hook_active` is true; the evidence directive is the exception and stays on a later turn end; on any later turn end whose `run.basis` is the one the previous Stop saw, the turn ends (exit 0) with `unattended_continue`",
+        "continue": "exit 2 with the reason on stderr (the real reason), and `unattended_continue` when `stop_hook_active` is true; on any later turn end whose `run.basis` is the one the previous Stop saw, the turn ends (exit 0) with `unattended_continue`",
         "loop_bound": "Claude's `stop_hook_active` plus its own cap of eight consecutive continuations (`host-capped` otherwise). A deliberative pause ends the turn (ADR-0068 owns the `stop_hook_active` rule). The adapter adds the same rule as Pi: it remembers the core's `run.basis` per session and a continuation on an unchanged basis ends with `unattended_continue`; the cap is the backstop, no longer the bound that matters.",
         "table_driven": "EHB-STOP-23"
       },
@@ -422,7 +422,7 @@
       "boundary": "HB-STOP",
       "title": "a Stop never claims convergence, and an `Allow(converged=true)` is the only success",
       "control_mode_dependent": true,
-      "outcomes": "Claude: `allow` (exit 0, view) | `inert` (exit 0, silent) | `settle-notice` (exit 0, `human_wait` or `budget_exhausted`) | `settle` (exit 0, view, one async audit) | `pause` (exit 0, `paused_for_human` or `paused_for_evidence`) | `continue` (exit 2: the real reason, `evidence_report`, or `unattended_continue`) | `fault-closed` (exit 2) | `fault-open` (exit 0, only on an explicit core `fail_direction: open`) | **`host-capped`** (Claude ends the turn after eight consecutive blocks, Empirica not consulted; Q2, `report-limitation`, never relied on). Pi: the same outcomes through its own surface (`HX-STOP-04`).",
+      "outcomes": "Claude: `allow` (exit 0, view) | `inert` (exit 0, silent) | `settle-notice` (exit 0, `human_wait` or `budget_exhausted`) | `settle` (exit 0, view, one async audit) | `pause` (exit 0, `paused_for_human` or `paused_for_evidence`) | `continue` (exit 2: the real reason, or `unattended_continue`) | `fault-closed` (exit 2) | `fault-open` (exit 0, only on an explicit core `fail_direction: open`) | **`host-capped`** (Claude ends the turn after eight consecutive blocks, Empirica not consulted; Q2, `report-limitation`, never relied on). Pi: the same outcomes through its own surface (`HX-STOP-04`).",
       "outcomes_by_mode": "The outcome by control mode and run state is the turn-end table (`turn_end`), the same on every host; this expectation owns only that `Allow(converged=true)` is the sole success.",
       "scenarios": [
         "EHB-STOP-01",
@@ -436,16 +436,16 @@
     {
       "id": "HX-STOP-02",
       "boundary": "HB-STOP",
-      "title": "evidence that only a report can show goes through the directive, then the real reason",
+      "title": "evidence that only a report can show: a deliberative run pauses for the human; an auto run asks no one and gets the real reason",
       "control_mode_dependent": true,
-      "outcomes": "Claude: `continue` with the `evidence_report` directive (interactive auto) | `pause` with `paused_for_evidence` (deliberative) | `continue` with the real reason (any other blocker). Pi: not applicable (the Pi gate presents in-process at `report_convergence`).",
-      "outcomes_by_mode": "Interactive auto, first and later Stop: the directive (the act-on-it action is the report that asks the human). Deliberative, any Stop: `paused_for_evidence`, which tells the human to tell the agent to report, and that they are asked in that call, if this host can show a dialog. Delegated: the route is `unavailable`, so there is no directive.",
+      "outcomes": "Claude: `pause` with `paused_for_evidence` (deliberative) | `continue` with the real reason (every auto mode, and any other blocker). Pi: not applicable (the Pi gate presents in-process at `report_convergence`).",
+      "outcomes_by_mode": "Deliberative, any Stop: `paused_for_evidence`, which tells the human to tell the agent to report, and that they are asked in that call, if this host can show a dialog. Every auto mode (interactive before or after its first approval, delegated): a source that needs a human is inert (an auto run asks a human only at its configuration, and the route is closed besides), so there is no batch and no directive: the first Stop gives the claim's real reason, a later one `unattended_continue`.",
       "scenarios": [
         "EHB-STOP-02",
         "EHB-STOP-05",
         "EHB-STOP-22"
       ],
-      "sources": "F5 (rulings A2-1/A2-2), F7, ADR-67 (\"Asking at the end of the pass\"), `public-contract.json settlement_notices.evidence_report`; tests `V2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded`, `::test_the_directive_names_the_call_that_asks_the_human`, `CT/test_claude_adapter.py::test_an_interactive_auto_stop_never_settles_for_evidence_and_directs_the_author_to_report`, `V2/test_host_faithful.py::HostFailure::test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop`."
+      "sources": "F5 (rulings A2-1/A2-2), F7, ADR-67 (\"Asking at the end of the pass\"), `public-contract.json settlement_notices.evidence_report`; tests `V2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_L4_the_stop_blocks_with_the_real_reason_in_every_cell_and_nobody_is_shown_a_dialog`, `::test_the_directive_names_the_call_that_asks_the_human`, `CT/test_claude_adapter.py::test_the_stop_directs_the_author_to_report_only_where_the_core_says_a_human_can_be_asked`, `V2/test_host_faithful.py::HostFailure::test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop`."
     },
     {
       "id": "HX-STOP-03",
@@ -579,7 +579,8 @@
         "EHB-DLG-05",
         "EHB-DLG-06",
         "EHB-DLG-07",
-        "EHB-DLG-08"
+        "EHB-DLG-08",
+        "EHB-DLG-09"
       ],
       "sources": "ADR-67 (\"One decision per item\", \"Human receipt\"), HEATH AS3; tests `V2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing`, `::test_later_grants_nothing_and_an_explicit_report_asks_again_within_the_ceiling`, `::test_a_dialog_that_raises_grants_nothing`, `V2/test_evidence_scenarios.py::BatchSizeCells::test_a_decline_or_cancel_that_carries_content_grants_nothing`, `PT/evidence-ui.test.ts`."
     },
@@ -1090,12 +1091,12 @@
         "auto-interactive-pre",
         "auto-interactive-post"
       ],
-      "setup": "interactive `auto` run, sole blocker = evidence confirmation, route `human`/`unobserved`",
+      "setup": "interactive `auto` run, sole blocker = a claim that rests only on a source that needs a human (inert: an auto run asks no one, so the claim reads `claim.research_missing`, case `unconfirmed`), whatever surface the host recorded",
       "action": "Stop",
-      "expected": "C: exit 2 with the `evidence_report` directive on the first and on a later Stop; never `evidence_wait`",
+      "expected": "C: exit 2 with the core's real reason on the first Stop and `unattended_continue` on a later one; never the `evidence_report` directive, never `evidence_wait`; the mediator shows no dialog",
       "covered_by": [
-        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_D_the_stop_blocks_with_the_directive_in_every_cell_and_the_mediator_shows_only_when_recorded",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_an_interactive_auto_stop_never_settles_for_evidence_and_directs_the_author_to_report"
+        "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_L4_the_stop_blocks_with_the_real_reason_in_every_cell_and_nobody_is_shown_a_dialog",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_the_stop_directs_the_author_to_report_only_where_the_core_says_a_human_can_be_asked"
       ],
       "ledger_rows": [
         "ev_url_confirm"
@@ -1162,9 +1163,9 @@
         "auto-interactive-post",
         "auto-delegated"
       ],
-      "setup": "an `auto` run: a non-converged Block, an evidence directive (interactive modes only: a delegated run's route is `unavailable`), a sole `budget.exhausted`, one pending async audit, a sole initial approval",
+      "setup": "an `auto` run: a non-converged Block, a claim resting only on a source that needs a human (inert in every auto mode: nobody is asked, the claim reads `claim.research_missing`), a sole `budget.exhausted`, one pending async audit, a sole initial approval",
       "action": "the first Stop (`stop_hook_active` false or absent)",
-      "expected": "C: real reason exit 2; `evidence_report` exit 2; `budget_exhausted` exit 0; async-audit view exit 0; `human_wait` exit 0 (the reason text is the one sentence of `_reason_text`)",
+      "expected": "C: real reason exit 2 (an evidence wait included: no directive); `budget_exhausted` exit 0; async-audit view exit 0; `human_wait` exit 0 (the reason text is the one sentence of `_reason_text`)",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_06_the_first_stop_of_an_auto_run_gives_the_reason_and_keeps_the_settlements",
         "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode"
@@ -1234,9 +1235,9 @@
       ],
       "setup": "interactive auto before its first approval",
       "action": "the first Stop and a continuation",
-      "expected": "C: `human_wait` settles an approvable first approval on either Stop; otherwise an auto first turn end gives the core's reason and a continuation takes the auto outcome (`unattended_continue`, or the evidence directive)",
+      "expected": "C: `human_wait` settles an approvable first approval on either Stop; otherwise an auto first turn end gives the core's reason and a continuation takes the auto outcome (`unattended_continue`)",
       "covered_by": [
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_the_evidence_directive"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_11_interactive_auto_before_first_approval_keeps_human_wait_and_has_no_evidence_directive"
       ],
       "ledger_rows": [
         "configuration_pending"
@@ -1315,7 +1316,7 @@
       "covered_by": [
         "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_operator_checkpoint_ends_the_loop_in_one_stop",
         "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_a_deliberative_evidence_wait_pauses_and_nobody_is_shown_a_dialog_by_the_stop",
-        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_an_evidence_directive_the_agent_ignores_to_the_cap_in_interactive_auto"
+        "plugins/empirica/tests/v2/test_host_faithful.py::StopHookLoopOnClaude::test_EHB_STOP_16_an_evidence_wait_the_agent_ignores_runs_to_the_cap_with_no_directive_in_interactive_auto"
       ],
       "ledger_rows": [
         "stop_pause_rendering"
@@ -1764,20 +1765,48 @@
         "auto-delegated"
       ],
       "setup": "decision-claim (`needs-decision`) with no human answer",
-      "action": "record research for it, or none; refute it; add a retrievable record that waits on a human",
-      "expected": "the author owns it: no research leaves it open (`claim.research_missing`); supporting research that counts approves it; refuting research discards it; supporting plus refuting is a conflict; a retrievable record waits for its own confirmation; no decision is in the human batch; a human answer, when present, decides in the existing order; an approved decision is never `human_owned`; a delegated run converges with nobody asked",
+      "action": "record research for it, or none; refute it; add a record that needs a human",
+      "expected": "the author owns it: no research leaves it open (`claim.research_missing`); supporting research that counts approves it; refuting research discards it; supporting plus refuting is a conflict; a record that needs a human is inert and leaves it open (`claim.research_missing`, case `unconfirmed`); no decision is in the human batch; a human answer, when present, decides in the existing order; an approved decision is never `human_owned`; a delegated run converges with nobody asked",
       "covered_by": [
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_F1_an_auto_decision_without_research_is_open_and_asks_nobody",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_F2_auto_research_approves_or_discards_a_decision",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_F3_a_human_answer_keeps_the_order_in_every_mode",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_a_independence_never_calls_an_agent_decided_claim_human_owned",
-        "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_b_a_decision_resting_on_a_retrievable_record_waits_on_the_records_confirmation",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_b_a_decision_resting_on_a_record_that_needs_a_human_is_open_and_asks_nobody",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_c_non_gating_and_conflicted_decisions_follow_the_ordinary_rules",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_d_a_researched_decision_converges_in_delegated_auto_with_nobody_asked",
         "plugins/empirica/tests/v2/test_evidence_scenarios.py::AutoDecisionCells::test_a_deliberative_needs_decision_with_only_research_stays_blocked",
         "plugins/empirica/tests/v2/test_observer_facts.py::AutoDecisionStandingTests::test_a_persisted_human_confirmation_decides_an_auto_run_in_the_same_shape",
         "plugins/empirica/tests/v2/test_observer_facts.py::AutoDecisionStandingTests::test_the_five_no_answer_cases_of_an_auto_run",
         "plugins/empirica/tests/v2/test_observer_facts.py::AutoDecisionStandingTests::test_a_mixed_run_of_a_persisted_answer_and_a_researched_decision_has_a_distinct_auditor"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-DLG-09",
+      "boundary": "HB-DLG",
+      "control_modes": [
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "a claim whose only supporting research is a record that needs a human (a web source, or a runtime note with no workspace path, or a local file the auditor child cannot read)",
+      "action": "record it, report, stop; for a deliberative run, the same",
+      "expected": "in auto the record is inert: it is in the dossier as recorded, supports nothing, is in no batch and has no producer the audit classifies; the claim reads `claim.research_missing` (case `unconfirmed`, naming the record) unless historical research ranks first (`claim.research_unbound`); other counted research approves the claim; refuting research still discards it; a stored human `confirm` or `reject` still decides in every mode; a stopped run's residual says the same; a deliberative run asks about the same record as before",
+      "covered_by": [
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I1_a_claim_resting_only_on_a_source_that_needs_a_human_is_open_and_says_what_to_do",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I2_another_record_approves_the_claim_and_the_inert_one_blocks_nothing",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I3_an_auto_decision_resting_on_a_source_that_needs_a_human_is_open",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I4_a_refuting_source_that_needs_a_human_still_discards_the_claim",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I5_a_deliberative_run_still_asks_about_the_same_source",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I6_each_guard_alone_keeps_the_batch_empty_or_the_route_closed",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I7_a_stored_human_answer_still_counts_in_an_auto_run",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I8_a_stopped_auto_run_leaves_the_claim_as_a_residual_that_says_so",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_I9_the_observer_waits_on_nobody_for_an_inert_record",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_F3_an_inert_record_is_in_the_dossier_but_not_among_the_producers_the_audit_classifies",
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::InertEvidenceCells::test_F5_research_that_no_longer_binds_is_named_before_research_nobody_confirms",
+        "plugins/empirica/tests/test_audit_retrieval.py::AuditorDefinitionTests::test_I10_the_shared_rubric_ignores_a_record_nobody_confirmed",
+        "plugins/empirica/tests/v2/test_observer_stateful.py::ReplayTests::test_each_named_sequence_keeps_the_invariant_after_every_step"
       ],
       "ledger_rows": []
     },
@@ -2424,16 +2453,16 @@
         "auto-interactive-pre",
         "auto-interactive-post"
       ],
-      "setup": "the sole blocker is an evidence confirmation a human can be asked about (route `human` or `unobserved`, batch not yet shown); the previous Stop already blocked; this takes precedence over `EHB-STOP-08`",
+      "setup": "the sole blocker is a claim resting only on a source that needs a human (inert: an auto run asks no one); the previous Stop already blocked; the same outcome as `EHB-STOP-08`",
       "action": "Stop with `stop_hook_active: true`",
-      "expected": "C: every interactive `auto` mode keeps the `evidence_report` directive (exit 2: the act-on-it action is the report that asks the human) while the core's `run.basis` changes; on an unchanged basis the turn ends (exit 0) with `unattended_continue`, the way out",
+      "expected": "C: every `auto` mode gets `unattended_continue` (exit 2, the real reason and the way out) while the core's `run.basis` changes, never the `evidence_report` directive; on an unchanged basis the turn ends (exit 0) with `unattended_continue`",
       "covered_by": [
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_keeps_the_evidence_directive_and_deliberative_hands_off",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_20_an_auto_continuation_has_no_evidence_directive_and_deliberative_hands_off",
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_INVARIANT_across_turn_ends_read_only_calls_earn_one_continuation_and_a_changed_basis_one_more"
       ],
       "ledger_rows": [
         "stop_unattended_directive",
-        "auto_evidence_directive"
+        "auto_evidence_asks_nobody"
       ]
     },
     {
@@ -2563,10 +2592,10 @@
       ],
       "setup": "Pi, an auto run, active, non-converged",
       "action": "`agent_before_settle`",
-      "expected": "P: `continue: true` with the next obligation (the core's reason, or the evidence directive in the interactive modes) appended as the message",
+      "expected": "P: `continue: true` with the next obligation (the core's reason) appended as the message",
       "covered_by": [
         "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32/33: an auto turn end continues once per change of basis and then ends with no-progress",
-        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32: interactive auto hands the evidence directive and a delegated run does not"
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-32: an auto run asks no one: every auto mode is handed the core's reason, never the evidence directive"
       ],
       "ledger_rows": [
         "pi_auto_continue_bound"

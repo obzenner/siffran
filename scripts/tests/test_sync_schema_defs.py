@@ -148,6 +148,7 @@ EXPECTED_CLAIM_ID_POSITIONS = {
         "/$defs/auditStaleParams/properties/claim_id",
         "/$defs/claimNamedParams/properties/claim_id",
         "/$defs/confirmationRequiredParams/properties/claim_ids",
+        "/$defs/researchMissingParams/properties/claim_id",
         "/$defs/runView/properties/confirmation_batch/anyOf/1/properties/claim_ids",
         "/$defs/runView/properties/confirmation_batch/anyOf/1/properties/records/items/properties/claim_id",
         "/$defs/freezeDeferredParams/properties/claim_ids",

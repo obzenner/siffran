@@ -1009,7 +1009,7 @@
       }
     },
     "human.confirm_evidence": {
-      "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress.",
+      "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only in a deliberative run whose host has a human ingress: an auto run asks no one after its configuration.",
       "surface": {
         "owner": "human",
         "operation": "confirmation"
@@ -1187,6 +1187,19 @@
           "claim_id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
+          },
+          "support": {
+            "enum": [
+              "unconfirmed"
+            ]
+          },
+          "record_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
           }
         }
       },
@@ -1197,7 +1210,11 @@
         "evidence/research"
       ],
       "message": "Record research for claim {claim_id}.",
-      "ended_message": "No research was recorded for claim {claim_id} before the run stopped."
+      "case_parameter": "support",
+      "case_messages": {
+        "unconfirmed": "Claim {claim_id} rests only on research that a human would have to confirm, and an auto run asks no one, so none of it counts. Cite a file in the workspace, which the service checks, or a local file your auditor can read, or run a spike; or end with report_convergence intent=stop and leave the claim as a residual. For a human to confirm sources, start a deliberative run."
+      },
+      "ended_message": "No research that counts was recorded for claim {claim_id} before the run stopped."
     },
     "claim.research_unbound": {
       "params": {
@@ -2780,9 +2797,9 @@
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
+    "evidence_wait": "Empirica is paused: this deliberative run's research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
     "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
-    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
+    "evidence_report": "This deliberative run's research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
     "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
     "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
