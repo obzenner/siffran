@@ -615,13 +615,16 @@ class AuditLaunchViewTests(unittest.TestCase):
 
     CEILING = SizeBudgetTests.CEILING
     #: What the renderer adds around the author's rationale: the label, a space and the two untrusted-data delimiters.
+    #: The rationale line is bounded by ``rationale_line_bound`` = schema maximum (600) x the worst per-character expansion
+    #: (6: ``safe_text`` writes an invisible character as ``\uNNNN``; a control as ``\xNN`` and ``<`` / ``>`` as ``\x3c`` /
+    #: ``\x3e`` are 4; a backslash is 2) + these markers. The old bound, 600 + markers, held only for text with no escapes.
     RATIONALE_MARKERS = len(_proto.author_view_labels()["proposal_rationale"]) + 1 + len("<<<EMPIRICA_UNTRUSTED_DATA>>>") \
         + len("<<<END_EMPIRICA_UNTRUSTED_DATA>>>")
 
     @staticmethod
     def renderer_text(text):
         """The view without the rationale line: the part the renderer controls (the rationale is the author's, bounded
-        by its schema, see ``test_the_rationale_line_is_bounded_by_the_schema``)."""
+        by its schema, see ``rationale_line_bound``)."""
         return "\n".join(line for line in text.splitlines() if not line.startswith("proposal rationale:"))
 
     def _owed(self, profile, rationale=SIZED_RATIONALE, claims=1):
@@ -770,25 +773,78 @@ class AuditLaunchViewTests(unittest.TestCase):
             for label, text in zip(("GetRun", "report_convergence"), self._owed(host_profile_id(host))):
                 self.assertLess(len(self.renderer_text(text)), self.CEILING, f"{host} audit-owed {label}: {len(text)} characters")
 
-    #: INFORMATIONAL pin, not a limit: the measured characters of the worst realistic audit-owed view (a 600-character
-    #: rationale, 8 claims, the real ~200-character handle), rationale line included: 1,619 / 1,755 on Claude and 1,590 /
-    #: 1,726 on Pi. The limit is the logical bound in the test below (the renderer's own text, rationale line excluded,
-    #: stays within the ceiling; the rationale line is bounded by its schema). The pin fails if the worst case grows or the
-    #: launch is printed twice again.
-    WORST = {"claude-code": (1619, 1755), "pi": (1590, 1726)}
+    @staticmethod
+    def worst_expansion():
+        """The most characters one author character can become in the rationale line: ``safe_text`` escapes backslash as two,
+        a control or C1 character as ``\\xNN`` (four) and an invisible or bidirectional character as ``\\uNNNN`` (six);
+        ``untrusted`` then rewrites ``<`` and ``>`` as ``\\x3c`` / ``\\x3e`` (four). Read from the renderer itself, over the
+        whole Basic Multilingual Plane, so a wider escape class changes the bound instead of passing silently."""
+        from adapters.author_view import TextSafety
+        safety = TextSafety("", "")
+        return max(len(safety.untrusted(chr(code))) for code in range(0x10000))
+
+    @classmethod
+    def rationale_line_bound(cls):
+        """The longest rationale line a schema-valid rationale can render: the schema maximum times the worst per-character
+        expansion, plus the label and the two untrusted-data delimiters."""
+        limit = _proto._REQUEST_SCHEMA["$defs"]["actionConfigureRun"]["properties"]["rationale"]["maxLength"]
+        return limit * cls.worst_expansion() + cls.RATIONALE_MARKERS
+
+    #: Valid 600-character rationales, each stressing a different escape: plain, all `<` (4x), mixed prose with `<` (the
+    #: review's example), a backslash run (2x), controls (4x) and zero-width characters (6x, the worst).
+    RATIONALES = {
+        "plain": ("r" * 599) + ".",
+        "all-lt": "<" * 600,
+        "mixed": ("x < y; " * 85) + "done.",
+        "backslashes": ("\\" * 599) + ".",
+        "controls": ("\x01" * 599) + ".",
+        "zero-width": ("\u200b" * 599) + ".",
+    }
+
+    def test_the_worst_expansion_is_derived_from_the_renderer(self):
+        self.assertEqual(self.worst_expansion(), 6)
+        self.assertEqual(self.rationale_line_bound(), 600 * 6 + self.RATIONALE_MARKERS)
+        for text in self.RATIONALES.values():
+            self.assertEqual(len(text), 600)
+            self.assertTrue(text.strip())
+
+    def test_every_valid_rationale_renders_within_the_derived_bound(self):
+        bound = self.rationale_line_bound()
+        measured = {}
+        for name, rationale in self.RATIONALES.items():
+            for host in ("claude-code", "pi"):
+                read, block = self._owed(host_profile_id(host), rationale=rationale, claims=8)
+                for label, text in (("GetRun", read), ("Block", block)):
+                    line = next(line for line in text.splitlines() if line.startswith("proposal rationale:"))
+                    self.assertLessEqual(len(line), bound, f"{name} {host} {label}")
+                    self.assertLessEqual(len(self.renderer_text(text)), self.CEILING, f"{name} {host} {label}: renderer text")
+                    measured[name, host, label] = len(line)
+        # the schema maximum alone is not a bound: the escapes are longer than the characters they replace
+        self.assertGreater(measured["all-lt", "pi", "GetRun"], 600 + self.RATIONALE_MARKERS)
+        self.assertGreater(measured["mixed", "pi", "GetRun"], 600 + self.RATIONALE_MARKERS)
+        self.assertEqual(measured["zero-width", "pi", "GetRun"], bound - 5, "six per character, one full stop")
+
+    #: INFORMATIONAL pin, not a limit: the measured characters of the full audit-owed view (8 claims, the real ~200-character
+    #: handle), rationale line included, as (GetRun, report_convergence Block) per host. "plain" is the 600-character
+    #: rationale with no escapes (1,619 / 1,755 on Claude, 1,590 / 1,726 on Pi); "zero-width" is the worst case the escapes
+    #: allow, six characters per character (4,614 / 4,750 on Claude, 4,585 / 4,721 on Pi). The limit is the logical bound
+    #: above (the renderer's own text, rationale line excluded, stays within the ceiling; the rationale line within
+    #: ``rationale_line_bound``). The pin fails if the worst case grows or the launch is printed twice again.
+    WORST = {"plain": {"claude-code": (1619, 1755), "pi": (1590, 1726)},
+             "zero-width": {"claude-code": (4614, 4750), "pi": (4585, 4721)}}
 
     def test_the_worst_audit_owed_view_is_bounded_by_what_the_renderer_controls(self):
-        rationale = ("r" * 599) + "."
         limit = _proto._REQUEST_SCHEMA["$defs"]["actionConfigureRun"]["properties"]["rationale"]["maxLength"]
         self.assertEqual(limit, 600)
-        for host, (read_max, block_max) in self.WORST.items():
-            read, block = self._owed(host_profile_id(host), rationale=rationale, claims=8)
-            for label, text, pin in (("GetRun", read, read_max), ("Block", block, block_max)):
-                line = next(line for line in text.splitlines() if line.startswith("proposal rationale:"))
-                self.assertLessEqual(len(self.renderer_text(text)), self.CEILING, f"{host} {label}")
-                self.assertLessEqual(len(line), limit + self.RATIONALE_MARKERS, f"{host} {label}: the rationale line")
-                self.assertLessEqual(len(text), pin, f"{host} {label} measured: {len(text)}")
-            self.assertEqual(block.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1)
+        for case, pins in self.WORST.items():
+            for host, (read_max, block_max) in pins.items():
+                read, block = self._owed(host_profile_id(host), rationale=self.RATIONALES[case], claims=8)
+                for label, text, pin in (("GetRun", read, read_max), ("Block", block, block_max)):
+                    line = next(line for line in text.splitlines() if line.startswith("proposal rationale:"))
+                    self.assertLessEqual(len(self.renderer_text(text)), self.CEILING, f"{case} {host} {label}")
+                    self.assertLessEqual(len(line), self.rationale_line_bound(), f"{case} {host} {label}: the rationale line")
+                    self.assertLessEqual(len(text), pin, f"{case} {host} {label} measured: {len(text)}")
+                self.assertEqual(block.count(_proto.host_profile(host_profile_id(host))["audit_launch"]), 1)
 
 
 #: What a human can be asked: the one batch of evidence and decisions (ADR-0067).
