@@ -373,12 +373,12 @@
     },
     "decided_by_author": {
       "tone": "positive",
-      "icon": "confirmed",
+      "icon": "verified",
       "copy": "decision.decided_by_author"
     },
     "rejected_by_evidence": {
       "tone": "negative",
-      "icon": "rejected",
+      "icon": "failed",
       "copy": "decision.rejected_by_evidence"
     }
   },
