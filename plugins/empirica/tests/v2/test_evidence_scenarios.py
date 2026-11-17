@@ -19,8 +19,8 @@ from adapters.author_view import render_author_view
 from core import confirmation as core_confirmation, evaluation
 from application import protocol
 from assertions import ConformanceCase, action_freeze, action_graph, get_run, observe_action
-from governance_setup import TEST_INVOCATION
-from observer_store import _Builder, _graph
+from governance_setup import TEST_INVOCATION, invocation_for
+from observer_store import PROFILE, _Builder, _graph
 from test_evidence_confirmation import URL, WORKSPACE_REF, confirm, graph_with_decision
 from test_evidence_hosts import Human, MediatorFixture, accept
 from application.protocol import host_profile_id  # noqa: E402
@@ -771,10 +771,14 @@ class TurnEndActorCells(ScenarioFixture):
 
     def actor(self, drv, run_id, ruled_out=False) -> str:
         """The core's value, which the fixtures' own derivation (from a view's reasons, obligations and governance, as the
-        fixture generators set it) must agree with wherever the view states what is owed; a view cannot show a ruled-out root."""
+        fixture generators set it) must agree with wherever the view states what is owed, from the run view and from a real
+        ``Evaluate`` result (its reasons are the derivation's first branch); a view cannot show a ruled-out root."""
         view = self.run_view(drv, run_id)
+        report = self.report(drv, run_id)
         if not ruled_out and any(row["status"] != "satisfied" for row in view["obligations"]["active"]):
             self.assertEqual(regen_contract_fixtures.turn_end_actor_of({"run": view}), view["turn_end_actor"])
+        if not ruled_out:
+            self.assertEqual(regen_contract_fixtures.turn_end_actor_of(report), report["run"]["turn_end_actor"])
         return view["turn_end_actor"]
 
     def test_author_while_the_agent_owes_research(self):
@@ -818,8 +822,59 @@ class TurnEndActorCells(ScenarioFixture):
                 return b.a.dispatch(b.drv, get_run(run_id=run))["result"]["run"]
 
             self.assertEqual((view()["governance"]["human_wait"], view()["turn_end_actor"]), (False, "author"), mode)
+            self.assertEqual(self.actor(b.drv, run), "author", mode)  # the view and an evaluation agree with the core
             b.ask_configuration(run, f"rc-{mode}", outcome="present")
             self.assertEqual((view()["governance"]["human_wait"], view()["turn_end_actor"]), (True, "human"), mode)
+            self.assertEqual(self.actor(b.drv, run), "human", mode)
+
+    def test_a_delegated_auto_run_never_waits_on_a_human(self):
+        """Nobody can be asked in delegated auto, so no state it reaches has ``turn_end_actor`` ``human``: its
+        configuration is approved by the host's policy, a source that needs a human is inert, and a stop needs no consent."""
+        seen = set()
+        delegated = dict(mode="auto", delegation=True, interactive=False)
+        drv, run_id = self.start(**delegated)
+        seen.add(self.actor(drv, run_id))  # researching
+        self.research(drv, run_id, "web", URL)  # a source that would need a human in a deliberative run
+        self.assertNotIn("evidence.confirmation_required", self.codes(self.report(drv, run_id)))
+        seen.add(self.actor(drv, run_id))
+        self.research(drv, run_id, "code", WORKSPACE_REF)
+        seen.add(self.actor(drv, run_id))  # the audit is the author's to launch
+        child = self.require_pending_audit_child(drv, run_id)
+        seen.add(self.actor(drv, run_id))  # a child is running
+        self.require_trusted_audit_attribution(drv, run_id, child, variant="distinct")
+        drv.trusted_audit_verdict(run_id, child, self.build_audit_verdict_payload(drv, run_id, verdict="pass", scope_review="pass"))
+        seen.add(self.actor(drv, run_id))  # nothing is owed
+        drv, run_id = self.start(**delegated)
+        self.research(drv, run_id, "code", WORKSPACE_REF, result="refutes")
+        seen.add(self.actor(drv, run_id, ruled_out=True))  # a refuted root
+        self.assertEqual(self.codes(self.stop(drv, run_id)), [])
+        seen.add(self.actor(drv, run_id))  # ended without a consent to ask
+        pending = _Builder()  # before its configuration is approved: the host's policy does that, no human is asked
+        run = pending.begin("probe", "s-delegated", "Configure first.", _graph("C0", [("C0", "ordinary", "Root")], []),
+                            approve=False, control_mode="auto",
+                            invocation=invocation_for(PROFILE, delegation=True, interactive=False, human_surface="unavailable",
+                                                      signal="v2 harness"))
+        view = pending.a.dispatch(pending.drv, get_run(run_id=run))["result"]["run"]
+        self.assertEqual((view["governance"]["state"], view["governance"]["human_wait"], view["turn_end_actor"]),
+                         ("pending", False, "author"))
+        seen.add(view["turn_end_actor"])
+        self.assertEqual(seen, {"author", "auditor", "none"})  # the states were reached, and none of them is the human's
+
+    def test_an_auto_run_never_reports_the_evidence_confirmation_the_derivation_maps_to_a_human(self):
+        """``turn_end_actor_of`` maps ``evidence.confirmation_required`` and the terminal consent to ``human``, as the core
+        does in deliberative. The core emits neither in auto, so the derivation refuses an auto view that carries one: a
+        fixture that did would be a state no run reaches."""
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        report = self.report(drv, run_id)
+        self.assertEqual((self.codes(report), self.actor(drv, run_id)), (["claim.research_missing"], "author"))
+        self.assertEqual(self.codes(self.stop(drv, run_id)), [])  # the stop asks no consent either
+        for code in ("evidence.confirmation_required", "governance.terminal_stop_pending"):
+            view = {**report, "reasons": [{**report["reasons"][0], "code": code, "parameters": {}}]}
+            with self.assertRaises(ValueError, msg=code):
+                regen_contract_fixtures.turn_end_actor_of(view)
+            deliberative = {**view, "run": {**view["run"], "governance": {**view["run"]["governance"], "control_mode": "deliberative"}}}
+            self.assertEqual(regen_contract_fixtures.turn_end_actor_of(deliberative), "human", code)
 
     def test_none_when_nothing_is_owed(self):
         for mode in self.MODES:

@@ -853,7 +853,8 @@
         "evidence_report",
         "paused_for_human",
         "paused_for_evidence",
-        "unattended_continue"
+        "unattended_continue",
+        "unattended_residual"
       ],
       "properties": {
         "human_wait": {
@@ -883,6 +884,11 @@
           "minLength": 1
         },
         "unattended_continue": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
+        },
+        "unattended_residual": {
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]*\\{reason\\}[^{}]*$"

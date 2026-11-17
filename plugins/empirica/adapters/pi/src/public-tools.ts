@@ -91,7 +91,7 @@ export interface PublicToolsProjection {
     confirmation: { title: string; actions: string[] };
   };
   settlement_notices: { human_wait: string; evidence_wait: string; evidence_report: string; budget_exhausted: string;
-    paused_for_human: string; paused_for_evidence: string; unattended_continue: string };
+    paused_for_human: string; paused_for_evidence: string; unattended_continue: string; unattended_residual: string };
   author_view: { labels: AuthorViewLabels };
 }
 

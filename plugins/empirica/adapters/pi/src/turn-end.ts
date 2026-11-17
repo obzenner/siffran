@@ -46,7 +46,7 @@ function activeBlock(result: Result): result is Extract<Result, { type: "Block" 
 
 /** The turn-end question: may a report still ask a human about the sole evidence blocker? True only when the confirmation is
  * the sole blocker and the batch's `prompt_error` is in the core's `ASKABLE` (`null`: a dialog can be shown; `unobserved`: the
- * report looks for one). It is Claude's `_evidence_report_directive`, case for case (`fixtures/turn-end-predicates.json`).
+ * report looks for one); a deliberative run pauses with `paused_for_evidence` then. An auto run asks no one. It is Claude's `_evidence_report_directive`, case for case (`fixtures/turn-end-predicates.json`).
  * It is not `evidenceConfirmationWait` (evidence-ui), which asks the different question "can the host present the batch now". */
 export function evidenceAskable(result: Result): boolean {
   if (!activeBlock(result) || result.reasons.length !== 1 || result.reasons[0].code !== "evidence.confirmation_required")
@@ -82,14 +82,16 @@ export function turnEnd(result: Result, previous: Basis | null): TurnEnd {
   const mode = controlMode(result);
   if (mode === null) return { kind: "nothing" };  // a view without a mode is not acted on
   const reason = reasonText(result);
-  const askable = evidenceAskable(result);
   if (mode === "deliberative")
-    return { kind: "notice", notice: askable ? NOTICES.paused_for_evidence : fill(NOTICES.paused_for_human, { reason }) };
+    return { kind: "notice", notice: evidenceAskable(result) ? NOTICES.paused_for_evidence : fill(NOTICES.paused_for_human, { reason }) };
+  // The core says nothing the author does moves the run (the root claim is refuted or conflicted): the honest end, at every
+  // chain position. Any other value, or none (a view the schema would refuse), is not read as that or as the author's step.
+  if (result.run.turn_end_actor === "none") return { kind: "notice", notice: fill(NOTICES.unattended_residual, { reason }) };
   const basis: Basis = String((result.run as { basis?: unknown }).basis ?? "");
   const wayOut = fill(NOTICES.unattended_continue, { reason });
-  // The first continuation hands the agent the core's own reason; later ones, the way out (the evidence directive is the
-  // one exception and is kept, ADR-0068).
-  const message = askable ? NOTICES.evidence_report : previous === null ? reason : wayOut;
+  // The first continuation hands the agent the core's own reason; later ones, the way out. An auto run asks no one, so no
+  // directive to report is ever appended.
+  const message = previous === null ? reason : wayOut;
   if (previous !== null && previous === basis)
     return { kind: "no-progress", notice: wayOut };
   return { kind: "continue", message, basis };

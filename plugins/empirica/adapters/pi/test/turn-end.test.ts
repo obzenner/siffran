@@ -37,11 +37,18 @@ function governance(mode: Mode, pending = false) {
     interactions_remaining: { proposal: 3, total: 128 }, proposal: { budgets: {} },
     context: { ingress: "pi_ui", interactive: mode !== "auto-delegated", delegation: mode === "auto-delegated", author: null },
     // the core's answer (core.governance.human_wait): a pending configuration this phase's human approves
-    human_wait: pending && (mode === "deliberative" || mode === "auto-interactive-pre") };
+    // (after its first approval, interactive auto asks a human only about a budget raise, so a pending view there is that dialog)
+    human_wait: pending && mode !== "auto-delegated" };
 }
 
-function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "human_wait" = "real"): Result {
+/** Who the turn end waits on, as the core projects it for each kind of view (`core.evaluation.turn_end_actor`). */
+const ACTORS: Record<string, "author" | "auditor" | "human" | "none"> = { human_wait: "human", audit: "auditor", no_author_step: "none" };
+/** What the core says in every mode when the root claim is refuted: no step of the author's approves it. */
+const REFUTED = "Claim C0 is refuted by the research recorded for it.";
+
+function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "human_wait" | "no_author_step" = "real"): Result {
   const run: Record<string, unknown> = { id: HANDLE, status: "active", basis: "sha256:0",
+    turn_end_actor: ACTORS[kind] ?? (kind === "evidence" && mode === "deliberative" ? "human" : "author"),
     spike_backend: { kind: "spikes_unavailable" }, governance: governance(mode, kind === "human_wait"),
     confirmation_batch: null, children: [] };
   let reason: Record<string, unknown> = { code: "claim.research_missing", message: REASON };
@@ -58,6 +65,7 @@ function block(mode: Mode, kind: "real" | "budget" | "evidence" | "audit" | "hum
     reason = { code: "audit.pending", message: "An audit is pending." };
   }
   if (kind === "human_wait") reason = { code: "governance.approval_required", message: "approval required" };
+  if (kind === "no_author_step") reason = { code: "claim.refuted", parameters: { claim_id: "C0" }, message: REFUTED };
   return { type: "Block", run, reasons: [reason] } as never;
 }
 
@@ -66,14 +74,19 @@ const CONVERGED = { type: "Allow", converged: true,
 const basis = (n: number): Basis => `sha256:${n}`;
 
 /** The Result for one state of the registry table in one mode, or null where the state cannot arise there. */
-function cell(state: string, mode: Mode, notice?: string): Result | null {
+function cell(state: string, mode: Mode, outcome: string): Result | null {
+  if (outcome === "unreachable") return null;
   if (state === "converged") return CONVERGED;
   if (state === "async-audit-pending") return block(mode, "audit");
-  if (state === "settlement") {
-    if (notice === "human_wait") return mode === "deliberative" || mode === "auto-interactive-pre" ? block(mode, "human_wait") : null;
-    return block(mode, "budget");
+  if (state === "human-wait") return block(mode, "human_wait");
+  if (state === "budget-exhausted") return block(mode, "budget");
+  if (state === "budget-raise-offered") {
+    const view = block(mode, "budget") as unknown as { reasons: Array<Record<string, unknown>> };
+    view.reasons[0].next_actions = ["budget.raise", "residual.accept"];
+    return view as never;
   }
   if (state === "evidence-wait") return block(mode, "evidence");
+  if (state === "no-author-step") return block(mode, "no_author_step");
   return block(mode);
 }
 
@@ -82,35 +95,88 @@ test("EHB-STOP-34: every state x control mode x chain position of the registry t
   for (const state of TABLE.states) {
     for (const mode of MODES) {
       const expected = state.outcomes[mode];
-      for (const name of state.id === "settlement" ? expected.notices! : [expected.notices?.[0]]) {
-        const result = cell(state.id, mode, name);
-        if (result === null) continue;
-        // chain position: no previous continuation, a previous one on an older basis, and one on the same basis
-        for (const [label, previous] of [["first", null], ["later", basis(99)], ["stalled", (result as { run: { basis: string } }).run.basis]] as const) {
-          const full = turnEnd(result, previous);
-          const got = full.kind === "continue" ? { kind: full.kind, message: full.message } : full;  // the basis is the adapter's own
-          const reason = ((result as { reasons?: Array<{ message?: string }> }).reasons ?? []).map((r) => r.message).join(" ");
-          const where = `${state.id} / ${mode} / ${name} / ${label}`;
-          checked += 1;
-          if (expected.outcome === "allow" || expected.outcome === "settle") {
-            assert.deepEqual(got, { kind: "nothing" }, where);
-          } else if (expected.outcome === "settle-notice" || expected.outcome === "pause") {
-            const template = NOTICES[name!];
-            assert.deepEqual(got, { kind: "notice", notice: fill(template, template.includes("{resource}")
-              ? { resource: "pass" } : template.includes("{reason}") ? { reason } : {}) }, where);
-          } else {
-            assert.equal(expected.outcome, "continue", where);
-            const directive = name === "evidence_report";
-            const later = fill(NOTICES.unattended_continue, { reason });
-            if (label === "first") assert.deepEqual(got, { kind: "continue", message: directive ? NOTICES[name!] : reason }, where);
-            else if (label === "later") assert.deepEqual(got, { kind: "continue", message: directive ? NOTICES[name!] : later }, where);
-            else assert.deepEqual(got, { kind: "no-progress", notice: later }, where);  // the adapter's own loop bound
-          }
+      const name = expected.notices?.[0];
+      const result = cell(state.id, mode, expected.outcome);
+      if (result === null) continue;
+      // chain position: no previous continuation, a previous one on an older basis, and one on the same basis
+      for (const [label, previous] of [["first", null], ["later", basis(99)], ["stalled", (result as { run: { basis: string } }).run.basis]] as const) {
+        const full = turnEnd(result, previous);
+        const got = full.kind === "continue" ? { kind: full.kind, message: full.message } : full;  // the basis is the adapter's own
+        const reason = ((result as { reasons?: Array<{ message?: string }> }).reasons ?? []).map((r) => r.message).join(" ");
+        const where = `${state.id} / ${mode} / ${name} / ${label}`;
+        checked += 1;
+        if (expected.outcome === "allow" || expected.outcome === "settle") {
+          assert.deepEqual(got, { kind: "nothing" }, where);
+        } else if (expected.outcome === "settle-notice" || expected.outcome === "pause") {
+          const template = NOTICES[name!];
+          assert.deepEqual(got, { kind: "notice", notice: fill(template, template.includes("{resource}")
+            ? { resource: "pass" } : template.includes("{reason}") ? { reason } : {}) }, where);
+        } else {
+          assert.equal(expected.outcome, "continue", where);
+          const later = fill(NOTICES.unattended_continue, { reason });
+          if (label === "first") assert.deepEqual(got, { kind: "continue", message: reason }, where);
+          else if (label === "later") assert.deepEqual(got, { kind: "continue", message: later }, where);
+          else assert.deepEqual(got, { kind: "no-progress", notice: later }, where);  // the adapter's own loop bound
         }
       }
     }
   }
   assert.ok(checked > 60, `a table that read as empty would pass vacuously (${checked})`);
+});
+
+test("A7: an auto run whose author has no step left ends with the residual at every chain position; deliberative still pauses", () => {
+  const residual = (mode: Mode) => ({ kind: "notice", notice: fill(NOTICES.unattended_residual, { reason: REFUTED }) });
+  for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const)
+    for (const previous of [null, basis(99), "sha256:0"])
+      assert.deepEqual(turnEnd(block(mode, "no_author_step"), previous), residual(mode), `${mode} / ${previous}`);
+  assert.match(NOTICES.unattended_residual, /report_convergence intent=stop/);
+  assert.deepEqual(turnEnd(block("deliberative", "no_author_step"), null),
+    { kind: "notice", notice: fill(NOTICES.paused_for_human, { reason: REFUTED }) });
+});
+
+test("A7: the four actors in auto: the author continues, the auditor and a human settle, none ends with the residual", () => {
+  for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const) {
+    assert.equal(turnEnd(block(mode), null).kind, "continue", `${mode}: author`);
+    assert.deepEqual(turnEnd(block(mode, "audit"), null), { kind: "nothing" }, `${mode}: auditor`);
+    assert.equal(turnEnd(block(mode, "no_author_step"), null).kind, "notice", `${mode}: none`);
+  }
+  for (const mode of ["auto-interactive-pre", "auto-interactive-post"] as const)
+    assert.deepEqual(turnEnd(block(mode, "human_wait"), null), { kind: "notice", notice: NOTICES.human_wait }, `${mode}: human`);
+});
+
+test("F4: a view without a turn_end_actor takes the path it took before the field and is never the residual or the author's step", () => {
+  // The schema requires the field; a host that meets a view without it (or with a value outside the enum) does not repair it:
+  // it behaves as it did before the field existed. Only the literal `none` ends an auto turn with the residual.
+  for (const absent of [undefined, "someone", 7, null])
+    for (const mode of MODES) for (const kind of ["real", "no_author_step"] as const) for (const previous of [null, basis(99), "sha256:0"]) {
+      const view = block(mode, kind) as unknown as { run: Record<string, unknown> };
+      if (absent === undefined) delete view.run.turn_end_actor; else view.run.turn_end_actor = absent;
+      const reason = kind === "real" ? REASON : REFUTED;
+      const got = turnEnd(view as never, previous);
+      const where = `${String(absent)} / ${mode} / ${kind} / ${previous}`;
+      if (mode === "deliberative") assert.deepEqual(got, { kind: "notice", notice: fill(NOTICES.paused_for_human, { reason }) }, where);
+      else if (previous === null) assert.deepEqual(got, { kind: "continue", message: reason, basis: "sha256:0" }, where);
+      else if (previous === "sha256:0") assert.deepEqual(got, { kind: "no-progress", notice: fill(NOTICES.unattended_continue, { reason }) }, where);
+      else assert.deepEqual(got, { kind: "continue", message: fill(NOTICES.unattended_continue, { reason }), basis: "sha256:0" }, where);
+    }
+});
+
+test("A7: an auto run with a stale evidence batch is handed the core's reason and never a directive to report", () => {
+  // The core gives an auto run no batch and no human reason; a view that says otherwise (built by hand) still gets the reason.
+  for (const mode of ["auto-interactive-pre", "auto-interactive-post", "auto-delegated"] as const) {
+    const view = block("deliberative", "evidence") as unknown as { run: Record<string, unknown> };
+    view.run.governance = governance(mode);
+    view.run.turn_end_actor = "author";
+    assert.equal(evidenceAskable(view as never), true, "the predicate still reads the batch (deliberative uses it)");
+    assert.deepEqual(turnEnd(view as never, null), { kind: "continue", message: "Research waits on a human.", basis: "sha256:0" }, mode);
+  }
+});
+
+test("A7: the notices the host reads are the contract's: the tools file lists exactly the contract's settlement notices", () => {
+  const contract = JSON.parse(readFileSync(path.resolve(HERE, "..", "..", "..", "..", "..", "contracts", "empirica", "v2",
+    "public-contract.json"), "utf8")).settlement_notices as Record<string, string>;
+  assert.deepEqual(Object.keys(PUBLIC_TOOLS.settlement_notices).sort(), Object.keys(contract).sort());
+  assert.equal(PUBLIC_TOOLS.settlement_notices.unattended_residual, contract.unattended_residual);
 });
 
 test("a run that is not active, a fault and an inert answer end the turn with nothing appended", () => {

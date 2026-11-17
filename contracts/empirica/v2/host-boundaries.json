@@ -16,8 +16,9 @@
       "settle": "End the turn with the run view and no notice: exactly one audit is pending and its result continues the run.",
       "settle-notice": "End the turn with the contract notice of the settlement; the run stays active and not converged, and nothing was approved or confirmed by the settlement.",
       "pause": "End the turn with a contract notice that is not a convergence claim and names the real next step the human can relay to the agent; the run stays active, nobody was asked, nothing was granted. The same on a first and a later turn end.",
-      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; `unattended_continue` on a later turn end of the same chain). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else; on an unchanged basis the turn ends instead (`end-no-progress`). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason.",
-      "end-no-progress": "End the turn with the `unattended_continue` notice because the host has already continued once on this observation basis (the core's `run.basis`); Pi records `no-progress`."
+      "continue": "Keep the turn going: the agent is handed the next obligation (the core's real reason; `unattended_continue` on a later turn end of the same chain). Progress is one fact with one owner: the core's `run.basis` (`core.evaluation.progress_basis`), which both hosts remember at their last continuation and compare, and nothing else. A chain continues at most K = 3 times on an unchanged basis; a changed basis resets the count and so does the end of a chain, and on Pi a total of T continuations (16) bounds one chain whatever the basis does; when the bound is reached the turn ends instead (`end-no-progress`). A `continue` cell names the notice of a later turn end; the first turn end of the chain gives the core's reason.",
+      "end-no-progress": "End the turn with the `unattended_residual` notice, which offers `report_convergence intent=stop` as the honest end, because the K-th continuation (K = 3) on one observation basis (the core's `run.basis`) would be reached, or on Pi because T continuations (16) were issued in one chain; Pi records `no-progress`. The same notice ends a turn whose `turn_end_actor` is `none` (the `settle-notice` of the `no-author-step` state).",
+      "unreachable": "The state cannot arise in this control mode (the core never produces it there); no host outcome is defined, and a scenario names the test that proves it."
     },
     "states": [
       {
@@ -73,46 +74,116 @@
         }
       },
       {
-        "id": "settlement",
-        "title": "the sole blocker is a human governance wait or an exhausted budget the core offers no raise for",
+        "id": "human-wait",
+        "title": "the sole blocker is a configuration a human is asked to approve (`turn_end_actor` `human`): the first approval, or in interactive auto after its first approval a budget raise; a delegated auto run has no human to ask",
         "outcomes": {
           "deliberative": {
             "outcome": "settle-notice",
             "notices": [
-              "human_wait",
+              "human_wait"
+            ]
+          },
+          "auto-interactive-pre": {
+            "outcome": "settle-notice",
+            "notices": [
+              "human_wait"
+            ]
+          },
+          "auto-interactive-post": {
+            "outcome": "settle-notice",
+            "notices": [
+              "human_wait"
+            ]
+          },
+          "auto-delegated": {
+            "outcome": "unreachable"
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-03",
+            "EHB-STOP-38",
+            "EHB-STOP-39"
+          ],
+          "pi": [
+            "EHB-STOP-36",
+            "EHB-STOP-38",
+            "EHB-STOP-39"
+          ]
+        }
+      },
+      {
+        "id": "budget-exhausted",
+        "title": "the sole blocker is an exhausted budget and the core offers no `budget.raise`",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "settle-notice",
+            "notices": [
               "budget_exhausted"
             ]
           },
           "auto-interactive-pre": {
             "outcome": "settle-notice",
             "notices": [
-              "human_wait",
               "budget_exhausted"
             ]
           },
           "auto-interactive-post": {
             "outcome": "settle-notice",
             "notices": [
-              "human_wait",
               "budget_exhausted"
             ]
           },
           "auto-delegated": {
             "outcome": "settle-notice",
             "notices": [
-              "human_wait",
               "budget_exhausted"
             ]
           }
         },
         "scenarios": {
           "claude": [
-            "EHB-STOP-03",
-            "EHB-STOP-04",
+            "EHB-STOP-04"
+          ],
+          "pi": [
+            "EHB-STOP-36"
+          ]
+        }
+      },
+      {
+        "id": "budget-raise-offered",
+        "title": "the sole blocker is an exhausted budget and the core offers `budget.raise`: a deliberative human decides it, and in interactive auto the agent proposes it for its human to approve, so the turn goes on",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "settle-notice",
+            "notices": [
+              "budget_exhausted"
+            ]
+          },
+          "auto-interactive-pre": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          },
+          "auto-interactive-post": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          },
+          "auto-delegated": {
+            "outcome": "continue",
+            "notices": [
+              "unattended_continue"
+            ]
+          }
+        },
+        "scenarios": {
+          "claude": [
             "EHB-STOP-37"
           ],
           "pi": [
-            "EHB-STOP-36",
             "EHB-STOP-37"
           ]
         }
@@ -159,8 +230,48 @@
         }
       },
       {
+        "id": "no-author-step",
+        "title": "the run's `turn_end_actor` is `none`: the root claim is refuted or conflicted, so no step of the author's approves it; a deliberative human decides, and an auto run is offered the honest end",
+        "outcomes": {
+          "deliberative": {
+            "outcome": "pause",
+            "notices": [
+              "paused_for_human"
+            ]
+          },
+          "auto-interactive-pre": {
+            "outcome": "settle-notice",
+            "notices": [
+              "unattended_residual"
+            ]
+          },
+          "auto-interactive-post": {
+            "outcome": "settle-notice",
+            "notices": [
+              "unattended_residual"
+            ]
+          },
+          "auto-delegated": {
+            "outcome": "settle-notice",
+            "notices": [
+              "unattended_residual"
+            ]
+          }
+        },
+        "scenarios": {
+          "claude": [
+            "EHB-STOP-40",
+            "EHB-STOP-21"
+          ],
+          "pi": [
+            "EHB-STOP-40",
+            "EHB-STOP-31"
+          ]
+        }
+      },
+      {
         "id": "active-other",
-        "title": "any other active, non-converged state",
+        "title": "any other active, non-converged state: the author has a step to take (`turn_end_actor` `author`), or the view does not say",
         "outcomes": {
           "deliberative": {
             "outcome": "pause",
@@ -447,7 +558,7 @@
         "EHB-STOP-05",
         "EHB-STOP-22"
       ],
-      "sources": "F5 (rulings A2-1/A2-2), F7, ADR-67 (\"Asking at the end of the pass\"), `public-contract.json settlement_notices.evidence_report`; tests `V2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_L4_the_stop_blocks_with_the_real_reason_in_every_cell_and_nobody_is_shown_a_dialog`, `::test_the_directive_names_the_call_that_asks_the_human`, `CT/test_claude_adapter.py::test_the_stop_directs_the_author_to_report_only_where_the_core_says_a_human_can_be_asked`, `V2/test_host_faithful.py::HostFailure::test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop`."
+      "sources": "F5 (rulings A2-1/A2-2), F7, ADR-67 (\"Asking at the end of the pass\"), `public-contract.json settlement_notices.evidence_report`; tests `V2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_L4_the_stop_blocks_with_the_real_reason_in_every_cell_and_nobody_is_shown_a_dialog`, `::test_the_directive_names_the_call_that_asks_the_human`, `CT/test_claude_adapter.py::test_the_stop_asks_a_report_of_no_auto_run_and_a_deliberative_run_pauses_where_a_human_can_be_asked`, `V2/test_host_faithful.py::HostFailure::test_the_stop_directive_may_send_one_report_and_that_report_leads_to_stop`."
     },
     {
       "id": "HX-STOP-03",
@@ -455,7 +566,7 @@
       "title": "a turn end is decided by the control mode and the run state, the same on every host (the turn-end table)",
       "control_mode_dependent": true,
       "outcomes": "Claude: `pause` (exit 0, `systemMessage`, `paused_for_human`/`paused_for_evidence`; the same on the first and on a later Stop; ADR-0068 owns the `stop_hook_active` rule) | `continue` (exit 2; `unattended_continue` when `stop_hook_active` is true) | unchanged settlements (see `HX-STOP-01`). If the host resets `stop_hook_active` between continuations, an auto run's post-tool Stop blocks again and the outcome is `host-capped` (`report-limitation`). Pi: `HX-STOP-04`.",
-      "outcomes_by_mode": "See the turn-end table (`turn_end`): deliberative pauses on any other active state; every auto mode continues; the settlements apply in every mode.",
+      "outcomes_by_mode": "See the turn-end table (`turn_end`): deliberative pauses on any other active state; an auto run continues while the author has a step (`turn_end_actor` `author`), settles while a human is asked about its configuration or a budget raise or an audit runs, and ends with `unattended_residual` when `turn_end_actor` is `none`; the settlements apply in every mode.",
       "scenarios": [
         "EHB-STOP-05",
         "EHB-STOP-06",
@@ -474,7 +585,11 @@
         "EHB-STOP-21",
         "EHB-STOP-22",
         "EHB-STOP-23",
-        "EHB-STOP-37"
+        "EHB-STOP-37",
+        "EHB-STOP-38",
+        "EHB-STOP-39",
+        "EHB-STOP-40",
+        "EHB-STOP-41"
       ],
       "sources": "CC \"Stop input\" and \"Stop decision control\"; Q2; ADR-0019 (G2), ADR-0051, ADR-0063, ADR-0064 interim (`fb1106b`), ADR-0067 A2-1/A2-2, ADR-0068; HEATH AS3 (`pause`); CODE `P/adapters/claude/completion.py:_turn_end_mode`."
     },
@@ -483,7 +598,7 @@
       "boundary": "HB-STOP",
       "title": "Pi ends a turn at `agent_before_settle` by the turn-end table, and bounds its own continuations",
       "control_mode_dependent": true,
-      "outcomes": "Pi (1.0.0 and later): `allow` and `settle` append nothing (a settlement appends its notice) | `pause` (a `custom_message` with `display: true`, no `continue`) | `continue` (`continue: true`, the next obligation appended) | `end-no-progress` (the `unattended_continue` notice, `no-progress` recorded). Only `agent_before_settle` acts; `agent_settled` is a notification and `turn_end` is not used, so a settle carries one notice.",
+      "outcomes": "Pi (1.0.0 and later): `allow` and `settle` append nothing (a settlement appends its notice) | `pause` (a `custom_message` with `display: true`, no `continue`) | `continue` (`continue: true`, the next obligation appended) | `end-no-progress` (the `unattended_residual` notice, `no-progress` recorded); an auto run whose `turn_end_actor` is `none` settles with `unattended_residual`. Only `agent_before_settle` acts; `agent_settled` is a notification and `turn_end` is not used, so a settle carries one notice.",
       "scenarios": [
         "EHB-STOP-29",
         "EHB-STOP-35",
@@ -491,10 +606,11 @@
         "EHB-STOP-31",
         "EHB-STOP-32",
         "EHB-STOP-33",
-        "EHB-STOP-34"
+        "EHB-STOP-34",
+        "EHB-STOP-37"
       ],
       "sources": "ADR-32, ADR-68, `dist/core/extensions/types.d.ts:729-779,805` and `docs/extensions.md:66,117` of Pi 1.1.0 (Q3 surface §1), PI-T (`agent_before_settle`).",
-      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; every auto mode continues while the core's `run.basis` changes between continuations and ends with `no-progress` otherwise."
+      "outcomes_by_mode": "See the turn-end table (`turn_end`). Deliberative pauses; an auto run continues while the core's `run.basis` changes between continuations, at most K = 3 times on one basis and T = 16 in a chain, and ends with `no-progress` otherwise."
     },
     {
       "id": "HX-STOP-05",
@@ -1099,7 +1215,7 @@
       "expected": "C: exit 2 with the core's real reason on the first Stop and `unattended_continue` on a later one; never the `evidence_report` directive, never `evidence_wait`; the mediator shows no dialog",
       "covered_by": [
         "plugins/empirica/tests/v2/test_a1_boundaries.py::ClaudeStopEvidenceByControlMode::test_L4_the_stop_blocks_with_the_real_reason_in_every_cell_and_nobody_is_shown_a_dialog",
-        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_the_stop_directs_the_author_to_report_only_where_the_core_says_a_human_can_be_asked"
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::test_the_stop_asks_a_report_of_no_auto_run_and_a_deliberative_run_pauses_where_a_human_can_be_asked"
       ],
       "ledger_rows": [
         "ev_url_confirm"
@@ -2574,14 +2690,79 @@
       "boundary": "HB-STOP",
       "control_modes": [
         "deliberative",
-        "auto-interactive-post"
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
       ],
       "setup": "the sole blocker is an exhausted budget, and the core offers `budget.raise` (deliberative, and interactive auto after its first approval, whose human approves a raise)",
       "action": "Stop (Claude) / `agent_before_settle` (Pi)",
-      "expected": "C/P: deliberative settles with `budget_exhausted`, as before; interactive auto continues with the core's reason (Claude exit 2; Pi `continue: true`), because the agent is the one to propose the raise; a delegated auto run's view never offers `budget.raise`, so it settles",
+      "expected": "C/P: deliberative settles with `budget_exhausted`, as before; an auto run continues with the core's reason (Claude exit 2; Pi `continue: true`) wherever the view offers `budget.raise`, because the agent is the one to propose the raise; the core offers it only to interactive auto after its first approval, so a delegated auto run's view never does and it settles (`budget-exhausted`)",
       "covered_by": [
         "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::ResponseMappingTests::test_A11d_an_exhausted_budget_the_core_offers_to_raise_continues_interactive_auto_only",
-        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A11d: an exhausted budget the core offers to raise continues interactive auto and settles deliberative"
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A11d: an exhausted budget the core offers to raise continues interactive auto and settles deliberative",
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_EHB_STOP_23_every_cell_of_the_registry_turn_end_table",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::EHB-STOP-34: every state x control mode x chain position of the registry turn-end table"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-38",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "auto-interactive-post"
+      ],
+      "setup": "interactive auto after its first approval, the sole blocker is a budget raise its human is asked to approve (`governance.human_wait` true, `turn_end_actor` `human`)",
+      "action": "Stop (Claude) / `agent_before_settle` (Pi)",
+      "expected": "C/P: the turn settles with `human_wait` on the first turn end and on a later one; nothing continues over the dialog, and no stop is offered over it",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_only_the_author_and_a_pending_audit_keep_an_auto_turn_going_and_a_human_settles_it",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A7: the four actors in auto: the author continues, the auditor and a human settle, none ends with the residual"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-39",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "auto-delegated"
+      ],
+      "setup": "delegated auto, in every state its run reaches (configuration, research, a source that needs a human, a pending audit, a refuted root, a stop)",
+      "action": "Stop (Claude) / `agent_before_settle` (Pi)",
+      "expected": "core: `turn_end_actor` is never `human`, so no turn end waits on a person: the `human-wait` cells are `unreachable` and the author, the auditor or `none` acts",
+      "covered_by": [
+        "plugins/empirica/tests/v2/test_evidence_scenarios.py::TurnEndActorCells::test_a_delegated_auto_run_never_waits_on_a_human"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-40",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "auto-interactive-pre",
+        "auto-interactive-post",
+        "auto-delegated"
+      ],
+      "setup": "an auto run whose `turn_end_actor` is `none` (the root claim is refuted or conflicted)",
+      "action": "Stop (Claude) / `agent_before_settle` (Pi)",
+      "expected": "C/P: the turn ends and the `unattended_residual` notice names the core's reason and offers `report_convergence intent=stop`; the first turn end and a later one are the same, and nothing continues; deliberative pauses with `paused_for_human`",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_A7_an_auto_run_whose_author_has_no_step_left_ends_with_the_residual_on_either_stop",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::A7: an auto run whose author has no step left ends with the residual at every chain position; deliberative still pauses"
+      ],
+      "ledger_rows": []
+    },
+    {
+      "id": "EHB-STOP-41",
+      "boundary": "HB-STOP",
+      "control_modes": [
+        "any"
+      ],
+      "setup": "a run view without `turn_end_actor`, or with a value outside its enum (the response schema requires it)",
+      "action": "Stop (Claude) / `agent_before_settle` (Pi)",
+      "expected": "C: the transport refuses the view and the Stop fails closed (exit 2, \"completion gate unavailable\"); P: the turn end behaves as it did before the field existed, never as the residual and never as the author's step; neither host treats a missing actor as a reason to continue on its own",
+      "covered_by": [
+        "plugins/empirica/adapters/claude/tests/test_claude_adapter.py::StopModeTests::test_F4_a_view_without_a_turn_end_actor_is_refused_at_the_transport_and_the_stop_fails_closed",
+        "plugins/empirica/adapters/pi/test/turn-end.test.ts::F4: a view without a turn_end_actor takes the path it took before the field and is never the residual or the author's step"
       ],
       "ledger_rows": []
     },

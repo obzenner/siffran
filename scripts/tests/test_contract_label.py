@@ -42,5 +42,50 @@ class ContractLabelTests(unittest.TestCase):
         self.assertEqual(wrong, [])
 
 
+class TurnEndNoticeTests(unittest.TestCase):
+    """The ``unattended_residual`` settlement notice (the honest end of an auto turn) is one name in the contract, its
+    schema, the vendored copy, the tools file Pi reads, and the turn-end table's validator."""
+
+    NOTICE = "unattended_residual"
+
+    def registry_with_a_cell_naming_it(self) -> dict:
+        doc = json.loads(text(CONTRACTS / "host-boundaries.json"))
+        doc["turn_end"]["states"][0]["outcomes"]["auto-delegated"]["notices"] = [self.NOTICE]
+        return doc
+
+    def test_the_validator_accepts_the_notice_only_when_the_contract_defines_it(self):
+        accepted: list[str] = []
+        v.check_turn_end(self.registry_with_a_cell_naming_it(), accepted, "doc")
+        self.assertEqual(accepted, [])
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            contract = json.loads(text(CONTRACTS / "public-contract.json"))
+            del contract["settlement_notices"][self.NOTICE]
+            target = Path(tmp) / "contracts" / "empirica" / "v2"
+            target.mkdir(parents=True)
+            (target / "public-contract.json").write_text(json.dumps(contract), encoding="utf-8")
+            refused: list[str] = []
+            v.check_turn_end(self.registry_with_a_cell_naming_it(), refused, "doc", Path(tmp))
+        self.assertTrue(refused)  # every cell of the registry that names it, and the one added above
+        for message in refused:
+            self.assertIn(f"notice '{self.NOTICE}' is not a settlement notice", message)
+
+    def test_the_schema_the_vendored_copy_and_the_tools_file_name_it(self):
+        schema = json.loads(text(CONTRACTS / "public-contract.schema.json"))["properties"]["settlement_notices"]
+        self.assertIn(self.NOTICE, schema["required"])
+        self.assertEqual(schema["properties"][self.NOTICE], schema["properties"]["unattended_continue"])  # one {reason}
+        contract = json.loads(text(CONTRACTS / "public-contract.json"))["settlement_notices"]
+        self.assertEqual(contract[self.NOTICE].count("{reason}"), 1)
+        for name in ("public-tools.json",):
+            tools = json.loads(text(CONTRACTS / name))["settlement_notices"]
+            self.assertEqual(tools, contract, name)
+            self.assertEqual(text(CONTRACTS / name), text(PLUGIN / "vendor" / "contracts" / "empirica" / "v2" / name), name)
+
+    def test_the_notice_names_the_reason_and_offers_the_honest_end(self):
+        notice = json.loads(text(CONTRACTS / "public-contract.json"))["settlement_notices"][self.NOTICE]
+        self.assertIn("{reason}", notice)
+        self.assertIn("report_convergence intent=stop", notice)
+
+
 if __name__ == "__main__":
     unittest.main()

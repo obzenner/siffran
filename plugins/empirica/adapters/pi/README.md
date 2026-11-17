@@ -145,9 +145,11 @@ deny.
 Pi has no native completion veto; the model must call `report_convergence` before making a
 convergence claim. The turn end follows the turn-end table of ADR-0068, acted on at
 `agent_before_settle` only (Pi 1.0.0 and later): a deliberative run pauses with one visible notice,
-an auto run is asked to continue with the next obligation, and the adapter ends an auto chain with
-the `unattended_continue` notice when the core's `run.basis` has not changed since its
-previous continuation (`no-progress`).
+an auto run is asked to continue with the next obligation while the core's `turn_end_actor` is
+`author`, and the adapter ends an auto chain with the `unattended_continue` notice when the core's
+`run.basis` has not changed since its previous continuation (`no-progress`). An auto run whose
+`turn_end_actor` is `none` ends with the `unattended_residual` notice, which offers
+`report_convergence intent=stop`.
 
 ## Validation
 

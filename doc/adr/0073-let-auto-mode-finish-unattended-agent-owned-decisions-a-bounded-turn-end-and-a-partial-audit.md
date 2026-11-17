@@ -66,7 +66,24 @@ Field runs or the native qualification show agent-decided claims passing the aud
 
 ### D2 Auto turn end
 
-To come: continue while author work remains, and a bound on unchanged continuations.
+An auto run keeps going while the author has a step, and ends honestly when it has none. The core says which (D2.3); a host reads that and nothing else.
+
+#### D2.4 The notices and the cells of the turn-end table
+
+The settlement notice `unattended_residual` is new. It names the core's reason, says that auto mode does not hand the turn back, and offers `report_convergence intent=stop` as the honest end. The registry's turn-end table (`turn_end` in `host-boundaries.json`) reads the run view's `turn_end_actor` in each auto cell:
+
+| `turn_end_actor` | Auto turn end |
+|---|---|
+| `author` | continue with the core's reason, then `unattended_continue` on a later turn end of the chain |
+| `auditor` | the pending-audit path settles the turn; the child's result continues the run |
+| `human` | settle with `human_wait`: the configuration dialog, or in interactive auto the budget-raise dialog of D3.1. Nothing continues over a dialog |
+| `none` | settle with `unattended_residual` at the first turn end and at every later one |
+
+A delegated auto run never has the actor `human`: nobody can be asked, its configuration is approved by the host's policy, and a source that needs a human is inert, so the `human-wait` cells of that mode are `unreachable`. A cell in the core test suite proves it across the states a delegated run reaches, and the observer's state machine asserts it in every state it generates. A deliberative run is unchanged: it pauses.
+
+The auto cells hold no evidence row. `evidence_wait` and `evidence_report` are deliberative notices, and an auto run is handed the claim's own `claim.research_missing`, so both hosts lost the branch that directed an auto run to report. The contract still lists the `evidence_report` notice and no host sends it. A host that reads a run view without `turn_end_actor` (the response schema requires it) does not read it as `none` or as `author`: Claude's transport refuses the view and the Stop fails closed; Pi takes the turn-end path it took before the field.
+
+**The bound on unchanged continuations is stated here and enforced later.** The contract says a chain continues at most K = 3 times on one observation basis, that a changed basis or the end of a chain resets the count, that Pi also bounds a chain with a total of T = 16 continuations, and that reaching either bound ends the turn with `unattended_residual`. The adapters do not count yet: they still end an unchanged basis at the first repeat with `unattended_continue`. The Claude and Pi adapter changes that count K and T are separate slices, and until they land the table's `end-no-progress` text describes the contract and not the shipped behaviour.
 
 #### D2.3 A core-owned signal for the turn end
 

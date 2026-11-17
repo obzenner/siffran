@@ -8,8 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from application.protocol import (
-    BUDGET_EXHAUSTED_NOTICE, EVIDENCE_REPORT_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_EVIDENCE_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
-    UNATTENDED_CONTINUE_NOTICE, render_notice)
+    BUDGET_EXHAUSTED_NOTICE, HUMAN_WAIT_NOTICE, PAUSED_FOR_EVIDENCE_NOTICE, PAUSED_FOR_HUMAN_NOTICE,
+    UNATTENDED_CONTINUE_NOTICE, UNATTENDED_RESIDUAL_NOTICE, render_notice)
 from core.projection import ASKABLE
 from .correlation import PROTOCOL, request_id as new_request_id
 from .fail_direction import FailureDirection, blocks_on_failure
@@ -103,8 +103,9 @@ def _human_approval_wait(result: Result) -> bool:
 def _evidence_report_directive(result: Result) -> bool:
     """True only when the human confirmation is the sole blocker, a human can be asked, and the batch has not been shown.
 
-    What a turn end does with it is the turn-end table (``_turn_end_mode``). The core returns
-    ``evidence.confirmation_required`` only when nothing else blocks the run. Only a ``prompt_error`` in
+    What a turn end does with it is the turn-end table (``_turn_end_mode``): a deliberative run pauses with
+    ``paused_for_evidence``. An auto run asks no one, so the core returns it no such reason and the table has no cell for
+    it. The core returns ``evidence.confirmation_required`` only when nothing else blocks the run. Only a ``prompt_error`` in
     ``projection.ASKABLE`` is directed (a human may be asked: no dialog is ruled out yet; the core gives such a batch a
     human route, so no route check is needed); any other value means no dialog will come, so the Stop blocks with the
     real reason."""
@@ -209,10 +210,10 @@ def stop_result(response: object, *, stop_hook_active: bool, no_progress: bool =
             if _evidence_report_directive(result):
                 return _settlement(PAUSED_FOR_EVIDENCE_NOTICE)
             return _settlement(render_notice(PAUSED_FOR_HUMAN_NOTICE, reason=_reason_text(result)))
+        if mode == "auto" and result.run.get("turn_end_actor") == "none":  # nothing the author does moves the run: the honest end
+            return _settlement(render_notice(UNATTENDED_RESIDUAL_NOTICE, reason=_reason_text(result)))
         if mode == "auto" and stop_hook_active and no_progress:  # continued once already and the core's basis did not move
             return _settlement(render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)))
-        if _evidence_report_directive(result):
-            return StopResult(2, stderr=EVIDENCE_REPORT_NOTICE + "\n")
         if mode == "auto" and stop_hook_active:
             return StopResult(2, stderr=render_notice(UNATTENDED_CONTINUE_NOTICE, reason=_reason_text(result)) + "\n")
         return StopResult(2, stderr=_reason_text(result) + "\n")

@@ -50,6 +50,8 @@ def _spike_binding(document: dict) -> dict:
 
 #: What the gate's first reason says about who the turn end waits on: a human who is asked, and an audit child that runs.
 _CONFIGURATION_REASONS = {"governance.approval_required", "governance.revision_required", "obligation.approval"}
+#: The reasons that wait on a human the core raises only in deliberative; an auto view that carried one is not a state any run reaches.
+_NEVER_ASKED_IN_AUTO = {"evidence.confirmation_required", "governance.terminal_stop_pending"}
 
 
 def turn_end_actor_of(result: dict) -> str:
@@ -66,6 +68,8 @@ def turn_end_actor_of(result: dict) -> str:
                     if row["status"] != "satisfied" and not row.get("hold") and (row.get("missing") or row["id"].startswith("obligation."))]
     code, parameters = owed[0] if owed else (None, {})
     configuring = (run.get("governance") or {}).get("human_wait") is True
+    if (run.get("governance") or {}).get("control_mode") == "auto" and code in _NEVER_ASKED_IN_AUTO:
+        raise ValueError(f"an auto run view never carries {code}: the core asks no one after the configuration")
     if (code == "evidence.confirmation_required" or (code == "governance.terminal_stop_pending" and parameters.get("case") != "declined")
             or (code in _CONFIGURATION_REASONS and configuring)):
         return "human"

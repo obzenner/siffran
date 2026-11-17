@@ -624,20 +624,16 @@ class ResponseMappingTests(unittest.TestCase):
             auto["run"]["governance"].update({"control_mode": "auto", "first_approval": True})
             self.assertEqual(_stop(auto).exit_code, 2)
 
-    def test_the_stop_directs_the_author_to_report_only_where_the_core_says_a_human_can_be_asked(self) -> None:
-        """The adapter reads one core fact, the batch's ``prompt_error``: only an askable one directs a report. The core
-        derives no askable batch for an auto run (``human_route``), so this view is built by hand and the real flow is
-        ``ClaudeStopEvidenceByControlMode.test_L4_*``."""
-        from application import protocol
-        notice = getattr(protocol, "EVIDENCE_REPORT_NOTICE", "<not defined>")
+    def test_the_stop_asks_a_report_of_no_auto_run_and_a_deliberative_run_pauses_where_a_human_can_be_asked(self) -> None:
+        """The adapter reads one core fact, the batch's ``prompt_error``. A deliberative run whose human can be asked pauses
+        with ``paused_for_evidence`` (the human is asked inside ``report_convergence``); one whose human cannot pauses with the
+        real reason. An auto run asks no one: the core gives it no batch and no human reason, so a view that says otherwise
+        (built by hand here) still gets the real reason and never a directive to report."""
         record = "sha256:" + "a" * 64
 
-        def result(route="human", prompt_error=None, code="evidence.confirmation_required"):
-            # A deliberately impossible view: the core gives an auto run no batch and no human reason. It proves the adapter
-            # reads only the batch's ``prompt_error``, whatever the view says about the mode.
-            run = json.loads(json.dumps(_valid_active_allow()["run"]))
-            run["governance"].update({"control_mode": "auto", "first_approval": True})  # an interactive auto run
-            run["governance"]["context"].update({"interactive": True, "delegation": False})
+        def result(mode, route="human", prompt_error=None, code="evidence.confirmation_required"):
+            run = StopModeTests.mode(mode, json.loads(json.dumps(_valid_active_allow()["run"])))
+            run["turn_end_actor"] = "human" if mode == "deliberative" else "author"
             run["confirmation_batch"] = {"key": "sha256:" + "b" * 64, "record_ids": [record],
                                          "claim_ids": [], "prompt_error": prompt_error, "records": [
                                              {"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/x"}]}
@@ -647,31 +643,30 @@ class ResponseMappingTests(unittest.TestCase):
                 "next_actions": ["human.confirm_evidence", "residual.accept"] if route == "human"
                 else ["residual.accept"],
                 "sections": ["evidence"], "message": "Research waits on a human."}]}
-        settled = _stop(result())
-        # In Claude the human is asked inside report_convergence, so a pause would end the turn unasked: block, plainly.
-        self.assertEqual((settled.exit_code, settled.stderr, settled.stdout), (2, notice + "\n", ""))
-        self.assertFalse(hasattr(protocol, "EVIDENCE_WAIT_NOTICE"))
-        self.assertEqual(_stop(result("unavailable", "unavailable")).exit_code, 2)  # nobody can answer
-        # The host has not looked for a surface yet (it does inside the report): the same directive, never a stop that
-        # leaves a human unasked.
-        unobserved = _stop(result("unobserved", "unobserved"))
-        self.assertEqual((unobserved.exit_code, unobserved.stderr, unobserved.stdout), (2, notice + "\n", ""))
-        # The batch was shown already (Later, cancel, timeout), the interactions are spent, or the host said it could
-        # not ask: nothing will ask again, so the Stop blocks with the real reason instead of pausing or directing a
-        # report that would ask nobody.
-        for error in ("already_presented", "interaction_limit", "surface_unrecorded", "presentation_failed"):
-            blocked = _stop(result(prompt_error=error))
-            self.assertEqual((blocked.exit_code, blocked.stderr), (2, "Research waits on a human.\n"), error)
-        # Another claim blocker leads: the open claim's own reason is what the Stop reports.
-        other = result(code="claim.research_missing")
+        notice = StopModeTests.notices()
+        for prompt_error in (None, "unobserved"):  # a dialog can be shown, or the report looks for one
+            asked = _stop(result("deliberative", prompt_error=prompt_error))
+            self.assertEqual((asked.exit_code, asked.stderr, json.loads(asked.stdout)),
+                             (0, "", {"systemMessage": notice["paused_for_evidence"]}), prompt_error)
+        for error in ("unavailable", "already_presented", "interaction_limit", "surface_unrecorded", "presentation_failed"):
+            spent = _stop(result("deliberative", prompt_error=error))
+            self.assertEqual(json.loads(spent.stdout), {"systemMessage": render_notice(
+                notice["paused_for_human"], reason="Research waits on a human.")}, error)
+        for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
+            for prompt_error in (None, "unobserved", "unavailable", "already_presented", "interaction_limit"):
+                blocked = _stop(result(mode, prompt_error=prompt_error))
+                self.assertEqual((blocked.exit_code, blocked.stderr, blocked.stdout),
+                                 (2, "Research waits on a human.\n", ""), (mode, prompt_error))
+                self.assertNotIn(notice["evidence_report"], blocked.stderr)
+        other = result("deliberative", code="claim.research_missing")  # another claim blocker leads
         other["reasons"][0]["parameters"] = {"claim_id": "G0"}
         other["reasons"][0]["message"] = "Record research for claim G0."
-        self.assertEqual(_stop(other).stderr, "Record research for claim G0.\n")
-        mixed = result()
+        self.assertIn("Record research for claim G0.", json.loads(_stop(other).stdout)["systemMessage"])
+        mixed = result("deliberative")
         mixed["reasons"].append({"code": "run.corrupt", "parameters": {}, "next_actions": [],
                                  "sections": [], "message": "corrupt"})
-        self.assertEqual(_stop(mixed).exit_code, 2)
-        terminal = result()
+        self.assertIn("paused for you", json.loads(_stop(mixed).stdout)["systemMessage"])
+        terminal = result("deliberative")
         terminal["run"]["status"] = "stopped_residual"
         self.assertEqual(_stop(terminal).exit_code, 2)
 
@@ -791,6 +786,9 @@ class StopModeTests(unittest.TestCase):
                    "counts. Cite a file in the workspace, which the service checks, or a local file your auditor can read, or run a "
                    "spike; or end with report_convergence intent=stop and leave the claim as a residual. For a human to confirm "
                    "sources, start a deliberative run.")
+    REFUTED = "Claim G0 is refuted by the research recorded for it."
+    #: The core's ``turn_end_actor`` of each kind of view that is not the author's.
+    ACTORS = {"human_wait": "human", "audit_pending": "auditor", "no_author_step": "none"}
     RECORD = "sha256:" + "a" * 64
 
     @classmethod
@@ -839,10 +837,17 @@ class StopModeTests(unittest.TestCase):
                       "message": "An audit is pending."}
         elif kind in ("human_wait", "approval_unanswerable"):
             _asked(run["governance"]).update({"state": "pending"})
+            if mode == "auto-interactive-post":  # after its first approval a human is asked only about a raise
+                run["governance"]["raises"] = True
             if kind == "approval_unanswerable":  # the approval cannot be asked here: spent, errored or no MCP ingress
                 run["governance"]["context"]["ingress"] = "unavailable"
             reason = {"code": "governance.approval_required", "parameters": {}, "next_actions": [], "sections": ["governance"],
                       "message": "approval required"}
+        elif kind == "no_author_step":  # the root claim is refuted: nothing the author can do approves it
+            reason = {"code": "claim.refuted", "parameters": {"claim_id": "G0"}, "affected": {"obligation_id": "claim:G0"},
+                      "next_actions": ["residual.accept"], "sections": ["evidence/research"], "message": cls.REFUTED}
+        # who the turn end waits on, as the core projects it (``core.evaluation.turn_end_actor``)
+        run["turn_end_actor"] = cls.ACTORS.get(kind, "human" if kind == "evidence" and mode == "deliberative" else "author")
         return {"type": "Block", "run": run, "reasons": [reason]}
 
     stop = staticmethod(_stop)  # a first Stop unless the test says ``stop_hook_active=True``
@@ -1051,20 +1056,83 @@ class StopModeTests(unittest.TestCase):
     #: Each state of the registry's turn-end table, built by ``cell_result`` for a control mode.
     TABLE = PLUGIN_ROOT.parent.parent / "contracts" / "empirica" / "v2" / "host-boundaries.json"
 
-    def cell_result(self, state: str, mode: str, notice: str | None = None) -> dict | None:
-        """A core response for one state of the table in one mode, or None where the state cannot arise in that mode
-        (the initial approval is a human's only before an interactive or deliberative run is approved)."""
+    def cell_result(self, state: str, mode: str, outcome: str, notice: str | None = None) -> dict | None:
+        """A core response for one state of the table in one mode, or None where the state cannot arise in that mode."""
+        if outcome == "unreachable":
+            return None
         if state == "converged":
             return stored(json.loads((_FIXTURES / "allow-converged.json").read_text()))["expected"]["result"]
         if state == "async-audit-pending":
             return self.block(mode, "audit_pending")
-        if state == "settlement":
-            if notice == "human_wait":
-                return self.block(mode, "human_wait") if mode in ("deliberative", "auto-interactive-pre") else None
+        if state == "human-wait":
+            return self.block(mode, "human_wait")
+        if state == "budget-exhausted":
             return self.block(mode, "budget")
+        if state == "budget-raise-offered":
+            view = self.block(mode, "budget")
+            view["reasons"][0]["next_actions"] = ["budget.raise", "residual.accept"]
+            return view
         if state == "evidence-wait":
             return self.block(mode, "evidence")  # in auto the view is the claim's own reason: the core asks no one
+        if state == "no-author-step":
+            return self.block(mode, "no_author_step")
         return self.block(mode, "real")
+
+    def test_A7_an_auto_run_whose_author_has_no_step_left_ends_with_the_residual_on_either_stop(self):
+        """``turn_end_actor`` ``none`` (the root claim is refuted or conflicted): in every auto mode the turn ends with the
+        notice that names the core's reason and offers ``report_convergence intent=stop``; deliberative still pauses."""
+        notice = self.notices()["unattended_residual"]
+        for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
+            for flag in (False, True):
+                with self.subTest(mode=mode, stop_hook_active=flag):
+                    got = self.stop(self.block(mode, "no_author_step"), stop_hook_active=flag)
+                    self.assertEqual((got.exit_code, got.stderr), (0, ""))
+                    self.assertEqual(json.loads(got.stdout), {"systemMessage": render_notice(notice, reason=self.REFUTED)})
+                    self.assertIn("intent=stop", got.stdout)
+        for flag in (False, True):
+            paused = self.stop(self.block("deliberative", "no_author_step"), stop_hook_active=flag)
+            self.assertEqual(json.loads(paused.stdout), self.paused(self.REFUTED), flag)
+
+    def test_A7_only_the_author_and_a_pending_audit_keep_an_auto_turn_going_and_a_human_settles_it(self):
+        """The four actors in auto: the author continues, the auditor settles through the pending-audit path, the human
+        settles through the configuration wait, and none ends with the residual."""
+        for mode in ("auto-interactive-pre", "auto-interactive-post"):
+            with self.subTest(actor="human", mode=mode):
+                got = self.stop(self.block(mode, "human_wait"))
+                self.assertEqual(json.loads(got.stdout), {"systemMessage": self.notices()["human_wait"]})
+        for mode in ("auto-interactive-pre", "auto-interactive-post", "auto-delegated"):
+            with self.subTest(mode=mode):
+                self.assertEqual(self.stop(self.block(mode, "real")).exit_code, 2)  # author
+                waiting = self.stop(self.block(mode, "audit_pending"))  # auditor
+                self.assertEqual((waiting.exit_code, waiting.stderr), (0, ""))
+                self.assertNotIn("systemMessage", waiting.stdout)
+                self.assertEqual(self.block(mode, "audit_pending")["run"]["turn_end_actor"], "auditor")
+
+    def test_F4_a_view_without_a_turn_end_actor_is_refused_at_the_transport_and_the_stop_fails_closed(self):
+        """The response schema requires the field, so a view that lacks it (or names a value outside the enum) is a contract
+        fault: ``Response`` refuses it, and the Stop hook reports the gate unavailable and blocks. It is never read as the
+        author's step (``continue``) and never as the residual (``settle``)."""
+        from adapters.claude import lifecycle
+        for absent in (None, "someone", 7):
+            for mode in ("deliberative", "auto-interactive-post", "auto-delegated"):
+                for kind in ("real", "no_author_step"):
+                    with self.subTest(actor=absent, mode=mode, kind=kind):
+                        view = self.block(mode, kind)
+                        if absent is None:
+                            del view["run"]["turn_end_actor"]
+                        else:
+                            view["run"]["turn_end_actor"] = absent
+                        with self.assertRaises(ValueError):
+                            _typed(view)
+                        out, err = StringIO(), StringIO()
+                        with patch.object(lifecycle, "_payload", return_value={"session_id": "s-" + uuid.uuid4().hex, "cwd": "."}), \
+                             patch.object(lifecycle, "_resolve", return_value=("run", None)), \
+                             patch.object(lifecycle, "dispatch_stop", side_effect=lambda *_: _typed(view)), \
+                             patch("sys.stdout", new=out), patch("sys.stderr", new=err):
+                            code = lifecycle.completion_main()
+                        self.assertEqual((code, out.getvalue()), (2, ""))
+                        self.assertIn("completion gate unavailable", err.getvalue())
+                        self.assertNotIn("No step left to the agent", err.getvalue())
 
     def test_EHB_STOP_23_every_cell_of_the_registry_turn_end_table(self):
         """Every state of ``turn_end`` x control mode x ``stop_hook_active``: the expected outcome is read from the
@@ -1075,33 +1143,30 @@ class StopModeTests(unittest.TestCase):
         for state in table["states"]:
             for mode in self.MODES:
                 cell = state["outcomes"][mode]
-                names = cell.get("notices") or [None]
-                for name in (names if state["id"] == "settlement" else names[:1]):
-                    result = self.cell_result(state["id"], mode, name)
-                    if result is None:
-                        continue
-                    for flag in (False, True):
-                        with self.subTest(state=state["id"], mode=mode, notice=name, stop_hook_active=flag):
-                            got = self.stop(result, stop_hook_active=flag)
-                            outcome = cell["outcome"]
-                            message = json.loads(got.stdout).get("systemMessage") if got.stdout.startswith("{") else None
-                            if outcome in ("allow", "settle"):
-                                self.assertEqual((got.exit_code, got.stderr, message), (0, "", None))
-                            elif outcome in ("settle-notice", "pause"):
-                                reason = " ".join(row.get("message", "") for row in result["reasons"])
-                                text = render_notice(notices[name], **({"reason": reason} if "{reason}" in notices[name] else
-                                                                       {"resource": "pass"} if "{resource}" in notices[name] else {}))
-                                self.assertEqual((got.exit_code, got.stderr, message), (0, "", text))
-                            else:
-                                self.assertEqual((got.exit_code, got.stdout), (2, ""))
-                                if name == "evidence_report":
-                                    self.assertEqual(got.stderr, notices[name] + "\n")
-                                elif flag:  # a later turn end of the chain
-                                    reason = " ".join(row["message"] for row in result["reasons"])
-                                    self.assertEqual(got.stderr, render_notice(notices[name], reason=reason) + "\n")
-                                else:  # a first turn end gives the core's own reason
-                                    self.assertEqual(got.stderr, " ".join(row["message"] for row in result["reasons"]) + "\n")
-                            checked += 1
+                name = (cell.get("notices") or [None])[0]
+                result = self.cell_result(state["id"], mode, cell["outcome"], name)
+                if result is None:
+                    continue
+                for flag in (False, True):
+                    with self.subTest(state=state["id"], mode=mode, notice=name, stop_hook_active=flag):
+                        got = self.stop(result, stop_hook_active=flag)
+                        outcome = cell["outcome"]
+                        message = json.loads(got.stdout).get("systemMessage") if got.stdout.startswith("{") else None
+                        if outcome in ("allow", "settle"):
+                            self.assertEqual((got.exit_code, got.stderr, message), (0, "", None))
+                        elif outcome in ("settle-notice", "pause"):
+                            reason = " ".join(row.get("message", "") for row in result["reasons"])
+                            text = render_notice(notices[name], **({"reason": reason} if "{reason}" in notices[name] else
+                                                                   {"resource": "pass"} if "{resource}" in notices[name] else {}))
+                            self.assertEqual((got.exit_code, got.stderr, message), (0, "", text))
+                        else:
+                            self.assertEqual((got.exit_code, got.stdout), (2, ""))
+                            if flag:  # a later turn end of the chain
+                                reason = " ".join(row["message"] for row in result["reasons"])
+                                self.assertEqual(got.stderr, render_notice(notices[name], reason=reason) + "\n")
+                            else:  # a first turn end gives the core's own reason
+                                self.assertEqual(got.stderr, " ".join(row["message"] for row in result["reasons"]) + "\n")
+                        checked += 1
         self.assertGreater(checked, 30)  # a table that read as empty would pass vacuously
 
     def test_EHB_STOP_21_a_deliberative_turn_end_pauses_on_the_first_stop_and_on_a_later_one(self):

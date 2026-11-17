@@ -111,6 +111,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         surface, self.can_present, self.unknown, kw = STARTS[start]
         self.b = _Builder()
         self.auto = start.startswith("auto-")
+        self.delegated = start == "auto-delegated"
         self.claims = ["C0", *sorted(extra)]
         self.reworded: set = set()
         self.run = self.b.begin("probe", "s-machine", "Generated run.", _graph_of(self.claims), surface=surface,
@@ -265,6 +266,8 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
             want = ("none" if first is None else "human" if first.actor == "human" else "none" if ruled_out
                     else "auditor" if first.actor == "auditor" else "author")
         assert core["turn_end_actor"] == want, (core["turn_end_actor"], want)
+        # nobody can be asked in delegated auto, before or after its configuration is approved: no turn end waits on a person
+        assert not (self.delegated and want == "human"), (core["turn_end_actor"], core["governance"]["state"])
         self.turn_ends.add(want)
 
     def _auto_asks_nobody(self, core, gate) -> None:
