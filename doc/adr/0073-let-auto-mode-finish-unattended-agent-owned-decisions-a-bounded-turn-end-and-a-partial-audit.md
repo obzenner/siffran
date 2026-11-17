@@ -74,9 +74,8 @@ The run view gains `turn_end_actor`, an additive closed enum: `author`, `auditor
 
 ### D3 and D6 An auto run asks a human only at its configuration
 
-The rule: an auto run asks a human at its configuration, and later only to approve a budget increase in interactive
-auto. It asks nothing else until the run ends: no evidence confirmation, no decision, no consent to end. A human who wants
-to confirm evidence starts the run in deliberative mode.
+The rule: an auto run asks a human at its configuration only. It asks nothing else until the run ends: no evidence
+confirmation, no decision, no consent to end. A human who wants to confirm evidence starts the run in deliberative mode.
 
 The lock: `core.confirmation.human_route` returns `unavailable` for every auto run, as it already did for a delegated
 one, whatever surface the host recorded. Every ask reads that one fact. The batch's `prompt_error` is `unavailable`, so a

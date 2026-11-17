@@ -232,8 +232,13 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertEqual(reason["parameters"]["support"], "unconfirmed")
         claim = next(o for o in self.run_view(drv, run_id)["obligations"]["active"] if o["id"] == "claim:C0")
         self.assertEqual(claim["next"], ["research.record"])
-        self.assertNotEqual(self.present(drv, run_id)["type"], "Allow")  # there is no batch to present
-        self.assertNotEqual(self.answer(drv, run_id, "r1", confirm(self.last_id(drv, run_id)))["type"], "Allow")
+        # the batch an earlier version would have shown (the inert rule removed): its key is a real one
+        from core import confirmation as core_confirmation
+        with mock.patch.object(core_confirmation, "asks_human", lambda snapshot, record: (
+                core_confirmation.pending_route(snapshot, record) in core_confirmation.HUMAN_ROUTES)):
+            key = self.run_view(drv, run_id)["confirmation_batch"]["key"]
+        refused = self.present(drv, run_id, key=key)  # the core refuses to present it, whatever the host recorded
+        self.assertEqual((refused["type"], refused["reasons"][0]["code"]), ("Block", "governance.approval_unavailable"))
         stopped = self.stop(drv, run_id)["result"]
         residual = next(r for r in stopped["run"]["residuals"] if r["code"] == "claim.research_missing")
         self.assertNotIn("human.confirm_evidence", residual["next_actions"])

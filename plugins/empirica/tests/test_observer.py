@@ -98,8 +98,8 @@ class ReasonMessageTests(unittest.TestCase):
         # a reason with no ended wording reads the same on a stopped run
         self.assertEqual(reason_message({"message": "Nothing to fill."}, {}, ended=True), "Nothing to fill.")
 
-    def test_the_observer_words_a_reason_exactly_as_the_author_view_does(self):
-        # one renderer (core.confirmation.reason_text): the observer's text is the core's, for every reason and both tenses
+    def test_the_observer_words_a_reason_through_the_one_renderer(self):
+        # one renderer (core.confirmation.reason_text, asked for the observer's wording): the text is the core's, for every reason and both tenses
         from core import confirmation
         from core.observer import reason_message
         contract = json.loads((_ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text())
@@ -107,10 +107,10 @@ class ReasonMessageTests(unittest.TestCase):
             params = {name: "X" for name in spec["params"].get("properties", {})}
             for ended in (False, True):
                 with self.subTest(code=code, ended=ended):
-                    if "{" in confirmation.reason_text(spec, params, ended=ended):
+                    if "{" in confirmation.reason_text(spec, params, ended=ended, ui=True):
                         continue
                     self.assertEqual(reason_message(spec, params, ended=ended),
-                                     confirmation.reason_text(spec, params, ended=ended))
+                                     confirmation.reason_text(spec, params, ended=ended, ui=True))
 
     def test_an_unfillable_or_unsuitable_parameter_is_a_contract_bug_not_half_a_message(self):
         from core.observer import reason_message
@@ -143,6 +143,26 @@ class ReasonMessageTests(unittest.TestCase):
         from core.observer import UI_REASON_FAMILIES
         self.assertEqual([c for c in contract["reasons"] if c.startswith(UI_REASON_FAMILIES)
                           and "ended_message" not in contract["reasons"][c]], [])
+
+    def test_a_case_text_the_observer_shows_is_held_to_the_same_rules(self):
+        from core.observer import message_problems, reason_message
+        long = "x" * 200
+        spec = {"message": "Fine.", "case_parameter": "asking", "case_messages": {"again": long}}
+        self.assertEqual(len(message_problems("evidence.confirmation_required", spec)), 1)  # shown as written: too long
+        spec["ui_case_messages"] = {"again": "Asked once; ask again by reporting."}
+        self.assertEqual(message_problems("evidence.confirmation_required", spec), [])  # the observer reads its own wording
+        spec["ui_case_messages"] = {"again": long}
+        spec["ended_case_messages"] = {"again": "A receipt was left."}
+        self.assertEqual(len(message_problems("evidence.confirmation_required", spec)), 2)  # its text, and the jargon
+        # the observer reads the observer's wording of a case, the ended one on a stopped run; the author view neither
+        from core import confirmation
+        spec = {"message": "Plain.", "case_parameter": "asking", "case_messages": {"again": "Author text."},
+                "ui_case_messages": {"again": "Observer text."}, "ended_message": "Ended.",
+                "ended_case_messages": {"again": "Ended again."}}
+        self.assertEqual(reason_message(spec, {"asking": "again"}), "Observer text.")
+        self.assertEqual(reason_message(spec, {"asking": "again"}, ended=True), "Ended again.")
+        self.assertEqual(reason_message(spec, {"asking": "other"}, ended=True), "Ended.")
+        self.assertEqual(confirmation.reason_text(spec, {"asking": "again"}), "Author text.")
 
     def test_negative_control_the_old_paragraph_and_a_jargon_word_are_caught(self):
         from core.observer import message_problems

@@ -590,6 +590,34 @@ class InertEvidenceCells(ScenarioFixture):
         self.assertEqual((row["status"], row["wait"]), ("pending", None))
         self.assertIsNone(core_confirmation.wait_route(snapshot, record))
 
+    def test_F1_the_observer_says_the_same_thing_in_one_plain_sentence_and_the_author_view_keeps_the_instruction(self):
+        from core import observer as core_observer
+        from application.protocol import public_contract
+        reasons = public_contract()["reasons"]
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        snapshot = self.snapshot(drv, run_id)
+        _row, detail = core_observer.project(snapshot, reasons)
+        shown = detail["claims"][0]["blocker_message"]
+        self.assertEqual(shown, "Claim C0 rests only on sources a person would have to confirm; this run asks no one.")
+        self.assertNotIn("report_convergence", shown)
+        blocked = self.report(drv, run_id)["reasons"][0]
+        self.assertIn("report_convergence intent=stop", blocked["message"])  # the author is told what to do about it
+        self.assertGreater(len(blocked["message"]), core_observer.UI_MESSAGE_LIMIT)
+
+    def test_F6_a_stopped_run_words_the_claim_as_its_mode_did(self):
+        from core import observer as core_observer
+        from application.protocol import public_contract
+        reasons = public_contract()["reasons"]
+        drv, run_id = self.start(mode="auto")
+        self.research(drv, run_id, "web", URL)
+        message = core_observer.reason_message(reasons["claim.research_missing"],
+                                               {"claim_id": "C0", "support": "unconfirmed"}, ended=True)
+        self.assertEqual(message, "No research that counts was recorded for claim C0 before the run stopped.")
+        # a deliberative run, and any research that was never recorded, read as they always did
+        self.assertEqual(core_observer.reason_message(reasons["claim.research_missing"], {"claim_id": "C0"}, ended=True),
+                         "No research was recorded for claim C0 before the run stopped.")
+
     def test_F5_research_that_no_longer_binds_is_named_before_research_nobody_confirms(self):
         drv, run_id = self.start(mode="auto")
         self.research(drv, run_id, "code", WORKSPACE_REF)
@@ -617,6 +645,12 @@ class InertEvidenceCells(ScenarioFixture):
         self.assertEqual(evaluation.audit_attributions(unknown, {"child_id": None})[1],
                          evaluation.audit_attributions(snapshot, {"child_id": None})[1])
         self.assertEqual(self.audit(drv, run_id)["type"], "Allow")  # a distinct auditor passes over the counted record
+        # the observer's historical view classifies the same producers: the inert record whose producer nobody knows is not among them
+        recorded = self.snapshot(drv, run_id)
+        verdict = evaluation.latest_audit_verdict(recorded)
+        self.assertEqual(evaluation.independence_then(recorded, verdict), "distinct")
+        history = [{**a, "producer": None} if a["artifact_id"] == inert else a for a in recorded.history]
+        self.assertEqual(evaluation.independence_then(dataclasses.replace(recorded, history=history), verdict), "distinct")
 
     @staticmethod
     def reworded_graph() -> dict:

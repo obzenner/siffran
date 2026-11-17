@@ -618,6 +618,8 @@ class ResponseMappingTests(unittest.TestCase):
         record = "sha256:" + "a" * 64
 
         def result(route="human", prompt_error=None, code="evidence.confirmation_required"):
+            # A deliberately impossible view: the core gives an auto run no batch and no human reason. It proves the adapter
+            # reads only the batch's ``prompt_error``, whatever the view says about the mode.
             run = json.loads(json.dumps(_valid_active_allow()["run"]))
             run["governance"].update({"control_mode": "auto", "first_approval": True})  # an interactive auto run
             run["governance"]["context"].update({"interactive": True, "delegation": False})
@@ -769,6 +771,11 @@ class StopModeTests(unittest.TestCase):
 
     MODES = ("deliberative", "auto-interactive-pre", "auto-interactive-post", "auto-delegated")
     REASON = "Record research for claim G0."
+    #: What the core says in auto when a claim rests only on sources that need a human (``claim.research_missing``, ``support: unconfirmed``).
+    UNCONFIRMED = ("Claim G0 rests only on research that a human would have to confirm, and an auto run asks no one, so none of it "
+                   "counts. Cite a file in the workspace, which the service checks, or a local file your auditor can read, or run a "
+                   "spike; or end with report_convergence intent=stop and leave the claim as a residual. For a human to confirm "
+                   "sources, start a deliberative run.")
     RECORD = "sha256:" + "a" * 64
 
     @classmethod
@@ -794,12 +801,17 @@ class StopModeTests(unittest.TestCase):
         run = cls.mode(mode, json.loads(json.dumps(_valid_active_allow()["run"])))
         reason = {"code": "claim.research_missing", "parameters": {"claim_id": "G0"}, "affected": {"obligation_id": "claim:G0"},
                   "next_actions": ["research.record"], "sections": ["evidence/research"], "message": cls.REASON}
-        if kind == "evidence":
+        if kind == "evidence" and mode != "deliberative":
+            # an auto run asks no one: a claim resting on sources that need a human is open, with no batch and no human reason
+            reason = {"code": "claim.research_missing", "parameters": {"claim_id": "G0", "support": "unconfirmed",
+                                                                         "record_ids": [cls.RECORD]},
+                      "affected": {"obligation_id": "claim:G0"}, "next_actions": ["research.record"],
+                      "sections": ["evidence/research"], "message": cls.UNCONFIRMED}
+        elif kind == "evidence":
             run["confirmation_batch"] = {"key": "sha256:" + "b" * 64, "record_ids": [cls.RECORD], "claim_ids": [],
-                                         "prompt_error": None if mode == "deliberative" else "unavailable", "records": [
+                                         "prompt_error": None, "records": [
                                              {"claim_id": "C0", "source_kind": "web", "source_ref": "https://example.test/x"}]}
-            route = "human" if mode == "deliberative" else "unavailable"  # an auto run asks no one: the core's route
-            reason = {"code": "evidence.confirmation_required", "parameters": {"route": route, "record_ids": [cls.RECORD]},
+            reason = {"code": "evidence.confirmation_required", "parameters": {"route": "human", "record_ids": [cls.RECORD]},
                       "next_actions": ["human.confirm_evidence"], "sections": ["evidence"],
                       "message": "Research waits on a human."}
         elif kind == "budget":
@@ -839,8 +851,7 @@ class StopModeTests(unittest.TestCase):
                     real = self.stop(self.block(mode, "real"))
                     self.assertEqual((real.exit_code, real.stdout, real.stderr), (2, "", self.REASON + "\n"))
                     waiting = self.stop(self.block(mode, "evidence"))  # an auto run asks no one: the reason, no directive
-                    self.assertEqual((waiting.exit_code, waiting.stdout, waiting.stderr),
-                                     (2, "", "Research waits on a human.\n"))
+                    self.assertEqual((waiting.exit_code, waiting.stdout, waiting.stderr), (2, "", self.UNCONFIRMED + "\n"))
                 spent = self.stop(self.block(mode, "budget"))
                 self.assertEqual((spent.exit_code, json.loads(spent.stdout), spent.stderr),
                                  (0, {"systemMessage": render_notice(budget, resource="pass")}, ""))
@@ -917,7 +928,7 @@ class StopModeTests(unittest.TestCase):
                 blocked = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
                 self.assertEqual((blocked.exit_code, blocked.stdout), (2, ""))
                 self.assertEqual(blocked.stderr, render_notice(self.notices()["unattended_continue"],
-                                                               reason="Research waits on a human.") + "\n")
+                                                               reason=self.UNCONFIRMED) + "\n")
         paused = self.stop(self.block("deliberative", "evidence"), stop_hook_active=True)
         self.assertEqual((paused.exit_code, paused.stderr), (0, ""))
         self.assertEqual(json.loads(paused.stdout), {"systemMessage": self.notices()["paused_for_evidence"]})
@@ -956,7 +967,7 @@ class StopModeTests(unittest.TestCase):
         self.assertEqual((first.exit_code, first.stderr), (2, self.REASON + "\n"))
         waiting = self.stop(self.block(mode, "evidence"), stop_hook_active=True)
         self.assertEqual((waiting.exit_code, waiting.stderr),
-                         (2, render_notice(notices["unattended_continue"], reason="Research waits on a human.") + "\n"))
+                         (2, render_notice(notices["unattended_continue"], reason=self.UNCONFIRMED) + "\n"))
 
     def test_EHB_STOP_19_an_approval_that_cannot_be_asked_ends_the_loop_by_mode(self):
         """Interactive auto before its first approval, when ``human_wait`` does not apply (no MCP ingress, a prompt error
@@ -1037,10 +1048,7 @@ class StopModeTests(unittest.TestCase):
                 return self.block(mode, "human_wait") if mode in ("deliberative", "auto-interactive-pre") else None
             return self.block(mode, "budget")
         if state == "evidence-wait":
-            result = self.block(mode, "evidence")
-            if mode != "deliberative":  # an auto run asks no one: the core derives no human route, so no askable prompt
-                result["run"]["confirmation_batch"]["prompt_error"] = "unavailable"
-            return result
+            return self.block(mode, "evidence")  # in auto the view is the claim's own reason: the core asks no one
         return self.block(mode, "real")
 
     def test_EHB_STOP_23_every_cell_of_the_registry_turn_end_table(self):

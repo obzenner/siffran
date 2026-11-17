@@ -69,7 +69,7 @@ _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 def reason_message(spec: Mapping[str, Any], parameters: Mapping[str, Any], *, ended: bool = False) -> str:
     """A reason's wording for the UI: ``confirmation.reason_text`` (the one renderer; ``ended`` for a run that has stopped),
     and a message the parameters cannot complete is a contract bug, never shown half-formatted."""
-    text = confirmation.reason_text(spec, parameters, ended=ended)
+    text = confirmation.reason_text(spec, parameters, ended=ended, ui=True)
     if _PLACEHOLDER.search(text):
         raise ValueError(f"reason parameters {sorted(parameters)} do not complete the message {text!r}")
     return text
@@ -134,12 +134,18 @@ UI_MESSAGE_BANNED = ("derivation", "receipt", "fold")
 
 
 def message_problems(code: str, spec: Mapping[str, Any]) -> list[str]:
-    """Why a registry reason's wordings that reach the UI (its message and its ended wording; the observer passes no
-    ``case``) are not plain enough, else ``[]``."""
+    """Why a registry reason's wordings that reach the UI are not plain enough, else ``[]``: its message, its ended wording,
+    the observer's and the ended wording of a case, and the author's text of every case that has no observer wording of
+    its own (the observer shows that one as written)."""
     if not code.startswith(UI_REASON_FAMILIES):
         return []
+    ui, ended_cases = spec.get("ui_case_messages") or {}, spec.get("ended_case_messages") or {}
+    shown = [("message", spec["message"]), ("ended_message", spec.get("ended_message", ""))]
+    shown += [(f"ui_case_messages.{case}", text) for case, text in ui.items()]
+    shown += [(f"ended_case_messages.{case}", text) for case, text in ended_cases.items()]
+    shown += [(f"case_messages.{case}", text) for case, text in (spec.get("case_messages") or {}).items() if case not in ui]
     problems = []
-    for name, message in (("message", spec["message"]), ("ended_message", spec.get("ended_message", ""))):
+    for name, message in shown:
         if len(message) > UI_MESSAGE_LIMIT:
             problems.append(f"{code} {name}: {len(message)} characters, over {UI_MESSAGE_LIMIT}")
         problems += [f"{code} {name}: uses the jargon {w!r}" for w in UI_MESSAGE_BANNED if w in message.lower()]

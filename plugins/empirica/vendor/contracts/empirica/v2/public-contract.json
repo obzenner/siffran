@@ -1214,7 +1214,13 @@
       "case_messages": {
         "unconfirmed": "Claim {claim_id} rests only on research that a human would have to confirm, and an auto run asks no one, so none of it counts. Cite a file in the workspace, which the service checks, or a local file your auditor can read, or run a spike; or end with report_convergence intent=stop and leave the claim as a residual. For a human to confirm sources, start a deliberative run."
       },
-      "ended_message": "No research that counts was recorded for claim {claim_id} before the run stopped."
+      "ended_message": "No research was recorded for claim {claim_id} before the run stopped.",
+      "ui_case_messages": {
+        "unconfirmed": "Claim {claim_id} rests only on sources a person would have to confirm; this run asks no one."
+      },
+      "ended_case_messages": {
+        "unconfirmed": "No research that counts was recorded for claim {claim_id} before the run stopped."
+      }
     },
     "claim.research_unbound": {
       "params": {
@@ -2188,7 +2194,10 @@
       "case_messages": {
         "again": "Research or a decision was shown to the human and left open (Later, cancel or timeout). An explicit report_convergence asks the human again; each asking spends one of the run's human interactions."
       },
-      "ended_message": "Unanswered when this run stopped: research or a decision needed a human."
+      "ended_message": "Unanswered when this run stopped: research or a decision needed a human.",
+      "ui_case_messages": {
+        "again": "Shown to the human and left open; reporting again asks once more."
+      }
     }
   },
   "sections": {
