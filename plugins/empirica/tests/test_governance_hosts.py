@@ -210,10 +210,12 @@ class GovernanceHostTests(unittest.TestCase):
         for line in lines:
             if not line.startswith(("Details: http://", "File: ")):
                 self.assertLessEqual(len(line), 72, line)
-        # a ceiling proposed below the approved one is no raise: it carries no prior
+        # a ceiling proposed below the approved one is part of the change the human judges: it carries its prior too, as the
+        # edited-configuration form's does
         dialog["budgets"][1]["value"] = 0
-        self.assertEqual(review_form(dialog, TEST_DOCUMENT, 900, approved=approved)[0].splitlines()[1],
-                         "passes 10 (was 8) · spawns 0 · audits 2")
+        lowered, lowered_schema = review_form(dialog, TEST_DOCUMENT, 900, approved=approved)
+        self.assertEqual(lowered.splitlines()[1], "passes 10 (was 8) · spawns 0 (was 1) · audits 2")
+        self.assertIn("(was 1)", lowered_schema["properties"]["max_spawns"]["title"])
         dialog["budgets"][1]["value"] = 1
         # no raise, no change: the first approval's form is exactly what it was
         self.assertTrue(plain.startswith("Empirica · approve run configuration (epoch "))

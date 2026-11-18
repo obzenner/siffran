@@ -241,9 +241,11 @@ def budget_recovery(governance: Mapping, actions) -> str:
     """The case of a ``budget.exhausted`` reason's text, from the recovery its run is offered (``actions``, after the mode's
     exclusions): ``raise_dialog`` where a raise is offered to an interactive auto run (its human approves it in a dialog),
     ``raise_human`` where one is offered to a deliberative run (its human decides it), ``fresh_run`` where ``budget.raise`` is
-    not offered (a delegated run has nobody to ask). The contract's ``budget.exhausted`` words each case; nothing else words
-    it. Presentation only: no decision reads it."""
-    if "budget.raise" not in actions:
+    not offered (a delegated run has nobody to ask). A raise that is offered but that no one can be asked to approve (the host
+    reported that it can show a human nothing: ``cannot_ask``) reads as ``fresh_run`` too, so the text promises no dialog or
+    decision that cannot happen; the offer itself is unchanged. The contract's ``budget.exhausted`` words each case; nothing
+    else words it. Presentation only: no decision reads it."""
+    if "budget.raise" not in actions or cannot_ask(governance):
         return "fresh_run"
     return "raise_human" if governance["control_mode"] == "deliberative" else "raise_dialog"
 
@@ -283,14 +285,20 @@ def _waiting_states(governance: Mapping) -> frozenset:
     return HUMAN_WAIT_STATES
 
 
+def cannot_ask(governance: Mapping) -> bool:
+    """Whether the host has reported its context and it cannot put a question to a human: no one can approve or decide a
+    raise now. A host that has not reported yet (a null ``author``) is not asked to give up."""
+    return (governance["context"]["author"] is not None
+            and governance["context"]["approval_capability"] != HUMAN_CONFIGURATION)
+
+
 def _no_ingress(governance: Mapping, budgets: Mapping) -> bool:
     """Whether a sized proposal waits on a human's approval that a host which has reported its context cannot put to
     one. A host that has not reported yet is not asked to give up. The run's initial context (no ``author``, no ingress)
     is byte-identical to a report of "no author, no ingress", so a null ``author`` is read as "not reported yet": the core
     holds no separate fact that a report arrived."""
     return (sized(governance) and expected_approval_kind(governance, raises(governance, budgets)) == "host_ui"
-            and governance["context"]["author"] is not None
-            and governance["context"]["approval_capability"] != HUMAN_CONFIGURATION)
+            and cannot_ask(governance))
 
 
 def _automatic_way_on(governance: Mapping, budgets: Mapping) -> bool:

@@ -9,7 +9,7 @@ from . import citations, confirmation, governance
 
 from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSUPPORTED, TERMINAL_STOP_REASON,
                          active_evidence, audit_blocker, audit_covers, audit_pending, bootstrap_status, latest_audit_verdict,
-                         claim_blockers, claim_digest, confirmation_batch, derive_claims,
+                         claim_blockers, claim_digest, confirmation_batch, derive_claims, recovery_actions,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
                          progress_basis, report_requirements, terminal_batch, earliest_stage, stage_rank, turn_end_actor,
@@ -387,11 +387,6 @@ def _child_summary(child: Mapping[str, Any], recovery_action: str) -> dict[str, 
     if child["state"] in _STOPPED_CHILD_STATES:
         row["recovery_action"] = recovery_action
     return row
-
-
-def recovery_actions(excluded_actions: tuple[str, ...], actions: list[str]) -> list[str]:
-    """Apply an admitted neutral exclusion policy to one recovery-action list."""
-    return [action for action in actions if action not in excluded_actions]
 
 
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:

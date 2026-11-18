@@ -2817,46 +2817,108 @@ class GovernanceServiceTests(unittest.TestCase):
                 self.assertEqual(reason["code"], "budget.exhausted")
                 self.assertEqual("budget.raise" in reason["next_actions"], offered)
 
+    def _exhausted(self, invocation, approval_kind):
+        """A run of this kind with its audit-spawn ceiling spent and its claim researched, on a fresh service; the reply of the
+        audit reservation it is then refused (``budget.exhausted``)."""
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+        budgets = {**SIZED_BUDGETS, "max_audit_spawns": 0}
+        if invocation is None:  # deliberative: the run setUp starts, on the new service
+            self.run_id = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
+                                        "invocation": dict(TEST_INVOCATION),
+                                        "selector": {"project": "p", "session": "s"}})["run"]["id"]
+            self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+            self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+            self.assertEqual(self.action(**sized_configure_run(budgets=budgets, rationale=SIZED_RATIONALE))["type"], "Allow")
+            self.assertEqual(self.service.trusted_governance_context(
+                run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]["type"], "Allow")
+        else:
+            self._prepare_auto(invocation, budgets=budgets)
+        self.assertEqual(self.admit(self.decision(approval_kind=approval_kind))["type"], "Allow")
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                     payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+        return self.action("child_reserve", purpose="audit", resource_class="audit",
+                           role_profile="empirica:empirica-auditor", execution="foreground")["reasons"][0]
+
+    B1_CASES = (("interactive auto", "INTERACTIVE", "host_ui", "raise_dialog",
+                 ("configure_run", "the human approves the raise in a dialog", "report_convergence intent=stop")),
+                ("deliberative", None, "host_ui", "raise_human",
+                 ("configure_run", "the human decides the raise", "report_convergence intent=stop")),
+                ("delegated auto", "DELEGATED", "auto", "fresh_run",
+                 ("report_convergence intent=stop", "start a fresh run")))
+
+    def _b1_invocation(self, name):
+        return {None: None, "INTERACTIVE": self.INTERACTIVE, "DELEGATED": DELEGATED_INVOCATION}[name]
+
     def test_B1_an_exhausted_budget_says_how_to_go_on_in_the_words_of_the_recovery_the_run_is_offered(self):
         """The reply names the recovery the core offers this run, never a bare "budget exhausted": a raise by configure_run that
         the human approves in a dialog (interactive auto), one the human decides (deliberative), or a stop or a fresh run
         (delegated, where ``budget.raise`` is not offered). The case is the reason's own ``recovery`` parameter."""
-        def exhaust(label, invocation, approval_kind):
-            self.runs, self.artifacts = Runs(), Artifacts()
-            self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
-            budgets = {**SIZED_BUDGETS, "max_audit_spawns": 0}
-            if invocation is None:  # deliberative: the run setUp starts, on the new service
-                self.run_id = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
-                                            "invocation": dict(TEST_INVOCATION),
-                                            "selector": {"project": "p", "session": "s"}})["run"]["id"]
-                self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
-                self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
-                self.assertEqual(self.action(**sized_configure_run(budgets=budgets, rationale=SIZED_RATIONALE))["type"], "Allow")
-                self.assertEqual(self.service.trusted_governance_context(
-                    run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]["type"], "Allow")
-            else:
-                self._prepare_auto(invocation, budgets=budgets)
-            self.assertEqual(self.admit(self.decision(approval_kind=approval_kind))["type"], "Allow")
-            self.assertEqual(self.action("investigate")["type"], "Allow")
-            self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
-                                         payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
-            return self.action("child_reserve", purpose="audit", resource_class="audit",
-                               role_profile="empirica:empirica-auditor", execution="foreground")["reasons"][0]
-        cases = (("interactive auto", self.INTERACTIVE, "host_ui", "raise_dialog",
-                  ("configure_run", "the human approves the raise in a dialog", "report_convergence intent=stop")),
-                 ("deliberative", None, "host_ui", "raise_human",
-                  ("configure_run", "the human decides the raise", "report_convergence intent=stop")),
-                 ("delegated auto", DELEGATED_INVOCATION, "auto", "fresh_run",
-                  ("report_convergence intent=stop", "start a fresh run")))
-        for label, invocation, approval_kind, recovery, phrases in cases:
+        for label, invocation, approval_kind, recovery, phrases in self.B1_CASES:
             with self.subTest(label):
-                reason = exhaust(label, invocation, approval_kind)
+                reason = self._exhausted(self._b1_invocation(invocation), approval_kind)
                 self.assertEqual(reason["parameters"], {"resource": "audit_spawn", "recovery": recovery})
                 self.assertTrue(reason["message"].startswith("audit_spawn budget exhausted. "), reason["message"])
                 for phrase in phrases:
                     self.assertIn(phrase, reason["message"])
                 self.assertEqual("configure_run" in reason["message"], "budget.raise" in reason["next_actions"])
                 self.assertNotIn("{", reason["message"])
+
+    def test_B1_every_surface_that_names_the_exhaustion_names_the_same_recovery(self):
+        """The case is part of the reason where the core makes it, so the run view's obligation, the report's gate and the
+        observer's wording (its own plain sentence) all carry it, not only the reply of the one transaction that adds it."""
+        from core import evaluation, observer as core_observer
+        observer_words = {"raise_dialog": "the agent can propose a raise for you to approve",
+                          "raise_human": "the agent can propose a raise for you to decide",
+                          "fresh_run": "this run cannot raise it, only stop or start afresh"}
+        for label, invocation, approval_kind, recovery, _ in self.B1_CASES:
+            with self.subTest(label):
+                self._exhausted(self._b1_invocation(invocation), approval_kind)
+                audit = next(o for o in self.view()["obligations"]["active"] if o["id"] == "obligation.audit")
+                self.assertEqual(audit["missing"]["code"], "budget.exhausted")
+                self.assertEqual(audit["missing"]["parameters"], {"resource": "audit_spawn", "recovery": recovery})
+                gate = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"})
+                self.assertEqual(gate["reasons"][0]["parameters"], {"resource": "audit_spawn", "recovery": recovery})
+                snapshot = self.service._coordinator.last_snapshot
+                owed = evaluation.report_requirements(snapshot, evaluation.derive_claims(snapshot), setup=False)
+                rows = core_observer.outstanding(owed, protocol.public_contract()["reasons"])
+                words = [row["message"] for row in rows if row["need"] == "budget.exhausted"]
+                self.assertEqual(len(words), 1, rows)
+                self.assertIn(observer_words[recovery], words[0])
+
+    def test_B1_a_spent_pass_ceiling_carries_the_case_too(self):
+        """The pass blocker is made apart from the audit one; it carries the run's case as well."""
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+        self._prepare_auto(self.INTERACTIVE, budgets={**SIZED_BUDGETS, "max_passes": 1})
+        self.assertEqual(self.admit(self.decision(approval_kind="host_ui"))["type"], "Allow")
+        self.assertEqual(self.action("investigate")["type"], "Allow")
+        research = dict(claim_id="C0", source_kind="code", result="supports", payload={"source_ref": "supplied", "citation": "observed"})
+        self.assertEqual(self.action("research", **research)["type"], "Allow")
+        self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "report_convergence"})  # spends the one pass
+        self.assertEqual(self.action("research", **{**research, "result": "refutes"})["type"], "Allow")
+        row = next(o for o in self.view()["obligations"]["active"] if o["id"] == "obligation.passes")
+        self.assertEqual(row["missing"], {"code": "budget.exhausted", "target_claim_id": None,
+                                          "parameters": {"resource": "pass", "recovery": "raise_dialog"}})
+
+    def test_B1_a_raise_is_not_promised_where_nobody_can_be_asked_to_approve_it(self):
+        """``budget.raise`` stays offered (no decision changed), but once the host reports that it can show no human anything
+        the text does not promise a dialog or a decision: it says the run cannot raise its ceilings, as a delegated run's does."""
+        for label, invocation, approval_kind in (("interactive auto", self.INTERACTIVE, "host_ui"), ("deliberative", None, "host_ui")):
+            with self.subTest(label):
+                self._exhausted(invocation, approval_kind)
+                before = self.action("child_reserve", purpose="audit", resource_class="audit",
+                                     role_profile="empirica:empirica-auditor", execution="foreground")["reasons"][0]
+                self.assertIn("budget.raise", before["next_actions"])
+                self.assertEqual(self.service.trusted_governance_context(
+                    run_id=self.run_id, payload={"author": AUTHOR, "ingress": "unavailable"})["result"]["type"], "Allow")
+                after = self.action("child_reserve", purpose="audit", resource_class="audit",
+                                    role_profile="empirica:empirica-auditor", execution="foreground")["reasons"][0]
+                self.assertEqual(after["next_actions"], before["next_actions"])  # the offer itself is as it was
+                self.assertEqual(after["parameters"], {"resource": "audit_spawn", "recovery": "fresh_run"})
+                self.assertNotIn("dialog", after["message"])
+                self.assertNotIn("the human decides", after["message"])
 
     def test_A7_an_auto_run_has_no_exhausted_budget_before_its_first_approval(self):
         """Nothing is spent before investigation, so a turn end of an auto run never meets ``budget.exhausted`` while its

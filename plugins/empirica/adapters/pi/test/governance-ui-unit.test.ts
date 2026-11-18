@@ -561,12 +561,13 @@ test("B1: a raise screen says it raises the approved ceilings and shows each rai
     assert.ok(lines.some(line => line.includes("10 (was 8)")), "the raised ceiling shows the approved value");
     assert.equal(lines.filter(line => line.includes("(was")).length, 1, "a ceiling that was not raised shows no prior");
   }
-  // a ceiling edited below the approved one is no raise: it shows no prior, as in the Claude form
+  // a ceiling edited below the approved one is part of the change: it shows its prior too, as in the Claude form
   state.values.max_spawns = 0;
   const lowered = renderLines(dialog, state, 80, theme,
     { confirmation: false, timeoutMs: 120_000, document: DOCUMENT, raise: approved });
-  assert.equal(lowered.filter(line => line.includes("(was")).length, 1);
-  assert.ok(!lowered.some(line => line.includes("0 (was 1)")));
+  assert.equal(lowered.filter(line => line.includes("(was")).length, 2);
+  assert.ok(lowered.some(line => line.includes("0 (was 1)")));
+  assert.ok(!lowered.some(line => line.includes("2 (was 2)")), "an unchanged ceiling shows no prior");
   // the first approval, and a proposal that raises nothing, are exactly as before
   const plain = renderLines(dialog, initialState(dialog), 80, theme,
     { confirmation: false, timeoutMs: 120_000, document: DOCUMENT });

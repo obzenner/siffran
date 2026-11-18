@@ -1390,11 +1390,29 @@ def derivation_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation)
                    "frozen": snapshot.state.frozen_claim_ids})
 
 
+def recovery_actions(excluded_actions: tuple[str, ...], actions: list[str]) -> list[str]:
+    """Apply an admitted neutral exclusion policy to one recovery-action list."""
+    return [action for action in actions if action not in excluded_actions]
+
+
+def exhausted(snapshot: EvaluationSnapshot, resource: str) -> dict[str, Any]:
+    """The parameters of a ``budget.exhausted`` reason: the resource and, for an active run, the ``recovery`` it is offered
+    (``governance.budget_recovery`` over the reason's recovery actions after the mode's exclusions), so the reason is made
+    with its case wherever it is made and every surface that words it (the reply, the run view, the observer) words the same
+    one. Presentation only: no decision reads ``recovery``."""
+    parameters = {"resource": resource}
+    if snapshot.state.status != "active":
+        return parameters
+    base = next(list(actions) for code, actions, _ in snapshot.reason_metadata if code == "budget.exhausted")
+    offered = recovery_actions(snapshot.contract.recovery_exclusions[governance.exclusion_key(snapshot.state.governance)], base)
+    return {**parameters, "recovery": governance.budget_recovery(snapshot.state.governance, offered)}
+
+
 def pass_budget_blocker(snapshot: EvaluationSnapshot, digest_value: str) -> dict[str, Any] | None:
     state = snapshot.state
     if (digest_value != state.last_derivation_digest
             and state.budgets["passes_used"] >= state.budgets["max_passes"]):
-        return {"reason": "budget.exhausted", "parameters": {"resource": "pass"}}
+        return {"reason": "budget.exhausted", "parameters": exhausted(snapshot, "pass")}
     return None
 
 
@@ -1407,7 +1425,7 @@ def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
     budgets = snapshot.state.budgets
     if (blocker is not None and blocker["reason"] in AUDIT_SPAWN_REASONS
             and budgets["audit_spawns_used"] >= budgets["max_audit_spawns"]):
-        return {"reason": "budget.exhausted", "parameters": {"resource": "audit_spawn"}}
+        return {"reason": "budget.exhausted", "parameters": exhausted(snapshot, "audit_spawn")}
     return blocker
 
 
@@ -1726,7 +1744,8 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
                 if reason == "governance.budget_invalid":
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
                     resource = governance.BUDGETS[ceiling].resource
-                    return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
+                    return _decision(snapshot, state, "Block", reason="budget.exhausted",
+                                     parameters=exhausted(snapshot, resource))
                 return _decision(snapshot, state, "Block", reason=reason,
                                  parameters=governance.refusal_parameters(state.governance, reason))
             if reason := governance.revision_error(state.governance, state.goal, proposed):
@@ -1779,7 +1798,7 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             limit_key, used_key, resource = SPAWN_BUDGET[resource_class]
             if state.budgets[used_key] >= state.budgets[limit_key]:
                 return _decision(snapshot, snapshot.state, "Block", reason="budget.exhausted",
-                                 parameters={"resource": resource})
+                                 parameters=exhausted(snapshot, resource))
             ordinal = len(state.children) + 1
             seed = {"run_id": snapshot.run_id, "ordinal": ordinal,
                     "purpose": action["purpose"], "role_profile": action["role_profile"],

@@ -28,7 +28,7 @@ turn end, and the run stays active, for a deliberative run, whose raise is the h
 When the core offers `budget.raise` (a deliberative or an interactive auto run), propose a raise with
 `configure_run` for the human to approve: the next action `empirica_observe kind=configure_run` marked as a raise is that
 call with higher ceilings, and the run keeps its progress, so no new run is needed. The human sees a dialog that names each
-raised ceiling beside the approved one. A delegated auto run is never offered `budget.raise`: it needs a fresh run
+changed ceiling beside the approved one. A delegated auto run is never offered `budget.raise`: it needs a fresh run
 with a larger up-front approved size. Never remove a claim, forge evidence, or bypass audit to fit the budget.
 
 ## Stall handling

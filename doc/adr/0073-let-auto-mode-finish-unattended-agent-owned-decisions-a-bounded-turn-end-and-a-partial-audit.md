@@ -142,10 +142,12 @@ not settle the turn on an exhausted budget when the core offers `budget.raise` t
 
 The raise is legible. The `budget.exhausted` reply words the recovery its run is offered, by the reason's `recovery` parameter
 (`raise_dialog`: the human approves the raise in a dialog; `raise_human`: the human decides it; `fresh_run`: no `budget.raise`
-is offered, so the stop or a fresh run). The core chooses the case from the recovery actions the run is left with after its mode's
-exclusions (`core.governance.budget_recovery`); no decision reads it. The author view marks the `budget.raise` next action with
+is offered, so the stop or a fresh run). The core chooses the case where it makes the reason (`core.evaluation.exhausted`), from the recovery actions the run is left
+with after its mode's exclusions (`core.governance.budget_recovery`), so the reply, the run view and the observer's own sentence
+carry the same one; where the host has reported that it can show a human nothing (`core.governance.cannot_ask`), a raise that is
+still offered reads as `fresh_run`, so no text promises a dialog that cannot come. No decision reads it. The author view marks the `budget.raise` next action with
 the contract's `budget_raise_note`, because it shares the `configure_run` call with every other configuration. The raise dialog
-says it raises the approved ceilings and shows each raised ceiling as `N (was M)`, M being the run view's `governance.budgets`,
+says it raises the approved ceilings and shows each changed ceiling (raised or lowered) as `N (was M)`, M being the run view's `governance.budgets`,
 read only when `governance.raises` is true; the bound document and its digest are unchanged.
 
 Two deliberate exceptions, both stated rather than hidden: a refuting web source still discards a claim in auto, with no

@@ -114,10 +114,11 @@ def _line(text: str, limit: int = 72, *, closing: str = "") -> str:
     return text[:limit - len(closing) - 1] + "…" + closing
 
 
-def _raised(row: Mapping[str, Any], approved: Mapping[str, Any] | None) -> int | None:
-    """The ceiling the run approved, for a row whose proposed value raises it; else ``None``. ``approved`` is the run view's
-    own ``governance.budgets`` of a run that holds a first approval and is asked about a raise, and ``None`` otherwise."""
-    if approved is None or row["key"] not in approved or row["value"] <= approved[row["key"]]:
+def _approved_value(row: Mapping[str, Any], approved: Mapping[str, Any] | None) -> int | None:
+    """The ceiling the run approved, for a row whose proposed value differs from it (a raise or a lowering: the whole change
+    the human judges, as the edited-configuration form shows it); else ``None``. ``approved`` is the run view's own
+    ``governance.budgets`` of a run that holds a first approval and is asked about a raise, and ``None`` otherwise."""
+    if approved is None or row["key"] not in approved or row["value"] == approved[row["key"]]:
         return None
     return approved[row["key"]]
 
@@ -126,7 +127,7 @@ def _budget_property(row: Mapping[str, Any], approved: Mapping[str, Any] | None 
     """Map one budget row to an editable integer property; a raised ceiling's title carries the approved value."""
     description = f"used {row['used']} · allowed {row['minimum']}–{row['maximum']}"
     with_help = description + " · " + row["help"]
-    was = _raised(row, approved)
+    was = _approved_value(row, approved)
     return {"type": "integer", "title": row["label"] + ("" if was is None else f" (was {was})"),
             "description": with_help if len(with_help) <= 60 else description,
             "minimum": row["minimum"], "maximum": row["maximum"], "default": row["value"]}
@@ -232,8 +233,8 @@ def _part(row: Mapping[str, Any], document: Mapping[str, Any]) -> str:
     return f"{row['short']} {value}{suffix}"
 
 def _raise_part(row: Mapping[str, Any], approved: Mapping[str, Any]) -> str:
-    """One compact value of a raise form: the proposed ceiling, with the approved one when it raises it (``_part``'s form)."""
-    was = _raised(row, approved)
+    """One compact value of a raise form: the proposed ceiling, with the approved one when it differs (``_part``'s form)."""
+    was = _approved_value(row, approved)
     return f"{row['short']} {row['value']}" + ("" if was is None else f" (was {was})")
 
 

@@ -131,7 +131,7 @@ export interface BoundDocument {
   run12: string | null;
 }
 /** `raise` is given when the human is asked about a raise (the run view's `governance.raises`): the ceilings the run
- * approved. The screen then says it raises them and shows each raised ceiling as `N (was M)`, as the confirm screen shows
+ * approved. The screen then says it raises them and shows each changed ceiling as `N (was M)`, as the confirm screen shows
  * a prior; the approved values are the view's own, never recomputed here. */
 export interface RenderOptions {
   confirmation: boolean; timeoutMs: number; document?: BoundDocument; raise?: Record<string, number>;
@@ -282,9 +282,7 @@ function controlLines(dialog: Dialog, state: DialogState, options: RenderOptions
   const priors = options.confirmation ? options.document?.priors ?? null : options.raise ?? null;
   const shown = controls.map(control => {
     const value = state.values[control.key], prior = priors ? priors[control.key] : undefined;
-    // a raise names the approved value only where the proposal is above it (Python `_raised`)
-    const differs = options.raise ? Number(value) > (prior as number) : prior !== value;
-    const was = prior !== undefined && differs ? ` (was ${valueText(prior)})` : "";
+    const was = prior !== undefined && prior !== value ? ` (was ${valueText(prior)})` : "";
     return valueText(value) + was;
   });
   const labelWidth = Math.max(...controls.map(control => visibleWidth(control.label))) + 2;
