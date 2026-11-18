@@ -1736,7 +1736,7 @@ class AutoTextTests(unittest.TestCase):
     UNCONFIRMED_OBSERVER = "Claim {claim_id} has only sources a person must confirm; it needs a source the service or auditor can check, or a spike."
     BUDGET_NOTICE = ("Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this "
                      "pause. End honestly with report_convergence intent=stop. A deliberative run may instead "
-                     "propose a raise for human approval; a delegated auto run starts a fresh run.")
+                     "propose a raise for human approval, if this host can ask a person; a delegated auto run starts a fresh run.")
     AUTO_CEILING = "A delegated auto run cannot raise its ceilings, audit retries included. Keep or lower them, or start a fresh run with a larger approved size."
     AUTO_CEILING_APPROVED = ("A delegated auto run cannot raise its approved ceilings: keep or lower them, or start a fresh run "
                              "with a larger approved size.")

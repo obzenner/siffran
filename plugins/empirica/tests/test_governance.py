@@ -2869,7 +2869,8 @@ class GovernanceServiceTests(unittest.TestCase):
         """The case is part of the reason where the core makes it, so the run view's obligation, the report's gate and the
         observer's wording (its own plain sentence) all carry it, not only the reply of the one transaction that adds it."""
         from core import evaluation, observer as core_observer
-        observer_words = {"raise_dialog": "the agent can propose a raise for you to approve",
+        observer_words = {"raise_unavailable": "a raise needs a person and this host cannot show one now",
+                          "raise_dialog": "the agent can propose a raise for you to approve",
                           "raise_human": "the agent can propose a raise for you to decide",
                           "fresh_run": "this run cannot raise it, only stop or start afresh"}
         for label, invocation, approval_kind, recovery, _ in self.B1_CASES:
@@ -2886,6 +2887,27 @@ class GovernanceServiceTests(unittest.TestCase):
                 words = [row["message"] for row in rows if row["need"] == "budget.exhausted"]
                 self.assertEqual(len(words), 1, rows)
                 self.assertIn(observer_words[recovery], words[0])
+
+    def test_B1_the_unavailable_raise_reads_the_same_on_every_surface_and_a_terminal_run_has_no_case(self):
+        from core import evaluation, observer as core_observer
+        self._exhausted(self.INTERACTIVE, "host_ui")
+        self.assertEqual(self.service.trusted_governance_context(
+            run_id=self.run_id, payload={"author": AUTHOR, "ingress": "unavailable"})["result"]["type"], "Allow")
+        audit = next(o for o in self.view()["obligations"]["active"] if o["id"] == "obligation.audit")
+        self.assertEqual(audit["missing"]["parameters"], {"resource": "audit_spawn", "recovery": "raise_unavailable"})
+        snapshot = self.service._coordinator.last_snapshot
+        owed = evaluation.report_requirements(snapshot, evaluation.derive_claims(snapshot), setup=False)
+        words = [r["message"] for r in core_observer.outstanding(owed, protocol.public_contract()["reasons"])
+                 if r["need"] == "budget.exhausted"]
+        self.assertEqual(len(words), 1)
+        self.assertIn("a raise needs a person and this host cannot show one now", words[0])
+        # a run that has ended words the exhaustion as it was, with no case to choose
+        stopped = self.request({"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"})
+        self.assertEqual(stopped["run"]["status"], "stopped_residual")
+        ended = [r for r in stopped["run"]["residuals"] if r["code"] == "budget.exhausted"]
+        self.assertTrue(ended, stopped["run"]["residuals"])
+        for row in ended:
+            self.assertNotIn("recovery", row["parameters"])
 
     def test_B1_a_spent_pass_ceiling_carries_the_case_too(self):
         """The pass blocker is made apart from the audit one; it carries the run's case as well."""
@@ -2916,9 +2938,14 @@ class GovernanceServiceTests(unittest.TestCase):
                 after = self.action("child_reserve", purpose="audit", resource_class="audit",
                                     role_profile="empirica:empirica-auditor", execution="foreground")["reasons"][0]
                 self.assertEqual(after["next_actions"], before["next_actions"])  # the offer itself is as it was
-                self.assertEqual(after["parameters"], {"resource": "audit_spawn", "recovery": "fresh_run"})
+                self.assertEqual(after["parameters"], {"resource": "audit_spawn", "recovery": "raise_unavailable"})
+                # the text explains the action it lists instead of denying it, and says it is the host's state now
+                self.assertIn("this host has reported that it cannot show one now", after["message"])
+                self.assertIn("a configure_run with higher ceilings would wait for nobody", after["message"])
+                self.assertNotIn("cannot raise its ceilings", after["message"])
                 self.assertNotIn("dialog", after["message"])
                 self.assertNotIn("the human decides", after["message"])
+                self.assertIn("report_convergence intent=stop", after["message"])
 
     def test_A7_an_auto_run_has_no_exhausted_budget_before_its_first_approval(self):
         """Nothing is spent before investigation, so a turn end of an auto run never meets ``budget.exhausted`` while its

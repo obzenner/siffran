@@ -241,12 +241,14 @@ def budget_recovery(governance: Mapping, actions) -> str:
     """The case of a ``budget.exhausted`` reason's text, from the recovery its run is offered (``actions``, after the mode's
     exclusions): ``raise_dialog`` where a raise is offered to an interactive auto run (its human approves it in a dialog),
     ``raise_human`` where one is offered to a deliberative run (its human decides it), ``fresh_run`` where ``budget.raise`` is
-    not offered (a delegated run has nobody to ask). A raise that is offered but that no one can be asked to approve (the host
-    reported that it can show a human nothing: ``cannot_ask``) reads as ``fresh_run`` too, so the text promises no dialog or
-    decision that cannot happen; the offer itself is unchanged. The contract's ``budget.exhausted`` words each case; nothing
-    else words it. Presentation only: no decision reads it."""
-    if "budget.raise" not in actions or cannot_ask(governance):
+    not offered (a delegated run has nobody to ask), and ``raise_unavailable`` where a raise is offered but no one can be asked
+    to approve it now (the host reported that it can show a human nothing: ``cannot_ask``), so the text explains the listed
+    action instead of promising a dialog that cannot come or denying the offer. The contract's ``budget.exhausted`` words each
+    case; nothing else words it. Presentation only: no decision reads it."""
+    if "budget.raise" not in actions:
         return "fresh_run"
+    if cannot_ask(governance):
+        return "raise_unavailable"
     return "raise_human" if governance["control_mode"] == "deliberative" else "raise_dialog"
 
 

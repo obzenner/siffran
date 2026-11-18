@@ -141,11 +141,14 @@ auto, and `recovery_exclusions` is keyed by the run's mode (`deliberative`, `aut
 not settle the turn on an exhausted budget when the core offers `budget.raise` to an auto run: the agent is the one to propose it. A raise that cannot be asked, because no human can be reached or the run has no interaction left to ask with, leaves a proposal within the approved ceilings, which is automatic and spends no interaction, so the view offers that proposal and the stop (`governance.raise_unavailable`). Only interactive auto has such a proposal: every deliberative proposal goes to the human, so a deliberative run with nobody to ask is offered the stop alone.
 
 The raise is legible. The `budget.exhausted` reply words the recovery its run is offered, by the reason's `recovery` parameter
-(`raise_dialog`: the human approves the raise in a dialog; `raise_human`: the human decides it; `fresh_run`: no `budget.raise`
-is offered, so the stop or a fresh run). The core chooses the case where it makes the reason (`core.evaluation.exhausted`), from the recovery actions the run is left
+(`raise_dialog`: the human approves the raise in a dialog; `raise_human`: the human decides it; `raise_unavailable`: a raise is
+offered but the host has reported that it can show a person nothing now; `fresh_run`: no `budget.raise` is offered, so the stop or
+a fresh run). The core chooses the case where it makes the reason (`core.evaluation.exhausted`), from the recovery actions the run is left
 with after its mode's exclusions (`core.governance.budget_recovery`), so the reply, the run view and the observer's own sentence
 carry the same one; where the host has reported that it can show a human nothing (`core.governance.cannot_ask`), a raise that is
-still offered reads as `fresh_run`, so no text promises a dialog that cannot come. No decision reads it. The author view marks the `budget.raise` next action with
+still offered reads as `raise_unavailable`: the text explains the listed action (a raise needs a person this host cannot show now,
+so a `configure_run` with higher ceilings would wait for nobody) instead of promising a dialog or denying the offer, and the
+author view's raise note says it needs a person this host can ask. No decision reads it. The author view marks the `budget.raise` next action with
 the contract's `budget_raise_note`, because it shares the `configure_run` call with every other configuration. The raise dialog
 says it raises the approved ceilings and shows each changed ceiling (raised or lowered) as `N (was M)`, M being the run view's `governance.budgets`,
 read only when `governance.raises` is true; the bound document and its digest are unchanged.

@@ -471,6 +471,9 @@ class ContentCompletenessTests(unittest.TestCase):
         self.assertEqual(author_view.render_surface("governance.propose"), plain)
         self.assertIn("raise", note)
         self.assertIn("approved ceilings", note)
+        # true wherever the raise is offered: a person decides it, and only where this host can ask one
+        self.assertIn("needs a person this host can ask", note)
+        self.assertNotIn("the human decides", note)
         noted = [action for action in next_action_surfaces() if note in author_view.render_surface(action)]
         self.assertEqual(noted, ["budget.raise"])
 

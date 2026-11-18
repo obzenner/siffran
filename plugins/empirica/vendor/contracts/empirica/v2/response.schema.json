@@ -127,6 +127,7 @@
           "enum": [
             "raise_dialog",
             "raise_human",
+            "raise_unavailable",
             "fresh_run"
           ]
         }
