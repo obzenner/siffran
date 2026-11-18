@@ -9,7 +9,7 @@ from . import citations, confirmation, governance
 
 from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSUPPORTED, TERMINAL_STOP_REASON,
                          active_evidence, audit_blocker, audit_covers, audit_pending, bootstrap_status, latest_audit_verdict,
-                         claim_blockers, claim_digest, confirmation_batch, deferred_unconfirmed, derive_claims,
+                         claim_blockers, claim_digest, confirmation_batch, deferred_unresolved, derive_claims,
                          recovery_actions,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
@@ -210,7 +210,7 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
             metadata, "violated", terminal_next))
     blockers_by_claim = {row["claim_id"]: row for row in blockers}
     _, deferred = _scope(snapshot)
-    unexplained = deferred_unconfirmed(snapshot, derivation)
+    unexplained = deferred_unresolved(snapshot, derivation)
     # What the report requires, in the gate's order (``core.evaluation.report_requirements``): the claim rows below are its
     # claim stage, the rows after them its human, pass, audit and consent stages, and a row behind an earlier stage is held.
     early = earliest_stage(r.stage for r in owed)
@@ -228,8 +228,8 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
                 if claim["id"] in unexplained:
-                    # outside the gating scope and supported by inert research only: say why it stays open, and that the
-                    # way on is research that counts or a revised graph (the gate asks nothing about it)
+                    # outside the gating scope and open for want of research that counts: say why, and that the way on is
+                    # research that counts or a revised graph (the gate asks nothing about it)
                     reason, parameters = unexplained[claim["id"]]
                     row["missing"] = {"code": reason, "target_claim_id": claim["id"], "parameters": parameters}
                     if terminal_next is None:

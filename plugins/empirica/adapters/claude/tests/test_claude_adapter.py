@@ -784,8 +784,8 @@ class StopModeTests(unittest.TestCase):
     #: What the core says in auto when a claim rests only on sources that need a human (``claim.research_missing``, ``support: unconfirmed``).
     UNCONFIRMED = ("Claim G0 has only research that a human would have to confirm, and an auto run asks no one, so that research does "
                    "not count. Cite a file in the workspace (the service checks it) or a local file your auditor can read, or run a "
-                   "spike. An unresolved claim, gating or not, keeps the run from converging, and one outside the gating scope ends it "
-                   "stopped_frozen: unless the graph is frozen, you can revise the claim graph to remove the claim. Or call "
+                   "spike. An unresolved claim, gating or not, keeps the run from converging. A claim outside the gating scope ends it "
+                   "stopped_frozen, and unless the graph is frozen you can revise the claim graph to remove it. Or call "
                    "report_convergence intent=stop to end with the claim as a residual. To have a human confirm "
                    "sources, start a deliberative run.")
     REFUTED = "Claim G0 is refuted by the research recorded for it."

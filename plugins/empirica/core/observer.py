@@ -30,7 +30,7 @@ from typing import Any
 from . import citations, confirmation, governance, spike_observer
 from .evaluation import (LATER, ClaimDerivation, EvaluationSnapshot, Requirement, active_evidence,
                          audit_acceptance, audit_attributions, audit_passes, audit_verdicts, claim_blockers,
-                         claim_digest, claim_state_cause, confirmation_batch, derive_claims_for_projection,
+                         claim_digest, claim_state_cause, confirmation_batch, deferred_unresolved, derive_claims_for_projection,
                          effective_scope_ids, evidence_digest, identity_pair, independence_then, latest_audit_verdict,
                          pending_decisions, report_requirements)
 from .projection import governance_facts, project_runview
@@ -592,6 +592,7 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     blockers = ({b["claim_id"]: b for b in claim_blockers(snapshot, derivation)}
                 if derivation is not None else {})
     scope = set(effective_scope_ids(snapshot)) if graph is not None else set()
+    unresolved = deferred_unresolved(snapshot, derivation) if derivation is not None else {}
     deciding = set(pending_decisions(snapshot, derivation)) if derivation is not None else set()
     batch = view["confirmation_batch"]
     prompt_error = batch["prompt_error"] if batch is not None else None
@@ -678,7 +679,9 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
         "claims": [_claim_detail(snapshot, c, c["id"] in scope,
                                  reason_message(reasons[blockers[c["id"]]["reason"]],
                                                 blockers[c["id"]]["parameters"], ended=ended)
-                                 if c["id"] in blockers else None, c["id"] in deciding, prompt_error,
+                                 if c["id"] in blockers else
+                                 reason_message(reasons[unresolved[c["id"]][0]], unresolved[c["id"]][1], ended=ended)
+                                 if c["id"] in unresolved else None, c["id"] in deciding, prompt_error,
                                  audit["pending"], set(derivation.freshness_heads), derivation.states[c["id"]])
                    for c in claims],
     })

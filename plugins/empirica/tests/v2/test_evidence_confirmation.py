@@ -258,7 +258,6 @@ class EvidenceConfirmationTests(EvidenceFixture):
         graph. Reasons, parameters and next actions only: what the gate asks and how the run ends are as before."""
         drv, run_id = self._auto_with_a_non_gating_claim()
         row = self._claim_row(drv, run_id)
-        self.assertEqual((row["missing"], row["next"]), (None, []), "nothing recorded yet: nothing to explain")
         before = self.run_view(drv, run_id)
         self.research(drv, run_id, "web", URL, claim="C1")
         after = self.run_view(drv, run_id)
@@ -285,16 +284,69 @@ class EvidenceConfirmationTests(EvidenceFixture):
         self.assertNotIn("C1", str([r["parameters"] for r in blocked["reasons"]]))
         # and the run still ends as it did: a claim outside the gating scope ends it stopped_frozen
         self.research(drv, run_id, "code", WORKSPACE_REF, claim="C0")
-        self.assertEqual(self.stop(drv, run_id)["result"]["run"]["status"], "stopped_frozen")
+        stopped = self.stop(drv, run_id)["result"]["run"]
+        self.assertEqual(stopped["status"], "stopped_frozen")
+        # a run that has ended offers what the ended run offers, on this row as on every other
+        ended = next(o for o in stopped["obligations"]["active"] if o["id"] == "claim:C1")
+        self.assertEqual(ended["next"], next(o for o in stopped["obligations"]["active"] if o["id"] == "claim:C0")["next"])
+        self.assertNotIn("graph.record", ended["next"])
+        self.assertEqual(ended["missing"]["code"], "claim.research_missing")
+
+    def test_B2_a_claim_outside_the_gating_scope_with_no_research_is_explained_in_every_mode(self):
+        """The same failure as the native one (open, no next step, then the run freezes), for a claim nobody researched: the
+        plain ``claim.research_missing`` and the same two ways on, whatever the mode. A claim whose own research counts is
+        not told it has none, and the gate asks nothing new."""
+        graph = canonical_graph(n_claims=2, kind="ordinary")
+        graph["claims"][1]["gating"] = False
+        for label, start in (("auto", self._auto_with_a_non_gating_claim), ("deliberative", lambda: self.start(graph=graph))):
+            with self.subTest(label):
+                drv, run_id = start()
+                before = self.run_view(drv, run_id)
+                row = self._claim_row(drv, run_id)
+                self.assertEqual(row["missing"], {"code": "claim.research_missing", "target_claim_id": "C1",
+                                                  "parameters": {"claim_id": "C1"}})
+                self.assertEqual((row["next"], row["hold"]), (["research.record", "graph.record"], "deferred"))
+                self.assertEqual((before["turn_end_actor"], before["next_actions"]),
+                                 (self.run_view(drv, run_id)["turn_end_actor"], self.run_view(drv, run_id)["next_actions"]))
+                self.assertEqual([r["affected"]["obligation_id"] for r in self.report(drv, run_id)["reasons"]], ["claim:C0"])
+        drv, run_id = self._auto_with_a_non_gating_claim()
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1")
+        self.assertIsNone(self._claim_row(drv, run_id)["missing"], "research that counts is not reported missing")
+        # a claim whose own research counts but whose supporter is open is held by that supporter, not by missing research
+        chain = canonical_graph(n_claims=2, kind="ordinary")
+        chain["claims"][1]["gating"] = False
+        chain["claims"].append({**chain["claims"][1], "id": "C2", "text": "Claim C2 supports C1."})
+        chain["edges"].append({"from": "C1", "to": "C2", "type": "SupportedBy"})
+        drv, run_id = self.start(host_profile_id("codex-cli"), mode="auto", graph=chain, audit_retrieval=[],
+                                 delegation=True, interactive=False)
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1")
+        self.assertIsNone(self._claim_row(drv, run_id, "C1")["missing"])
+        self.assertEqual(self._claim_row(drv, run_id, "C2")["missing"]["code"], "claim.research_missing")
+
+    def test_B2_the_observer_says_why_a_claim_outside_the_gating_scope_is_open(self):
+        """The person reads the same reason the agent's row names, in the observer's own words."""
+        from core import observer as core_observer
+        from application import protocol
+        drv, run_id = self._auto_with_a_non_gating_claim()
+        reasons = protocol.public_contract()["reasons"]
+        def message():
+            _, detail = core_observer.project(self.snapshot(drv, run_id), reasons)
+            return next(c for c in detail["claims"] if c["id"] == "C1")["blocker_message"]
+        self.assertEqual(message(), "Record research for claim C1.")
+        self.research(drv, run_id, "web", URL, claim="C1")
+        self.assertEqual(message(), "Claim C1 has only sources a person must confirm; it needs a source the service or auditor can check, or a spike.")
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1")
+        self.assertIsNone(message())
 
     def test_B2_the_deferred_claim_is_explained_only_where_its_research_is_inert_and_the_graph_can_change(self):
-        # research a human is asked about (deliberative), a record the service verifies, a claim with no research, and a
-        # frozen graph (where revising it is no way on) each leave the row as it was
+        # research a human is asked about (deliberative), a record the service verifies and a frozen graph (where revising
+        # it is no way on) each leave the row as it was
         graph = canonical_graph(n_claims=2, kind="ordinary")
         graph["claims"][1]["gating"] = False
         drv, run_id = self.start(graph=graph)
         self.research(drv, run_id, "web", URL, claim="C1")
         self.assertEqual(self._claim_row(drv, run_id)["next"], [])
+        self.assertEqual(self._claim_row(drv, run_id)["missing"], None)
         drv, run_id = self._auto_with_a_non_gating_claim()
         self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1")
         self.assertIsNone(self._claim_row(drv, run_id)["missing"])

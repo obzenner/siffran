@@ -674,11 +674,13 @@ def _claim_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
     return reason, parameters
 
 
-def deferred_unconfirmed(snapshot: EvaluationSnapshot,
-                         derivation: ClaimDerivation) -> dict[str, tuple[str, dict[str, Any]]]:
-    """The claims outside the gating scope that only inert research supports, with the reason each row names: the claim can
-    never be approved in this run, and an unfrozen graph can still be revised. Presentation only: the gate never asks about
-    a claim outside its scope (``claim_blockers`` covers the scope), so nothing here is a blocker and no decision reads it."""
+def deferred_unresolved(snapshot: EvaluationSnapshot,
+                        derivation: ClaimDerivation) -> dict[str, tuple[str, dict[str, Any]]]:
+    """The claims outside the gating scope that are open for want of research that counts, with the reason each row names:
+    ``claim.research_missing``, in its ``unconfirmed`` case where only inert research supports the claim and in its plain
+    case where none is recorded. Such a claim can never be approved as things stand, an open claim outside the scope ends the
+    run ``stopped_frozen``, and an unfrozen graph can still be revised. Presentation only: the gate never asks about a claim
+    outside its scope (``claim_blockers`` covers the scope), so nothing here is a blocker and no decision reads it."""
     if snapshot.graph is None or snapshot.state.frozen_claim_ids is not None:
         return {}
     found = {}
@@ -687,7 +689,7 @@ def deferred_unconfirmed(snapshot: EvaluationSnapshot,
         if claim_id in derivation.scope or derivation.states[claim_id] != "open":
             continue
         reason, parameters = _claim_reason(snapshot, derivation, claim_id)
-        if reason == "claim.research_missing" and parameters.get("support") == "unconfirmed":
+        if reason == "claim.research_missing":
             found[claim_id] = (reason, parameters)
     return found
 
