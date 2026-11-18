@@ -197,6 +197,10 @@ so stored runs need no migration:
 
 Deliberative runs read as before. To have a person confirm evidence, start the run in deliberative mode.
 
+**Known broken: delegated auto in non-interactive Claude Code** (`claude -p`, the SDK; [#103](https://github.com/obzenner/siffran/issues/103)).
+Claude Code's default permission mode refuses Empirica's own tools there, so the run starts but cannot take a step, and the
+process still exits 0. Run Empirica in an interactive Claude Code session, or in Pi print mode for unattended runs.
+
 ## Qualified hosts
 
 The host versions 7.0.0 was qualified on are recorded here after the operator's native

@@ -11,7 +11,7 @@ Host versions: Pi's range (`>=1.0.0,<2.0.0`) is enforced at `/empirica` start (a
 | Surface | Deliberative | Auto, human present | Auto, delegated (`EMPIRICA_AUTO_DELEGATION=1`) |
 |---|---|---|---|
 | Claude Code, interactive session | Supported | Supported | n/a |
-| Claude Code, non-interactive (`-p`, SDK) | Refused: nobody can approve the configuration | Refused: auto needs the delegation | Supported; nobody can confirm evidence, so URL research stays unconfirmed |
+| Claude Code, non-interactive (`-p`, SDK) | Refused: nobody can approve the configuration | Refused: auto needs the delegation | **Broken** ([#103](https://github.com/obzenner/siffran/issues/103)): Claude Code's default permission mode refuses Empirica's own tools, so the run starts but cannot take a step, and the process exits 0. Use an interactive session |
 | Pi TUI and RPC | Supported | Supported | Supported |
 | Pi print and JSON (`pi -p`, `--mode json`) | Refused: nobody can approve | Refused: auto needs the delegation | Supported; notices go to stderr, the command waits for the run it started, a refusal exits 1; nobody can confirm evidence |
 | Codex | Not available | Not available | Not available |
