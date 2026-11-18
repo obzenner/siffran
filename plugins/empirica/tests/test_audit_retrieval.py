@@ -1,4 +1,5 @@
 """Claude's observed auditor retrieval is read from the plugin-owned definition (ADR-0067, Slice 2)."""
+import re
 import sys
 import tempfile
 import unittest
@@ -59,8 +60,9 @@ class AuditorDefinitionTests(unittest.TestCase):
                               else "it contains the cited text", text)
 
     # The service's quoting rule (``core.citations``), as the auditor's text states it
-    QUOTE_RULE = ("Judge \"contains the cited text\" by the service's rule: whitespace runs, line breaks included, compare as one space, "
-                  "and a citation may join separate excerpts with `\u2026`. A quote that matches under that rule contains the cited text; "
+    QUOTE_RULE = ("Judge \"contains the cited text\" by the service's rule: each whitespace run, line breaks included, compares as one space "
+                  "(a space is still required where the source has whitespace), and a citation may join separate excerpts, in their source "
+                  "order, with `\u2026` or `...`. A quote that matches under that rule contains the cited text; "
                   "do not fail a record for a difference in whitespace or line breaks alone.")
 
     def test_the_shared_rubric_applies_the_services_quoting_rule(self):
@@ -84,6 +86,15 @@ class AuditorDefinitionTests(unittest.TestCase):
         self.assertIsNone(verdict("alpha   beta\t\tgamma", "alpha\r\n\r\nbeta  gamma\n"))  # runs of any whitespace are one space
         self.assertIsNone(verdict("alpha \u2026 gamma", "alpha\nbeta\ngamma\n"))  # excerpts joined with an ellipsis
         self.assertIsNone(verdict("alpha ... gamma", "alpha\nbeta\ngamma\n"))
+        # every ellipsis spelling the auditor's sentence names is one the service verifies (the sentence cannot name a spelling
+        # the service stops accepting, nor leave out one it accepts)
+        sentence = " ".join((self.agents / "empirica-auditor.md").read_text(encoding="utf-8").split())
+        named = re.findall(r"`([^`]+)`", sentence[sentence.index("may join separate excerpts"):][:200])
+        self.assertEqual(named, ["\u2026", "..."])
+        for spelling in named:
+            self.assertIsNone(verdict(f"alpha {spelling} gamma", "alpha\nbeta\ngamma\n"), spelling)
+        from core.citations import _ELLIPSIS
+        self.assertEqual(sorted(_ELLIPSIS.pattern.replace("\\s*", "").strip("()?:").split("|")), sorted(["\u2026", "\\.\\.\\."]))
         # whitespace is the only latitude: words, their order, and a joined excerpt out of order still fail
         self.assertEqual(verdict("alphabeta gamma", "alpha\nbeta\ngamma\n"), "text_not_found")  # no space where there was one
         self.assertEqual(verdict("gamma beta alpha", "alpha\nbeta\ngamma\n"), "text_not_found")
