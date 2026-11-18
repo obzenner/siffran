@@ -1731,8 +1731,10 @@ class AutoTextTests(unittest.TestCase):
 
     UNCONFIRMED = (
         "Claim {claim_id} has only research that a human would have to confirm, and an auto run asks no one, so that research does not count. "
-        "Cite a file in the workspace (the service checks it) or a local file your auditor can read, or run a spike; or call "
-        "report_convergence intent=stop to end with the claim as a residual. To have a human confirm sources, start a deliberative run.")
+        "Cite a file in the workspace (the service checks it) or a local file your auditor can read, or run a spike. "
+        "An unresolved claim, gating or not, keeps the run from converging, and one outside the gating scope ends it stopped_frozen: "
+        "unless the graph is frozen, you can revise the claim graph to remove the claim. "
+        "Or call report_convergence intent=stop to end with the claim as a residual. To have a human confirm sources, start a deliberative run.")
     UNCONFIRMED_OBSERVER = "Claim {claim_id} has only sources a person must confirm; it needs a source the service or auditor can check, or a spike."
     BUDGET_NOTICE = ("Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this "
                      "pause. End honestly with report_convergence intent=stop. A deliberative run may instead "

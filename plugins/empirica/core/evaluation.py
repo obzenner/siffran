@@ -623,48 +623,73 @@ def claim_blockers(snapshot: EvaluationSnapshot,
                   if derivation.states[claim_id] != "approved"]
     if not unresolved:
         return ()
-    claims = {claim["id"]: claim for claim in snapshot.graph["claims"]}
     blockers: list[dict[str, Any]] = []
     for claim_id in unresolved:
         target_id = derivation.blockers.get(claim_id, claim_id)
-        claim = claims[target_id]
-        state = derivation.states[target_id]
-        evidence = active_evidence(snapshot, claim)
-        research = [item for item in evidence if item["kind"] == "research"]
-        spikes = [item for item in evidence if item["kind"] == "spike"]
-        parameters: dict[str, Any] = {}
-        if state == "discarded":
-            reason = "claim.refuted"
-        elif state == "blocked":
-            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
-                snapshot, [], pending_decisions(snapshot, derivation))
-        elif claim_conflicted(snapshot, claim):
-            reason = "evidence.conflict"
-        elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
-            # What the author can do now comes before waiting on a human; the batch is still projected.
-            reason, parameters = spike[0], spike[1]
-        elif awaiting := _awaiting_human(snapshot, research):
-            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
-                snapshot, awaiting, pending_decisions(snapshot, derivation))
-        elif spike:
-            reason, parameters = spike[0], spike[1]
-        else:
-            historical_research = any(
-                item.get("kind") == "research" and item.get("claim_id") == target_id
-                and item.get("claim_digest") != claim_digest(claim)
-                for item in snapshot.history)
-            # Rebinding is the more direct fix, so it ranks before research that no human will confirm.
-            if historical_research:
-                reason = "claim.research_unbound"
-            elif unconfirmed := _uncounted_support(snapshot, research):
-                reason, parameters = "claim.research_missing", {"support": "unconfirmed", "record_ids": unconfirmed}
-            else:
-                reason = "claim.research_missing"
-        if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
-            parameters = {**parameters, "claim_id": target_id}
+        reason, parameters = _claim_reason(snapshot, derivation, target_id)
         blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
                          "reason": reason, "parameters": parameters})
     return tuple(blockers)
+
+
+def _claim_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
+                  target_id: str) -> tuple[str, dict[str, Any]]:
+    """The reason a claim is not approved and its parameters: the one classification of a claim's own blocker, read by the
+    gate (``claim_blockers``, over the scope) and by the view's rows for a claim outside it (``deferred_unconfirmed``)."""
+    claim = next(c for c in snapshot.graph["claims"] if c["id"] == target_id)
+    state = derivation.states[target_id]
+    evidence = active_evidence(snapshot, claim)
+    research = [item for item in evidence if item["kind"] == "research"]
+    spikes = [item for item in evidence if item["kind"] == "spike"]
+    parameters: dict[str, Any] = {}
+    if state == "discarded":
+        reason = "claim.refuted"
+    elif state == "blocked":
+        reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+            snapshot, [], pending_decisions(snapshot, derivation))
+    elif claim_conflicted(snapshot, claim):
+        reason = "evidence.conflict"
+    elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
+        # What the author can do now comes before waiting on a human; the batch is still projected.
+        reason, parameters = spike[0], spike[1]
+    elif awaiting := _awaiting_human(snapshot, research):
+        reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+            snapshot, awaiting, pending_decisions(snapshot, derivation))
+    elif spike:
+        reason, parameters = spike[0], spike[1]
+    else:
+        historical_research = any(
+            item.get("kind") == "research" and item.get("claim_id") == target_id
+            and item.get("claim_digest") != claim_digest(claim)
+            for item in snapshot.history)
+        # Rebinding is the more direct fix, so it ranks before research that no human will confirm.
+        if historical_research:
+            reason = "claim.research_unbound"
+        elif unconfirmed := _uncounted_support(snapshot, research):
+            reason, parameters = "claim.research_missing", {"support": "unconfirmed", "record_ids": unconfirmed}
+        else:
+            reason = "claim.research_missing"
+    if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
+        parameters = {**parameters, "claim_id": target_id}
+    return reason, parameters
+
+
+def deferred_unconfirmed(snapshot: EvaluationSnapshot,
+                         derivation: ClaimDerivation) -> dict[str, tuple[str, dict[str, Any]]]:
+    """The claims outside the gating scope that only inert research supports, with the reason each row names: the claim can
+    never be approved in this run, and an unfrozen graph can still be revised. Presentation only: the gate never asks about
+    a claim outside its scope (``claim_blockers`` covers the scope), so nothing here is a blocker and no decision reads it."""
+    if snapshot.graph is None or snapshot.state.frozen_claim_ids is not None:
+        return {}
+    found = {}
+    for claim in snapshot.graph["claims"]:
+        claim_id = claim["id"]
+        if claim_id in derivation.scope or derivation.states[claim_id] != "open":
+            continue
+        reason, parameters = _claim_reason(snapshot, derivation, claim_id)
+        if reason == "claim.research_missing" and parameters.get("support") == "unconfirmed":
+            found[claim_id] = (reason, parameters)
+    return found
 
 
 def _derive_claims(snapshot: EvaluationSnapshot,

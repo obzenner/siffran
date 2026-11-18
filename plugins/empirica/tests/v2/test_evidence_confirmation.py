@@ -243,6 +243,67 @@ class EvidenceConfirmationTests(EvidenceFixture):
         residual = next(r for r in stopped["run"]["residuals"] if r["code"] == "claim.research_missing")
         self.assertNotIn("human.confirm_evidence", residual["next_actions"])
 
+    def _auto_with_a_non_gating_claim(self):
+        graph = canonical_graph(n_claims=2, kind="ordinary")
+        graph["claims"][1]["gating"] = False  # C1 is deferred scope: outside what the run must approve
+        return self.start(host_profile_id("codex-cli"), mode="auto", graph=graph, audit_retrieval=[],
+                          delegation=True, interactive=False)
+
+    def _claim_row(self, drv, run_id, claim="C1") -> dict:
+        return next(o for o in self.run_view(drv, run_id)["obligations"]["active"] if o["id"] == "claim:" + claim)
+
+    def test_B2_in_auto_a_claim_outside_the_gating_scope_that_only_inert_research_supports_names_both_ways_on(self):
+        """The claim can never be approved in this run, so its row says why (``claim.research_missing``, ``support:
+        unconfirmed``, as a gating claim's does) and names both ways on: record research that counts, or revise the claim
+        graph. Reasons, parameters and next actions only: what the gate asks and how the run ends are as before."""
+        drv, run_id = self._auto_with_a_non_gating_claim()
+        row = self._claim_row(drv, run_id)
+        self.assertEqual((row["missing"], row["next"]), (None, []), "nothing recorded yet: nothing to explain")
+        before = self.run_view(drv, run_id)
+        self.research(drv, run_id, "web", URL, claim="C1")
+        after = self.run_view(drv, run_id)
+        # who acts and what the run offers next (what both hosts' choosers read) do not move with the explanation
+        self.assertEqual((after["turn_end_actor"], after["next_actions"]), (before["turn_end_actor"], before["next_actions"]))
+        self.assertEqual(after["turn_end_actor"], "author")
+        row = self._claim_row(drv, run_id)
+        self.assertEqual((row["status"], row["hold"]), ("residual", "deferred"))
+        self.assertEqual(row["missing"]["code"], "claim.research_missing")
+        self.assertEqual(row["missing"]["target_claim_id"], "C1")
+        self.assertEqual({k: v for k, v in row["missing"]["parameters"].items() if k != "record_ids"},
+                         {"support": "unconfirmed", "claim_id": "C1"})
+        self.assertEqual(len(row["missing"]["parameters"]["record_ids"]), 1)
+        self.assertEqual(row["next"], ["research.record", "graph.record"])
+        # the author sees the reason and both next steps on the claim's own row
+        from adapters.author_view import render_author_view
+        text = render_author_view(self.dispatch(drv, get_run(run_id=run_id))["result"])
+        lines = text[text.index("  claim:C1"):].splitlines()
+        self.assertEqual([line.strip() for line in lines[1:3]],
+                         ["missing: claim.research_missing", "next: empirica_observe kind=research; empirica_observe kind=graph"])
+        # what the gate asks is unchanged: the gating claim's own need, never the deferred claim's
+        blocked = self.report(drv, run_id)
+        self.assertEqual([r["affected"]["obligation_id"] for r in blocked["reasons"]], ["claim:C0"])
+        self.assertNotIn("C1", str([r["parameters"] for r in blocked["reasons"]]))
+        # and the run still ends as it did: a claim outside the gating scope ends it stopped_frozen
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C0")
+        self.assertEqual(self.stop(drv, run_id)["result"]["run"]["status"], "stopped_frozen")
+
+    def test_B2_the_deferred_claim_is_explained_only_where_its_research_is_inert_and_the_graph_can_change(self):
+        # research a human is asked about (deliberative), a record the service verifies, a claim with no research, and a
+        # frozen graph (where revising it is no way on) each leave the row as it was
+        graph = canonical_graph(n_claims=2, kind="ordinary")
+        graph["claims"][1]["gating"] = False
+        drv, run_id = self.start(graph=graph)
+        self.research(drv, run_id, "web", URL, claim="C1")
+        self.assertEqual(self._claim_row(drv, run_id)["next"], [])
+        drv, run_id = self._auto_with_a_non_gating_claim()
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C1")
+        self.assertIsNone(self._claim_row(drv, run_id)["missing"])
+        drv, run_id = self._auto_with_a_non_gating_claim()
+        self.research(drv, run_id, "web", URL, claim="C1")
+        self.research(drv, run_id, "code", WORKSPACE_REF, claim="C0")
+        self.require_frozen_scope(drv, run_id)
+        self.assertEqual(self._claim_row(drv, run_id)["next"], [])
+
     # ---- the gate -------------------------------------------------------------------------
 
     def test_the_research_response_itself_names_the_waiting_record(self):
