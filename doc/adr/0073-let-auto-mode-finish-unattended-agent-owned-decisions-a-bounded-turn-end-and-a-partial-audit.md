@@ -140,6 +140,14 @@ The limits are unchanged: 3 dialogs per plan revision,
 auto, and `recovery_exclusions` is keyed by the run's mode (`deliberative`, `auto_interactive`, `auto_delegated`). A host does
 not settle the turn on an exhausted budget when the core offers `budget.raise` to an auto run: the agent is the one to propose it. A raise that cannot be asked, because no human can be reached or the run has no interaction left to ask with, leaves a proposal within the approved ceilings, which is automatic and spends no interaction, so the view offers that proposal and the stop (`governance.raise_unavailable`). Only interactive auto has such a proposal: every deliberative proposal goes to the human, so a deliberative run with nobody to ask is offered the stop alone.
 
+The raise is legible. The `budget.exhausted` reply words the recovery its run is offered, by the reason's `recovery` parameter
+(`raise_dialog`: the human approves the raise in a dialog; `raise_human`: the human decides it; `fresh_run`: no `budget.raise`
+is offered, so the stop or a fresh run). The core chooses the case from the recovery actions the run is left with after its mode's
+exclusions (`core.governance.budget_recovery`); no decision reads it. The author view marks the `budget.raise` next action with
+the contract's `budget_raise_note`, because it shares the `configure_run` call with every other configuration. The raise dialog
+says it raises the approved ceilings and shows each raised ceiling as `N (was M)`, M being the run view's `governance.budgets`,
+read only when `governance.raises` is true; the bound document and its digest are unchanged.
+
 Two deliberate exceptions, both stated rather than hidden: a refuting web source still discards a claim in auto, with no
 human to confirm or reject it, and a stored 7.0.x human `confirm` or `reject` still counts in every mode.
 

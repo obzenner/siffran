@@ -221,7 +221,8 @@
       "generic_spikes": "generic spike evidence (read-only)",
       "generic_spike_request": "immutable request",
       "generic_spike_result": "admitted result",
-      "generic_spike_no_result": "no result evidence admitted"
+      "generic_spike_no_result": "no result evidence admitted",
+      "budget_raise_note": "(a raise above the approved ceilings: the human decides)"
     }
   },
   "host_profiles": {

@@ -237,6 +237,17 @@ def raises(governance: Mapping, budgets: Mapping) -> bool:
                 and any(governance["proposal"]["budgets"][ceiling] > budgets[ceiling] for ceiling in CEILINGS))
 
 
+def budget_recovery(governance: Mapping, actions) -> str:
+    """The case of a ``budget.exhausted`` reason's text, from the recovery its run is offered (``actions``, after the mode's
+    exclusions): ``raise_dialog`` where a raise is offered to an interactive auto run (its human approves it in a dialog),
+    ``raise_human`` where one is offered to a deliberative run (its human decides it), ``fresh_run`` where ``budget.raise`` is
+    not offered (a delegated run has nobody to ask). The contract's ``budget.exhausted`` words each case; nothing else words
+    it. Presentation only: no decision reads it."""
+    if "budget.raise" not in actions:
+        return "fresh_run"
+    return "raise_human" if governance["control_mode"] == "deliberative" else "raise_dialog"
+
+
 def exclusion_key(governance: Mapping) -> str:
     """The key of the contract's ``recovery_exclusions`` that applies to the run: ``deliberative``, ``auto_interactive``
     (its human can approve a raise) or ``auto_delegated`` (nobody can be asked: the honest stop is the way on)."""

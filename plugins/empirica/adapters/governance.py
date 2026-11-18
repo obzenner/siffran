@@ -114,11 +114,20 @@ def _line(text: str, limit: int = 72, *, closing: str = "") -> str:
     return text[:limit - len(closing) - 1] + "…" + closing
 
 
-def _budget_property(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Map one budget row to an editable integer property."""
+def _raised(row: Mapping[str, Any], approved: Mapping[str, Any] | None) -> int | None:
+    """The ceiling the run approved, for a row whose proposed value raises it; else ``None``. ``approved`` is the run view's
+    own ``governance.budgets`` of a run that holds a first approval and is asked about a raise, and ``None`` otherwise."""
+    if approved is None or row["key"] not in approved or row["value"] <= approved[row["key"]]:
+        return None
+    return approved[row["key"]]
+
+
+def _budget_property(row: Mapping[str, Any], approved: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Map one budget row to an editable integer property; a raised ceiling's title carries the approved value."""
     description = f"used {row['used']} · allowed {row['minimum']}–{row['maximum']}"
     with_help = description + " · " + row["help"]
-    return {"type": "integer", "title": row["label"],
+    was = _raised(row, approved)
+    return {"type": "integer", "title": row["label"] + ("" if was is None else f" (was {was})"),
             "description": with_help if len(with_help) <= 60 else description,
             "minimum": row["minimum"], "maximum": row["maximum"], "default": row["value"]}
 
@@ -170,7 +179,8 @@ def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
                            break_on_hyphens=False),
             short, f"File: {document['path']}")
 
-def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float, *,
+                approved: Mapping[str, Any] | None = None) -> tuple[str, dict]:
     """Map a validated dialog and its written document to Claude's editable elicitation form.
 
     The form keeps exactly what the human judges (ADR-0072 "What the forms keep"): the numbers
@@ -178,21 +188,32 @@ def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout:
     under the contract-owned unverified label. PR 19 (finding N7 of the Lima qualification of
     ``ac401739``): Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines, so
     the heading, the document's ``Details:`` and the goal open the form — never a blank line —
-    while the rationale pointer, the document's remaining lines and the legend stay below, whole."""
+    while the rationale pointer, the document's remaining lines and the legend stay below, whole.
+
+    ``approved`` is given when the human is asked about a raise (the run view's ``governance.raises``): the ceilings the run
+    approved. The form then says it raises them, and the line the human judges it by is the budgets with each raised ceiling
+    as ``N (was M)``, as the confirm form shows a prior; the goal, which a raise does not change, stays below the fold."""
     reviews = dialog["reviews_left"]["proposal"]
     count = f"{reviews} {'review' if reviews == 1 else 'reviews'} left"
     details, *document_tail = _document_lines(document)
+    facts = f"(epoch {dialog['epoch']} · {count} · {_duration(timeout)})"
+    goal = _line(f'Goal: "{dialog["goal"]}"', closing='"')
+    if approved is None:
+        opening = (_line(f"Empirica · approve run configuration {facts}"), details, goal)
+        below: tuple[str, ...] = ()
+    else:
+        parts = [_raise_part(row, approved) for row in dialog["budgets"]]
+        opening = (_line(f"Empirica · raise approved ceilings {facts}"), _line(" · ".join(parts)), details)
+        below = (goal,)
     message = "\n".join((
-        *(_visible(
-            _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
-            details,
-            _line(f'Goal: "{dialog["goal"]}"', closing='"'))),
+        *_visible(*opening),
+        *below,
         _line(f"{dialog['rationale_label']} and full detail: in the document"),
         *document_tail,
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
-    properties = {row["key"]: _budget_property(row) for row in dialog["budgets"]}
+    properties = {row["key"]: _budget_property(row, approved) for row in dialog["budgets"]}
     return message, {"type": "object", "properties": properties, "required": []}
 
 
@@ -209,6 +230,12 @@ def _part(row: Mapping[str, Any], document: Mapping[str, Any]) -> str:
     old = priors[row["key"]]["was"] if row["key"] in priors else row["value"]
     suffix = f" (was {show(old)})" if old != row["value"] else ""
     return f"{row['short']} {value}{suffix}"
+
+def _raise_part(row: Mapping[str, Any], approved: Mapping[str, Any]) -> str:
+    """One compact value of a raise form: the proposed ceiling, with the approved one when it raises it (``_part``'s form)."""
+    was = _raised(row, approved)
+    return f"{row['short']} {row['value']}" + ("" if was is None else f" (was {was})")
+
 
 def confirm_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map an amended dialog and its written document to a buttons-only confirmation.
@@ -399,8 +426,10 @@ class HostGovernance:
             # stays only for the re-entry guard (the stale proposal re-check below and the
             # recursion), no longer for the form choice.
             confirm = document["question"] == core_hitl.CONFIRM_AMENDMENT
+            # a raise is shown as one, beside the ceilings the run approved (the view's own, never recomputed here)
+            approved = g.get("budgets") if g.get("raises") is True else None
             message, schema = (confirm_form(dialog, document, timeout) if confirm
-                               else review_form(dialog, document, timeout))
+                               else review_form(dialog, document, timeout, approved=approved))
             resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirm)
             if isinstance(resolved, Dismiss):
                 return dismiss()

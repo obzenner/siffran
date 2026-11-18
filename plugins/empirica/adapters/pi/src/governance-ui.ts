@@ -16,6 +16,8 @@ interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   first_approval: boolean;
   proposal: Proposal; prompt_error: string | null;
+  /** The ceilings the run has approved (the view's own); read only to show a raise beside them. */
+  budgets?: Record<string, number>;
   /** Whether the configuration waits on its human: the core's answer (`core.governance.human_wait`). */
   human_wait: boolean;
   /** Whether the standing proposal asks for more than the run approved: the core's answer (`core.governance.raises`),
@@ -160,7 +162,7 @@ interface DialogComponent {
 /** Run one native custom component with shared deadline and abort handling. */
 async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: number,
                           confirmation: boolean, signal?: AbortSignal,
-                          document?: BoundDocument): Promise<DialogDecision> {
+                          document?: BoundDocument, raise?: Record<string, number>): Promise<DialogDecision> {
   if (!ctx.ui.custom) return { type: "dismiss" };
   // Pi's RPC mode reports hasUI=true yet its `custom()` is `async () => undefined` (no component
   // can be shown; 1.0.0 and 1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
@@ -188,7 +190,7 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
     if (signal?.aborted) abort(); // an abort that landed before the listener existed
     const component: DialogComponent = {
       render: width => renderLines(dialog, state, width, theme,
-        { confirmation, document, timeoutMs: Math.max(0, deadline - Date.now()) }),
+        { confirmation, document, raise, timeoutMs: Math.max(0, deadline - Date.now()) }),
       invalidate: () => {},
       handleInput: data => {
         const outcome = reduce(state, data, dialog, confirmation);
@@ -312,7 +314,9 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   // review view — never the adapter's own recursion flag. The flag survives only as the
   // re-entry guard (the stale-proposal check above and the recursion below).
   const confirm = bound !== undefined && bound.question === "confirm_amendment";
-  const selected = await showDialog(ctx, dialog, deadline, confirm, signal, bound);
+  // a raise is shown as one, beside the ceilings the run approved (the view's own, never recomputed here)
+  const raise = !confirm && g.raises === true ? g.budgets : undefined;
+  const selected = await showDialog(ctx, dialog, deadline, confirm, signal, bound, raise);
   if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return dismiss();
   const action = selected.type === "reject" ? "reject" : "approve";
   const configuration = selected.type === "approve" ? selected.configuration

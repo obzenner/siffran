@@ -26,7 +26,9 @@ refuse; the audit findings stay in the run view's Audit section. The host then s
 turn end, and the run stays active, for a deliberative run, whose raise is the human's to decide, or a delegated auto run, which is offered none. Stop honestly
 (`report_convergence` with `intent: "stop"`) and accept the typed non-converged terminal result.
 When the core offers `budget.raise` (a deliberative or an interactive auto run), propose a raise with
-`configure_run` for the human to approve. A delegated auto run is never offered `budget.raise`: it needs a fresh run
+`configure_run` for the human to approve: the next action `empirica_observe kind=configure_run` marked as a raise is that
+call with higher ceilings, and the run keeps its progress, so no new run is needed. The human sees a dialog that names each
+raised ceiling beside the approved one. A delegated auto run is never offered `budget.raise`: it needs a fresh run
 with a larger up-front approved size. Never remove a claim, forge evidence, or bypass audit to fit the budget.
 
 ## Stall handling

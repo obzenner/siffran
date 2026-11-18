@@ -1662,7 +1662,7 @@ class GovernanceServiceTests(unittest.TestCase):
     def assert_exhausted_audit(self, result):
         self.assertEqual(result["type"], "Block")
         self.assertEqual([(r["code"], r["parameters"]) for r in result["reasons"]],
-                         [("budget.exhausted", {"resource": "audit_spawn"})])
+                         [("budget.exhausted", {"resource": "audit_spawn", "recovery": "raise_human"})])
         audit_row = next(row for row in result["run"]["obligations"]["active"]
                          if row["id"] == "obligation.audit")
         self.assertEqual(audit_row["missing"]["code"], "budget.exhausted")
@@ -2817,6 +2817,47 @@ class GovernanceServiceTests(unittest.TestCase):
                 self.assertEqual(reason["code"], "budget.exhausted")
                 self.assertEqual("budget.raise" in reason["next_actions"], offered)
 
+    def test_B1_an_exhausted_budget_says_how_to_go_on_in_the_words_of_the_recovery_the_run_is_offered(self):
+        """The reply names the recovery the core offers this run, never a bare "budget exhausted": a raise by configure_run that
+        the human approves in a dialog (interactive auto), one the human decides (deliberative), or a stop or a fresh run
+        (delegated, where ``budget.raise`` is not offered). The case is the reason's own ``recovery`` parameter."""
+        def exhaust(label, invocation, approval_kind):
+            self.runs, self.artifacts = Runs(), Artifacts()
+            self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, PROFILE, {}, None)
+            budgets = {**SIZED_BUDGETS, "max_audit_spawns": 0}
+            if invocation is None:  # deliberative: the run setUp starts, on the new service
+                self.run_id = self.request({"type": "StartRun", "control_mode": "deliberative", "goal": "governed task",
+                                            "invocation": dict(TEST_INVOCATION),
+                                            "selector": {"project": "p", "session": "s"}})["run"]["id"]
+                self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")
+                self.assertEqual(self.action("graph", payload=copy.deepcopy(GRAPH))["type"], "Allow")
+                self.assertEqual(self.action(**sized_configure_run(budgets=budgets, rationale=SIZED_RATIONALE))["type"], "Allow")
+                self.assertEqual(self.service.trusted_governance_context(
+                    run_id=self.run_id, payload=copy.deepcopy(CONTEXT))["result"]["type"], "Allow")
+            else:
+                self._prepare_auto(invocation, budgets=budgets)
+            self.assertEqual(self.admit(self.decision(approval_kind=approval_kind))["type"], "Allow")
+            self.assertEqual(self.action("investigate")["type"], "Allow")
+            self.assertEqual(self.action("research", claim_id="C0", source_kind="code", result="supports",
+                                         payload={"source_ref": "supplied", "citation": "observed"})["type"], "Allow")
+            return self.action("child_reserve", purpose="audit", resource_class="audit",
+                               role_profile="empirica:empirica-auditor", execution="foreground")["reasons"][0]
+        cases = (("interactive auto", self.INTERACTIVE, "host_ui", "raise_dialog",
+                  ("configure_run", "the human approves the raise in a dialog", "report_convergence intent=stop")),
+                 ("deliberative", None, "host_ui", "raise_human",
+                  ("configure_run", "the human decides the raise", "report_convergence intent=stop")),
+                 ("delegated auto", DELEGATED_INVOCATION, "auto", "fresh_run",
+                  ("report_convergence intent=stop", "start a fresh run")))
+        for label, invocation, approval_kind, recovery, phrases in cases:
+            with self.subTest(label):
+                reason = exhaust(label, invocation, approval_kind)
+                self.assertEqual(reason["parameters"], {"resource": "audit_spawn", "recovery": recovery})
+                self.assertTrue(reason["message"].startswith("audit_spawn budget exhausted. "), reason["message"])
+                for phrase in phrases:
+                    self.assertIn(phrase, reason["message"])
+                self.assertEqual("configure_run" in reason["message"], "budget.raise" in reason["next_actions"])
+                self.assertNotIn("{", reason["message"])
+
     def test_A7_an_auto_run_has_no_exhausted_budget_before_its_first_approval(self):
         """Nothing is spent before investigation, so a turn end of an auto run never meets ``budget.exhausted`` while its
         configuration waits: the turn-end table's budget cells for that mode are ``unreachable``."""
@@ -3116,7 +3157,7 @@ class GovernanceServiceTests(unittest.TestCase):
         # The audit row names the same exhaustion as the reason, so both offer the same recovery.
         self.assertEqual(audit_row["missing"]["code"], "budget.exhausted")
         self.assertEqual(audit_row["next"], denied["reasons"][0]["next_actions"])
-        self.assertEqual(denied["reasons"][0]["parameters"], {"resource": "audit_spawn"})
+        self.assertEqual(denied["reasons"][0]["parameters"], {"resource": "audit_spawn", "recovery": "raise_human"})
 
     def test_human_submission_cannot_inject_or_tamper_rationale(self):
         self.prepare()

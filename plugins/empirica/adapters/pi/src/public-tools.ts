@@ -73,6 +73,7 @@ export type AuthorViewLabel =
   | "pending_human"
   | "pending_audit"
   | "human_note"
+  | "budget_raise_note"
   | "decision_approve"
   | "decision_reject"
   | "human_answer";

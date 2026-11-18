@@ -461,6 +461,19 @@ class ContentCompletenessTests(unittest.TestCase):
                     shown += [launch, "the auditor launch under"]
                 self.assertTrue(any(item in text for item in shown), f"{name}: {action}")
 
+    def test_B1_a_budget_raise_reads_as_a_raise_and_no_other_surface_does(self):
+        """``budget.raise`` and ``governance.propose`` share one tool call; the view names which one this is, with the
+        contract-owned note, so a reader that follows ``next:`` does not take the raise for any configuration call or conclude
+        that it needs a new run."""
+        note = author_view._LABELS["budget_raise_note"]
+        plain = "empirica_observe kind=configure_run"
+        self.assertEqual(author_view.render_surface("budget.raise"), f"{plain} {note}")
+        self.assertEqual(author_view.render_surface("governance.propose"), plain)
+        self.assertIn("raise", note)
+        self.assertIn("approved ceilings", note)
+        noted = [action for action in next_action_surfaces() if note in author_view.render_surface(action)]
+        self.assertEqual(noted, ["budget.raise"])
+
     def test_every_open_obligation_id_appears(self):
         for name in RUNVIEW_FIXTURES:
             result = _load_fixture(name)

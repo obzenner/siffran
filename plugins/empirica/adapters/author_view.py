@@ -26,6 +26,7 @@ _SURFACES = next_action_surfaces()
 _DEFS = response_schema_defs()
 _DIGEST_DEFS = frozenset({"digest256", "nullableDigest256"})
 _CLAIM_ID_DEF = "claimId"
+_RAISE_ACTION = "budget.raise"
 _NULL = {"type": "null"}
 
 
@@ -140,7 +141,9 @@ def render_surface(action_id: str, launch: str | None = None, audit: bool = Fals
     surface = _SURFACES[action_id]
     tool = surface.get("tool")
     if tool == "empirica_observe":
-        return Trusted(f"empirica_observe kind={surface['action']}")
+        # a raise is one call among the ones a configuration takes: the contract's note says which this is
+        note = f" {_LABELS['budget_raise_note']}" if action_id == _RAISE_ACTION else ""
+        return Trusted(f"empirica_observe kind={surface['action']}{note}")
     if tool == "empirica_read":
         return Trusted(f"empirica_read {surface['operation']}")
     if tool == "report_convergence":

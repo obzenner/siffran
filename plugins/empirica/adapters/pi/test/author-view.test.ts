@@ -49,6 +49,20 @@ test("author-view loads every next-action surface from the public contract", () 
   }
 });
 
+test("B1: a budget raise reads as a raise, with the contract-owned note, and no other surface does", () => {
+  const contractPath = path.resolve(import.meta.dirname, "..", "..", "..", "..", "..",
+    "contracts", "empirica", "v2", "public-contract.json");
+  const contract = JSON.parse(readFileSync(contractPath, "utf8"));
+  const note: string = contract.author_view.labels.budget_raise_note;
+  assert.ok(note.includes("raise") && note.includes("approved ceilings"));
+  const golden = JSON.parse(readStoredText(path.join(GOLDEN_DIR, "all-next-actions.json"), "utf8"));
+  const lines: string[] = golden.text.split("\n");
+  const noted = lines.filter(line => line.includes(note));
+  assert.ok(noted.length > 0, "the raise surface carries the note");
+  assert.ok(noted.every(line => line.includes(`empirica_observe kind=configure_run ${note}`)));
+  assert.equal(golden.text.split(note).length - 1, noted.length, "the note rides only the raise");
+});
+
 test("an owed audit shows the host profile's launch byte for byte; a host with none keeps the protocol surface", () => {
   const profiles = JSON.parse(readFileSync(path.join(import.meta.dirname, "..", "..", "..", "vendor", "contracts",
     "empirica", "v2", "host-profiles.json"), "utf8")).profiles as Json[];

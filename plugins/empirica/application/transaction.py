@@ -1018,6 +1018,11 @@ class Coordinator:
         reason["next_actions"] = recovery_actions(
             snapshot.contract.recovery_exclusions[governance.exclusion_key(snapshot.state.governance)],
             confirmation_actions(code, parameters, reason["next_actions"], run["confirmation_batch"]))
+        if code == "budget.exhausted" and snapshot.state.status == "active":
+            # the reply names the recovery this run is offered, not a bare exhaustion (the case chooses the contract's text)
+            reason["parameters"] = {**reason["parameters"],
+                                    "recovery": governance.budget_recovery(snapshot.state.governance, reason["next_actions"])}
+            reason["message"] = confirmation.reason_text(_proto.public_contract()["reasons"][code], reason["parameters"])
         result = {"type": "Block", "run": run, "reasons": [reason]}
         if presentation:
             result["presentation"] = project_presentation(snapshot)

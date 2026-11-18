@@ -122,6 +122,13 @@
             "audit_spawn",
             "pass"
           ]
+        },
+        "recovery": {
+          "enum": [
+            "raise_dialog",
+            "raise_human",
+            "fresh_run"
+          ]
         }
       }
     },

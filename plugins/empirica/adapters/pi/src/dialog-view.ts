@@ -130,12 +130,18 @@ export interface BoundDocument {
   url: string | null;
   run12: string | null;
 }
-export interface RenderOptions { confirmation: boolean; timeoutMs: number; document?: BoundDocument }
+/** `raise` is given when the human is asked about a raise (the run view's `governance.raises`): the ceilings the run
+ * approved. The screen then says it raises them and shows each raised ceiling as `N (was M)`, as the confirm screen shows
+ * a prior; the approved values are the view's own, never recomputed here. */
+export interface RenderOptions {
+  confirmation: boolean; timeoutMs: number; document?: BoundDocument; raise?: Record<string, number>;
+}
 
 /** Title on the left and run facts on the right; the facts move to their own line if narrow. */
 function header(dialog: Dialog, options: RenderOptions, width: number, theme: DialogTheme): string[] {
   const title = options.confirmation
-    ? "Empirica · confirm edited configuration" : "Empirica · approve run configuration";
+    ? "Empirica · confirm edited configuration"
+    : options.raise ? "Empirica · raise approved ceilings" : "Empirica · approve run configuration";
   const reviews = dialog.reviews_left.proposal;
   const facts = [`epoch ${dialog.epoch}`,
     ...(options.confirmation ? [] : [`${reviews} ${reviews === 1 ? "review" : "reviews"} left`]),
@@ -273,10 +279,12 @@ function detailText(control: Control): string {
 function controlLines(dialog: Dialog, state: DialogState, options: RenderOptions,
                       width: number, theme: DialogTheme): string[] {
   const controls: Control[] = dialog.budgets;
-  const priors = options.confirmation ? options.document?.priors ?? null : null;
+  const priors = options.confirmation ? options.document?.priors ?? null : options.raise ?? null;
   const shown = controls.map(control => {
     const value = state.values[control.key], prior = priors ? priors[control.key] : undefined;
-    const was = prior !== undefined && prior !== value ? ` (was ${valueText(prior)})` : "";
+    // a raise names the approved value only where the proposal is above it (Python `_raised`)
+    const differs = options.raise ? Number(value) > (prior as number) : prior !== value;
+    const was = prior !== undefined && differs ? ` (was ${valueText(prior)})` : "";
     return valueText(value) + was;
   });
   const labelWidth = Math.max(...controls.map(control => visibleWidth(control.label))) + 2;

@@ -547,6 +547,49 @@ test("the confirm screen takes its (was ...) priors from the document, not a hos
   assert.ok(!noPriors.some(line => line.includes("(was")),
     "no prior in the document means no invented prior on screen");
 });
+test("B1: a raise screen says it raises the approved ceilings and shows each raised one as N (was M)", () => {
+  const dialog = fixture.dialogs.review;
+  const state = initialState(dialog);
+  state.values.max_passes = 10;
+  const approved = { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 };
+  for (const width of [80, 50]) {
+    const lines = renderLines(dialog, state, width, theme,
+      { confirmation: false, timeoutMs: 120_000, document: DOCUMENT, raise: approved });
+    assert.ok(lines.every(line => visibleWidth(line) <= width));
+    assert.ok(lines[0]!.startsWith("Empirica · raise approved ceilings"), lines[0]);
+    assert.ok(!lines.join("\n").includes("approve run configuration"));
+    assert.ok(lines.some(line => line.includes("10 (was 8)")), "the raised ceiling shows the approved value");
+    assert.equal(lines.filter(line => line.includes("(was")).length, 1, "a ceiling that was not raised shows no prior");
+  }
+  // a ceiling edited below the approved one is no raise: it shows no prior, as in the Claude form
+  state.values.max_spawns = 0;
+  const lowered = renderLines(dialog, state, 80, theme,
+    { confirmation: false, timeoutMs: 120_000, document: DOCUMENT, raise: approved });
+  assert.equal(lowered.filter(line => line.includes("(was")).length, 1);
+  assert.ok(!lowered.some(line => line.includes("0 (was 1)")));
+  // the first approval, and a proposal that raises nothing, are exactly as before
+  const plain = renderLines(dialog, initialState(dialog), 80, theme,
+    { confirmation: false, timeoutMs: 120_000, document: DOCUMENT });
+  assert.ok(plain[0]!.startsWith("Empirica · approve run configuration"));
+  assert.ok(!plain.some(line => line.includes("(was")));
+});
+
+test("B1: the dialog of a raise in interactive auto is the raise screen, built from the run's approved ceilings", async () => {
+  const h = harness([[ESC]]);
+  h.g.control_mode = "auto"; h.g.first_approval = true; h.g.raises = true;
+  (h.g as Record<string, unknown>).budgets = { max_passes: 7, max_spawns: 1, max_audit_spawns: 2 };
+  await h.invoke();
+  const shown = h.renders[0]!;
+  assert.ok(shown[0]!.startsWith("Empirica · raise approved ceilings"), shown[0]);
+  assert.ok(shown.some(line => line.includes("8 (was 7)")), shown.join("\n"));
+  // a first approval shows the plain screen even when the view carries budgets
+  const first = harness([[ESC]]);
+  (first.g as Record<string, unknown>).budgets = { max_passes: 7, max_spawns: 1, max_audit_spawns: 2 };
+  await first.invoke();
+  assert.ok(first.renders[0]![0]!.startsWith("Empirica · approve run configuration"));
+  assert.ok(!first.renders[0]!.some(line => line.includes("(was")));
+});
+
 // --- PR 09: write-first binding through the TypeScript mediation (ADR-0072) ---
 
 test("every governance decision payload carries the bound document's digest", async () => {

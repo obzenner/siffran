@@ -966,6 +966,7 @@
             "pending_human",
             "pending_audit",
             "human_note",
+            "budget_raise_note",
             "decision_approve",
             "decision_reject",
             "human_answer",
@@ -1219,6 +1220,10 @@
               "minLength": 1
             },
             "human_note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budget_raise_note": {
               "type": "string",
               "minLength": 1
             },

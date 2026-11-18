@@ -183,6 +183,42 @@ class GovernanceHostTests(unittest.TestCase):
                     if not line.startswith(("Details: http://", "File: ")):
                         self.assertLessEqual(len(line), 72, line)
 
+    def test_B1_a_raise_form_says_it_raises_the_approved_ceilings_and_shows_each_as_was(self):
+        """A raise is not a first approval: the heading says it raises the approved ceilings, and the line the human judges it by
+        shows each raised ceiling as ``N (was M)``, M being the value the run approved (the way the edited-configuration form
+        shows a prior). Everything else of the review form, the document binding included, is as before."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        dialog = copy.deepcopy(self.governance_dialog())
+        dialog["epoch"] = 2
+        dialog["budgets"][0]["value"] = 10  # passes: proposed above what was approved
+        approved = {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}
+        plain, _ = review_form(dialog, TEST_DOCUMENT, 900)
+        message, schema = review_form(dialog, TEST_DOCUMENT, 900, approved=approved)
+        lines = message.splitlines()
+        window = lines[:CLAUDE_VISIBLE_LINES]
+        self.assertNotIn("", window)
+        self.assertTrue(window[0].startswith("Empirica · raise approved ceilings (epoch 2 · "), window[0])
+        self.assertNotIn("approve run configuration", message)
+        self.assertEqual(window[1], "passes 10 (was 8) · spawns 1 · audits 2", "only a raised ceiling carries a prior")
+        self.assertTrue(window[2].startswith("Details: "), window[2])
+        for kept in ('Goal: "supplied task"', "Accept = approve as shown · edit values → confirm again",
+                     "Decline = reject · Esc = decide later", f"{dialog['rationale_label']} and full detail: in the document"):
+            self.assertIn(kept, message)
+        self.assertEqual(sorted(schema["properties"]), sorted(row["key"] for row in dialog["budgets"]))
+        self.assertIn("(was 8)", schema["properties"]["max_passes"]["title"])
+        self.assertNotIn("(was", schema["properties"]["max_spawns"]["title"])
+        for line in lines:
+            if not line.startswith(("Details: http://", "File: ")):
+                self.assertLessEqual(len(line), 72, line)
+        # a ceiling proposed below the approved one is no raise: it carries no prior
+        dialog["budgets"][1]["value"] = 0
+        self.assertEqual(review_form(dialog, TEST_DOCUMENT, 900, approved=approved)[0].splitlines()[1],
+                         "passes 10 (was 8) · spawns 0 · audits 2")
+        dialog["budgets"][1]["value"] = 1
+        # no raise, no change: the first approval's form is exactly what it was
+        self.assertTrue(plain.startswith("Empirica · approve run configuration (epoch "))
+        self.assertEqual(review_form(dialog, TEST_DOCUMENT, 900, approved=None), (plain, review_form(dialog, TEST_DOCUMENT, 900)[1]))
+
     def test_the_confirm_form_opens_with_its_budgets_and_rationale_cue(self):
         """PR 19 (finding N7) with the B4 amendment: the confirm's visible lines carry what the
         human judges — the heading, the budgets line complete with its ``(was …)`` priors, and
@@ -746,6 +782,11 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertEqual(asked["run"]["governance"]["approval_kind"], "host_ui")
         self.assertEqual(asked["run"]["governance"]["state"], "approved")
         self.assertEqual(len(calls), 2, "the raise opens the one further dialog")
+        # B1: that dialog says it is a raise of the approved ceilings, naming each raised one with the approved value
+        raise_message = calls[1][0]
+        self.assertTrue(raise_message.startswith("Empirica · raise approved ceilings (epoch "), raise_message)
+        self.assertIn("passes 8 (was 7)", raise_message)
+        self.assertTrue(calls[0][0].startswith("Empirica · approve run configuration (epoch "), "the first approval is unchanged")
 
     def test_F2_a_raise_nobody_can_approve_names_the_proposal_within_the_ceilings_and_the_stop(self):
         """Onto-S F2: after the first approval a pending raise needs a human; with none to ask and a revision left, the reason

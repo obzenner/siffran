@@ -52,8 +52,9 @@ class BudgetFreezeTerminalTests(ConformanceCase):
             resp = self.dispatch(drv, observe_action(run_id=run_id, action=action_child_reserve(
                 purpose="investigation", resource_class="investigation",
                 role_profile=self.DEFAULT_PROFILE, execution="foreground")))
+            # B1: the reply carries the case of the recovery this (deliberative) run is offered: a raise its human decides
             result = self.assert_block_reason(resp, "budget.exhausted",
-                                               parameters={"resource": "spawn"})
+                                               parameters={"resource": "spawn", "recovery": "raise_human"})
             spec = REASONS["budget.exhausted"]
             self.assertEqual(result["reasons"][0]["next_actions"], spec["next_actions"],
                              "budget.exhausted next_actions must match registry order")
@@ -87,7 +88,7 @@ class BudgetFreezeTerminalTests(ConformanceCase):
                 action=action_child_reserve(purpose="audit", resource_class="audit",
                     role_profile=self.DEFAULT_PROFILE, execution="foreground")))
             self.assert_block_reason(denied, "budget.exhausted",
-                                     parameters={"resource": "audit_spawn"})
+                                     parameters={"resource": "audit_spawn", "recovery": "raise_human"})
             admitted = self.dispatch(drv, observe_action(run_id=run_id,
                 action=action_child_reserve(purpose="work", resource_class="investigation",
                     role_profile="worker", execution="foreground")))

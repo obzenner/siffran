@@ -1403,6 +1403,13 @@
               "audit_spawn",
               "pass"
             ]
+          },
+          "recovery": {
+            "enum": [
+              "raise_dialog",
+              "raise_human",
+              "fresh_run"
+            ]
           }
         }
       },
@@ -1415,7 +1422,18 @@
         "budget"
       ],
       "message": "{resource} budget exhausted.",
-      "ended_message": "{resource} budget was exhausted when the run stopped."
+      "case_parameter": "recovery",
+      "case_messages": {
+        "raise_dialog": "{resource} budget exhausted. Propose higher ceilings with configure_run: the human approves the raise in a dialog, and this run goes on with the ceilings they approve. Or end honestly with report_convergence intent=stop.",
+        "raise_human": "{resource} budget exhausted. Propose higher ceilings with configure_run: the human decides the raise, and this run goes on if they approve it. Or end honestly with report_convergence intent=stop.",
+        "fresh_run": "{resource} budget exhausted. This run cannot raise its ceilings, because nobody can be asked: end honestly with report_convergence intent=stop, or start a fresh run."
+      },
+      "ended_message": "{resource} budget was exhausted when the run stopped.",
+      "ui_case_messages": {
+        "raise_dialog": "{resource} budget exhausted; the agent can propose a raise for you to approve.",
+        "raise_human": "{resource} budget exhausted; the agent can propose a raise for you to decide.",
+        "fresh_run": "{resource} budget exhausted; this run cannot raise it, only stop or start afresh."
+      }
     },
     "audit.required": {
       "params": {
@@ -2910,7 +2928,8 @@
       "generic_spikes": "generic spike evidence (read-only)",
       "generic_spike_request": "immutable request",
       "generic_spike_result": "admitted result",
-      "generic_spike_no_result": "no result evidence admitted"
+      "generic_spike_no_result": "no result evidence admitted",
+      "budget_raise_note": "(a raise above the approved ceilings: the human decides)"
     }
   }
 }

@@ -62,6 +62,8 @@ interface AuthorView {
 
 const PUBLIC_CONTRACT = readVendored("public-contract.json") as Json;
 const LABELS = PUBLIC_TOOLS.author_view.labels;
+/** The one next action whose surface another action shares: a budget raise is a `configure_run` call (contract `next_actions`). */
+const RAISE_ACTION = "budget.raise";
 const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);
 const CLAIM_ID_DEF = "claimId";
 // The one claim-id pattern, read from the contract. ECMAScript `$` (no `m` flag) matches only at
@@ -204,7 +206,9 @@ function launchHome(run: Json, reasons: Json[]): string | undefined {
 function surface(actionId: string, launch?: string, audit = false): Trusted {
   if (launch && launches(actionId, audit)) return trusted(launch);
   const row = SURFACES[actionId] as Json;
-  if (row.tool === "empirica_observe") return trusted(`empirica_observe kind=${row.action}`);
+  // a raise is one call among the ones a configuration takes: the contract's note says which this is
+  if (row.tool === "empirica_observe")
+    return trusted(`empirica_observe kind=${row.action}${actionId === RAISE_ACTION ? ` ${LABELS.budget_raise_note}` : ""}`);
   if (row.tool === "empirica_read") return trusted(`empirica_read ${row.operation}`);
   if (row.tool === "report_convergence") return trusted(`report_convergence intent=${row.intent}`);
   return trusted(`${row.owner}: ${row.operation}`);
