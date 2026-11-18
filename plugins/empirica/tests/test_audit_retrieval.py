@@ -58,6 +58,37 @@ class AuditorDefinitionTests(unittest.TestCase):
                 self.assertIn("exists and contains the cited text" if name.startswith("pi")
                               else "it contains the cited text", text)
 
+    # The service's quoting rule (``core.citations``), as the auditor's text states it
+    QUOTE_RULE = ("Judge \"contains the cited text\" by the service's rule: whitespace runs, line breaks included, compare as one space, "
+                  "and a citation may join separate excerpts with `\u2026`. A quote that matches under that rule contains the cited text; "
+                  "do not fail a record for a difference in whitespace or line breaks alone.")
+
+    def test_the_shared_rubric_applies_the_services_quoting_rule(self):
+        text = " ".join((self.agents / "empirica-auditor.md").read_text(encoding="utf-8").split())
+        self.assertEqual(text.count(self.QUOTE_RULE), 1)
+        self.assertLess(text.index(self.QUOTE_RULE), text.index("When `retrieve` is `false`"), "the rule sits with the retrieve: true duty")
+        # the Pi wrapper carries no copy: the shared rubric is the one place
+        self.assertNotIn("whitespace", (self.agents / "pi/empirica-auditor.md").read_text(encoding="utf-8"))
+
+    def test_the_service_applies_the_rule_the_auditor_text_states(self):
+        """The sentence above is the service's behaviour: ``core.citations`` compares whitespace runs (line breaks included) as
+        one space and splits a citation at ``\u2026`` or ``...`` into excerpts that must appear in order."""
+        from core.citations import citation_problem
+        from core.freshness import ObservationState
+        present = ObservationState.PRESENT
+
+        def verdict(citation, content):
+            return citation_problem("data.txt", citation, content.encode("utf-8"), present)
+
+        self.assertIsNone(verdict("alpha beta gamma", "alpha\nbeta\ngamma\n"))  # the native case: names on separate lines
+        self.assertIsNone(verdict("alpha   beta\t\tgamma", "alpha\r\n\r\nbeta  gamma\n"))  # runs of any whitespace are one space
+        self.assertIsNone(verdict("alpha \u2026 gamma", "alpha\nbeta\ngamma\n"))  # excerpts joined with an ellipsis
+        self.assertIsNone(verdict("alpha ... gamma", "alpha\nbeta\ngamma\n"))
+        # whitespace is the only latitude: words, their order, and a joined excerpt out of order still fail
+        self.assertEqual(verdict("alphabeta gamma", "alpha\nbeta\ngamma\n"), "text_not_found")  # no space where there was one
+        self.assertEqual(verdict("gamma beta alpha", "alpha\nbeta\ngamma\n"), "text_not_found")
+        self.assertEqual(verdict("gamma \u2026 alpha", "alpha\nbeta\ngamma\n"), "text_not_found")
+
     def test_the_shared_rubric_covers_confirmed_records_missing_sources_and_human_decisions(self):
         text = (self.agents / "empirica-auditor.md").read_text(encoding="utf-8")
         for required in ("`verified_by_service` or `confirmed_by_human`", "fail the claim that\n  rests on it",

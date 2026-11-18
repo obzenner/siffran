@@ -24,6 +24,9 @@ Each research artifact in the dossier carries `verification: {class, status, ret
   exists, and it contains the cited text. Do this for every such record, including records whose
   `status` is `verified_by_service` or `confirmed_by_human`; a prior confirmation never replaces your
   check.
+- Judge "contains the cited text" by the service's rule: whitespace runs, line breaks included, compare as
+  one space, and a citation may join separate excerpts with `…`. A quote that matches under that rule
+  contains the cited text; do not fail a record for a difference in whitespace or line breaks alone.
 - When `retrieve` is `false`, you cannot fetch the source. Judge only whether it is relevant and
   supports the claim's wording. If `status` is `confirmed_by_human`, a person verified it; say that
   you relied on it, and do not re-fail a claim merely because you could not retrieve it.
