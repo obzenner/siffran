@@ -10,19 +10,20 @@
    },
    "audit": {
     "failed": 1,
-    "none": 8,
+    "none": 9,
     "passed": 4
    },
    "host": {
-    "claude": 8,
+    "claude": 9,
     "pi": 5
    },
    "mode": {
+    "auto": 1,
     "deliberative": 13
    },
    "project": {
     "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 2,
-    "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 3,
+    "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 4,
     "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9": 6,
     "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d": 2
    },
@@ -30,7 +31,7 @@
     "audit_pending": 1,
     "changed_since_audit": 1,
     "needs_human": 5,
-    "not_ended": 1,
+    "not_ended": 2,
     "proven": 1,
     "stopped_budget": 1,
     "stopped_frozen": 1,
@@ -72,16 +73,16 @@
   "facts": {
    "decisions": 18,
    "failed_audits": 1,
-   "refutations": 1
+   "refutations": 2
   },
   "not_read": 1,
   "runs": {
    "decisions": 12,
    "failed_audits": 1,
-   "refutations": 1
+   "refutations": 2
   },
   "since": null,
-  "total": 13,
+  "total": 14,
   "untimed": {
    "decisions": 0,
    "failed_audits": 0,
@@ -105,7 +106,7 @@
   "runs": [
    6,
    2,
-   3,
+   4,
    2
   ],
   "standing": [
@@ -126,9 +127,9 @@
  "coverage": {
   "partial": 0,
   "pending": 0,
-  "read": 13,
+  "read": 14,
   "reindexing": 0,
-  "runs": 14,
+  "runs": 15,
   "unreadable": 1
  },
  "facets": {
@@ -141,19 +142,20 @@
   },
   "audit": {
    "failed": 1,
-   "none": 8,
+   "none": 9,
    "passed": 4
   },
   "host": {
-   "claude": 8,
+   "claude": 9,
    "pi": 5
   },
   "mode": {
+   "auto": 1,
    "deliberative": 13
   },
   "project": {
    "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 2,
-   "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 3,
+   "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 4,
    "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9": 6,
    "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d": 2
   },
@@ -161,7 +163,7 @@
    "audit_pending": 1,
    "changed_since_audit": 1,
    "needs_human": 5,
-   "not_ended": 1,
+   "not_ended": 2,
    "proven": 1,
    "stopped_budget": 1,
    "stopped_frozen": 1,
@@ -170,6 +172,7 @@
  },
  "marks": {
   "attempt": [
+   1,
    1,
    1,
    1,
@@ -200,6 +203,7 @@
    4,
    4,
    12,
+   2,
    5,
    4,
    4,
@@ -216,6 +220,7 @@
    "847d720ba940",
    "4bf0bcdffdf1",
    "5e08e7f95232",
+   "01174704eecc",
    "fbfc17260172",
    "e9d2410d9652",
    "3311712612ef",
@@ -232,6 +237,7 @@
    1,
    4,
    2,
+   3,
    1,
    0,
    0,
@@ -249,6 +255,7 @@
    0,
    0,
    2,
+   2,
    0,
    2,
    0,
@@ -264,6 +271,7 @@
    1,
    2,
    3,
+   4,
    4,
    5,
    6,
@@ -286,11 +294,12 @@
    null,
    1790592960.0,
    1790595240.0,
-   1790595900.0,
-   1790601180.0,
-   1790601600.0,
+   1790596440.0,
+   1790601720.0,
+   1790602140.0,
    1790594100.0,
    1790588040.0,
+   1790595900.0,
    1790591820.0,
    1790586000.0,
    1790591040.0,
@@ -302,11 +311,12 @@
    null,
    1790594040.0,
    1790595840.0,
-   1790596440.0,
-   1790601540.0,
-   1790602560.0,
+   1790596980.0,
+   1790602080.0,
+   1790603100.0,
    1790595180.0,
    1790589120.0,
+   1790596380.0,
    1790592900.0,
    1790587200.0,
    1790591760.0,
@@ -323,6 +333,7 @@
    4,
    4,
    12,
+   2,
    5,
    4,
    4,
@@ -350,7 +361,7 @@
   },
   {
    "ask": "confirm_source",
-   "asked_at": 1790596440.0,
+   "asked_at": 1790596980.0,
    "host": "pi",
    "id": "6dcdc8c0a41f",
    "key": "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1",
@@ -358,7 +369,7 @@
   },
   {
    "ask": "approve_configuration",
-   "asked_at": 1790601420.0,
+   "asked_at": 1790601960.0,
    "host": "claude",
    "id": "05e9cd035aba",
    "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1",
@@ -448,11 +459,11 @@
    "name": "lumen",
    "needs": 1,
    "repo": "/work/lumen",
-   "runs": 3,
+   "runs": 4,
    "since": 1790591040.0,
    "standings": {
     "needs_human": 1,
-    "not_ended": 1,
+    "not_ended": 2,
     "stopped_residual": 1
    }
   },
@@ -463,11 +474,11 @@
    "needs": 2,
    "repo": "/work/quarry",
    "runs": 2,
-   "since": 1790601180.0,
+   "since": 1790601720.0,
    "standings": {
     "needs_human": 2
    }
   }
  ],
- "token": "sha256:e0a317c3bc18857a309e2aa738e5ba2680baaf5f35389be61d06974a676f7b93"
+ "token": "sha256:c8d24e8a7b76c440562ac62ef60b3d19570df60779c5ab2d5cb760c0ed7872bf"
 }

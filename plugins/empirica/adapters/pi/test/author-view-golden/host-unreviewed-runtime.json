@@ -119,7 +119,8 @@
         "first_approval": false,
         "pre_approval_revisions": 0,
         "post_approval_revisions": 0,
-        "human_wait": false
+        "human_wait": false,
+        "raises": false
       },
       "audit": {
         "verdict": "none",
@@ -129,10 +130,11 @@
         "findings": []
       },
       "confirmation_batch": null,
+      "turn_end_actor": "author",
       "spike_backend": {
         "kind": "spikes_unavailable"
       }
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nhost: pi-subagents 0.99.0 (not reviewed; preflight passed)\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
+  "text": "Allow (converged=false) active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nhost: pi-subagents 0.99.0 (not reviewed; preflight passed)\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
 }

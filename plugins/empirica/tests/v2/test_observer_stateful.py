@@ -26,6 +26,7 @@ import os
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 sys.path[:0] = [str(HERE), str(HERE.parent), str(HERE.parents[1]), str(HERE.parents[3] / "scripts")]
@@ -34,6 +35,8 @@ from hypothesis import HealthCheck, Phase, settings, strategies as st  # noqa: E
 from hypothesis.stateful import RuleBasedStateMachine, initialize, invariant, precondition, rule  # noqa: E402
 
 from application.observer import Observer  # noqa: E402
+from core import evaluation, projection  # noqa: E402
+import core.observer as core_observer  # noqa: E402
 from assertions import HarnessDefect, action_graph, action_investigate, evaluate, get_argument, get_run, observe_action  # noqa: E402
 from governance_setup import invocation_for, sized_configure_run  # noqa: E402
 from observer_store import (PROFILE, DriverSource, _Builder, _graph, copy_store, decision_problems, observed, step_problems,  # noqa: E402
@@ -52,7 +55,9 @@ STARTS = {
     "unobserved-without-dialog": (None, False, True, {"invocation": invocation_for(PROFILE, human_surface="unobserved",
                                                                                    signal="host startup")}),
     "auto-delegated": ("unavailable", False, False, {"control_mode": "auto", "invocation": invocation_for(
-        PROFILE, delegation=True, human_surface="unavailable", signal="v2 harness")}),
+        PROFILE, delegation=True, interactive=False, human_surface="unavailable", signal="v2 harness")}),
+    # an interactive auto run: its human approved the configuration, and nothing after it is asked
+    "auto-interactive": ("human", True, False, {"control_mode": "auto"}),
 }
 FILES = ("src/probe.py", "src/other.py")
 
@@ -60,6 +65,31 @@ FILES = ("src/probe.py", "src/other.py")
 def _graph_of(claims: list[str], reworded=frozenset()) -> dict:
     words = {c: (kind, text + (" (reworded)" if c in reworded else "")) for c, (kind, text) in CLAIMS.items()}
     return _graph("C0", [(c, *words[c]) for c in claims], [("C0", c) for c in claims if c != "C0"])
+
+
+_SPIES: list = []
+
+
+def setUpModule() -> None:
+    """For this module's tests only, every ``report_requirements`` answer the gate, the author view and the observer ask
+    for must name, as its first admissible requirement, the row first in its list (true while rows are stage-ordered)."""
+    real = evaluation.report_requirements
+
+    def spy(*args, **kwargs):
+        owed = real(*args, **kwargs)
+        chosen = evaluation.first_admissible(owed)
+        assert chosen is (owed[0] if owed else None), (chosen, owed)
+        return owed
+
+    for module in (evaluation, projection, core_observer):
+        patch = mock.patch.object(module, "report_requirements", spy)
+        patch.start()
+        _SPIES.append(patch)
+
+
+def tearDownModule() -> None:
+    while _SPIES:
+        _SPIES.pop().stop()
 
 
 class ObserverEqualsCoreMachine(RuleBasedStateMachine):
@@ -71,6 +101,7 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         self.b = None
         self.edits = 0
         self.receipts = 0  # every host answer has a receipt of its own
+        self.turn_ends: set = set()  # the turn end actors the invariant has met
 
     # --- the run ---------------------------------------------------------------------------------------------------
 
@@ -79,13 +110,14 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
     def begin(self, start, extra, approve):
         surface, self.can_present, self.unknown, kw = STARTS[start]
         self.b = _Builder()
-        self.auto = start == "auto-delegated"
+        self.auto = start.startswith("auto-")
+        self.delegated = start == "auto-delegated"
         self.claims = ["C0", *sorted(extra)]
         self.reworded: set = set()
         self.run = self.b.begin("probe", "s-machine", "Generated run.", _graph_of(self.claims), surface=surface,
                                 qualified=True,
                                 # an auto run is approved by its host's policy, never by a waiting human
-                                approve=approve or start == "auto-delegated", **copy.deepcopy(kw))
+                                approve=approve or self.auto, **copy.deepcopy(kw))
 
     def _core(self) -> dict:
         return self.b.a.dispatch(self.b.drv, get_run(run_id=self.run))["result"]["run"]
@@ -219,6 +251,35 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         self.receipts += 1
         self.b.present_and_answer(self.run, f"answer-{self.receipts}", decisions)
 
+    def _turn_end_actor(self, snapshot, core, argument) -> None:
+        """``turn_end_actor`` is the actor of the report's first admissible requirement (``author``, ``auditor`` or
+        ``human``), ``none`` when nothing is owed and when the run has ended, and ``none`` too when the root is refuted or
+        conflicted (read from the public argument) unless a human is being asked."""
+        if core["status"] != "active":
+            want = "none"
+        else:
+            first = evaluation.first_admissible(evaluation.report_requirements(snapshot, evaluation.derive_claims(snapshot)))
+            root = next((c for c in argument["claims"] if c["claim_id"] == argument["root_claim_id"]), None)
+            outcomes = {a["outcome"] for a in argument["artifacts"] if a["kind"] == "research" and a["active"]
+                        and root is not None and a["claim_id"] == root["claim_id"]}
+            ruled_out = root is not None and (root["state"] == "discarded" or outcomes >= {"supporting", "refuting"})
+            want = ("none" if first is None else "human" if first.actor == "human" else "none" if ruled_out
+                    else "auditor" if first.actor == "auditor" else "author")
+        assert core["turn_end_actor"] == want, (core["turn_end_actor"], want)
+        # nobody can be asked in delegated auto, before or after its configuration is approved: no turn end waits on a person
+        assert not (self.delegated and want == "human"), (core["turn_end_actor"], core["governance"]["state"])
+        self.turn_ends.add(want)
+
+    def _auto_asks_nobody(self, core, gate) -> None:
+        """An approved auto run asks a human nothing: no evidence batch, no confirmation or consent blocker, and the turn
+        never waits on a human."""
+        if not (self.auto and core["status"] == "active" and core["governance"]["state"] == "approved"):
+            return
+        codes = {reason["code"] for reason in gate.get("reasons", [])}
+        assert core["confirmation_batch"] is None, core["confirmation_batch"]
+        assert not codes & {"evidence.confirmation_required", "governance.terminal_stop_pending"}, codes
+        assert core["turn_end_actor"] != "human", core["turn_end_actor"]
+
     # --- the invariant -----------------------------------------------------------------------------------------------
 
     @invariant()
@@ -237,10 +298,13 @@ class ObserverEqualsCoreMachine(RuleBasedStateMachine):
         reader.store = copy_store(self.b.store)
         reader.drv = reader.store.driver
         core = reader.a.dispatch(reader.drv, get_run(run_id=self.run))["result"]["run"]
+        seen = reader.drv._service._coordinator.last_snapshot  # the state GetRun read, before any report counts a pass
         argument = reader.a.dispatch(reader.drv, get_argument(run_id=self.run))["result"]["argument"]
         gate = reader.a.dispatch(reader.drv, evaluate(run_id=self.run, intent="report_convergence"))["result"]
         c = self.check
-        decided, self.decisions = decision_problems(row, detail, argument)
+        self._turn_end_actor(seen, core, argument)
+        self._auto_asks_nobody(core, gate)
+        decided, self.decisions = decision_problems(row, detail, argument, core)
         assert decided == [], decided
         stepped, self.steps = step_problems(detail, argument)
         assert stepped == [], stepped
@@ -304,6 +368,12 @@ REPLAYS = {
         ("research", dict(claim="C0", against=False, ref="a.md"))],
     "an unattended delegated run asks nobody": [
         ("begin", dict(start="auto-delegated", extra={"C2", "C3"}, approve=True)), ("cite_the_web", dict(claim="C3"))],
+    "an interactive auto run asks nobody about a web source": [
+        ("begin", dict(start="auto-interactive", extra={"C2", "C3"}, approve=True)), ("cite_the_web", dict(claim="C3")),
+        ("cite_the_web", dict(claim="C2")), ("report", {})],
+    "an interactive auto run with a source for and against the root": [
+        ("begin", dict(start="auto-interactive", extra={"C3"}, approve=True)), ("cite_the_web", dict(claim="C0")),
+        ("research", dict(claim="C0", against=True, ref="a.md"))],
     "a passing audit by the same model is not independent": [
         ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
         ("research", dict(claim="C3", against=False, ref="b.md")), ("audit", dict(verdict="pass", auditor="same_model"))],
@@ -323,6 +393,20 @@ REPLAYS = {
         ("begin", dict(start="attended", extra={"C2"}, approve=True)), ("stop", dict(consent=True))],
     "a decision refuted by research is not asked": [
         ("begin", dict(start="attended", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=True, ref="a.md"))],
+    "an auto decision its evidence approves is the author's": [
+        ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=False, ref="a.md"))],
+    "an auto decision its evidence rules out": [
+        ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("research", dict(claim="C2", against=True, ref="a.md"))],
+    "an auto decision left open by a stop": [
+        ("begin", dict(start="auto-delegated", extra={"C2"}, approve=True)), ("stop", dict(consent=True))],
+    "a root refuted by research has no turn end to wait for": [
+        ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=True, ref="a.md"))],
+    "a root with research for and against it is in conflict": [
+        ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
+        ("research", dict(claim="C0", against=True, ref="b.md"))],
+    "an audit left running is the auditor's turn": [
+        ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
+        ("research", dict(claim="C3", against=False, ref="b.md")), ("a_re_audit_is_left_pending", {})],
     "a stop shown and declined": [
         ("begin", dict(start="attended", extra={"C3"}, approve=True)), ("research", dict(claim="C0", against=False, ref="a.md")),
         ("stop", dict(consent=False))],
@@ -331,7 +415,7 @@ REPLAYS = {
 
 class ReplayTests(unittest.TestCase):
     def test_each_named_sequence_keeps_the_invariant_after_every_step(self):
-        decisions, steps_seen = set(), set()
+        decisions, steps_seen, turn_ends = set(), set(), set()
         for name, steps in REPLAYS.items():
             with self.subTest(name):
                 machine = ObserverEqualsCoreMachine()
@@ -340,9 +424,13 @@ class ReplayTests(unittest.TestCase):
                     machine.the_observer_says_what_the_core_says()
                     decisions |= set(machine.decisions)
                     steps_seen |= set(machine.steps)
+                    turn_ends |= machine.turn_ends
         # The oracles must see every answer they tell apart, or an observer that always says one would pass.
-        self.assertEqual(decisions, {"approved", "rejected", "waiting", "unanswered", "deferred", "not_asked"})
+        self.assertEqual(decisions, {"approved", "rejected", "waiting", "unanswered", "deferred", "not_asked",
+                                     "decided_by_author", "rejected_by_evidence"})
         self.assertEqual(steps_seen, {"current", "replaced", "gone"})
+        # Likewise every turn end actor, including the two the generator rarely reaches: a ruled-out root, and an audit running.
+        self.assertEqual(turn_ends, {"author", "auditor", "human", "none"})
 
 
 class FoundByTheMachineTests(unittest.TestCase):

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections import deque
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, replace
 from functools import partial
 from types import MappingProxyType
@@ -414,8 +414,10 @@ def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
                       stale: set[str]) -> tuple[str, Mapping[str, Any] | None]:
     """A claim's own state, before its supporters are considered, and for a ``discarded`` one the recorded artifact that
     discarded it: the failed spike, else the first refuting research, else the human's answer that rejected a
-    ``needs-decision`` claim (``None`` for every other state). The one rule of a claim's own state: the gate's
-    ``local_claim_state`` is its first element, and the observer's dropped claims read their cause from it."""
+    ``needs-decision`` claim (``None`` for every other state). A ``needs-decision`` claim with no answer is ``blocked``
+    on the human, except in auto, where it is the author's and derived like an ``ordinary`` claim (supporting research
+    that counts approves it). The one rule of a claim's own state: the gate's ``local_claim_state`` is its first
+    element, and the observer's dropped claims read their cause from it."""
     evidence = active_evidence(snapshot, claim)
     research = [a for a in evidence if a["kind"] == "research"]
     supporting = any(a["outcome"] == "supporting" and confirmation.counts(snapshot, a)
@@ -433,20 +435,27 @@ def claim_state_cause(snapshot: EvaluationSnapshot, claim: dict[str, Any],
         return "discarded", next(a for a in research if a["outcome"] == "refuting")
     if claim["kind"] == "needs-decision":
         answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
-        if answer is None:
+        if answer is not None:
+            return ("approved", None) if answer["outcome"] == confirmation.APPROVE else ("discarded", answer)
+        if snapshot.state.governance["control_mode"] != "auto":
             return "blocked", None
-        return ("approved", None) if answer["outcome"] == confirmation.APPROVE else ("discarded", answer)
-    approved = supporting and (claim["kind"] == "ordinary" or
+    approved = supporting and (claim["kind"] in ("ordinary", "needs-decision") or
                                (claim["kind"] == "needs-experiment" and spike_ok))
     return ("approved" if approved else "open"), None
 
 
-def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
-    """Ids of the supporting records a claim waits on, when none of them can approve it yet."""
+def _uncounted_support(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
+    """Ids of the supporting records a claim has when none of them can approve it yet."""
     supporting = [a for a in research if a["outcome"] == "supporting"]
     if not supporting or any(confirmation.counts(snapshot, a) for a in supporting):
         return []
     return [a["artifact_id"] for a in supporting]
+
+
+def _awaiting_human(snapshot: EvaluationSnapshot, research: list[dict[str, Any]]) -> list[str]:
+    """Ids of the supporting records a claim waits on a human for (none in auto, whose records are inert)."""
+    uncounted = set(_uncounted_support(snapshot, research))
+    return [a["artifact_id"] for a in research if a["artifact_id"] in uncounted and confirmation.asks_human(snapshot, a)]
 
 
 CONFIRMATION_REASON = "evidence.confirmation_required"
@@ -463,13 +472,14 @@ def pending_human(snapshot: EvaluationSnapshot, scope: tuple[str, ...]) -> dict[
         if claim["id"] in scope and (records := [
                 a["artifact_id"] for a in active_evidence(snapshot, claim)
                 if a["kind"] == "research"
-                and confirmation.pending_route(snapshot, a) in confirmation.HUMAN_ROUTES]):
+                and confirmation.asks_human(snapshot, a)]):
             pending[claim["id"]] = records
     return pending
 
 
 def pending_decisions(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> list[str]:
-    """Ids of the gating ``needs-decision`` claims still waiting for the human's answer."""
+    """Ids of the gating ``needs-decision`` claims still waiting for the human's answer (none in auto: its claims are
+    derived by fold 1, so none is ``blocked``)."""
     return [c["id"] for c in snapshot.graph["claims"]
             if c["id"] in derivation.scope and c["kind"] == "needs-decision"
             and derivation.states[c["id"]] == "blocked"]
@@ -613,43 +623,75 @@ def claim_blockers(snapshot: EvaluationSnapshot,
                   if derivation.states[claim_id] != "approved"]
     if not unresolved:
         return ()
-    claims = {claim["id"]: claim for claim in snapshot.graph["claims"]}
     blockers: list[dict[str, Any]] = []
     for claim_id in unresolved:
         target_id = derivation.blockers.get(claim_id, claim_id)
-        claim = claims[target_id]
-        state = derivation.states[target_id]
-        evidence = active_evidence(snapshot, claim)
-        research = [item for item in evidence if item["kind"] == "research"]
-        spikes = [item for item in evidence if item["kind"] == "spike"]
-        parameters: dict[str, Any] = {}
-        if state == "discarded":
-            reason = "claim.refuted"
-        elif state == "blocked":
-            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
-                snapshot, [], pending_decisions(snapshot, derivation))
-        elif claim_conflicted(snapshot, claim):
-            reason = "evidence.conflict"
-        elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
-            # What the author can do now comes before waiting on a human; the batch is still projected.
-            reason, parameters = spike[0], spike[1]
-        elif awaiting := _awaiting_human(snapshot, research):
-            reason, parameters = "evidence.confirmation_required", confirmation.parameters(
-                snapshot, awaiting, pending_decisions(snapshot, derivation))
-        elif spike:
-            reason, parameters = spike[0], spike[1]
-        else:
-            historical_research = any(
-                item.get("kind") == "research" and item.get("claim_id") == target_id
-                and item.get("claim_digest") != claim_digest(claim)
-                for item in snapshot.history)
-            reason = ("claim.research_unbound" if historical_research
-                      else "claim.research_missing")
-        if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
-            parameters = {**parameters, "claim_id": target_id}
+        reason, parameters = _claim_reason(snapshot, derivation, target_id)
         blockers.append({"claim_id": claim_id, "target_claim_id": target_id,
                          "reason": reason, "parameters": parameters})
     return tuple(blockers)
+
+
+def _claim_reason(snapshot: EvaluationSnapshot, derivation: ClaimDerivation,
+                  target_id: str) -> tuple[str, dict[str, Any]]:
+    """The reason a claim is not approved and its parameters: the one classification of a claim's own blocker, read by the
+    gate (``claim_blockers``, over the scope) and by the view's rows for a claim outside it (``deferred_unconfirmed``)."""
+    claim = next(c for c in snapshot.graph["claims"] if c["id"] == target_id)
+    state = derivation.states[target_id]
+    evidence = active_evidence(snapshot, claim)
+    research = [item for item in evidence if item["kind"] == "research"]
+    spikes = [item for item in evidence if item["kind"] == "spike"]
+    parameters: dict[str, Any] = {}
+    if state == "discarded":
+        reason = "claim.refuted"
+    elif state == "blocked":
+        reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+            snapshot, [], pending_decisions(snapshot, derivation))
+    elif claim_conflicted(snapshot, claim):
+        reason = "evidence.conflict"
+    elif (spike := _spike_requirement(snapshot, claim, derivation, research, spikes)) and spike[2]:
+        # What the author can do now comes before waiting on a human; the batch is still projected.
+        reason, parameters = spike[0], spike[1]
+    elif awaiting := _awaiting_human(snapshot, research):
+        reason, parameters = "evidence.confirmation_required", confirmation.parameters(
+            snapshot, awaiting, pending_decisions(snapshot, derivation))
+    elif spike:
+        reason, parameters = spike[0], spike[1]
+    else:
+        historical_research = any(
+            item.get("kind") == "research" and item.get("claim_id") == target_id
+            and item.get("claim_digest") != claim_digest(claim)
+            for item in snapshot.history)
+        # Rebinding is the more direct fix, so it ranks before research that no human will confirm.
+        if historical_research:
+            reason = "claim.research_unbound"
+        elif unconfirmed := _uncounted_support(snapshot, research):
+            reason, parameters = "claim.research_missing", {"support": "unconfirmed", "record_ids": unconfirmed}
+        else:
+            reason = "claim.research_missing"
+    if reason in CLAIM_NAMED_REASONS:  # the reason's text names the claim to discharge, not "this claim"
+        parameters = {**parameters, "claim_id": target_id}
+    return reason, parameters
+
+
+def deferred_unresolved(snapshot: EvaluationSnapshot,
+                        derivation: ClaimDerivation) -> dict[str, tuple[str, dict[str, Any]]]:
+    """The claims outside the gating scope that are open for want of research that counts, with the reason each row names:
+    ``claim.research_missing``, in its ``unconfirmed`` case where only inert research supports the claim and in its plain
+    case where none is recorded. Such a claim can never be approved as things stand, an open claim outside the scope ends the
+    run ``stopped_frozen``, and an unfrozen graph can still be revised. Presentation only: the gate never asks about a claim
+    outside its scope (``claim_blockers`` covers the scope), so nothing here is a blocker and no decision reads it."""
+    if snapshot.graph is None or snapshot.state.frozen_claim_ids is not None:
+        return {}
+    found = {}
+    for claim in snapshot.graph["claims"]:
+        claim_id = claim["id"]
+        if claim_id in derivation.scope or derivation.states[claim_id] != "open":
+            continue
+        reason, parameters = _claim_reason(snapshot, derivation, claim_id)
+        if reason == "claim.research_missing":
+            found[claim_id] = (reason, parameters)
+    return found
 
 
 def _derive_claims(snapshot: EvaluationSnapshot,
@@ -739,6 +781,9 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Bootstrap obligations, ordered ``next_actions`` (empty for a terminal run or once bootstrap is complete), and readiness flags."""
     facts = _bootstrap_facts(snapshot)
     state, governed = snapshot.state, snapshot.state.governance
+    # the stuck and nobody-to-ask checks read who approves the standing proposal, which for an interactive auto run after its
+    # first approval depends on whether it raises a ceiling: derived here from the two, as the run view derives it
+    governed = {**governed, "raises": governance.raises(governed, state.budgets)}
     active = []
     for predicate, obligation_id, must in snapshot.bootstrap_requirements:
         if ((predicate == "governance.approved" and not facts["graph.selected"])
@@ -754,7 +799,17 @@ def bootstrap_status(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if not facts["graph.selected"]:
             actions.append("graph.record")
         elif not facts["governance.approved"]:
-            if governance.interaction_error(governed, confirmation.interactions(snapshot)):
+            # A pending raise nobody can be asked about (no human, or no interaction left) leaves a revision within the approved
+            # ceilings, which is automatic: propose it, or stop. Otherwise the stop alone when no dialog can be shown: nobody
+            # to ask, or the run's allowance (not just this configuration's three presentations: changed ceilings are a new
+            # configuration) is spent, or this configuration is shown out and no change is allowed any more (the revision
+            # allowance is spent).
+            confirmations = confirmation.interactions(snapshot)
+            if governance.raise_unasked(governed, confirmations, state.budgets):
+                actions.extend(("governance.propose", "residual.accept"))
+            elif (governance.interactions_remaining(governed, confirmations)["total"] == 0
+                    or governance.nobody_to_ask(governed, state.budgets)
+                    or governance.configuration_stuck(governed, confirmations, state.budgets)):
                 actions.append("residual.accept")
             else:
                 actions.append("governance.propose")
@@ -1171,15 +1226,22 @@ def approved_claim_ids(snapshot: EvaluationSnapshot) -> list[str]:
             if c["id"] in derivation.scope and derivation.states[c["id"]] == "approved"]
 
 
+def _inert_research(snapshot: EvaluationSnapshot, artifact: Mapping[str, Any]) -> bool:
+    """Whether an artifact is research that needs a human in a run that asks none: it stays in the dossier and in the
+    evidence digest, but supports nothing, so its producer is not one the audit's independence is classified against."""
+    return artifact.get("kind") == "research" and confirmation.inert(snapshot, artifact)
+
+
 def covered_artifact_ids(snapshot: EvaluationSnapshot) -> list[str]:
-    """Return the exact active evidence set whose producer identity an audit covers."""
+    """Return the exact active evidence set whose producer identity an audit covers (inert research is not in it)."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
         return []
     derivation = derive_claims(snapshot)
     gating = set(derivation.scope)
     return [artifact["artifact_id"] for claim in snapshot.graph["claims"]
             if claim["id"] in gating and derivation.states[claim["id"]] == "approved"
-            for artifact in active_evidence(snapshot, claim)]
+            for artifact in active_evidence(snapshot, claim)
+            if not _inert_research(snapshot, artifact)]
 
 
 def valid_attribution(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> bool:
@@ -1321,7 +1383,8 @@ def independence_then(snapshot: EvaluationSnapshot, verdict: Mapping[str, Any]) 
                     and item.get("subject_kind") == "auditor" and item.get("child_id") == verdict.get("child_id")), None)
     reviewed = [c for c in dossier["claims"] if c["gating"] and c["state"] == "approved"]
     by_id = {item.get("artifact_id"): item for item in before}
-    producers = [by_id.get(artifact_id, {}).get("producer") for c in reviewed for artifact_id in c["active_evidence_ids"]]
+    producers = [by_id.get(artifact_id, {}).get("producer") for c in reviewed for artifact_id in c["active_evidence_ids"]
+                 if not _inert_research(snapshot, by_id.get(artifact_id, {}))]
     return _independence(auditor, producers, bool(reviewed))
 
 
@@ -1354,11 +1417,29 @@ def derivation_digest(snapshot: EvaluationSnapshot, derivation: ClaimDerivation)
                    "frozen": snapshot.state.frozen_claim_ids})
 
 
+def recovery_actions(excluded_actions: tuple[str, ...], actions: list[str]) -> list[str]:
+    """Apply an admitted neutral exclusion policy to one recovery-action list."""
+    return [action for action in actions if action not in excluded_actions]
+
+
+def exhausted(snapshot: EvaluationSnapshot, resource: str) -> dict[str, Any]:
+    """The parameters of a ``budget.exhausted`` reason: the resource and, for an active run, the ``recovery`` it is offered
+    (``governance.budget_recovery`` over the reason's recovery actions after the mode's exclusions), so the reason is made
+    with its case wherever it is made and every surface that words it (the reply, the run view, the observer) words the same
+    one. Presentation only: no decision reads ``recovery``."""
+    parameters = {"resource": resource}
+    if snapshot.state.status != "active":
+        return parameters
+    base = next(list(actions) for code, actions, _ in snapshot.reason_metadata if code == "budget.exhausted")
+    offered = recovery_actions(snapshot.contract.recovery_exclusions[governance.exclusion_key(snapshot.state.governance)], base)
+    return {**parameters, "recovery": governance.budget_recovery(snapshot.state.governance, offered)}
+
+
 def pass_budget_blocker(snapshot: EvaluationSnapshot, digest_value: str) -> dict[str, Any] | None:
     state = snapshot.state
     if (digest_value != state.last_derivation_digest
             and state.budgets["passes_used"] >= state.budgets["max_passes"]):
-        return {"reason": "budget.exhausted", "parameters": {"resource": "pass"}}
+        return {"reason": "budget.exhausted", "parameters": exhausted(snapshot, "pass")}
     return None
 
 
@@ -1371,7 +1452,7 @@ def audit_blocker(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) -> 
     budgets = snapshot.state.budgets
     if (blocker is not None and blocker["reason"] in AUDIT_SPAWN_REASONS
             and budgets["audit_spawns_used"] >= budgets["max_audit_spawns"]):
-        return {"reason": "budget.exhausted", "parameters": {"resource": "audit_spawn"}}
+        return {"reason": "budget.exhausted", "parameters": exhausted(snapshot, "audit_spawn")}
     return blocker
 
 
@@ -1398,6 +1479,48 @@ def audit_acceptance(snapshot: EvaluationSnapshot, derivation: ClaimDerivation) 
 #: answers, the pass ceiling, the audit, the human's consent to end the run. A requirement is *admissible* (the gate names it
 #: now) exactly when no earlier stage has an unmet one.
 REPORT_STAGES = ("setup", "claim", "confirmation", "passes", "audit", "terminal")
+
+
+def stage_rank(stage: str) -> int:
+    """A stage's place in ``REPORT_STAGES``, the one order of a report."""
+    return REPORT_STAGES.index(stage)
+
+
+def earliest_stage(stages: Iterable[str]) -> int | None:
+    """The rank of the earliest of ``stages``, or ``None`` when there are none: the stage that is admissible now."""
+    return min(map(stage_rank, stages), default=None)
+
+
+def first_admissible(requirements: Sequence[Requirement]) -> Requirement | None:
+    """The requirement the gate names now: the first, in row order, that ``report_requirements`` marks ``admissible``,
+    the one owner of admissibility. ``None`` when nothing is owed, or when every row is held."""
+    return next((r for r in requirements if r.admissible), None)
+
+
+
+
+#: Who a host's turn end waits on, by the actor of the first admissible requirement. A running audit child is the auditor's
+#: step: the turn settles and the child's result continues the run (``audit.required``, and the audit that failed, are the
+#: agent's to launch again).
+_TURN_END_ACTORS = {"agent": "author", "auditor": "auditor", "human": "human"}
+
+
+def turn_end_actor(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
+                   owed: Sequence[Requirement]) -> str:
+    """``author``, ``auditor``, ``human`` or ``none``: who the run waits on at a turn end, for a host to read and not to
+    recompute. It is the actor of the first admissible requirement of ``owed`` (``report_requirements``), ``none`` when
+    nothing is owed and when the run has ended, and ``none`` when the root claim is refuted or conflicted: no further work
+    can approve it, so the author's only step is to say so by stopping. A human who is being asked is never hidden."""
+    first = first_admissible(owed)
+    if snapshot.state.status != "active" or first is None:
+        return "none"
+    if first.actor != "human" and snapshot.graph is not None and derivation is not None:
+        root = next((c for c in snapshot.graph["claims"] if c["id"] == snapshot.graph["root"]), None)
+        if root is not None and (derivation.states.get(root["id"]) == "discarded" or claim_conflicted(snapshot, root)):
+            return "none"
+    return _TURN_END_ACTORS[first.actor]
+
+
 #: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
 HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON})
 #: Where a requirement waits that is not admissible yet: for the stages before it.
@@ -1444,7 +1567,7 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                         setup: bool = True) -> tuple[Requirement, ...]:
     """Everything an active run still owes before the report converges it, in the gate's order, each with who acts and where.
 
-    This is the one projection of the report's ordering. The gate blocks on the first requirement (``_evaluate``); the author
+    This is the one projection of the report's ordering. The gate blocks on the first row marked ``admissible`` (``first_admissible`` reads that flag); the author
     view lists them as its obligations and holds the ones behind an earlier stage (``core.projection``); the observer
     publishes them as what the run owes and names the first admissible one next (``core.observer``). It is pure: nothing is
     committed, so what the gate reaches only after charging a pass is listed without charging it.
@@ -1492,20 +1615,22 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                 key = terminal_key("stopped_frozen", terminal_digest(snapshot, derivation, "stopped_frozen"))
                 found.append(("terminal", obligation, required, TERMINAL_STOP_REASON, consent, (), None,
                               confirmation.prompt_error(snapshot, key, terminal=True)))
-    first = min((REPORT_STAGES.index(row[0]) for row in found), default=0)
+    first = earliest_stage(row[0] for row in found)
     # Who acts on a human's step is the human only while the request is with them (P3c): the configuration once the agent
     # has asked and a host can show it (``governance.human_wait``); the end of the run unless the human already declined it
     # (then the agent keeps working until the human tells it to stop again).
     approval = next(o for p, o, _ in snapshot.bootstrap_requirements if p == "governance.approved")
     configuration_waits = governance.human_wait(
-        snapshot.state.governance, governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)))
+        snapshot.state.governance,
+        governance.interaction_error(snapshot.state.governance, confirmation.interactions(snapshot)),
+        governance.raises(snapshot.state.governance, snapshot.state.budgets))
     requirements = []
     for stage, obligation, required, reason, parameters, claims, affected, prompt_error in found:
         human = ((reason in HUMAN_WAITING_REASONS and not (reason == TERMINAL_STOP_REASON
                                                             and parameters["case"] == "declined"))
                  or (stage == "setup" and obligation == approval and configuration_waits))
         actor = "human" if human else "auditor" if reason == "audit.pending" else "agent"
-        admissible = REPORT_STAGES.index(stage) == first
+        admissible = stage_rank(stage) == first
         place = ((confirmation.ask_where(prompt_error) if reason else "next_report") if actor == "human"
                  else "in_progress" if actor == "auditor" else "next_turn")
         # Whether the gate names a requirement now (``admissible``) is one fact; whether a human will be shown the question is
@@ -1646,7 +1771,8 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
                 if reason == "governance.budget_invalid":
                     ceiling = next(k for k, used in governance.CEILINGS.items() if proposed["budgets"][k] < state.budgets[used])
                     resource = governance.BUDGETS[ceiling].resource
-                    return _decision(snapshot, state, "Block", reason="budget.exhausted", parameters={"resource": resource})
+                    return _decision(snapshot, state, "Block", reason="budget.exhausted",
+                                     parameters=exhausted(snapshot, resource))
                 return _decision(snapshot, state, "Block", reason=reason,
                                  parameters=governance.refusal_parameters(state.governance, reason))
             if reason := governance.revision_error(state.governance, state.goal, proposed):
@@ -1699,7 +1825,7 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             limit_key, used_key, resource = SPAWN_BUDGET[resource_class]
             if state.budgets[used_key] >= state.budgets[limit_key]:
                 return _decision(snapshot, snapshot.state, "Block", reason="budget.exhausted",
-                                 parameters={"resource": resource})
+                                 parameters=exhausted(snapshot, resource))
             ordinal = len(state.children) + 1
             seed = {"run_id": snapshot.run_id, "ordinal": ordinal,
                     "purpose": action["purpose"], "role_profile": action["role_profile"],
@@ -1746,10 +1872,10 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             deferred = [c for c, _ in states if c["id"] not in gating]
             status = "stopped_frozen" if deferred else "stopped_residual"
             return end(replace(state, status=status))
-        # The first requirement of the report's one ordering (the author alone before the human, the passes before the audit)
-        # is what the gate names; the observer and the author view list the same requirements.
+        # The first admissible requirement of the report's one ordering (the author alone before the human, the passes
+        # before the audit) is what the gate names; the observer and the author view list the same requirements.
         owed = report_requirements(snapshot, derivation, setup=False)
-        first = owed[0] if owed else None
+        first = first_admissible(owed)
         if first is not None and first.stage in {"claim", "confirmation", "passes"}:
             return decide(state, "Block", reason=first.reason, parameters=first.parameters, affected=first.affected)
         current_digest = derivation_digest(snapshot, derivation)

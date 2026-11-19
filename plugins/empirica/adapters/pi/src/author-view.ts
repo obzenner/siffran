@@ -62,6 +62,8 @@ interface AuthorView {
 
 const PUBLIC_CONTRACT = readVendored("public-contract.json") as Json;
 const LABELS = PUBLIC_TOOLS.author_view.labels;
+/** The one next action whose surface another action shares: a budget raise is a `configure_run` call (contract `next_actions`). */
+const RAISE_ACTION = "budget.raise";
 const DIGEST_DEFS = new Set(["digest256", "nullableDigest256"]);
 const CLAIM_ID_DEF = "claimId";
 // The one claim-id pattern, read from the contract. ECMAScript `$` (no `m` flag) matches only at
@@ -70,6 +72,11 @@ const CLAIM_ID = new RegExp(String((RESPONSE_DEFS[CLAIM_ID_DEF] as Json).pattern
 const SURFACES = Object.fromEntries(
   Object.entries(PUBLIC_CONTRACT.next_actions as Json).map(([id, row]) => [id, row.surface]),
 ) as Json;
+// The exact auditor launch each host profile declares: the profile is its only copy.
+const AUDIT_LAUNCHES = new Map<string, string>(
+  (readVendored("host-profiles.json").profiles as Json[])
+    .filter((row) => typeof row.audit_launch === "string").map((row) => [row.profile_id, row.audit_launch]),
+);
 const CEILINGS = Object.keys(PUBLIC_CONTRACT.governance_decisions.controls.budgets as Json)
   .map((ceiling) => [ceiling, `${ceiling.slice("max_".length)}_used`] as const);
 
@@ -159,10 +166,49 @@ function validResult(result: unknown): boolean {
   }
 }
 
-/** Render one contract-owned action surface. */
-function surface(actionId: string): Trusted {
+/** Where a view prints the host's auditor launch: once, at its `home` heading; elsewhere a pointer to it. */
+class Launch {
+  private printed = false;
+  readonly text: string | undefined;
+  readonly home: string | undefined;
+  constructor(text?: string, home?: string) { this.text = text; this.home = home; }
+  /** The launch, or a pointer to it, for a place under the `site` heading; undefined when the host has none. */
+  at(site: string): string | undefined {
+    if (this.text === undefined) return undefined;
+    if (this.home === undefined) return this.text; // no home found: print it where it is needed
+    if (site === this.home && !this.printed) { this.printed = true; return this.text; }
+    return `the auditor launch under ${(LABELS as Record<string, string>)[this.home!].replace(/:$/, "")}`;
+  }
+}
+const NO_LAUNCH = new Launch();
+
+/** A spawn of the auditor always; a retry only when it concerns the audit. */
+const launches = (id: string, audit: boolean): boolean => id === "child.spawn_auditor" || (audit && id === "child.retry");
+
+/** Render next actions; an audit launch is printed once per view. */
+function surfaces(ids: readonly string[], launch: Launch, site: string, audit = false): Trusted[] {
+  return ids.map((id) => surface(id, launches(id, audit) ? launch.at(site) : undefined, audit));
+}
+
+/** The one heading that prints the launch, in the order the view reads: obligation, children, reasons, residuals, Next. */
+function launchHome(run: Json, reasons: Json[]): string | undefined {
+  // A `child.terminal` reason is never a home: an audit child that stopped has a Children row, which is.
+  const aboutAudit = (row: Json): boolean => String(row.code).startsWith("audit.");
+  if ((run.obligations.active as Json[]).some((row) => row.id === "obligation.audit" && row.status !== "satisfied"
+    && (row.next as string[]).some((id) => launches(id, true)))) return "open_obligations";
+  if ((run.children as Json[]).some((row) => row.resource_class === "audit" && row.recovery_action === "child.retry")) return "children";
+  if (reasons.some((row) => (row.next_actions as string[]).some((id) => launches(id, aboutAudit(row))))) return "reasons";
+  if ((run.residuals as Json[]).some((row) => (row.next_actions as string[]).some((id) => launches(id, aboutAudit(row))))) return "residuals";
+  return (run.next_actions as string[]).includes("child.spawn_auditor") ? "next" : undefined;
+}
+
+/** Render one contract-owned action surface; `launch` replaces an audit's child action. */
+function surface(actionId: string, launch?: string, audit = false): Trusted {
+  if (launch && launches(actionId, audit)) return trusted(launch);
   const row = SURFACES[actionId] as Json;
-  if (row.tool === "empirica_observe") return trusted(`empirica_observe kind=${row.action}`);
+  // a raise is one call among the ones a configuration takes: the contract's note says which this is
+  if (row.tool === "empirica_observe")
+    return trusted(`empirica_observe kind=${row.action}${actionId === RAISE_ACTION ? ` ${LABELS.budget_raise_note}` : ""}`);
   if (row.tool === "empirica_read") return trusted(`empirica_read ${row.operation}`);
   if (row.tool === "report_convergence") return trusted(`report_convergence intent=${row.intent}`);
   return trusted(`${row.owner}: ${row.operation}`);
@@ -270,28 +316,28 @@ function residualClaims(row: Json, safety: TextSafety): Trusted | null {
   const claim = `claim:${claimId(row.claim_id, safety)}`;
   const target = row.target_claim_id ?? row.claim_id;
   return trusted(target === row.claim_id
-    ? claim : `${claim} ${LABELS.via_claim}${claimId(target, safety)}`);
+    ? claim : `${claim}; ${LABELS.via_claim}${claimId(target, safety)}`);
 }
 
 /**
  * Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
  * `target_claim_id` is null for non-claim obligations and equals the obligation's own claim id when
- * it is not redirected; only a different target is named (`code via claim:<id>`).
+ * it is not redirected; only a different target is named (`code; <via_claim label><id>`).
  */
 function missing(row: Json, safety: TextSafety): Trusted {
   const target = row.missing.target_claim_id;
   if (target === null || target === String(row.id).replace(/^claim:/, "")) {
     return trusted(row.missing.code);
   }
-  return trusted(`${row.missing.code} ${LABELS.via_claim}${claimId(target, safety)}`);
+  return trusted(`${row.missing.code}; ${LABELS.via_claim}${claimId(target, safety)}`);
 }
 
 /** Parse one schema-valid reason row. */
-function reason(row: Json, safety: TextSafety): Reason {
+function reason(row: Json, safety: TextSafety, launch: Launch = NO_LAUNCH, audit = false, site = "reasons"): Reason {
   return {
     code: trusted(row.code), message: trusted(row.message), affected: affected(row.affected, safety),
     params: parameters(row.parameters, safety),
-    nextActions: (row.next_actions as string[]).map(surface),
+    nextActions: surfaces(row.next_actions as string[], launch, site, audit),
   };
 }
 
@@ -311,7 +357,12 @@ function spikeBackend(run: Json): readonly Trusted[] {
 function governance(run: Json): Trusted {
   const value = run.governance as Json | null;
   if (value === null) return trusted(LABELS.no_governance);
-  const parts = [`${LABELS.governance} ${value.state}`];
+  // The mode is the public run view's own word; a delegated auto run has no human to ask, which the author must know.
+  // The rule is the core's `core/run.py` `delegated_auto`: interactive authority outranks delegation.
+  const delegated = value.control_mode === "auto" && value.context.delegation === true
+    && value.context.interactive !== true;
+  const parts = [`${LABELS.governance} ${value.state}`,
+    `${LABELS.mode} ${value.control_mode}${delegated ? `, ${LABELS.mode_delegated}` : ""}`];
   parts.push(`${LABELS.budget_usage} ${CEILINGS.map(
     ([ceiling, used]) => `${value.budgets[used]}/${value.proposal.budgets[ceiling]}`,
   ).join(" ")}`);
@@ -381,7 +432,14 @@ function parse(result: Json): AuthorView {
     proposalRationale: rationale === null ? null : untrusted(rationale, safety),
     hostNote: hostNote(run.host as Json),
   };
-  const terminalNext = (run.next_actions as string[]).map(surface);
+  const reasonRows = result.type === "Block" ? (result.reasons as Json[]) : []; // Only Block carries reasons.
+  const stopped = (run.children as Json[]).filter((row) => row.recovery_action);
+  // A `child.terminal` reason does not name its child, so it is about the audit only when every stopped child is the audit's.
+  const auditChild = stopped.length > 0 && stopped.every((row) => row.resource_class === "audit");
+  const text = AUDIT_LAUNCHES.get(run.host.profile_id);
+  const launch = new Launch(text, text === undefined ? undefined : launchHome(run, reasonRows));
+  const aboutAudit = (row: Json): boolean => String(row.code).startsWith("audit.") || (row.code === "child.terminal" && auditChild);
+  const terminalNext = surfaces(run.next_actions as string[], launch, "next");
   const terminal = run.status !== "active";
   const active = run.obligations.active as Json[];
   const obligations = active.filter((row) => row.status !== "satisfied").map((row): Obligation => ({
@@ -390,7 +448,7 @@ function parse(result: Json): AuthorView {
       ? (String(row.id).startsWith("claim:") ? untrusted(row.required, safety) : trusted(row.required))
       : null,
     missing: row.missing === null ? null : missing(row, safety),
-    nextActions: (row.next as string[]).map(surface).concat(
+    nextActions: surfaces(row.next as string[], launch, "open_obligations", row.id === "obligation.audit").concat(
       (row.next as string[]).length || !terminal ? [] : terminalNext,
     ),
   }));
@@ -399,12 +457,13 @@ function parse(result: Json): AuthorView {
   const residuals = (run.residuals as Json[]).map((row): Reason => ({
     code: trusted(row.code), message: trusted(""), affected: residualClaims(row, safety),
     params: parameters(row.parameters, safety),
-    nextActions: (row.next_actions as string[]).map(surface),
+    nextActions: surfaces(row.next_actions as string[], launch, "residuals", aboutAudit(row)),
   }));
   const children = (run.children as Json[]).map((row): Child => ({
     resourceClass: trusted(row.resource_class), purpose: childLabel(row, safety),
     state: trusted(row.state),
-    recovery: row.recovery_action ? surface(row.recovery_action) : null,
+    recovery: row.recovery_action
+      ? surfaces([row.recovery_action], launch, "children", row.resource_class === "audit")[0] : null,
   }));
   const freshness = (run.freshness.changes as Json[]).map((row): Freshness => ({
     path: untrusted(row.path, safety), state: trusted(row.state),
@@ -416,9 +475,7 @@ function parse(result: Json): AuthorView {
       independence: run.audit.independence === null ? null : trusted(run.audit.independence),
       findings: (run.audit.findings as unknown[]).map((item) => untrusted(item, safety)),
     },
-    // Only Block carries reasons; a run-bearing Allow has none.
-    reasons: result.type === "Block"
-      ? (result.reasons as Json[]).map((row) => reason(row, safety)) : [],
+    reasons: reasonRows.map((row) => reason(row, safety, launch, aboutAudit(row))),
     obligations, satisfied, residuals, children, freshness,
     nextActions: terminal ? [] : terminalNext,
     waiting: waitingLines(run, safety),

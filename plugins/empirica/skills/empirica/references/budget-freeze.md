@@ -1,12 +1,11 @@
 # Budget, stalls, and freeze
 
-Read this file only when configuring limits, handling a stalled run, or closing a
-bounded scope.
+The rules needed before investigation are in the skill; this reference adds the detail for later.
 
 ## Budget
 
 `configure_run` changes the proposal only. A host approval installs the exact proposed ceilings
-without resetting counters; auto cannot raise them. See [governance.md](governance.md).
+without resetting counters; a delegated auto run cannot raise them, and an interactive one only with its human's approval. See [governance.md](governance.md).
 
 Empirica is bounded by configured pass, investigation-spawn, and mandatory-audit-spawn
 ceilings. Passes are charged only when the current derivation changes; repeated identical
@@ -24,11 +23,13 @@ When a budget is exhausted the service names it where it bites: once `audit_spaw
 `budget.exhausted` (`resource: audit_spawn`) rather than as an audit retry the service would
 refuse; the audit findings stay in the run view's Audit section. The host then settles a sole
 `budget.exhausted` blocker on an active run with a contract-owned notice instead of blocking the
-turn end, and the run stays active. Stop honestly (`report_convergence` with `intent: "stop"`) and
-accept the typed non-converged terminal result, or, in deliberative mode, propose a raise with
-`configure_run` for human approval. Auto mode still requires a fresh run with a larger up-front
-approved size (or a deliberative run) and never authorizes `budget.raise` or another automatic
-approval prompt (ADR-0063). Never remove a claim, forge evidence, or bypass audit to fit the budget.
+turn end, and the run stays active, for a deliberative run, whose raise is the human's to decide, or a delegated auto run, which is offered none. Stop honestly
+(`report_convergence` with `intent: "stop"`) and accept the typed non-converged terminal result.
+When the core offers `budget.raise` (a deliberative or an interactive auto run), propose a raise with
+`configure_run` for the human to approve: the next action `empirica_observe kind=configure_run` marked as a raise is that
+call with higher ceilings, and the run keeps its progress, so no new run is needed. The human sees a dialog that names each
+changed ceiling beside the approved one. A delegated auto run is never offered `budget.raise`: it needs a fresh run
+with a larger up-front approved size. Never remove a claim, forge evidence, or bypass audit to fit the budget.
 
 ## Stall handling
 

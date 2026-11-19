@@ -115,6 +115,7 @@
           }
         ]
       },
+      "turn_end_actor": "human",
       "spike_backend": {
         "kind": "spikes_unavailable"
       }

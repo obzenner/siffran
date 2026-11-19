@@ -47,8 +47,20 @@
       "description": "The turn-end table (ADR-0068): the outcome of a turn end by control mode and run state, the same on every host, and how each host maps the outcomes to its own surface. The `HX-STOP-*` expectations refer to it and the design document renders it.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["outcomes", "states", "hosts"],
+      "required": ["bounds", "outcomes", "states", "hosts"],
       "properties": {
+        "bounds": {
+          "description": "The one definition of how long an auto chain of turn ends may go on: the K-th turn end on one observation basis, or the T-th turn end in a chain, ends it. Every host in `enforced_by` counts both K and T, and a host not named there does not count. The prose of the table, the adapters and the documents cite it and do not restate it.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["K", "T", "definition", "enforced_by"],
+          "properties": {
+            "K": {"type": "integer", "minimum": 2},
+            "T": {"type": "integer", "minimum": 2},
+            "definition": {"type": "string", "minLength": 1},
+            "enforced_by": {"type": "array", "uniqueItems": true, "items": {"enum": ["claude", "pi"]}}
+          }
+        },
         "outcomes": {
           "description": "The closed outcome vocabulary of the table, with its meaning.",
           "type": "object",

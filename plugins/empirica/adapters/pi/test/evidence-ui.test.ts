@@ -215,6 +215,18 @@ test("G14, U4: a batch left on Later is shown again by an explicit report, under
   }
 });
 
+test("L3: an interactive auto run is shown no evidence dialog: the core's answer for it is route and prompt error `unavailable`", async () => {
+  // What the core derives for every auto run, whatever surface the host recorded (core.confirmation.human_route); Pi reads it and decides nothing.
+  const response = blocked("unavailable");
+  (response.result as unknown as { run: Record<string, unknown> }).run.governance = { control_mode: "auto", context: { interactive: true } };
+  const { ctx, shown } = ctxFor({ selects: ["Confirm"], inputs: [""] });  // a TUI with every dialog the host could show
+  const { trusted, calls } = bridge([RECORD]);
+  const out = await confirm(ctx, trusted, response);
+  assert.equal(out.response, response);
+  assert.equal(out.failure, undefined, "no presentable batch: nothing failed to be asked");
+  assert.deepEqual([calls, shown], [[], []]);
+});
+
 test("nothing is presented without a batch the core says can be shown; another blocker does not stop it", async () => {
   const noBatch = { ...blocked(), result: { ...blocked().result, run: { id: "run-1", status: "active", confirmation_batch: null } } } as unknown as Response;
   for (const response of [blocked("unavailable"), blocked("human", "interaction_limit"),

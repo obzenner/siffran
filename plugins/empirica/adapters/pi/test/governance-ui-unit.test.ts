@@ -141,10 +141,11 @@ interface HarnessSettings {
 function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
   const dialog = structuredClone(reviewDialog);
   const g = { state: "pending", control_mode: "deliberative", proposal_digest: "sha256:" + "a".repeat(64),
-    plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, proposal: {
+    plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, raises: false, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
       rationale: dialog.rationale,
-    }, context: { author: null, ingress: "pi_ui", interactive: true, delegation: false } };
+    }, context: { author: null, ingress: "pi_ui", approval_capability: "human_configuration", interactive: true,
+      delegation: false } };
   const run = { id: "run", status: "active", spike_backend: { kind: "spikes_unavailable" }, governance: g };
   const decisions: Array<Record<string, unknown>> = [];
   const renders: string[][] = [];
@@ -263,6 +264,79 @@ test("declining confirmation keeps the edited revision pending", async () => {
   assert.equal(h.g.state, "pending");
 });
 
+// The adapter only chooses which contract code applies, from the run's own facts; the code's row owns the actions.
+test("a closed dialog, a spent configuration, a spent run and no UI each choose one contract code", async () => {
+  const codes = async (setup: (h: ReturnType<typeof harness>) => void, keys: string[][] = [[ESC]]) => {
+    const h = harness(keys);
+    setup(h);
+    const out = await h.invoke();
+    assert.equal(out.result.type, "Block");
+    const reason = out.result.type === "Block" ? out.result.reasons[0] : undefined;
+    return [reason?.code, reason?.next_actions];
+  };
+  const again = ["governance.propose", "residual.accept"];
+  assert.deepEqual(await codes(() => {}), ["governance.dialog_closed", again]);
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 }; }, []),
+    ["governance.configuration_shown", again]);
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 0 }; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.ctx.hasUI = false; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  // Spent revisions and a shown-out configuration: no dialog opens and no change is allowed; the view's own next action is
+  // the stop, and the reason agrees with it (a change still possible keeps `configuration_shown`).
+  const shownOut = (h: ReturnType<typeof harness>, next: string) => {
+    h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 };
+    (h.g as Record<string, unknown>).next_action = next;
+  };
+  assert.deepEqual(await codes(h => shownOut(h, "residual.accept"), []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => shownOut(h, "governance.propose"), []),
+    ["governance.configuration_shown", again]);
+  // Onto-S F2: nobody can approve a pending raise, while a proposal within the approved ceilings is admitted (the view's
+  // next action is propose): the way on is that proposal or the stop; the view naming the stop alone wins.
+  const noRaiseIngress = (h: ReturnType<typeof harness>, next: string, raises = true) => {
+    h.g.human_wait = false; h.ctx.hasUI = false; h.g.context.approval_capability = "unavailable";
+    (h.g as Record<string, unknown>).raises = raises; (h.g as Record<string, unknown>).next_action = next;
+  };
+  assert.deepEqual(await codes(h => noRaiseIngress(h, "governance.propose"), []),
+    ["governance.raise_unavailable", again]);
+  assert.deepEqual(await codes(h => noRaiseIngress(h, "residual.accept"), []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => noRaiseIngress(h, "governance.propose", false), []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  // F2: the run's total allowance spent while a human could be reached, a raise pending and an automatic revision admitted
+  // (the view's next action is propose): the same way on; the view naming the stop alone, or no raise, still wins.
+  const totalSpent = (h: ReturnType<typeof harness>, next: string, raises = true, proposal = 3, total = 0) => {
+    h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal, total };
+    (h.g as Record<string, unknown>).raises = raises; (h.g as Record<string, unknown>).next_action = next;
+  };
+  assert.deepEqual(await codes(h => totalSpent(h, "governance.propose"), []), ["governance.raise_unavailable", again]);
+  assert.deepEqual(await codes(h => totalSpent(h, "residual.accept"), []), ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => totalSpent(h, "governance.propose", false), []), ["governance.approval_unavailable", ["residual.accept"]]);
+  assert.deepEqual(await codes(h => totalSpent(h, "governance.propose", true, 0, 100), []), ["governance.configuration_shown", again]);
+  // F1: a deliberative run has no automatic revision, so with no human to ask its view names the stop alone
+  assert.deepEqual(await codes(h => { noRaiseIngress(h, "residual.accept"); (h.g as Record<string, unknown>).control_mode = "deliberative"; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+  // N1: three showings, then resumed where nothing can be shown: the core's refresh reports an unavailable
+  // capability, and nobody to ask outranks the spent configuration (the same order as Claude's closed_code).
+  assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
+    (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 };
+    h.g.context.approval_capability = "unavailable"; h.g.context.ingress = "unavailable"; h.ctx.hasUI = false; }, []),
+    ["governance.approval_unavailable", ["residual.accept"]]);
+});
+
+test("the host reports what it can show NOW: no UI means an unavailable ingress", () => {
+  const ctx = fakeCtx();
+  ctx.hasUI = true;
+  assert.equal(piGovernanceContext(ctx).ingress, "pi_ui");
+  ctx.hasUI = false;
+  assert.equal(piGovernanceContext(ctx).ingress, "unavailable");
+});
+
 test("no-op keys and cancel approve nothing", async () => {
   const h = harness([["x", ESC]]);
   await h.invoke();
@@ -309,6 +383,19 @@ test("interactive auto presents initially, then accepts automatically without a 
   assert.equal(later.customCalls, 0);
 });
 
+test("A11d: interactive auto after its first approval asks its human about a raise only, reading the core's fact", async () => {
+  const raising = harness(); raising.g.control_mode = "auto"; raising.g.first_approval = true; raising.g.raises = true;
+  await raising.invoke();
+  assert.deepEqual(outcomes(raising), ["present", "approve"]);
+  assert.equal(raising.customCalls, 1, "the human sees the dialog");
+
+  const delegated = harness(); delegated.g.control_mode = "auto"; delegated.g.first_approval = true;
+  delegated.g.raises = true; delegated.g.context.interactive = false; delegated.g.context.delegation = true;
+  await delegated.invoke();
+  assert.deepEqual(outcomes(delegated), ["approve"], "a delegated run is never asked");
+  assert.equal(delegated.customCalls, 0);
+});
+
 test("interactive auto with unavailable UI fails closed and never delegates", async () => {
   const h = harness(); h.g.control_mode = "auto"; h.g.context.delegation = true;
   h.ctx.hasUI = false; h.g.context.ingress = "unavailable"; delete h.ctx.ui.custom;
@@ -342,6 +429,9 @@ test("phase decision matches deliberative, interactive-auto, and delegated autho
   assert.equal(expectedApprovalKind(h.g), "host_ui");
   h.g.first_approval = true;
   assert.equal(expectedApprovalKind(h.g), "auto");
+  h.g.raises = true;  // the core's fact: the proposal asks for more than the run approved
+  assert.equal(expectedApprovalKind(h.g), "host_ui");
+  h.g.raises = false;
   h.g.first_approval = false; h.g.context.interactive = false; h.g.context.delegation = true;
   assert.equal(expectedApprovalKind(h.g), "auto");
 });
@@ -457,6 +547,50 @@ test("the confirm screen takes its (was ...) priors from the document, not a hos
   assert.ok(!noPriors.some(line => line.includes("(was")),
     "no prior in the document means no invented prior on screen");
 });
+test("B1: a raise screen says it raises the approved ceilings and shows each raised one as N (was M)", () => {
+  const dialog = fixture.dialogs.review;
+  const state = initialState(dialog);
+  state.values.max_passes = 10;
+  const approved = { max_passes: 8, max_spawns: 1, max_audit_spawns: 2 };
+  for (const width of [80, 50]) {
+    const lines = renderLines(dialog, state, width, theme,
+      { confirmation: false, timeoutMs: 120_000, document: DOCUMENT, raise: approved });
+    assert.ok(lines.every(line => visibleWidth(line) <= width));
+    assert.ok(lines[0]!.startsWith("Empirica · raise approved ceilings"), lines[0]);
+    assert.ok(!lines.join("\n").includes("approve run configuration"));
+    assert.ok(lines.some(line => line.includes("10 (was 8)")), "the raised ceiling shows the approved value");
+    assert.equal(lines.filter(line => line.includes("(was")).length, 1, "a ceiling that was not raised shows no prior");
+  }
+  // a ceiling edited below the approved one is part of the change: it shows its prior too, as in the Claude form
+  state.values.max_spawns = 0;
+  const lowered = renderLines(dialog, state, 80, theme,
+    { confirmation: false, timeoutMs: 120_000, document: DOCUMENT, raise: approved });
+  assert.equal(lowered.filter(line => line.includes("(was")).length, 2);
+  assert.ok(lowered.some(line => line.includes("0 (was 1)")));
+  assert.ok(!lowered.some(line => line.includes("2 (was 2)")), "an unchanged ceiling shows no prior");
+  // the first approval, and a proposal that raises nothing, are exactly as before
+  const plain = renderLines(dialog, initialState(dialog), 80, theme,
+    { confirmation: false, timeoutMs: 120_000, document: DOCUMENT });
+  assert.ok(plain[0]!.startsWith("Empirica · approve run configuration"));
+  assert.ok(!plain.some(line => line.includes("(was")));
+});
+
+test("B1: the dialog of a raise in interactive auto is the raise screen, built from the run's approved ceilings", async () => {
+  const h = harness([[ESC]]);
+  h.g.control_mode = "auto"; h.g.first_approval = true; h.g.raises = true;
+  (h.g as Record<string, unknown>).budgets = { max_passes: 7, max_spawns: 1, max_audit_spawns: 2 };
+  await h.invoke();
+  const shown = h.renders[0]!;
+  assert.ok(shown[0]!.startsWith("Empirica · raise approved ceilings"), shown[0]);
+  assert.ok(shown.some(line => line.includes("8 (was 7)")), shown.join("\n"));
+  // a first approval shows the plain screen even when the view carries budgets
+  const first = harness([[ESC]]);
+  (first.g as Record<string, unknown>).budgets = { max_passes: 7, max_spawns: 1, max_audit_spawns: 2 };
+  await first.invoke();
+  assert.ok(first.renders[0]![0]!.startsWith("Empirica · approve run configuration"));
+  assert.ok(!first.renders[0]!.some(line => line.includes("(was")));
+});
+
 // --- PR 09: write-first binding through the TypeScript mediation (ADR-0072) ---
 
 test("every governance decision payload carries the bound document's digest", async () => {
@@ -486,7 +620,7 @@ test("no bound document on the context answer refuses before any present", async
     const result = await h.invoke();
     assert.equal(result.result.type, "Block");
     if (result.result.type === "Block")
-      assert.equal(result.result.reasons[0]!.code, "governance.approval_unavailable");
+      assert.equal(result.result.reasons[0]!.code, "governance.dialog_closed"); // the chooser reads the run's facts
     assert.deepEqual(h.decisions, [], "no present may accompany an unbindable document");
     assert.equal(h.customCalls, 0);
   }

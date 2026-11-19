@@ -3,7 +3,7 @@
   "definitions": {
     "empirica_read": {
       "title": "Read Empirica state",
-      "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+      "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome; the run view's next: line says when to call configure_run again."
     },
     "empirica_observe": {
       "title": "Record an Empirica author action",
@@ -126,24 +126,28 @@
     },
     "recovery_exclusions": {
       "deliberative": [],
-      "auto": [
+      "auto_interactive": [],
+      "auto_delegated": [
         "budget.raise"
       ]
     }
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
-    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
+    "evidence_wait": "Empirica is paused: this deliberative run's research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. End honestly with report_convergence intent=stop. A deliberative run may instead propose a raise for human approval, if this host can ask a person; a delegated auto run starts a fresh run.",
+    "evidence_report": "This deliberative run's research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
     "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
-    "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
+    "unattended_continue": "Empirica is not converged: {reason} Auto mode asks nobody at this turn end, so act on that reason now.",
+    "unattended_residual": "Empirica is not converged: {reason} If no step of yours moves the run, end it honestly with report_convergence intent=stop; otherwise act on that reason, or, unless the claim graph is frozen, revise the claim graph and continue."
   },
   "author_view": {
     "labels": {
       "no_governance": "no governance",
       "governance": "governance:",
+      "mode": "mode",
+      "mode_delegated": "unattended",
       "budget_usage": "passes/spawns/audits:",
       "converged": "converged=",
       "run_id": "run_id:",
@@ -164,7 +168,7 @@
       "next_inline": "next:",
       "missing": "missing:",
       "recovery": "recovery:",
-      "via_claim": "via claim:",
+      "via_claim": "first discharge claim:",
       "argument": "Argument",
       "goal": "goal:",
       "root_claim_id": "root_claim_id:",
@@ -217,7 +221,8 @@
       "generic_spikes": "generic spike evidence (read-only)",
       "generic_spike_request": "immutable request",
       "generic_spike_result": "admitted result",
-      "generic_spike_no_result": "no result evidence admitted"
+      "generic_spike_no_result": "no result evidence admitted",
+      "budget_raise_note": "(a raise above the approved ceilings: needs a person this host can ask)"
     }
   },
   "host_profiles": {
@@ -330,12 +335,21 @@
       ]
     },
     "governance.approval_unavailable": {
-      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+      "message": "No approval dialog can be shown now, so nothing is approved and the only way on is the honest stop.",
       "sections": [
         "governance"
       ],
       "next_actions": [
-        "host.repair_context",
+        "residual.accept"
+      ]
+    },
+    "governance.dialog_closed": {
+      "message": "The approval dialog ended without an answer, so nothing is approved; once the human says how to go on, propose again, or stop.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
         "residual.accept"
       ]
     },
@@ -360,7 +374,26 @@
       ]
     },
     "governance.interaction_limit": {
-      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
+      "message": "The human interactions for this run are spent, so no dialog can be shown; stop honestly or start a fresh run.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "residual.accept"
+      ]
+    },
+    "governance.raise_unavailable": {
+      "message": "Nobody can be asked to approve a raise now, so it cannot proceed; propose again within the approved ceilings, which needs no approval, or stop.",
+      "sections": [
+        "governance"
+      ],
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ]
+    },
+    "governance.configuration_shown": {
+      "message": "This configuration has been shown three times; once the human says which ceilings to change, propose them, or stop.",
       "sections": [
         "governance"
       ],
@@ -624,7 +657,7 @@
                 }
               },
               {
-                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored.",
+                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored. Limits and refusal reasons: public-contract clause evidence/spike/limits.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -1101,7 +1134,7 @@
                 }
               },
               {
-                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored.",
+                "description": "Request one closed generic deterministic spike plan draft for a run whose exact generic Docker backend is bound. The profile and framework policy are host-owned and cannot be authored. Limits and refusal reasons: public-contract clause evidence/spike/limits.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [

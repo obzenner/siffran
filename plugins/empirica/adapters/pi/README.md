@@ -61,7 +61,7 @@ confirmation showing original versus amended values plus the warning that the ra
 regenerated. Interactive `--auto` opens this same dialog exactly once before investigation, then
 accepts only non-raising revisions without another dialog. Missing UI never downgrades to delegation.
 Delegated auto requires recorded operator provenance and remains inside 8/1/2. See
-[governance](../../skills/empirica/references/governance.md) for limits, identity classes,
+[governance](../../skills/empirica/references/governance.md) and the [operator facts](../../../../doc/governance-operations.md) for limits, identity classes,
 and fresh-generation compatibility. These UI flows have fast simulated-control coverage and
 real-service governance coverage; no automated test certifies native human
 approval. Follow the operator-led procedure printed by `make native-qualification` for
@@ -145,9 +145,11 @@ deny.
 Pi has no native completion veto; the model must call `report_convergence` before making a
 convergence claim. The turn end follows the turn-end table of ADR-0068, acted on at
 `agent_before_settle` only (Pi 1.0.0 and later): a deliberative run pauses with one visible notice,
-an auto run is asked to continue with the next obligation, and the adapter ends an auto chain with
-the `unattended_continue` notice when the core's `run.basis` has not changed since its
-previous continuation (`no-progress`).
+an auto run is asked to continue with the next obligation while the core's `turn_end_actor` is
+`author`. The adapter counts the turn ends of a chain in memory, for one run and one chain, and applies the registry's
+`turn_end.bounds`: With K = 3 and T = 16: the K-th turn end of a chain on one observation basis, or the T-th turn end in a chain, ends the chain with the `unattended_residual` notice, so at most K − 1 continuations on one basis and T − 1 in a chain. The last continuation before a bound, the (K − 1)-th on one basis or the (T − 1)-th in a chain, carries `unattended_residual` as its directive, so the model is offered the stop while it is still reading. A changed basis restarts the count on the new basis; any turn end that is not a continuation ends the chain and clears both counts. A continuation that carries the `unattended_residual` directive (the actor `none`) counts like any other. A changed basis restarts the count, and any other turn-end outcome, a change of run and a
+new prompt (`before_agent_start`) clear it. An auto run whose `turn_end_actor` is `none` continues once per basis with the
+`unattended_residual` notice as its directive, which offers `report_convergence intent=stop` or a revised claim graph.
 
 ## Validation
 

@@ -114,7 +114,8 @@
         "first_approval": false,
         "pre_approval_revisions": 0,
         "post_approval_revisions": 0,
-        "human_wait": false
+        "human_wait": false,
+        "raises": false
       },
       "audit": {
         "verdict": "none",
@@ -124,6 +125,7 @@
         "findings": []
       },
       "confirmation_batch": null,
+      "turn_end_actor": "author",
       "spike_backend": {
         "kind": "spikes_unavailable"
       }
@@ -132,16 +134,15 @@
       {
         "code": "governance.approval_unavailable",
         "parameters": {},
-        "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+        "message": "No approval dialog can be shown now, so nothing is approved and the only way on is the honest stop.",
         "sections": [
           "governance"
         ],
         "next_actions": [
-          "host.repair_context",
           "residual.accept"
         ]
       }
     ]
   },
-  "text": "Block active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nReasons:\n  governance.approval_unavailable: Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.\n    next: host: governance_context; report_convergence intent=stop\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
+  "text": "Block active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nReasons:\n  governance.approval_unavailable: No approval dialog can be shown now, so nothing is approved and the only way on is the honest stop.\n    next: report_convergence intent=stop\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
 }

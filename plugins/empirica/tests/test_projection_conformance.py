@@ -31,6 +31,7 @@ DEADLINES = (None, 1735689600.0)
 BUDGET_MODES = ("available", "exhausted")
 SCOPE_MODES = ("open", "frozen", "deferred")
 DIGEST = "sha256:" + "a" * 64
+DOCUMENT_DIGEST = "sha256:" + "e" * 64
 
 RUN_VIEW = jsonschema.validators.validator_for(protocol.response_schema())(
     {key: protocol.response_schema()[key] for key in ("$schema", "$id", "$defs")}
@@ -119,7 +120,7 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
         "outcome": "approve", "plan_revision": 1,
         "proposal_digest": approved_digest, "approval_kind": "host_ui",
         "superseded_budgets": None,
-        "document_digest": None,
+        "document_digest": DOCUMENT_DIGEST,  # a host_ui decision names the document it bound; only an auto receipt records null
     }
     value.update(approved_digest=approved_digest, approval_kind="host_ui",
                  first_approval=True, receipts=[approval])
@@ -142,7 +143,7 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
             "outcome": "reject", "plan_revision": 2,
             "proposal_digest": value["proposal_digest"], "approval_kind": kind,
             "superseded_budgets": None,
-            "document_digest": None,
+            "document_digest": None if kind == "auto" else DOCUMENT_DIGEST,
         })
     return value
 
@@ -150,10 +151,11 @@ def _governance(base: dict, phase: str, mode: str, budgets: dict) -> dict:
 class ProjectionConformanceTests(unittest.TestCase):
     def test_contract_recovery_exclusions_are_the_projection_policy(self):
         table = protocol.CONTRACT_VIEW.recovery_exclusions
-        self.assertEqual(dict(table), {"deliberative": (), "auto": ("budget.raise",)})
+        self.assertEqual(dict(table), {"deliberative": (), "auto_interactive": (), "auto_delegated": ("budget.raise",)})
         actions = ["budget.raise", "residual.accept"]
         self.assertEqual(recovery_actions(table["deliberative"], actions), actions)
-        self.assertEqual(recovery_actions(table["auto"], actions), ["residual.accept"])
+        self.assertEqual(recovery_actions(table["auto_interactive"], actions), actions)  # its human approves a raise
+        self.assertEqual(recovery_actions(table["auto_delegated"], actions), ["residual.accept"])
 
     def test_the_confirmation_rule_and_the_exclusions_commute_through_project_prompt_error(self):
         """``project_prompt_error`` patches rows that already carry the mode's exclusions and applies none itself. That is

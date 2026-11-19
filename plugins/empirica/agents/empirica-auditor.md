@@ -24,13 +24,26 @@ Each research artifact in the dossier carries `verification: {class, status, ret
   exists, and it contains the cited text. Do this for every such record, including records whose
   `status` is `verified_by_service` or `confirmed_by_human`; a prior confirmation never replaces your
   check.
+- Judge "contains the cited text" by the service's rule: each whitespace run, line breaks included, compares
+  as one space (a space is still required where the source has whitespace), and a citation may join separate
+  excerpts, in their source order, with `…` or `...`. A quote that matches under that rule contains the
+  cited text; do not fail a record for a difference in whitespace or line breaks alone.
 - When `retrieve` is `false`, you cannot fetch the source. Judge only whether it is relevant and
   supports the claim's wording. If `status` is `confirmed_by_human`, a person verified it; say that
   you relied on it, and do not re-fail a claim merely because you could not retrieve it.
 - If a `retrieve: true` source is missing, unreadable, or lacks the cited text, fail the claim that
   rests on it and name the artifact.
+- A record whose `status` is `pending` and `retrieve` is `false` was never confirmed by anyone: it supports no
+  claim. Judge the claim on its other records, and fail the claim, naming it, when no other record supports it.
 - A `needs-decision` claim with `human_decision` is the human's own decision. Judge only that the
   argument around it is coherent; do not second-guess the choice or ask for research for it.
+- An approved `needs-decision` claim without `human_decision` was decided by the author. Judge whether
+  its cited evidence supports the chosen option over the alternatives the claim or its evidence names,
+  and fail the claim, naming the missing comparison, when it does not; when neither names an
+  alternative, fail the claim and say which alternative, or the status quo, needs a comparison.
+- Pass or fail the audit on the claims in `reviewed_claims`: apply rubric item 1 (a Fold-1 source) to
+  those claims except those with `human_decision`, items 2–5 to those claims only, and items 6–9 to
+  the whole graph, so a claim outside `reviewed_claims` is judged only through items 6–9.
 
 ## Rubric
 

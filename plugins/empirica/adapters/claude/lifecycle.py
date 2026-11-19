@@ -25,7 +25,7 @@ from adapters.audit_protocol import (AuditLaunchPlan, AuditProtocol, AuditProtoc
                                      IdentityObservation)
 from adapters.identity import REVIEWER_FAMILIES, claude_observation, family, observe
 from adapters.public_tools import EVIDENCE_ACTIONS, OBSERVE_TOOL
-from .completion import dispatch_stop, stop_result, unchanged_basis
+from .completion import count_turn_end, dispatch_stop, remember_chain, stop_result
 from .restore import dispatch_restore, restore_context
 from .route import dispatch_investigation
 from .run_start import dispatch_resolve, dispatch_start_run
@@ -310,8 +310,9 @@ def run_start_main() -> int:
             context = (
                 f"Empirica v2 is active. Opaque run handle: {handle}. "
                 "Use empirica_observe for public author actions, empirica_read for the "
-                "current RunView/argument/contract, and report_convergence only after "
-                "the bound audit is current. Never submit trusted ingress."
+                "current RunView/argument/contract, and report_convergence, which presents "
+                "evidence that waits on a human and, after the bound audit, decides the "
+                "run. Never submit trusted ingress."
             )
             json.dump({"hookSpecificOutput": {"hookEventName": "UserPromptExpansion",
                                               "additionalContext": context}}, sys.stdout)
@@ -436,9 +437,10 @@ def completion_main() -> int:
             return 0  # exact no-active-run response → nothing to gate
         response = dispatch_stop(payload, handle)
         active = payload.get("stop_hook_active") is True
-        same = (isinstance(response, Response) and response.result.type == "Block"
-                and unchanged_basis(payload, response.result))
-        mapped = stop_result(response, stop_hook_active=active, no_progress=same)
+        result = response.result if isinstance(response, Response) else None
+        count, total = count_turn_end(payload, result, stop_hook_active=active) if result is not None else (1, 1)
+        mapped = stop_result(response, stop_hook_active=active, turn_count=count, chain_total=total)
+        remember_chain(payload, result, mapped.chain_count, mapped.chain_total)  # a continuation keeps the count; any other outcome ends the chain
     except SelectorError:
         return 0  # malformed non-session Stop events retain observational behavior
     except Exception as exc:  # noqa: BLE001 - completion is the fail-closed boundary

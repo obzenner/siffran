@@ -211,6 +211,9 @@ class HookNativeBehaviorTests(unittest.TestCase):
         self.assertIn("empirica_observe", context)
         self.assertIn("empirica_read", context)
         self.assertIn("report_convergence", context)
+        # report_convergence also presents evidence that waits on a human
+        self.assertNotIn("only after", context)
+        self.assertIn("evidence that waits on a human", context)
 
     def test_unknown_flags_refuse_activation_before_start(self) -> None:
         from adapters.claude import lifecycle

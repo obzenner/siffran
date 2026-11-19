@@ -122,6 +122,14 @@
             "audit_spawn",
             "pass"
           ]
+        },
+        "recovery": {
+          "enum": [
+            "raise_dialog",
+            "raise_human",
+            "raise_unavailable",
+            "fresh_run"
+          ]
         }
       }
     },
@@ -184,6 +192,30 @@
       "properties": {
         "claim_id": {
           "$ref": "#/$defs/claimId"
+        }
+      }
+    },
+    "researchMissingParams": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_id"
+      ],
+      "properties": {
+        "claim_id": {
+          "$ref": "#/$defs/claimId"
+        },
+        "support": {
+          "enum": [
+            "unconfirmed"
+          ]
+        },
+        "record_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest256"
+          }
         }
       }
     },
@@ -434,7 +466,7 @@
               "const": "claim.research_missing"
             },
             "parameters": {
-              "$ref": "#/$defs/claimNamedParams"
+              "$ref": "#/$defs/researchMissingParams"
             }
           }
         },
@@ -942,6 +974,51 @@
           "properties": {
             "code": {
               "const": "governance.approval_unavailable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.dialog_closed"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.raise_unavailable"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "governance.configuration_shown"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -1545,7 +1622,8 @@
         "next_actions",
         "untrusted_delimiters",
         "governance",
-        "confirmation_batch"
+        "confirmation_batch",
+        "turn_end_actor"
       ],
       "description": "Public run view. converged lives only on Allow, never duplicated here.",
       "properties": {
@@ -1605,6 +1683,15 @@
         "terminal_note": {
           "type": "string"
         },
+        "turn_end_actor": {
+          "enum": [
+            "author",
+            "auditor",
+            "human",
+            "none"
+          ],
+          "description": "Who the run waits on at a turn end, owned by the core (core.evaluation.turn_end_actor): the actor of the report's first admissible requirement. author: the agent's work, including launching an audit; auditor: an audit child is running, so the turn settles and the child's result continues the run; human: a human is being asked. none: nothing is owed, the run has ended, or the root claim is refuted or conflicted and no human is being asked. A host reads it and derives nothing else."
+        },
         "next_actions": {
           "type": "array",
           "items": {
@@ -1640,7 +1727,8 @@
                 "next_action",
                 "interactions_remaining",
                 "prompt_error",
-                "human_wait"
+                "human_wait",
+                "raises"
               ],
               "properties": {
                 "state": {
@@ -1887,6 +1975,10 @@
                 },
                 "human_wait": {
                   "description": "Whether the configuration waits on its human (core.governance.human_wait, the one predicate of who acts on it: the agent asked, it is pending, a revision pending or rejected, a human approves this phase, the host that mediated it can show its dialog and a presentation is admissible). A host's turn end reads it and adds only its own approval ingress.",
+                  "type": "boolean"
+                },
+                "raises": {
+                  "description": "Whether the standing proposal asks for more than the run has approved: the run holds its first approval and some proposed ceiling is above the approved one (core.governance.raises, derived at read time). In an interactive auto run it is what makes the next approval a human's (host_ui); in every other run it changes nothing.",
                   "type": "boolean"
                 }
               }

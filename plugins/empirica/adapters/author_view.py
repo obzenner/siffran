@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from typing import Any, NewType
 
 from application.protocol import (
+    audit_launch,
     author_view_labels,
     next_action_surfaces,
     response_schema_defs,
@@ -25,6 +26,7 @@ _SURFACES = next_action_surfaces()
 _DEFS = response_schema_defs()
 _DIGEST_DEFS = frozenset({"digest256", "nullableDigest256"})
 _CLAIM_ID_DEF = "claimId"
+_RAISE_ACTION = "budget.raise"
 _NULL = {"type": "null"}
 
 
@@ -74,7 +76,7 @@ class Obligation:
 
     obligation_id: Trusted
     required: Trusted | Untrusted | None
-    missing: Trusted | None  # code, plus ``via claim:<id>`` when a descendant claim blocks it
+    missing: Trusted | None  # code, plus the claim to discharge first when a descendant claim blocks it
     next_actions: tuple[Trusted, ...]
 
 
@@ -132,17 +134,67 @@ def _fallback(result: Any) -> str:
         return "null"
 
 
-def render_surface(action_id: str) -> Trusted:
-    """Render one contract-owned action surface."""
+def render_surface(action_id: str, launch: str | None = None, audit: bool = False) -> Trusted:
+    """Render one contract-owned action surface; an audit's child action is the host's exact auditor launch."""
+    if launch and (action_id == "child.spawn_auditor" or (audit and action_id == "child.retry")):
+        return Trusted(launch)
     surface = _SURFACES[action_id]
     tool = surface.get("tool")
     if tool == "empirica_observe":
-        return Trusted(f"empirica_observe kind={surface['action']}")
+        # a raise is one call among the ones a configuration takes: the contract's note says which this is
+        note = f" {_LABELS['budget_raise_note']}" if action_id == _RAISE_ACTION else ""
+        return Trusted(f"empirica_observe kind={surface['action']}{note}")
     if tool == "empirica_read":
         return Trusted(f"empirica_read {surface['operation']}")
     if tool == "report_convergence":
         return Trusted(f"report_convergence intent={surface['intent']}")
     return Trusted(f"{surface['owner']}: {surface['operation']}")
+
+
+class _Launch:
+    """Where a view prints the host's auditor launch: once, at its ``home`` heading (the line GetRun shows too: the audit
+    obligation, else the stopped audit child's recovery row, else the first place that needs it). Elsewhere it points there."""
+
+    def __init__(self, text: str | None = None, home: str | None = None) -> None:
+        self.text, self.home, self.printed = text, home, False
+
+    def at(self, site: str) -> str | None:
+        """The launch, or a pointer to it, for a place under the ``site`` heading; ``None`` when the host has no launch."""
+        if self.text is None:
+            return None
+        if self.home is None:  # no home found: print it where it is needed
+            return self.text
+        if site == self.home and not self.printed:
+            self.printed = True
+            return self.text
+        return f"the auditor launch under {_LABELS[self.home].rstrip(':')}"
+
+
+def _launches(action: str, audit: bool) -> bool:
+    """A spawn of the auditor always; a retry only when it concerns the audit."""
+    return action == "child.spawn_auditor" or (audit and action == "child.retry")
+
+
+def _actions(actions: list[str], launch: _Launch, site: str, audit: bool = False) -> tuple[Trusted, ...]:
+    """Render next actions; an audit launch is printed once per view (see ``_Launch``)."""
+    return tuple(render_surface(action, launch.at(site) if _launches(action, audit) else None, audit) for action in actions)
+
+
+def _home(run: dict[str, Any], reasons: list[dict[str, Any]]) -> str | None:
+    """The one heading that prints the launch, in the order the view reads: obligation, children, reasons, residuals, Next."""
+    def audit_reason(row: dict[str, Any]) -> bool:
+        # A `child.terminal` reason is never a home: an audit child that stopped has a Children row, which is.
+        return row["code"].startswith("audit.")
+    if any(row["id"] == "obligation.audit" and row["status"] != "satisfied"
+           and any(_launches(action, True) for action in row["next"]) for row in run["obligations"]["active"]):
+        return "open_obligations"
+    if any(row["resource_class"] == "audit" and row.get("recovery_action") == "child.retry" for row in run["children"]):
+        return "children"
+    if any(_launches(action, audit_reason(row)) for row in reasons for action in row["next_actions"]):
+        return "reasons"
+    if any(_launches(action, audit_reason(row)) for row in run["residuals"] for action in row["next_actions"]):
+        return "residuals"
+    return "next" if "child.spawn_auditor" in run["next_actions"] else None
 
 
 def _obligation_id(value: str, safety: TextSafety) -> Trusted:
@@ -241,29 +293,30 @@ def _residual_claims(row: dict[str, Any], safety: TextSafety) -> Trusted | None:
     target = row.get("target_claim_id", row["claim_id"])
     if target == row["claim_id"]:
         return Trusted(claim)
-    return Trusted(f"{claim} {_LABELS['via_claim']}{safety.claim_id(target)}")
+    return Trusted(f"{claim}; {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
 def _missing(row: dict[str, Any], safety: TextSafety) -> Trusted:
     """Render an obligation's missing code and, when another claim blocks it, the claim to discharge.
 
     ``target_claim_id`` is ``None`` for non-claim obligations and equals the obligation's own claim
-    id when it is not redirected; only a different target is named (``code via claim:<id>``).
+    id when it is not redirected; only a different target is named (``code; <via_claim label><id>``).
     """
     missing = row["missing"]
     target = missing["target_claim_id"]
     if target is None or target == row["id"].removeprefix("claim:"):
         return Trusted(missing["code"])
-    return Trusted(f"{missing['code']} {_LABELS['via_claim']}{safety.claim_id(target)}")
+    return Trusted(f"{missing['code']}; {_LABELS['via_claim']}{safety.claim_id(target)}")
 
 
-def _reason(row: dict[str, Any], safety: TextSafety) -> Reason:
-    """Parse one schema-valid reason row."""
+def _reason(row: dict[str, Any], safety: TextSafety, launch: _Launch = _Launch(), audit: bool = False,
+            site: str = "reasons") -> Reason:
+    """Parse one schema-valid reason row; ``audit`` when its child action concerns the audit."""
     return Reason(
         Trusted(row["code"]), Trusted(row["message"]),
         _affected(row.get("affected"), safety),
         _parameters(row["parameters"], safety),
-        tuple(render_surface(action) for action in row["next_actions"]),
+        _actions(row["next_actions"], launch, site, audit),
     )
 
 
@@ -284,7 +337,12 @@ def _governance(run: dict[str, Any]) -> Trusted:
     governance = run["governance"]
     if governance is None:
         return Trusted(_LABELS["no_governance"])
-    parts = [f"{_LABELS['governance']} {governance['state']}"]
+    # The mode is the public run view's own word; a delegated auto run has no human to ask, which the author must know.
+    # The rule is the core's ``core.run.delegated_auto``: interactive authority outranks delegation.
+    context = governance["context"]
+    delegated = governance["control_mode"] == "auto" and context["delegation"] is True and context["interactive"] is not True
+    parts = [f"{_LABELS['governance']} {governance['state']}",
+             f"{_LABELS['mode']} {governance['control_mode']}{', ' + _LABELS['mode_delegated'] if delegated else ''}"]
     usage = " ".join(
         f"{governance['budgets'][used]}/{governance['proposal']['budgets'][ceiling]}"
         for ceiling, used in CEILINGS.items())
@@ -334,7 +392,16 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     header = Header(Trusted(result_type), Trusted(run["status"]), _governance(run),
                     Trusted(run["id"]), _spike_backend(run),
                     safety.untrusted(rationale) if rationale is not None else None, host_note)
-    terminal_next = tuple(render_surface(action) for action in run["next_actions"])
+    reasons = result["reasons"] if result["type"] == "Block" else []  # Only Block carries reasons.
+    stopped = [row for row in run["children"] if row.get("recovery_action")]
+    # A `child.terminal` reason does not name its child, so it is about the audit only when every stopped child is the audit's.
+    audit_child = bool(stopped) and all(row["resource_class"] == "audit" for row in stopped)
+    text = audit_launch(run["host"]["profile_id"])
+    launch = _Launch(text, _home(run, reasons) if text else None)
+
+    def about_audit(row: dict[str, Any]) -> bool:
+        return row["code"].startswith("audit.") or (row["code"] == "child.terminal" and audit_child)
+    terminal_next = _actions(run["next_actions"], launch, "next")
     terminal = run["status"] != "active"
     obligations = tuple(
         Obligation(
@@ -343,7 +410,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
              if row["id"].startswith("claim:") else Trusted(row["required"]))
             if row["required"] else None,
             _missing(row, safety) if row["missing"] is not None else None,
-            tuple(render_surface(action) for action in row["next"])
+            _actions(row["next"], launch, "open_obligations", row["id"] == "obligation.audit")
             or (terminal_next if terminal else ()),
         )
         for row in run["obligations"]["active"] if row["status"] != "satisfied")
@@ -353,11 +420,12 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     residuals = tuple(
         Reason(Trusted(row["code"]), Trusted(""), _residual_claims(row, safety),
                _parameters(row["parameters"], safety),
-               tuple(render_surface(action) for action in row["next_actions"]))
+               _actions(row["next_actions"], launch, "residuals", about_audit(row)))
         for row in run["residuals"])
     children = tuple(
         Child(Trusted(row["resource_class"]), _child_label(row, safety), Trusted(row["state"]),
-              render_surface(row["recovery_action"]) if row.get("recovery_action") else None)
+              _actions([row["recovery_action"]], launch, "children", row["resource_class"] == "audit")[0]
+              if row.get("recovery_action") else None)
         for row in run["children"])
     freshness = tuple(
         Freshness(safety.untrusted(row["path"]), Trusted(row["state"]))
@@ -365,8 +433,7 @@ def _parse(result: dict[str, Any]) -> AuthorView:
     return AuthorView(
         header, _audit_summary(run["audit"], safety),
         # Only Block carries reasons; a run-bearing Allow has none.
-        (tuple(_reason(row, safety) for row in result["reasons"])
-         if result["type"] == "Block" else ()),
+        tuple(_reason(row, safety, launch, about_audit(row)) for row in reasons),
         obligations, satisfied, residuals, children, freshness,
         () if terminal else terminal_next,
         _waiting(run, safety),

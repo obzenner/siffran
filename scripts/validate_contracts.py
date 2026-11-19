@@ -62,7 +62,7 @@ VERIFICATION = {"class": "verbatim", "status": "verified_by_service", "retrieve"
 AUDIT_CHILD_TOOL_VOCABULARY = frozenset({"read", "grep", "find", "ls", "contact_supervisor"})
 # The compact reviewed digest of the host-profiles registry (D2A §8/§9). Changing a
 # canonical value requires updating it deliberately.
-REVIEWED_HOST_PROFILES_DIGEST = "sha256:689db72b8157d408b5e6278696d1b93ccf03f565634981d179823430777f3966"
+REVIEWED_HOST_PROFILES_DIGEST = "sha256:2f1f3906c539cd99a8bea2ce08015f4f3ab784d21ec4977f59ddd088bbf209e0"
 # Structural identity constants (truly frozen, not registry-derived vocabularies).
 REGISTRY_ID = "empirica/public"
 REGISTRY_VERSION = "6.0.0"
@@ -1528,7 +1528,13 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
         #   ordinary: active supporting research, no active refuting/failing evidence.
         #   needs-experiment: additionally requires an active passing spike with satisfied
         #     prerequisites and no RunView freshness change for its bindings.
-        #   needs-decision: can never project approved.
+        #   needs-decision: a human_decision that does not approve always rejects. Otherwise it
+        #     is approved when (a) its human_decision approves it, or (b) it has an active
+        #     supporting research outcome and no active refuting research (confirmation status
+        #     is the core's, as for ordinary). Neither is invalid. The view carries no control
+        #     mode, so this is structural: the core owns the rule that (b) without (a) approves
+        #     only in auto; A3 must add the core test
+        #     test_a_deliberative_needs_decision_with_only_research_stays_blocked.
         if claim.get("state") == "approved":
             active_arts = [artifact_by_id[a] for a in ae if a in artifact_by_id]
             has_supporting = any(a.get("kind") == "research"
@@ -1543,10 +1549,15 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             has_failing_spike = any(a.get("kind") == "spike"
                                   and a.get("outcome") == "fail"
                                   for a in active_arts)
-            if ck == "needs-decision":
-                errors.append(f"{where}: argument.claims[{i}] needs-decision claim "
-                              f"cannot project approved")
-            if not has_supporting:
+            human = claim.get("human_decision")
+            human_approved = isinstance(human, dict) and human.get("outcome") == "approve"
+            if ck == "needs-decision" and isinstance(human, dict) and not human_approved:
+                errors.append(f"{where}: argument.claims[{i}] needs-decision approved but its "
+                              f"human_decision does not approve it")
+            elif ck == "needs-decision" and not human_approved and not has_supporting:
+                errors.append(f"{where}: argument.claims[{i}] needs-decision approved with neither "
+                              f"an approving human_decision nor active supporting research")
+            elif not has_supporting and not (ck == "needs-decision" and human_approved):
                 errors.append(f"{where}: argument.claims[{i}] approved but no active "
                               f"supporting research in active_evidence_ids")
             if has_refuting:
@@ -1639,6 +1650,14 @@ def check_argument_view(result: dict, contract: dict, errors: list[str], where: 
             if rc.get("claim_id") in rc_keys:
                 errors.append(f"{where}: argument.audit.reviewed_claims[{i}] duplicate claim_id {rc.get('claim_id')!r}")
             rc_keys.add(rc.get("claim_id"))
+        # A settled audit whose reviewed claims all have no active evidence rests on no producer: its independence is
+        # human_owned or unverified, never a producer-independence class.
+        active_by_id = {c.get("claim_id"): c.get("active_evidence_ids") for c in claims if isinstance(c, dict)}
+        if (covered and reviewed_claims and not any(active_by_id.get(rc.get("claim_id")) for rc in reviewed_claims
+                                                    if isinstance(rc, dict))
+                and audit.get("independence") not in {"human_owned", "unverified"}):
+            errors.append(f"{where}: argument.audit.independence {audit.get('independence')!r} must be human_owned or "
+                          f"unverified when no reviewed claim has active evidence")
         # MAJOR-1: for a settled verdict that still covers the argument (current), reviewed_claims must equal exactly
         # all current claims where gating=true and state=approved, with each reviewed evidence_digest equal to that
         # claim's current evidence_digest. With no verdict or a pending re-audit they must be empty (the raw schema
@@ -2992,7 +3011,7 @@ def main() -> int:
         "block-stale-spike-missing", "block-deferred-scope",
         "block-child-cancelled", "block-child-timeout", "block-child-orphaned",
         # D2C added GetArgument provenance fixtures.
-        "getargument-spike-approved", "getargument-superseded",
+        "getargument-spike-approved", "getargument-superseded", "getargument-human-decision",
         # Trusted reviewer ingress; covered producers live on evidence artifacts.
         "observe-attribution-auditor",
         "observe-audit-verdict", "observe-audit-verdict-frozen",
@@ -3579,7 +3598,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         "contract_result.digest", "GetContract wrong-but-well-formed digest")
 
     # D2A §8/§9 negatives: one mutation each with its own expected diagnostic substring.
-    full_rv = {"governance": None, "confirmation_batch": None, "id": "r", "goal": "g", "status": "active",
+    full_rv = {"governance": None, "confirmation_batch": None, "turn_end_actor": "author", "id": "r", "goal": "g",
+               "status": "active",
                "basis": "sha256:" + "5" * 64,
                "audit": {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []},
                "contract": {"id": "empirica/public", "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
@@ -3888,6 +3908,13 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return {"protocol": "empirica/v2", "request_id": "x",
                 "result": {"type": "Allow", "converged": False, "run": full_rv, "argument": argument}}
 
+    # D2.3: the run view's turn_end_actor is required and closed (author | human | none).
+    for label, change in (("missing", lambda rv: rv.pop("turn_end_actor")),
+                          ("another value", lambda rv: rv.update(turn_end_actor="agent"))):
+        env = copy.deepcopy(_full_env(_d2c_arg()))
+        change(env["result"]["run"])
+        if not schema_rejects(env, "response"):
+            errors.append(f"NEG a run view with turn_end_actor {label}: expected the response schema to reject it")
     # The valid base argument must pass both the raw schema and the procedural check.
     if schema_rejects(_full_env(_d2c_arg()), "response"):
         errors.append("NEG D2C base argument: expected schema-valid but rejected")
@@ -4176,7 +4203,8 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
 
     # D2C invariant 13 conditional approval negatives and positives: claim kind drives the
     # requirement. ordinary approved requires supporting research only; needs-experiment
-    # additionally requires a passing spike; needs-decision can never be approved.
+    # additionally requires a passing spike; needs-decision needs an approving human_decision
+    # or active supporting research.
 
     # ordinary approved research-only POSITIVE (must pass).
     _ord_ed = registry_digest([R1])
@@ -4215,12 +4243,94 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
            "needs-experiment approved but no active passing spike",
            "needs-experiment approved without spike")
 
-    # needs-decision approved NEGATIVE.
-    arg = _d2c_arg()
-    arg["claims"][0]["kind"] = "needs-decision"
-    expect(lambda e: check_argument_view(_arg_env(arg), registry, e, "neg"),
-           "needs-decision claim cannot project approved",
-           "needs-decision approved")
+    # needs-decision approved: valid with (a) an approving human_decision or (b) active supporting
+    # research and no refuting research; invalid with neither.
+    def _nd_arg(supported: bool, human: dict | None = None) -> dict:
+        nd = _d2c_arg()
+        nd["claims"][0]["kind"] = "needs-decision"
+        if human is not None:
+            nd["claims"][0]["human_decision"] = human
+        if not supported:
+            for art in nd["artifacts"]:
+                if "active" in art:
+                    art["active"] = False
+            nd["claims"][0]["active_evidence_ids"] = []
+            nd["claims"][0]["evidence_digest"] = registry_digest([])
+            nd["audit"]["reviewed_claims"][0]["evidence_digest"] = registry_digest([])
+            nd["audit"]["independence"] = "human_owned"
+        return nd
+
+    def _nd_errors(nd: dict) -> list[str]:
+        local: list[str] = []
+        check_argument_view(_arg_env(nd), registry, local, "neg")
+        return local
+
+    _approve = {"outcome": "approve", "answer": None}
+    expect(lambda e: check_argument_view(_arg_env(_nd_arg(False)), registry, e, "neg"),
+           "needs-decision approved with neither an approving human_decision nor active supporting research",
+           "needs-decision approved with neither")
+    expect(lambda e: check_argument_view(_arg_env(_nd_arg(False, {"outcome": "reject", "answer": None})),
+                                         registry, e, "neg"),
+           "needs-decision approved but its human_decision does not approve it",
+           "needs-decision approved with a rejecting human_decision")
+    for label, nd in (("(a) human_decision", _nd_arg(False, _approve)), ("(b) supporting research", _nd_arg(True))):
+        if _nd_errors(nd):
+            errors.append(f"NEG needs-decision approved with {label} must pass but produced: {_nd_errors(nd)}")
+    # A decision with no active evidence rests on no producer, so the audit is human_owned (or unverified), never a
+    # producer-independence class.
+    for _class in ("distinct", "mixed", "same_model"):
+        _owned = _nd_arg(False, _approve)
+        _owned["audit"]["independence"] = _class
+        expect(lambda e, a=_owned: check_argument_view(_arg_env(a), registry, e, "neg"),
+               f"argument.audit.independence {_class!r} must be human_owned or unverified",
+               f"no reviewed claim has active evidence but independence is {_class}")
+    for _class in ("human_owned", "unverified"):
+        _owned = _nd_arg(False, _approve)
+        _owned["audit"]["independence"] = _class
+        if _nd_errors(_owned):
+            errors.append(f"NEG no active evidence with independence {_class} must pass but produced: {_nd_errors(_owned)}")
+    _refuter = "sha256:" + "9" * 64
+
+    def _with_refuting(nd: dict) -> dict:
+        nd["artifacts"].append({"sequence": 4, "artifact_id": _refuter,
+            "claim_id": "G0", "claim_digest": d64, "kind": "research", "statement_digest": d64,
+            "active": True, "outcome": "refuting", "source_kind": "web",
+            "source_ref": "https://example.test/refutes", "citation": "Observed refutation.",
+            "verification": VERIFICATION})
+        ids = [*nd["claims"][0]["active_evidence_ids"], _refuter]
+        nd["claims"][0]["active_evidence_ids"] = ids
+        nd["claims"][0]["evidence_digest"] = registry_digest(ids)
+        nd["audit"]["reviewed_claims"][0]["evidence_digest"] = nd["claims"][0]["evidence_digest"]
+        return nd
+
+    # An evidence veto is the only error: a decision or research never overrides refuting evidence.
+    for label, nd in (("(b)", _nd_arg(True)), ("(a)", _nd_arg(False, _approve))):
+        if _nd_errors(_with_refuting(nd)) != ["neg: argument.claims[0] approved but active refuting "
+                                              "research present in active_evidence_ids"]:
+            errors.append(f"NEG needs-decision approved with {label} plus refuting research: "
+                          f"expected only the refuting error, got {_nd_errors(nd)}")
+    # A failed active spike vetoes an approving decision: it supersedes the passing spike, which is no longer active.
+    nd = _nd_arg(True, _approve)
+    _fail_id = "sha256:" + "a" * 64
+    _fail_req = _validation_spike_request(
+        sequence=4, artifact_id="sha256:" + "b" * 64, claim_digest=d64,
+        prerequisites=[R1, R2], paths=REQ_FILES, backend=nd["spike_backend"])
+    nd["artifacts"].append(_fail_req)
+    nd["artifacts"].append(_validation_spike_result(
+        sequence=5, artifact_id=_fail_id, request=_fail_req, claim_digest=d64,
+        exit_code=1, active=True, supersedes=P1))
+    next(a for a in nd["artifacts"] if a["artifact_id"] == P1)["active"] = False
+    nd["claims"][0]["active_evidence_ids"] = [R1, R2, _fail_id]
+    nd["claims"][0]["evidence_digest"] = registry_digest([R1, R2, _fail_id])
+    nd["audit"]["reviewed_claims"][0]["evidence_digest"] = nd["claims"][0]["evidence_digest"]
+    if _nd_errors(nd) != ["neg: argument.claims[0] approved but active failing spike present in active_evidence_ids"]:
+        errors.append(f"NEG needs-decision approved (a) with a failed spike: expected only the failing-spike error, "
+                      f"got {_nd_errors(nd)}")
+    # A non-approving decision wins over supporting research.
+    expect(lambda e: check_argument_view(_arg_env(_nd_arg(True, {"outcome": "reject", "answer": None})),
+                                         registry, e, "neg"),
+           "needs-decision approved but its human_decision does not approve it",
+           "needs-decision approved with a rejecting human_decision and supporting research")
 
     # identical-digest distinct-claim leakage NEGATIVE: two claims share one wording
     # digest; each must have its own active set and must not share artifacts.

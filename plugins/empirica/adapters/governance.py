@@ -71,7 +71,31 @@ def governance_timeout() -> float:
                      f"got {json.dumps(raw, ensure_ascii=False)}")
 
 
-def unavailable(result: dict, code: str = "governance.approval_unavailable", *, message: str | None = None) -> dict:
+def closed_code(result: dict) -> str:
+    """The one contract code for a mediation that ended without a decision, chosen from the run's own governance
+    facts (never from the adapter's guess): the row it names owns the actions.
+
+    The run's allowance spent, nobody who can be asked with no automatic way on, or no way left to change a shown-out
+    configuration (the view's own ``next_action`` is the stop) → ``governance.approval_unavailable`` (the stop alone);
+    a raise nobody can approve, or none can be asked for want of an interaction, while a proposal within the approved
+    ceilings is still admitted (the view's ``next_action`` is to propose) → ``governance.raise_unavailable``; this configuration's
+    presentations spent with a change still possible → ``governance.configuration_shown``; a human who closed the dialog
+    → ``governance.dialog_closed``. Nobody to ask is tested first, so every host answers a resumed run the same way."""
+    governed = (result.get("run") or {}).get("governance") or {}
+    if governed.get("next_action") == "residual.accept":
+        return "governance.approval_unavailable"
+    spent = (governed.get("interactions_remaining") or {}).get("total") == 0
+    if (governed.get("context") or {}).get("approval_capability") == "unavailable" or (spent and governed.get("prompt_error")):
+        # nobody can approve a pending raise, or nothing is left to ask with, and the view still offers a proposal
+        return "governance.raise_unavailable" if governed.get("raises") is True else "governance.approval_unavailable"
+    if governed.get("prompt_error"):
+        return ("governance.approval_unavailable" if (governed.get("interactions_remaining") or {}).get("total") == 0
+                else "governance.configuration_shown")
+    return "governance.dialog_closed" if governed.get("human_wait") is True else "governance.approval_unavailable"
+
+
+def unavailable(result: dict, code: str | None = None, *, message: str | None = None) -> dict:
+    code = code or closed_code(result)
     row = protocol.public_contract()["reasons"][code]
     return {"type": "Block", "run": result["run"], "reasons": [{"code": code,
             "parameters": {}, "message": message or row["message"], "sections": row["sections"],
@@ -90,11 +114,21 @@ def _line(text: str, limit: int = 72, *, closing: str = "") -> str:
     return text[:limit - len(closing) - 1] + "…" + closing
 
 
-def _budget_property(row: Mapping[str, Any]) -> dict[str, Any]:
-    """Map one budget row to an editable integer property."""
+def _approved_value(row: Mapping[str, Any], approved: Mapping[str, Any] | None) -> int | None:
+    """The ceiling the run approved, for a row whose proposed value differs from it (a raise or a lowering: the whole change
+    the human judges, as the edited-configuration form shows it); else ``None``. ``approved`` is the run view's own
+    ``governance.budgets`` of a run that holds a first approval and is asked about a raise, and ``None`` otherwise."""
+    if approved is None or row["key"] not in approved or row["value"] == approved[row["key"]]:
+        return None
+    return approved[row["key"]]
+
+
+def _budget_property(row: Mapping[str, Any], approved: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Map one budget row to an editable integer property; a raised ceiling's title carries the approved value."""
     description = f"used {row['used']} · allowed {row['minimum']}–{row['maximum']}"
     with_help = description + " · " + row["help"]
-    return {"type": "integer", "title": row["label"],
+    was = _approved_value(row, approved)
+    return {"type": "integer", "title": row["label"] + ("" if was is None else f" (was {was})"),
             "description": with_help if len(with_help) <= 60 else description,
             "minimum": row["minimum"], "maximum": row["maximum"], "default": row["value"]}
 
@@ -146,7 +180,8 @@ def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
                            break_on_hyphens=False),
             short, f"File: {document['path']}")
 
-def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float, *,
+                approved: Mapping[str, Any] | None = None) -> tuple[str, dict]:
     """Map a validated dialog and its written document to Claude's editable elicitation form.
 
     The form keeps exactly what the human judges (ADR-0072 "What the forms keep"): the numbers
@@ -154,21 +189,32 @@ def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout:
     under the contract-owned unverified label. PR 19 (finding N7 of the Lima qualification of
     ``ac401739``): Claude Code 2.1.304 shows only the first ``CLAUDE_VISIBLE_LINES`` lines, so
     the heading, the document's ``Details:`` and the goal open the form — never a blank line —
-    while the rationale pointer, the document's remaining lines and the legend stay below, whole."""
+    while the rationale pointer, the document's remaining lines and the legend stay below, whole.
+
+    ``approved`` is given when the human is asked about a raise (the run view's ``governance.raises``): the ceilings the run
+    approved. The form then says it raises them, and the line the human judges it by is the budgets with each raised ceiling
+    as ``N (was M)``, as the confirm form shows a prior; the goal, which a raise does not change, stays below the fold."""
     reviews = dialog["reviews_left"]["proposal"]
     count = f"{reviews} {'review' if reviews == 1 else 'reviews'} left"
     details, *document_tail = _document_lines(document)
+    facts = f"(epoch {dialog['epoch']} · {count} · {_duration(timeout)})"
+    goal = _line(f'Goal: "{dialog["goal"]}"', closing='"')
+    if approved is None:
+        opening = (_line(f"Empirica · approve run configuration {facts}"), details, goal)
+        below: tuple[str, ...] = ()
+    else:
+        parts = [_raise_part(row, approved) for row in dialog["budgets"]]
+        opening = (_line(f"Empirica · raise approved ceilings {facts}"), _line(" · ".join(parts)), details)
+        below = (goal,)
     message = "\n".join((
-        *(_visible(
-            _line(f"Empirica · approve run configuration (epoch {dialog['epoch']} · {count} · {_duration(timeout)})"),
-            details,
-            _line(f'Goal: "{dialog["goal"]}"', closing='"'))),
+        *_visible(*opening),
+        *below,
         _line(f"{dialog['rationale_label']} and full detail: in the document"),
         *document_tail,
         "Accept = approve as shown · edit values → confirm again",
         "Decline = reject · Esc = decide later",
     ))
-    properties = {row["key"]: _budget_property(row) for row in dialog["budgets"]}
+    properties = {row["key"]: _budget_property(row, approved) for row in dialog["budgets"]}
     return message, {"type": "object", "properties": properties, "required": []}
 
 
@@ -185,6 +231,12 @@ def _part(row: Mapping[str, Any], document: Mapping[str, Any]) -> str:
     old = priors[row["key"]]["was"] if row["key"] in priors else row["value"]
     suffix = f" (was {show(old)})" if old != row["value"] else ""
     return f"{row['short']} {value}{suffix}"
+
+def _raise_part(row: Mapping[str, Any], approved: Mapping[str, Any]) -> str:
+    """One compact value of a raise form: the proposed ceiling, with the approved one when it differs (``_part``'s form)."""
+    was = _approved_value(row, approved)
+    return f"{row['short']} {row['value']}" + ("" if was is None else f" (was {was})")
+
 
 def confirm_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map an amended dialog and its written document to a buttons-only confirmation.
@@ -317,10 +369,14 @@ class HostGovernance:
         expected = (g["plan_revision"], g["proposal_digest"])
         if run["status"] != "active" or g["state"] == "approved":
             return result
-        approval_kind = expected_approval_kind(g)
+        approval_kind = expected_approval_kind(g, g["raises"])
         approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
         if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
-            return unavailable(result)
+            # Report what this host can do NOW, so the run's own facts (and its Next) say nobody can be asked,
+            # whatever an earlier context said; then the view names the stop alone.
+            reported = self.context_ingress(self.profile, run["id"],
+                                            {"author": g["context"]["author"], "ingress": "unavailable"}).get("result", {})
+            return unavailable(reported if reported.get("run") else result)
         context = {"author": g["context"]["author"], "ingress": approval_ingress}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
         if result.get("type") not in {"Allow", "Inert"} or not result.get("run"):
@@ -329,7 +385,7 @@ class HostGovernance:
         if confirmation and expected != (g["plan_revision"], g["proposal_digest"]):
             return unavailable(result, "governance.stale_proposal")
         if g["prompt_error"]:
-            return unavailable(result, g["prompt_error"])
+            return unavailable(result)
         envelope = {"run_id": run["id"], "receipt_id": uuid4().hex, "proposal_digest": g["proposal_digest"],
                     "plan_revision": g["plan_revision"], "approval_kind": approval_kind}
         document = None
@@ -371,8 +427,10 @@ class HostGovernance:
             # stays only for the re-entry guard (the stale proposal re-check below and the
             # recursion), no longer for the form choice.
             confirm = document["question"] == core_hitl.CONFIRM_AMENDMENT
+            # a raise is shown as one, beside the ceilings the run approved (the view's own, never recomputed here)
+            approved = g.get("budgets") if g.get("raises") is True else None
             message, schema = (confirm_form(dialog, document, timeout) if confirm
-                               else review_form(dialog, document, timeout))
+                               else review_form(dialog, document, timeout, approved=approved))
             resolved = decision(self.elicit(message, schema), dialog, schema, confirmation=confirm)
             if isinstance(resolved, Dismiss):
                 return dismiss()

@@ -536,9 +536,11 @@
                           "waiting",
                           "unanswered",
                           "deferred",
-                          "not_asked"
+                          "not_asked",
+                          "decided_by_author",
+                          "rejected_by_evidence"
                         ],
-                        "description": "approved/rejected: the human answered. deferred: outside the run's scope, nobody is asked. waiting: the human is asked (where). unanswered: the run ended with it open. not_asked: in scope but nothing asks it (it was refuted, say)."
+                        "description": "approved/rejected: the human answered. deferred: outside the run's scope, nobody is asked. waiting: the human is asked (where). unanswered: the run ended with it open. not_asked: in scope but nothing asks it (deliberative: it was refuted, say). decided_by_author: auto mode, no human answer, approved by its evidence. rejected_by_evidence: auto mode, no human answer, discarded by refuting evidence or a failed spike."
                       },
                       "outcome": {
                         "enum": [

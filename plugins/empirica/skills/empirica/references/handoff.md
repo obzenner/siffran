@@ -10,6 +10,8 @@ Empirica's graph, manifests, evidence, audit bindings, and operational state are
 internal assurance artifacts. Do not copy them into the product tree merely to
 make the run visible.
 
+Convergence is design-time assurance, not a security boundary; CI remains the trust boundary for shipped code.
+
 Use Methodologist at the confluence only when evidence leaves a genuine design or
 formal-reasoning decision. Do not invoke it as ceremony after the answer is fixed.
 Accepted architecture decisions belong in the repository's normal ADR/MADR form.

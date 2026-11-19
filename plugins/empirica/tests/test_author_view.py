@@ -216,7 +216,7 @@ class NoFallbackTests(unittest.TestCase):
 
 
 class RedirectedObligationTests(unittest.TestCase):
-    """An obligation blocked by a descendant claim names that claim (``missing: <code> via claim:<id>``)."""
+    """An obligation blocked by a descendant claim names that claim (``missing: <code>; first discharge claim:<id>``)."""
 
     GOLDEN = ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" / "author-view-golden"
 
@@ -229,7 +229,7 @@ class RedirectedObligationTests(unittest.TestCase):
         text = render_author_view(golden["result"], strict=True)
         self.assertEqual(text, golden["text"])
         self.assertIn("\n  claim:G0: ", text)
-        self.assertIn("\n    missing: claim.spike_missing via claim:S1\n", text)
+        self.assertIn("\n    missing: claim.spike_missing; first discharge claim:S1\n", text)
 
     def test_unredirected_obligation_renders_the_bare_code(self):
         for name in ("block-open-claim", "audit-mixed"):
@@ -239,7 +239,17 @@ class RedirectedObligationTests(unittest.TestCase):
             self.assertTrue(rows, name)
             for row in rows:
                 self.assertIn(f"\n    missing: {row['missing']['code']}\n", text, name)
-            self.assertNotIn("missing: " + rows[0]["missing"]["code"] + " via", text, name)
+            self.assertNotIn("missing: " + rows[0]["missing"]["code"] + ";", text, name)
+
+    def test_a_redirected_residual_names_the_claim_to_discharge(self):
+        result = stored(json.loads((self.GOLDEN / "block-deferred-scope.json").read_text()))["result"]
+        residual = result["run"]["residuals"][0]
+        residual.update(claim_id="G0", target_claim_id="S1")
+        self.assertIn(" — affected: claim:G0; first discharge claim:S1\n", render_author_view(result, strict=True) + "\n")
+        residual["target_claim_id"] = "G0"
+        text = render_author_view(result, strict=True)
+        self.assertIn(" — affected: claim:G0", text)
+        self.assertNotIn("first discharge", text)
 
     def test_target_is_rendered_through_claim_id_safety(self):
         """A target that is not a claim id is fenced and escaped, exactly as a residual's is."""
@@ -249,7 +259,7 @@ class RedirectedObligationTests(unittest.TestCase):
                                              "target_claim_id": hostile, "parameters": {}}}
         rendered = str(author_view._missing(row, safety))
         self.assertEqual(
-            rendered, "claim.spike_missing via claim:"
+            rendered, "claim.spike_missing; first discharge claim:"
             + str(safety.untrusted(hostile)))
         self.assertNotIn("\n", rendered)
         self.assertNotIn("<x>", rendered)
@@ -258,12 +268,61 @@ class RedirectedObligationTests(unittest.TestCase):
             str(safety.untrusted(hostile))))
         # A safe id is raw; own id and null targets add nothing.
         row["missing"]["target_claim_id"] = "S1"
-        self.assertEqual(str(author_view._missing(row, safety)), "claim.spike_missing via claim:S1")
+        self.assertEqual(str(author_view._missing(row, safety)), "claim.spike_missing; first discharge claim:S1")
         row["missing"]["target_claim_id"] = "G0"
         self.assertEqual(str(author_view._missing(row, safety)), "claim.spike_missing")
         row.update(id="obligation.audit", missing={"code": "audit.failed", "target_claim_id": None,
                                                    "parameters": {}})
         self.assertEqual(str(author_view._missing(row, safety)), "audit.failed")
+
+
+class ControlModeHeaderTests(unittest.TestCase):
+    """The first line names the control mode, from the public run view, in the contract's own words."""
+
+    GOLDEN = RedirectedObligationTests.GOLDEN
+
+    def first_line(self, name):
+        result = stored(json.loads((self.GOLDEN / f"{name}.json").read_text()))["result"]
+        return render_author_view(result, strict=True).splitlines()[0], result
+
+    def test_each_mode_is_printed_between_the_state_and_the_budget(self):
+        for name, mode in (("governance-approved", "mode deliberative"),
+                           ("governance-wait-pending", "mode deliberative"),
+                           ("governance-wait-post-approval-auto", "mode auto"),
+                           ("governance-wait-delegated-auto", "mode auto, unattended")):
+            line, result = self.first_line(name)
+            state = result["run"]["governance"]["state"]
+            self.assertIn(f"governance: {state}; {mode}; passes/spawns/audits: ", line, name)
+        auto = self.first_line("governance-wait-post-approval-auto")[1]["run"]["governance"]
+        self.assertEqual((auto["control_mode"], auto["context"]["delegation"]), ("auto", False))
+
+    def test_unattended_follows_the_cores_delegated_auto_rule(self):
+        """``core.run.delegated_auto``: auto, delegation, and no interactive human. Interactive authority outranks
+        delegation, and a deliberative run is never unattended."""
+        for mode, delegation, interactive, expected in (
+                ("auto", True, False, "mode auto, unattended"), ("auto", True, True, "mode auto"),
+                ("auto", False, False, "mode auto"), ("deliberative", True, False, "mode deliberative"),
+                ("deliberative", True, True, "mode deliberative")):
+            result = stored(json.loads((self.GOLDEN / "governance-wait-delegated-auto.json").read_text()))["result"]
+            governed = result["run"]["governance"]
+            governed["control_mode"] = mode
+            governed["context"].update(delegation=delegation, interactive=interactive)
+            line = render_author_view(result, strict=True).splitlines()[0]
+            self.assertIn(f"; {expected}; passes/spawns/audits: ", line, (mode, delegation, interactive))
+
+    def test_a_run_without_governance_has_no_mode(self):
+        line, result = self.first_line("block-pending-audit")
+        self.assertIsNone(result["run"]["governance"])
+        self.assertNotIn("mode", line)
+
+    def test_the_words_are_the_contracts_and_the_renderers_hold_none(self):
+        labels = author_view.author_view_labels()
+        self.assertEqual((labels["mode"], labels["mode_delegated"], labels["via_claim"]),
+                         ("mode", "unattended", "first discharge claim:"))
+        for source in (PLUGIN / "adapters" / "author_view.py", PLUGIN / "adapters" / "pi" / "src" / "author-view.ts"):
+            text = source.read_text(encoding="utf-8")
+            for word in ("unattended", "first discharge", "mode deliberative", "mode auto"):
+                self.assertNotIn(word, text, f"{source.name}: {word}")
 
 
 class NoUnownedDigestsOrOpaqueIdsTests(unittest.TestCase):
@@ -394,8 +453,29 @@ class ContentCompletenessTests(unittest.TestCase):
                   if row.get("recovery_action")),
             }
             text = render_author_view(result, strict=True)
+            launch = author_view.audit_launch(run["host"]["profile_id"]) if run else None
             for action in sorted(emitted):
-                self.assertIn(author_view.render_surface(action), text, f"{name}: {action}")
+                # An audit's child action is the host's auditor launch, printed once, and pointed to elsewhere.
+                shown = [author_view.render_surface(action)]
+                if launch and action in ("child.spawn_auditor", "child.retry"):
+                    shown += [launch, "the auditor launch under"]
+                self.assertTrue(any(item in text for item in shown), f"{name}: {action}")
+
+    def test_B1_a_budget_raise_reads_as_a_raise_and_no_other_surface_does(self):
+        """``budget.raise`` and ``governance.propose`` share one tool call; the view names which one this is, with the
+        contract-owned note, so a reader that follows ``next:`` does not take the raise for any configuration call or conclude
+        that it needs a new run."""
+        note = author_view._LABELS["budget_raise_note"]
+        plain = "empirica_observe kind=configure_run"
+        self.assertEqual(author_view.render_surface("budget.raise"), f"{plain} {note}")
+        self.assertEqual(author_view.render_surface("governance.propose"), plain)
+        self.assertIn("raise", note)
+        self.assertIn("approved ceilings", note)
+        # true wherever the raise is offered: a person decides it, and only where this host can ask one
+        self.assertIn("needs a person this host can ask", note)
+        self.assertNotIn("the human decides", note)
+        noted = [action for action in next_action_surfaces() if note in author_view.render_surface(action)]
+        self.assertEqual(noted, ["budget.raise"])
 
     def test_every_open_obligation_id_appears(self):
         for name in RUNVIEW_FIXTURES:

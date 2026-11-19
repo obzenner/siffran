@@ -115,7 +115,8 @@
         "first_approval": false,
         "pre_approval_revisions": 0,
         "post_approval_revisions": 0,
-        "human_wait": false
+        "human_wait": false,
+        "raises": false
       },
       "audit": {
         "verdict": "none",
@@ -125,6 +126,7 @@
         "findings": []
       },
       "confirmation_batch": null,
+      "turn_end_actor": "author",
       "spike_backend": {
         "kind": "qualified",
         "backend": "docker",
@@ -134,5 +136,5 @@
       }
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes qualified generic Docker profile binding (not a live-health claim)\n  qualification record: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  execution binding: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
+  "text": "Allow (converged=false) active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes qualified generic Docker profile binding (not a live-health claim)\n  qualification record: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  execution binding: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
 }

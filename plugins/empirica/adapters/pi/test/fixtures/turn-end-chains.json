@@ -1,0 +1,182 @@
+{
+  "about": "Where an auto chain ends is decided by the registry's `turn_end.bounds` (its K), not by a host. Each case runs `segments` of turn ends on one observation basis (a segment is a basis label and a count, `K` standing for the registry's number), every one of which continues, then one `final` turn end on a basis, which `then` says continues or ends the chain with `unattended_residual`. `actor` is the run view's `turn_end_actor`. Pi (`turn-end.test.ts`) and Claude (`test_claude_adapter.py`) read this file, so the two hosts answer the same chains. `sequences` give what each turn end hands the agent: `reason` (the core's own reason), `continue` (`unattended_continue`, which asks for action and never offers the stop), `residual-directive` (the last continuation, the one before a bound: `unattended_residual` as the directive, so the model sees the stop) and `end` (the turn that ends the chain, `unattended_residual`). A step runs `turns` turn ends on `basis`; `fresh` is a new basis at every turn end.",
+  "cases": [
+    {
+      "name": "author: K - 1 turn ends on one basis continue, the K-th ends",
+      "actor": "author",
+      "segments": [
+        [
+          "a",
+          "K-1"
+        ]
+      ],
+      "final": "a",
+      "then": "end"
+    },
+    {
+      "name": "author: one turn end short of K, the next basis continues",
+      "actor": "author",
+      "segments": [
+        [
+          "a",
+          "K-1"
+        ]
+      ],
+      "final": "b",
+      "then": "continue"
+    },
+    {
+      "name": "author: a changed basis restarts the count",
+      "actor": "author",
+      "segments": [
+        [
+          "a",
+          "K-1"
+        ],
+        [
+          "b",
+          "K-1"
+        ]
+      ],
+      "final": "b",
+      "then": "end"
+    },
+    {
+      "name": "author: returning to an earlier basis starts from 1",
+      "actor": "author",
+      "segments": [
+        [
+          "a",
+          "K-1"
+        ],
+        [
+          "b",
+          "1"
+        ]
+      ],
+      "final": "a",
+      "then": "continue"
+    },
+    {
+      "name": "author: a first turn end continues",
+      "actor": "author",
+      "segments": [],
+      "final": "a",
+      "then": "continue"
+    },
+    {
+      "name": "none: the first turn end continues with the directive",
+      "actor": "none",
+      "segments": [],
+      "final": "a",
+      "then": "continue"
+    },
+    {
+      "name": "none: the second turn end on one basis ends the chain",
+      "actor": "none",
+      "segments": [
+        [
+          "a",
+          "1"
+        ]
+      ],
+      "final": "a",
+      "then": "end"
+    },
+    {
+      "name": "none: a changed basis continues",
+      "actor": "none",
+      "segments": [
+        [
+          "a",
+          "1"
+        ]
+      ],
+      "final": "b",
+      "then": "continue"
+    },
+    {
+      "name": "none: the count carries across the actor, the K-th turn end on one basis ends",
+      "actor": "none",
+      "segments": [
+        [
+          "a",
+          "K-1"
+        ]
+      ],
+      "final": "a",
+      "then": "end",
+      "first_actor": "author"
+    }
+  ],
+  "sequences": [
+    {
+      "name": "author, one basis: the reason, the notice that asks for action, the residual before the bound, the end",
+      "actor": "author",
+      "steps": [
+        {
+          "basis": "a",
+          "turns": "1",
+          "expect": "reason"
+        },
+        {
+          "basis": "a",
+          "turns": "K-3",
+          "expect": "continue"
+        },
+        {
+          "basis": "a",
+          "turns": "1",
+          "expect": "residual-directive"
+        },
+        {
+          "basis": "a",
+          "turns": "1",
+          "expect": "end"
+        }
+      ]
+    },
+    {
+      "name": "author, a basis that changes at every turn end: the same, by the T-th turn end of the chain",
+      "actor": "author",
+      "steps": [
+        {
+          "basis": "fresh",
+          "turns": "1",
+          "expect": "reason"
+        },
+        {
+          "basis": "fresh",
+          "turns": "T-3",
+          "expect": "continue"
+        },
+        {
+          "basis": "fresh",
+          "turns": "1",
+          "expect": "residual-directive"
+        },
+        {
+          "basis": "fresh",
+          "turns": "1",
+          "expect": "end"
+        }
+      ]
+    },
+    {
+      "name": "none: the directive is the residual from the first turn end, and the second on one basis ends",
+      "actor": "none",
+      "steps": [
+        {
+          "basis": "a",
+          "turns": "1",
+          "expect": "residual-directive"
+        },
+        {
+          "basis": "a",
+          "turns": "1",
+          "expect": "end"
+        }
+      ]
+    }
+  ]
+}

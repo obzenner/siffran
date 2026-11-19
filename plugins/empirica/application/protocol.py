@@ -81,7 +81,7 @@ _GOVERNANCE_CONTROLS = copy.deepcopy(_decisions)
 _PROJECTION_CONTROLS = _GOVERNANCE_CONTROLS["controls"]
 _NOTICES = _PUBLIC_CONTRACT["settlement_notices"]
 HUMAN_WAIT_NOTICE: str = _NOTICES["human_wait"]
-#: What the Claude Stop says when the confirmation is the sole blocker: report_convergence, where the host can ask.
+#: The directive the Stop once gave an interactive auto run to report; no host gives it now (an auto run asks no one).
 EVIDENCE_REPORT_NOTICE: str = _NOTICES["evidence_report"]
 #: Template with the single ``{resource}`` placeholder.
 BUDGET_EXHAUSTED_NOTICE: str = _NOTICES["budget_exhausted"]
@@ -91,6 +91,9 @@ PAUSED_FOR_HUMAN_NOTICE: str = _NOTICES["paused_for_human"]
 PAUSED_FOR_EVIDENCE_NOTICE: str = _NOTICES["paused_for_evidence"]
 #: Block on a later turn end of an ``auto`` run, which never hands the turn back (ADR-0068); one ``{reason}``.
 UNATTENDED_CONTINUE_NOTICE: str = _NOTICES["unattended_continue"]
+#: The turn end of an ``auto`` run whose author has no step left (``turn_end_actor`` ``none``): names the reason and offers
+#: ``report_convergence intent=stop`` as the honest end (ADR-0073); one ``{reason}``.
+UNATTENDED_RESIDUAL_NOTICE: str = _NOTICES["unattended_residual"]
 
 
 _AUTHOR_VIEW_LABELS = MappingProxyType(dict(_PUBLIC_CONTRACT["author_view"]["labels"]))
@@ -191,6 +194,11 @@ def host_profile_id(host_id: str) -> str:
     if len(ids) != 1:
         raise ValueError(f"expected exactly one host profile for {host_id!r}, found {len(ids)}")
     return ids[0]
+
+
+def audit_launch(profile_id: str) -> str | None:
+    """The exact auditor launch a host's profile declares (``host-profiles.json`` is its only copy), else ``None``."""
+    return (_PROFILES.get(profile_id) or {}).get("audit_launch")
 
 
 def host_profile(profile_id: str) -> Mapping[str, Any]:

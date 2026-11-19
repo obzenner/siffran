@@ -4,12 +4,14 @@ Which hosts and versions Empirica supports, how Pi admits its audit runtime, and
 
 ## Supported surfaces
 
+Operator-side governance facts (the review document, decision timeout, reviewer configuration) are in [governance-operations.md](governance-operations.md).
+
 Host versions: Pi's range (`>=1.0.0,<2.0.0`) is enforced at `/empirica` start (a Pi outside it, or one whose version cannot be read, is refused with `host.version_unsupported` and nothing starts); Claude Code's range (`>=2.1.278,<2.2.0`) is the documented supported range and is not checked (hook payloads carry no version), so Claude is admitted by observed capability; the pi-subagents range is enforced at runtime.
 
 | Surface | Deliberative | Auto, human present | Auto, delegated (`EMPIRICA_AUTO_DELEGATION=1`) |
 |---|---|---|---|
 | Claude Code, interactive session | Supported | Supported | n/a |
-| Claude Code, non-interactive (`-p`, SDK) | Refused: nobody can approve the configuration | Refused: auto needs the delegation | Supported; nobody can confirm evidence, so URL research stays unconfirmed |
+| Claude Code, non-interactive (`-p`, SDK) | Refused: nobody can approve the configuration | Refused: auto needs the delegation | **Broken** ([#103](https://github.com/obzenner/siffran/issues/103)): Claude Code's default permission mode refuses Empirica's own tools, so the run starts but cannot take a step, and the process exits 0. Use an interactive session |
 | Pi TUI and RPC | Supported | Supported | Supported |
 | Pi print and JSON (`pi -p`, `--mode json`) | Refused: nobody can approve | Refused: auto needs the delegation | Supported; notices go to stderr, the command waits for the run it started, a refusal exits 1; nobody can confirm evidence |
 | Codex | Not available | Not available | Not available |

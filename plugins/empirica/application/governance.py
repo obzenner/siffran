@@ -69,7 +69,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                         run_id=run_id, snapshot=snapshot)
             else:
                 reason = policy.decision_error(run_id, governed, payload,
-                                             confirmation.interactions(snapshot))
+                                             confirmation.interactions(snapshot), state.budgets)
                 if reason == "inert":
                     # Historical and raw-submission receipts replay before current admission rules.
                     return c._inert_with_run(rid, snapshot, presentation=True)

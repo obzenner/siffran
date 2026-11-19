@@ -374,7 +374,7 @@
     "tools": {
       "empirica_read": {
         "title": "Read Empirica state",
-        "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome. Do not blindly reopen host UI."
+        "description": "Read Empirica state. GetRun and RestoreRun return a deterministic plain-text author view; act on its reasons, obligations, and rendered next calls rather than parsing JSON. GetArgument and GetContract retain their detailed auditor/contract sections. Inspect state after an uncertain configure_run outcome; the run view's next: line says when to call configure_run again."
       },
       "empirica_observe": {
         "title": "Record an Empirica author action",
@@ -1009,7 +1009,7 @@
       }
     },
     "human.confirm_evidence": {
-      "description": "Show the human the pending research records and needs-decision claims in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only when the run has a human ingress.",
+      "description": "Show the human the pending research records (and, in deliberative mode, the needs-decision claims) in one batch: record one presentation, then submit one receipt of per-item decisions. Offered only in a deliberative run whose host has a human ingress: an auto run asks no one about evidence.",
       "surface": {
         "owner": "human",
         "operation": "confirmation"
@@ -1021,7 +1021,7 @@
       }
     },
     "convergence.report": {
-      "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and decisions in one dialog, and when there is none the response says so.",
+      "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and, in deliberative mode, decisions in one dialog, and when there is none the response says so.",
       "surface": {
         "tool": "report_convergence",
         "intent": "report_convergence"
@@ -1187,6 +1187,19 @@
           "claim_id": {
             "type": "string",
             "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
+          },
+          "support": {
+            "enum": [
+              "unconfirmed"
+            ]
+          },
+          "record_ids": {
+            "type": "array",
+            "uniqueItems": true,
+            "items": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
           }
         }
       },
@@ -1197,7 +1210,17 @@
         "evidence/research"
       ],
       "message": "Record research for claim {claim_id}.",
-      "ended_message": "No research was recorded for claim {claim_id} before the run stopped."
+      "case_parameter": "support",
+      "case_messages": {
+        "unconfirmed": "Claim {claim_id} has only research that a human would have to confirm, and an auto run asks no one, so that research does not count. Cite a file in the workspace (the service checks it) or a local file your auditor can read, or run a spike. An unresolved claim, gating or not, keeps the run from converging. A claim outside the gating scope ends it stopped_frozen, and unless the graph is frozen you can revise the claim graph to remove it. Or call report_convergence intent=stop to end with the claim as a residual. To have a human confirm sources, start a deliberative run."
+      },
+      "ended_message": "No research was recorded for claim {claim_id} before the run stopped.",
+      "ui_case_messages": {
+        "unconfirmed": "Claim {claim_id} has only sources a person must confirm; it needs a source the service or auditor can check, or a spike."
+      },
+      "ended_case_messages": {
+        "unconfirmed": "No research that counts was recorded for claim {claim_id} before the run stopped."
+      }
     },
     "claim.research_unbound": {
       "params": {
@@ -1380,6 +1403,14 @@
               "audit_spawn",
               "pass"
             ]
+          },
+          "recovery": {
+            "enum": [
+              "raise_dialog",
+              "raise_human",
+              "raise_unavailable",
+              "fresh_run"
+            ]
           }
         }
       },
@@ -1392,7 +1423,20 @@
         "budget"
       ],
       "message": "{resource} budget exhausted.",
-      "ended_message": "{resource} budget was exhausted when the run stopped."
+      "case_parameter": "recovery",
+      "case_messages": {
+        "raise_dialog": "{resource} budget exhausted. Propose higher ceilings with configure_run: the human approves the raise in a dialog, and this run goes on with the ceilings they approve. Or end honestly with report_convergence intent=stop.",
+        "raise_human": "{resource} budget exhausted. Propose higher ceilings with configure_run: the human decides the raise, and this run goes on if they approve it. Or end honestly with report_convergence intent=stop.",
+        "fresh_run": "{resource} budget exhausted. This run cannot raise its ceilings, because nobody can be asked: end honestly with report_convergence intent=stop, or start a fresh run.",
+        "raise_unavailable": "{resource} budget exhausted. A raise needs a person, and this host has reported that it cannot show one now, so a configure_run with higher ceilings would wait for nobody: end honestly with report_convergence intent=stop, or start a fresh run."
+      },
+      "ended_message": "{resource} budget was exhausted when the run stopped.",
+      "ui_case_messages": {
+        "raise_dialog": "{resource} budget exhausted; the agent can propose a raise for you to approve.",
+        "raise_human": "{resource} budget exhausted; the agent can propose a raise for you to decide.",
+        "fresh_run": "{resource} budget exhausted; this run cannot raise it, only stop or start afresh.",
+        "raise_unavailable": "{resource} budget exhausted; a raise needs a person and this host cannot show one now, so only stop or start afresh."
+      }
     },
     "audit.required": {
       "params": {
@@ -1830,13 +1874,28 @@
         "properties": {}
       },
       "next_actions": [
-        "host.repair_context",
         "residual.accept"
       ],
       "sections": [
         "governance"
       ],
-      "message": "Host approval UI unavailable/cancelled. Keep pending; use supported UI or start an explicitly auto fresh run.",
+      "message": "No approval dialog can be shown now, so nothing is approved and the only way on is the honest stop.",
+      "disposition": "host_recovery"
+    },
+    "governance.dialog_closed": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "The approval dialog ended without an answer, so nothing is approved; once the human says how to go on, propose again, or stop.",
       "disposition": "host_recovery"
     },
     "governance.auto_ceiling": {
@@ -1862,9 +1921,9 @@
       "sections": [
         "governance"
       ],
-      "message": "Auto cannot increase operational ceilings, including audit retries. The bound in the parameters says which text applies; the core chooses it from whether the run was already approved.",
+      "message": "A delegated auto run cannot raise its ceilings, audit retries included. Keep or lower them, or start a fresh run with a larger approved size.",
       "case_messages": {
-        "approved": "Auto cannot raise the approved ceilings; lower or keep them, or start a fresh run with a larger approved size.",
+        "approved": "A delegated auto run cannot raise its approved ceilings: keep or lower them, or start a fresh run with a larger approved size.",
         "envelope": "A delegated proposal cannot exceed the 8/1/2 policy envelope (or the narrower limit the operator set): reduce scope, or use an approval-capable host interactively."
       },
       "case_parameter": "bound"
@@ -1968,13 +2027,44 @@
         "properties": {}
       },
       "next_actions": [
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "The human interactions for this run are spent, so no dialog can be shown; stop honestly or start a fresh run.",
+      "disposition": "host_recovery"
+    },
+    "governance.raise_unavailable": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
         "governance.propose",
         "residual.accept"
       ],
       "sections": [
         "governance"
       ],
-      "message": "The durable proposal (3) or total (128) interaction limit is exhausted. Stop honestly or start a fresh run.",
+      "message": "Nobody can be asked to approve a raise now, so it cannot proceed; propose again within the approved ceilings, which needs no approval, or stop.",
+      "disposition": "host_recovery"
+    },
+    "governance.configuration_shown": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "governance.propose",
+        "residual.accept"
+      ],
+      "sections": [
+        "governance"
+      ],
+      "message": "This configuration has been shown three times; once the human says which ceilings to change, propose them, or stop.",
       "disposition": "host_recovery"
     },
     "governance.decision_conflict": {
@@ -2141,7 +2231,10 @@
       "case_messages": {
         "again": "Research or a decision was shown to the human and left open (Later, cancel or timeout). An explicit report_convergence asks the human again; each asking spends one of the run's human interactions."
       },
-      "ended_message": "Unanswered when this run stopped: research or a decision needed a human."
+      "ended_message": "Unanswered when this run stopped: research or a decision needed a human.",
+      "ui_case_messages": {
+        "again": "Shown to the human and left open; reporting again asks once more."
+      }
     }
   },
   "sections": {
@@ -2181,7 +2274,7 @@
         },
         {
           "id": "roles/human",
-          "text": "The human resolves judgment, budget, and product decisions and accepts residuals; the human must not be silently simulated by an agent."
+          "text": "The human resolves budget decisions, and in deliberative mode judgment and product decisions, and accepts residuals; the human must not be silently simulated by an agent."
         }
       ]
     },
@@ -2243,11 +2336,11 @@
       "clauses": [
         {
           "id": "claims/residuals/human_decision",
-          "text": "A declared human or data hold that is valid and surfaced is a residual; a needs-decision claim waiting on a human is part of the one human batch (evidence.confirmation_required)."
+          "text": "A declared human or data hold that is valid and surfaced is a residual; in deliberative mode a needs-decision claim waiting on a human is part of the one human batch (evidence.confirmation_required)."
         },
         {
           "id": "claims/residuals/needs_decision",
-          "text": "A needs-decision claim cannot be agent-approved and becomes a human residual."
+          "text": "In deliberative mode a needs-decision claim is the human's: it cannot be agent-approved and becomes a human residual. In auto it is the author's: supporting research that does not wait on a human approves it, refuting research or a failed spike discards it, and a human answer, when present, decides after those."
         },
         {
           "id": "claims/residuals/lossless_obligation",
@@ -2421,7 +2514,7 @@
       "clauses": [
         {
           "id": "audit/independence/derived",
-          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities, or human_owned when every reviewed claim is a human decision with no evidence behind it; it is never supplied in the verdict."
+          "text": "Independence is derived by the application as distinct, mixed, same_model, or unverified from trusted normalized identities, or human_owned when every reviewed claim is a human-answered decision with no evidence behind it (a claim the author decided has a producer and is never human_owned); it is never supplied in the verdict."
         },
         {
           "id": "audit/independence/required",
@@ -2465,7 +2558,7 @@
         },
         {
           "id": "budget/exhausted",
-          "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted. Deliberative runs may recover with budget.raise or residual.accept; automatic runs exclude budget.raise and recover only by residual.accept or by starting a fresh run. Exhaustion never borrows from another account."
+          "text": "An exhausted investigation-spawn, audit-spawn, or pass budget yields budget.exhausted. Deliberative runs and interactive auto runs recover with budget.raise (a proposal above the approved ceilings, which the human approves) or residual.accept; a delegated auto run is never offered budget.raise and recovers by residual.accept or by starting a fresh run. Exhaustion never borrows from another account."
         }
       ]
     },
@@ -2671,7 +2764,7 @@
         },
         {
           "id": "governance/auto",
-          "text": "Every run starts with author-sized ceilings and rationale. Deliberative and interactive-auto runs require one initial human-approved sizing episode; delegated auto instead accepts initial sizing only inside the persisted operator-narrowed 8/1/2 envelope. After the first successful approval, automatic revisions are componentwise monotone and cannot raise installed ceilings; deliberative human locked confirmation may amend them. Automatic exhaustion is restart-only rather than budget.raise. Auto is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
+          "text": "Every run starts with author-sized ceilings and rationale. Deliberative and interactive-auto runs require one initial human-approved sizing episode; delegated auto instead accepts initial sizing only inside the persisted operator-narrowed 8/1/2 envelope. After the first successful approval, automatic revisions are componentwise monotone and cannot raise installed ceilings; deliberative human locked confirmation may amend them, and an interactive auto run may propose a raise, which the human approves or rejects (governance.raises says a proposal asks for one). A delegated auto run has nobody to ask, so it recovers from exhaustion by a fresh run, never by budget.raise. Auto is admitted only from an interactive invocation or recorded operator delegation. Reviewer configuration is host-owned, and actual host-observed reviewer distinctness from the covered evidence producer is checked at convergence."
         },
         {
           "id": "governance/limits",
@@ -2743,24 +2836,28 @@
     },
     "recovery_exclusions": {
       "deliberative": [],
-      "auto": [
+      "auto_interactive": [],
+      "auto_delegated": [
         "budget.raise"
       ]
     }
   },
   "settlement_notices": {
     "human_wait": "Empirica is paused for human governance input, not converged. Investigation remains blocked; no approval was granted by this pause.",
-    "evidence_wait": "Empirica is paused: research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
-    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. Stop honestly (report_convergence intent=stop), or in deliberative mode propose a raise for human approval; in auto mode start a fresh run.",
-    "evidence_report": "Research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
+    "evidence_wait": "Empirica is paused: this deliberative run's research evidence is waiting for your confirmation, and the run is not converged. No confirmation was granted by this pause. The agent presents it to you at the end of its next pass; if you leave it on Later or close the dialog it is shown again only when you tell the agent to report once more (each showing spends one of the run's human interactions), and otherwise the run must change or be accepted as a residual.",
+    "budget_exhausted": "Empirica paused: the {resource} budget is exhausted and the run is not converged. No approval was granted by this pause. End honestly with report_convergence intent=stop. A deliberative run may instead propose a raise for human approval, if this host can ask a person; a delegated auto run starts a fresh run.",
+    "evidence_report": "This deliberative run's research evidence is waiting for your confirmation, and the run is not converged. Call report_convergence now: the human is asked inside that call, if this host can show a dialog; or end honestly with report_convergence intent=stop. No confirmation was granted by this block.",
     "paused_for_human": "Empirica is paused for you, not converged: {reason} Nothing was approved or confirmed by this pause, and nobody was asked. The run stays open: tell the agent to carry out that step, or end the run.",
     "paused_for_evidence": "Empirica is paused for you, not converged: research evidence is waiting for your confirmation. To continue, tell the agent to call report_convergence: you are asked in that call, if this host can show a dialog. Nothing was approved or confirmed by this pause, and nobody was asked.",
-    "unattended_continue": "Empirica is not converged: {reason} Auto mode does not hand the turn back to you: act on it, or end honestly with report_convergence intent=stop."
+    "unattended_continue": "Empirica is not converged: {reason} Auto mode asks nobody at this turn end, so act on that reason now.",
+    "unattended_residual": "Empirica is not converged: {reason} If no step of yours moves the run, end it honestly with report_convergence intent=stop; otherwise act on that reason, or, unless the claim graph is frozen, revise the claim graph and continue."
   },
   "author_view": {
     "labels": {
       "no_governance": "no governance",
       "governance": "governance:",
+      "mode": "mode",
+      "mode_delegated": "unattended",
       "budget_usage": "passes/spawns/audits:",
       "converged": "converged=",
       "run_id": "run_id:",
@@ -2781,7 +2878,7 @@
       "next_inline": "next:",
       "missing": "missing:",
       "recovery": "recovery:",
-      "via_claim": "via claim:",
+      "via_claim": "first discharge claim:",
       "argument": "Argument",
       "goal": "goal:",
       "root_claim_id": "root_claim_id:",
@@ -2834,7 +2931,8 @@
       "generic_spikes": "generic spike evidence (read-only)",
       "generic_spike_request": "immutable request",
       "generic_spike_result": "admitted result",
-      "generic_spike_no_result": "no result evidence admitted"
+      "generic_spike_no_result": "no result evidence admitted",
+      "budget_raise_note": "(a raise above the approved ceilings: needs a person this host can ask)"
     }
   }
 }

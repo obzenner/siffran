@@ -370,6 +370,16 @@
       "tone": "neutral",
       "icon": "open",
       "copy": "decision.not_asked"
+    },
+    "decided_by_author": {
+      "tone": "positive",
+      "icon": "verified",
+      "copy": "decision.decided_by_author"
+    },
+    "rejected_by_evidence": {
+      "tone": "negative",
+      "icon": "failed",
+      "copy": "decision.rejected_by_evidence"
     }
   },
   "assurance": {

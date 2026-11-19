@@ -9,10 +9,12 @@ from . import citations, confirmation, governance
 
 from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSUPPORTED, TERMINAL_STOP_REASON,
                          active_evidence, audit_blocker, audit_covers, audit_pending, bootstrap_status, latest_audit_verdict,
-                         claim_blockers, claim_digest, confirmation_batch, derive_claims,
+                         claim_blockers, claim_digest, confirmation_batch, deferred_unresolved, derive_claims,
+                         recovery_actions,
                          derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
                          evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
-                         progress_basis, report_requirements, terminal_batch, REPORT_STAGES, Requirement)
+                         progress_basis, report_requirements, terminal_batch, earliest_stage, stage_rank, turn_end_actor,
+                         Requirement)
 
 
 def _scope(snapshot: EvaluationSnapshot) -> tuple[list[str], list[str]]:
@@ -164,7 +166,7 @@ def _observed(snapshot: EvaluationSnapshot, item: Mapping[str, Any], stale: set[
            "stale": item["kind"] == "spike" and item["artifact_id"] in stale}
     if item["kind"] != "research":
         return row
-    route = confirmation.pending_route(snapshot, item)
+    route = confirmation.wait_route(snapshot, item)
     decided = confirmation.receipt(snapshot, item)
     return {**row, **({"confirm": route} if route is not None else {}),
             **({"note": decided["note"]} if decided is not None and "note" in decided else {})}
@@ -185,10 +187,14 @@ def _rejected(snapshot: EvaluationSnapshot, claim: Mapping[str, Any]) -> list[di
     return rows
 
 
+#: What a claim outside the gating scope offers besides research that counts: revising the claim graph (an unfrozen graph's way on).
+DEFERRED_CLAIM_WAY_ON = ("graph.record",)
+
+
 def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[str, str],
                  blockers: tuple[dict[str, Any], ...],
                  metadata: Mapping[str, tuple[tuple[str, ...], tuple[str, ...]]],
-                 stale: set[str], terminal_next: list[str] | None = None,
+                 stale: set[str], terminal_next: list[str] | None = None, *, owed: tuple[Requirement, ...],
                  ) -> dict[str, list[dict[str, Any]]]:
     state = snapshot.state
     late = (snapshot.command["type"] == "ObserveAction"
@@ -204,10 +210,10 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
             metadata, "violated", terminal_next))
     blockers_by_claim = {row["claim_id"]: row for row in blockers}
     _, deferred = _scope(snapshot)
+    unexplained = deferred_unresolved(snapshot, derivation)
     # What the report requires, in the gate's order (``core.evaluation.report_requirements``): the claim rows below are its
     # claim stage, the rows after them its human, pass, audit and consent stages, and a row behind an earlier stage is held.
-    owed = report_requirements(snapshot, derivation, blockers)
-    early = min((REPORT_STAGES.index(r.stage) for r in owed), default=None)
+    early = earliest_stage(r.stage for r in owed)
     if snapshot.graph:
         for claim in snapshot.graph["claims"]:
             blocker = blockers_by_claim.get(claim["id"])
@@ -221,7 +227,14 @@ def _obligations(snapshot: EvaluationSnapshot, derivation: Any, states: Mapping[
                 "satisfied" if states[claim["id"]] == "approved" else "residual", terminal_next)
             if claim["id"] in deferred:
                 row["hold"] = "deferred"
-            elif terminal_next is None and blocker is not None and early is not None and REPORT_STAGES.index(
+                if claim["id"] in unexplained:
+                    # outside the gating scope and open for want of research that counts: say why, and that the way on is
+                    # research that counts or a revised graph (the gate asks nothing about it)
+                    reason, parameters = unexplained[claim["id"]]
+                    row["missing"] = {"code": reason, "target_claim_id": claim["id"], "parameters": parameters}
+                    if terminal_next is None:
+                        row["next"] = [*_reason_metadata(metadata, reason)[0], *DEFERRED_CLAIM_WAY_ON]
+            elif terminal_next is None and blocker is not None and early is not None and stage_rank(
                     "confirmation" if blocker["reason"] == CONFIRMATION_REASON else "claim") > early:
                 row["hold"] = "blocked"
             active.append(row)
@@ -347,7 +360,7 @@ def governance_facts(state: Any, spent: int | None) -> dict:
                  prompt_error=governance.interaction_error(state.governance, spent) if known else None)
     value.pop("receipts")
     value.pop("delegation_envelope")
-    value.update(budgets=dict(state.budgets),
+    value.update(raises=governance.raises(state.governance, state.budgets), budgets=dict(state.budgets),
                  remaining={ceiling: state.budgets[ceiling] - state.budgets[used]
                             for ceiling, used in governance.CEILINGS.items()})
     return value
@@ -358,9 +371,10 @@ def project_governance(snapshot: EvaluationSnapshot) -> dict:
     bootstrap = bootstrap_status(snapshot)
     actions = bootstrap["next_actions"]  # empty for a terminal run or when bootstrap is complete
     value.update(request_ready=bootstrap["request_ready"], display_ready=bootstrap["display_ready"],
-                 next_action=actions[-1] if actions else snapshot.default_next_action,
+                 next_action=(next((a for a in reversed(actions) if a != "residual.accept"), actions[-1])
+                              if actions else snapshot.default_next_action),
                  # who acts on the configuration: the one predicate, published so a host reads it, never re-derives it
-                 human_wait=governance.human_wait(value, value["prompt_error"]))
+                 human_wait=governance.human_wait(value, value["prompt_error"], value["raises"]))
     return value
 
 
@@ -388,11 +402,6 @@ def _child_summary(child: Mapping[str, Any], recovery_action: str) -> dict[str, 
     return row
 
 
-def recovery_actions(excluded_actions: tuple[str, ...], actions: list[str]) -> list[str]:
-    """Apply an admitted neutral exclusion policy to one recovery-action list."""
-    return [action for action in actions if action not in excluded_actions]
-
-
 def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] | None = None) -> dict[str, Any]:
     derivation = derive_claims_for_projection(snapshot)
     changes, stale = _freshness(derivation)
@@ -403,10 +412,10 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
     bootstrap = bootstrap_status(snapshot)
     terminal = snapshot.state.status != "active"
     terminal_next = _reason_metadata(metadata, "run.terminal")[0] if terminal else None
-    obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next)
+    owed = report_requirements(snapshot, derivation, blockers)
+    obligations = _obligations(snapshot, derivation, states, blockers, metadata, stale, terminal_next, owed=owed)
     residuals = _residuals(snapshot, derivation, blockers, metadata, terminal_next)
-    control_mode = snapshot.state.governance["control_mode"]
-    exclusions = snapshot.contract.recovery_exclusions[control_mode]
+    exclusions = snapshot.contract.recovery_exclusions[governance.exclusion_key(snapshot.state.governance)]
     batch = _batch(snapshot, derivation)
     for residual in residuals:
         residual["next_actions"] = recovery_actions(exclusions, confirmation_actions(
@@ -429,6 +438,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                  | {"findings": audit["findings"] if audit["verdict"] == "failed" else []},
         "governance": project_governance(snapshot),
         "confirmation_batch": batch,
+        # Who a host's turn end waits on, decided once here so that no host derives it (D2.3).
+        "turn_end_actor": turn_end_actor(snapshot, derivation, owed),
         "contract": {"id": snapshot.contract_id, "version": snapshot.contract_version,
                      "digest": snapshot.contract_digest,
                      "relevant_sections": list(["protocol"] if relevant_sections is None

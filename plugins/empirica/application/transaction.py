@@ -1011,13 +1011,12 @@ class Coordinator:
                              parameters: dict[str, Any] | None = None, affected: str | None = None,
                              *, presentation: bool = False):
         self.last_snapshot = snapshot
-        control_mode = snapshot.state.governance["control_mode"]
         reason = self._reason(code, parameters, affected)
         run = project_runview(snapshot, select_sections(
             _proto.public_contract(), "block", [code],
             snapshot.state.status if snapshot.state.status != "active" else None))
         reason["next_actions"] = recovery_actions(
-            snapshot.contract.recovery_exclusions[control_mode],
+            snapshot.contract.recovery_exclusions[governance.exclusion_key(snapshot.state.governance)],
             confirmation_actions(code, parameters, reason["next_actions"], run["confirmation_batch"]))
         result = {"type": "Block", "run": run, "reasons": [reason]}
         if presentation:
@@ -1046,6 +1045,7 @@ class Coordinator:
         run_id = encode_handle(key) if isinstance(key, RunKey) else str(key)
         run = {
             "id": run_id, "goal": goal, "status": "active", "governance": None, "confirmation_batch": None,
+            "turn_end_actor": "none",  # an unreadable run is nobody's turn: the host reports it
             "basis": digest({"unreadable_run": code}),  # an unreadable run has no state to move: one fixed basis per reason
             "contract": {"id": _proto.public_contract()["id"],
                          "version": _proto.public_contract()["version"],

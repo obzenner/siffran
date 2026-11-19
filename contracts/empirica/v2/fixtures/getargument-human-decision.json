@@ -1,0 +1,129 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-getarg-human-decision",
+    "command": {
+      "type": "GetArgument",
+      "run_id": "run-fx"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-getarg-human-decision",
+    "result": {
+      "type": "Allow",
+      "converged": true,
+      "run": {
+        "id": "run-fx",
+        "goal": "Prove the public contract is internally consistent.",
+        "status": "converged",
+        "basis": "sha256:4c26d2cbf3ee6c85b15f1f8ce79286a2fc23713815c2da86f736196614dbb04b",
+        "contract": {
+          "id": "empirica/public",
+          "version": "6.0.0",
+          "relevant_sections": [
+            "terminal",
+            "audit",
+            "audit/independence"
+          ],
+          "digest": "<contract-digest>"
+        },
+        "obligations": {
+          "active": [],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [
+          {
+            "child_id": "ch-audit-1",
+            "purpose": "audit",
+            "resource_class": "audit",
+            "state": "completed"
+          }
+        ],
+        "host": {
+          "profile_id": "claude-code",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "next_actions": [
+          "run.inspect"
+        ],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "governance": null,
+        "audit": {
+          "verdict": "passed",
+          "current": true,
+          "pending": false,
+          "independence": "distinct",
+          "findings": []
+        },
+        "confirmation_batch": null,
+        "turn_end_actor": "none",
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        }
+      },
+      "argument": {
+        "root_claim_id": "G0",
+        "argument_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "goal": "Prove the public contract is internally consistent.",
+        "goal_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "frozen_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "deferred_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "claims": [
+          {
+            "claim_id": "G0",
+            "text": "Which storage engine?",
+            "wording_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "state": "approved",
+            "gating": true,
+            "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+            "active_evidence_ids": [],
+            "kind": "needs-decision",
+            "human_decision": {
+              "outcome": "approve",
+              "answer": "Use the embedded engine."
+            }
+          }
+        ],
+        "edges": [],
+        "artifacts": [],
+        "route_stamp": 1,
+        "investigation_stamp": 2,
+        "audit": {
+          "verdict": "passed",
+          "current": true,
+          "pending": false,
+          "independence": "human_owned",
+          "reviewed_argument_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "reviewed_goal_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "reviewed_frozen_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "reviewed_deferred_scope_digest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+          "reviewed_claims": [
+            {
+              "claim_id": "G0",
+              "evidence_digest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ],
+          "findings": []
+        },
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        }
+      }
+    }
+  }
+}

@@ -236,7 +236,7 @@ class MediatorTests(MediatorFixture):
         self.assertIsNone(confirmation.presentable(blocked))
         self.assertEqual(self.mediate(drv, run_id, human, blocked=blocked), blocked)
         self.assertEqual(human.shown, [])
-        self.assertEqual(blocked["reasons"][0]["code"], "evidence.confirmation_required")
+        self.assertEqual(blocked["reasons"][0]["code"], "claim.research_missing")  # nobody is asked: the author's to fix
 
     def test_a_presentation_made_stale_during_the_dialog_is_refused_and_grants_nothing(self):
         drv, run_id = self.start()

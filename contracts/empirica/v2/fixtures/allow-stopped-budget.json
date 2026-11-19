@@ -74,6 +74,7 @@
           "findings": []
         },
         "confirmation_batch": null,
+        "turn_end_actor": "none",
         "spike_backend": {
           "kind": "spikes_unavailable"
         }

@@ -152,7 +152,9 @@ enum, digest, and path invariant. `validate_contracts.py` additionally enforces 
 13. approval follows canonical claim kind: `ordinary` requires active supporting research and no
     active refuting/failing evidence; `needs-experiment` additionally requires an active passing spike
     with satisfied prerequisites and no RunView freshness change for its bindings; `needs-decision`
-    can never project approved. Contradictory active evidence can never project approved. A stale
+    is approved by an approving `human_decision`, or (in auto, a core rule) by active supporting
+    research; either way only with no active refuting or failing evidence, and never against a
+    non-approving `human_decision`. Contradictory active evidence can never project approved. A stale
     spike is unusable for Fold 2 but does not silently impose Fold 2 on an `ordinary` claim;
 14. current passed/failed audit exact gating coverage rules from D2A continue unchanged and therefore
     bind the complete active-set digest above.

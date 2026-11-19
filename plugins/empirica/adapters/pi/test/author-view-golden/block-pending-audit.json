@@ -53,6 +53,7 @@
         "findings": []
       },
       "confirmation_batch": null,
+      "turn_end_actor": "auditor",
       "spike_backend": {
         "kind": "spikes_unavailable"
       }

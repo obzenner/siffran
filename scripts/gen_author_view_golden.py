@@ -20,8 +20,9 @@ PLUGIN = ROOT / "plugins" / "empirica"
 sys.path.insert(0, str(PLUGIN))
 
 from adapters.author_view import render_author_view, validate_public_result  # noqa: E402
-from application.protocol import contract_result, next_action_surfaces, stored, to_stored  # noqa: E402
-from core.governance import human_wait  # noqa: E402
+from application.protocol import contract_result, host_profile_id, next_action_surfaces, stored, to_stored  # noqa: E402
+from core.governance import human_wait, raises  # noqa: E402
+from regen_contract_fixtures import turn_end_actor_of  # noqa: E402
 from core.projection import confirmation_actions  # noqa: E402
 
 FIXTURES = ROOT / "contracts" / "empirica" / "v2" / "fixtures"
@@ -150,6 +151,23 @@ def _synthetic_results() -> list[tuple[str, object]]:
                                                   "parameters": {}},
                        next=list(failed_metadata["next_actions"]))
 
+    # An audit is owed: each host's view shows its own exact auditor launch (a host with none keeps the protocol surface).
+    owed_meta = contract["reasons"]["audit.required"]
+    audit_owed = {}
+    for host in ("claude-code", "pi", "codex-cli"):
+        view = copy.deepcopy(pending)
+        view["run"]["host"]["profile_id"] = host_profile_id(host)
+        view["run"]["children"] = []
+        view["run"]["audit"] = {"verdict": "none", "current": None, "pending": False, "independence": None, "findings": []}
+        view["reasons"] = [{"code": "audit.required", "parameters": {}, "message": owed_meta["message"],
+                            "next_actions": owed_meta["next_actions"], "sections": owed_meta["sections"],
+                            "affected": {"obligation_id": "obligation.audit"}}]
+        view["run"]["obligations"]["active"] = [{
+            "id": "obligation.audit", "required": contract["bootstrap"]["audit_obligation"]["must"], "observed": [],
+            "status": "residual", "missing": {"code": "audit.required", "target_claim_id": None, "parameters": {}},
+            "next": list(owed_meta["next_actions"])}]
+        audit_owed[f"audit-owed-{host.removesuffix('-code').removesuffix('-cli')}"] = view
+
     # A pass that no longer covers the argument, with a re-audit on its way: the audit is "passed, no longer current,
     # re-audit pending" and never "failed" or "required" (U1: four facts, not one overloaded word).
     audit_not_current = copy.deepcopy(audit_mixed)
@@ -225,7 +243,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
     # adapters/pi/test/fixtures/turn-end-predicates.json): the run view publishes the core's answer, never a golden's.
     def governance_wait(state, reason, *, first_approval=False, control_mode="deliberative", rationale="sized",
                         prompt_error=None, capability="human_configuration", ingress="pi_ui", interactive=True,
-                        delegation=False):
+                        delegation=False, raising=False):
         view = copy.deepcopy(approved)
         view["type"] = "Block"
         view.pop("converged", None)
@@ -234,9 +252,12 @@ def _synthetic_results() -> list[tuple[str, object]]:
                  approved_digest=g["approved_digest"] if first_approval else None,
                  approval_kind=g["approval_kind"] if first_approval else None)
         g["proposal"]["rationale"] = rationale
+        if raising:  # a proposal one pass above the ceilings the run approved
+            g["proposal"]["budgets"]["max_passes"] = g["budgets"]["max_passes"] + 1
         g["context"].update(approval_capability=capability, ingress=ingress, interactive=interactive,
                             delegation=delegation)
-        g["human_wait"] = human_wait(g, prompt_error)
+        g["raises"] = raises(g, g["budgets"])
+        g["human_wait"] = human_wait(g, prompt_error, g["raises"])
         meta = contract["reasons"][reason]
         view["reasons"] = [{"code": reason, "parameters": {}, "message": meta["message"],
                             "next_actions": list(meta["next_actions"]), "sections": meta["sections"]}]
@@ -256,6 +277,8 @@ def _synthetic_results() -> list[tuple[str, object]]:
                                                           control_mode="auto", interactive=False, delegation=True),
         "governance-wait-post-approval-auto": governance_wait("revision_pending", "governance.revision_required",
                                                               first_approval=True, control_mode="auto"),
+        "governance-wait-raise-interactive-auto": governance_wait("revision_pending", "governance.revision_required",
+                                                                  first_approval=True, control_mode="auto", raising=True),
     }
 
     # The author reads what the human answered: every verification status, the note, the decision and its answer.
@@ -293,6 +316,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
         *evidence.items(),
         *governance.items(),
         ("getargument-human-answers", answered),
+        *audit_owed.items(),
         ("audit-stale-scope", audit_stale),
         ("audit-mixed", audit_mixed),
         ("audit-passed-not-current-reaudit-pending", audit_not_current),
@@ -333,6 +357,8 @@ def main() -> int:
         text = render_author_view(result, strict=True)
         pairs.append((name, result, text))
     for name, result in _synthetic_results():
+        if isinstance(result, dict) and "run" in result:  # whose turn it is, as the view's own reasons and governance say
+            result["run"]["turn_end_actor"] = turn_end_actor_of(result)
         text = render_author_view(result, strict=True)
         pairs.append((name, result, text))
 

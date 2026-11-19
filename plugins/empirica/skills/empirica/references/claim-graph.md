@@ -1,6 +1,6 @@
 # Claim graph
 
-Read this file immediately before seeding or replacing the selected graph.
+The rules needed before investigation are in the skill; this reference adds the detail for later.
 
 ## Canonical v2 shape
 

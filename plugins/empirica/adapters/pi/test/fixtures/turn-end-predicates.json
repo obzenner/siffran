@@ -188,6 +188,14 @@
       "approval_wait": false
     },
     {
+      "name": "a revision of an interactive auto run that raises a ceiling above the approved ones",
+      "golden": "governance-wait-raise-interactive-auto",
+      "evidence_askable": false,
+      "audit_pending": false,
+      "human_wait": true,
+      "approval_wait": true
+    },
+    {
       "name": "an approved configuration",
       "golden": "governance-approved",
       "evidence_askable": false,

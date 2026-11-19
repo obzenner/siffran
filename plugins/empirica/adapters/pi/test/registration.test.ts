@@ -154,7 +154,9 @@ test("empirica_observe configure_run fails closed when the governance ingress th
 });
 
 // QUAL-2 C5 measures the final rendered text returned after mediation. The same measured
-// ceiling is enforced by Python and Pi.
+// ceiling is enforced by Python and Pi. It is a logical bound: it limits the text the renderer controls, while the
+// author's sizing rationale is limited by the configure_run schema (600 characters); the long-rationale worst case is
+// bounded that way in tests/test_context_economy.py.
 const POST_MEDIATION_CEILING = 1300;
 const APPROVED_CONFIGURE = JSON.parse(readStoredText(
   path.join(HERE, "fixtures", "approved-configure-runview.json"), "utf8")) as
@@ -230,7 +232,7 @@ function mediatedObserve(choice: "approve" | "dismiss"): {
 
 test("Pi rendered-text ceiling matches Python and covers audit-pending and terminal views", () => {
   assert.equal(POST_MEDIATION_CEILING, 1300, "Pi and Python must share the measured ceiling");
-  for (const name of ["block-pending-audit", "allow-converged"]) {
+  for (const name of ["block-pending-audit", "allow-converged", "audit-owed-claude", "audit-owed-pi", "audit-owed-codex"]) {
     const golden = JSON.parse(readStoredText(
       path.join(HERE, "author-view-golden", `${name}.json`), "utf8"));
     const text = renderAuthorView(golden.result);

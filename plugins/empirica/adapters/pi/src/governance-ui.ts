@@ -16,8 +16,13 @@ interface Governance {
   state: string; control_mode: string; proposal_digest: string; plan_revision: number;
   first_approval: boolean;
   proposal: Proposal; prompt_error: string | null;
+  /** The ceilings the run has approved (the view's own); read only to show a raise beside them. */
+  budgets?: Record<string, number>;
   /** Whether the configuration waits on its human: the core's answer (`core.governance.human_wait`). */
   human_wait: boolean;
+  /** Whether the standing proposal asks for more than the run approved: the core's answer (`core.governance.raises`),
+   * required by the response schema. */
+  raises: boolean;
   context: { author: { provider_id: string; model_id: string } | null; ingress: string;
     interactive: boolean | null; delegation: boolean };
 }
@@ -93,7 +98,30 @@ export async function refreshGovernance(runId: string, ctx: ExtensionContext,
   return result;
 }
 
-function unavailable(response: Response, code = "governance.approval_unavailable"): Response {
+/**
+ * The one contract code for a mediation that ended without a decision, chosen from the run's own governance facts
+ * (never from the adapter's guess): the row it names owns the actions. Python: `closed_code`. The run's allowance
+ * spent, nobody who can be asked with no automatic way on, or nothing left to show or change (the view's `next_action` is the
+ * stop) → the stop alone; a raise nobody can approve (no human, or no interaction left) while a proposal within the approved ceilings is admitted → `raise_unavailable`; this configuration's presentations spent → `configuration_shown`;
+ * a human who closed the dialog → `dialog_closed`.
+ */
+function closedCode(response: Response): string {
+  const run = "run" in response.result ? response.result.run : null;
+  const g = (run?.governance ?? {}) as { prompt_error?: string | null; human_wait?: boolean; next_action?: string; raises?: boolean;
+    interactions_remaining?: { total?: number }; context?: { approval_capability?: string } };
+  // the view's own next action is the stop: nobody to ask with no automatic way on, or nothing left to show or change
+  if (g.next_action === "residual.accept") return "governance.approval_unavailable";
+  // nobody can approve a pending raise, but a proposal within the approved ceilings is still admitted: propose it, or stop
+  // (or none can be asked for want of an interaction: the run's total allowance is spent)
+  if (g.context?.approval_capability === "unavailable" || (g.prompt_error && g.interactions_remaining?.total === 0))
+    return g.raises === true ? "governance.raise_unavailable" : "governance.approval_unavailable";
+  if (g.prompt_error)
+    return g.interactions_remaining?.total === 0 ? "governance.approval_unavailable" : "governance.configuration_shown";
+  return g.human_wait === true ? "governance.dialog_closed" : "governance.approval_unavailable";
+}
+
+function unavailable(response: Response, code?: string): Response {
+  code ??= closedCode(response);
   if (!(code in RECOVERY)) throw new Error(`Missing canonical governance recovery metadata: ${code}`);
   if (!("run" in response.result)) return response;
   return { ...response, result: { type: "Block", run: response.result.run,
@@ -134,7 +162,7 @@ interface DialogComponent {
 /** Run one native custom component with shared deadline and abort handling. */
 async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: number,
                           confirmation: boolean, signal?: AbortSignal,
-                          document?: BoundDocument): Promise<DialogDecision> {
+                          document?: BoundDocument, raise?: Record<string, number>): Promise<DialogDecision> {
   if (!ctx.ui.custom) return { type: "dismiss" };
   // Pi's RPC mode reports hasUI=true yet its `custom()` is `async () => undefined` (no component
   // can be shown; 1.0.0 and 1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
@@ -162,7 +190,7 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
     if (signal?.aborted) abort(); // an abort that landed before the listener existed
     const component: DialogComponent = {
       render: width => renderLines(dialog, state, width, theme,
-        { confirmation, document, timeoutMs: Math.max(0, deadline - Date.now()) }),
+        { confirmation, document, raise, timeoutMs: Math.max(0, deadline - Date.now()) }),
       invalidate: () => {},
       handleInput: data => {
         const outcome = reduce(state, data, dialog, confirmation);
@@ -177,8 +205,10 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
 
 export function expectedApprovalKind(governance: Governance): "host_ui" | "auto" {
   if (governance.control_mode === "deliberative") return "host_ui";
+  // After the first approval an interactive auto run's human is asked about a raise only: the core's fact, read from the view
+  // (`governance.raises`, derived from the proposal and the approved ceilings), never derived here. Fail closed: absent is not a raise.
   if (governance.context.interactive === true)
-    return governance.first_approval ? "auto" : "host_ui";
+    return !governance.first_approval || governance.raises === true ? "host_ui" : "auto";
   return "auto";
 }
 
@@ -200,12 +230,16 @@ export function humanApprovalWait(result: Response["result"]): boolean {
     && reasons.length === 1 && CONFIGURATION_REASONS.has(reasons[0].code);
 }
 
-/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule); mirrors
- * Python `completion._budget_exhausted_wait`. The core already refused the only recovery the Block
- * once listed, so denying the report again cannot help. */
+/** True only for the sole `budget.exhausted` blocker of an active run (ADR-0063 exhaustion rule) that has no recovery left
+ * for the agent to take; mirrors Python `completion._budget_exhausted_wait`. Denying the report again cannot help a run whose
+ * recovery the core refused (a delegated auto run's raise) or leaves to the human (a deliberative run's). An auto run the
+ * core still offers `budget.raise` (its human approves a raise) is not waiting: the agent proposes it. */
 export function budgetExhaustedWait(result: Response["result"]): boolean {
-  return result.type === "Block" && "run" in result && !!result.run && result.run.status === "active"
-    && result.reasons.length === 1 && result.reasons[0].code === "budget.exhausted";
+  if (!(result.type === "Block" && "run" in result && !!result.run && result.run.status === "active"
+    && result.reasons.length === 1 && result.reasons[0].code === "budget.exhausted")) return false;
+  const offered = (result.reasons[0].next_actions as string[] | undefined)?.includes("budget.raise") === true;
+  const governance = result.run.governance as { control_mode?: unknown } | null | undefined;
+  return !(offered && governance?.control_mode === "auto");
 }
 
 export const HUMAN_WAIT_NOTICE = PUBLIC_TOOLS.settlement_notices.human_wait;
@@ -244,7 +278,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
     return unavailable(response, "governance.stale_proposal");
   if (g.state === "approved") return response;
   const approvalKind = expectedApprovalKind(g);
-  if (g.prompt_error) return unavailable(response, g.prompt_error);
+  if (g.prompt_error) return unavailable(response);
   const envelope = { run_id: runId, receipt_id: randomUUID(), proposal_digest: g.proposal_digest,
     plan_revision: g.plan_revision, approval_kind: approvalKind };
   // PR 09 (ADR-0072 write-first): a host_ui mediation must hold the bridge-written bound
@@ -280,7 +314,9 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   // review view — never the adapter's own recursion flag. The flag survives only as the
   // re-entry guard (the stale-proposal check above and the recursion below).
   const confirm = bound !== undefined && bound.question === "confirm_amendment";
-  const selected = await showDialog(ctx, dialog, deadline, confirm, signal, bound);
+  // a raise is shown as one, beside the ceilings the run approved (the view's own, never recomputed here)
+  const raise = !confirm && g.raises === true ? g.budgets : undefined;
+  const selected = await showDialog(ctx, dialog, deadline, confirm, signal, bound, raise);
   if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return dismiss();
   const action = selected.type === "reject" ? "reject" : "approve";
   const configuration = selected.type === "approve" ? selected.configuration

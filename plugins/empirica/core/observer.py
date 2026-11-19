@@ -30,7 +30,7 @@ from typing import Any
 from . import citations, confirmation, governance, spike_observer
 from .evaluation import (LATER, ClaimDerivation, EvaluationSnapshot, Requirement, active_evidence,
                          audit_acceptance, audit_attributions, audit_passes, audit_verdicts, claim_blockers,
-                         claim_digest, claim_state_cause, confirmation_batch, derive_claims_for_projection,
+                         claim_digest, claim_state_cause, confirmation_batch, deferred_unresolved, derive_claims_for_projection,
                          effective_scope_ids, evidence_digest, identity_pair, independence_then, latest_audit_verdict,
                          pending_decisions, report_requirements)
 from .projection import governance_facts, project_runview
@@ -40,7 +40,8 @@ from .projection import governance_facts, project_runview
 EVIDENCE_KINDS = ("spike", "research", "none")
 REVIEW_STATES = ("passed", "failed", "stale", "changed", "unreviewed", "none")
 ASSURANCE_STATES = ("assured", "awaiting_audit", "audit_failed", "not_approved")
-DECISION_STATUSES = ("approved", "rejected", "waiting", "unanswered", "deferred", "not_asked")
+DECISION_STATUSES = ("approved", "rejected", "waiting", "unanswered", "deferred", "not_asked",
+                     "decided_by_author", "rejected_by_evidence")
 ATTENTION_STATES = ("needs_you", "not_ended", "ended")
 #: Who a pending item waits on, and where it will happen. ``next_report`` and ``explicit_report`` are a host dialog
 #: (the first when the host asks by itself, the second only when the author reports explicitly); ``if_available``: a human
@@ -68,7 +69,7 @@ _PLACEHOLDER = re.compile(r"\{(\w+)\}")
 def reason_message(spec: Mapping[str, Any], parameters: Mapping[str, Any], *, ended: bool = False) -> str:
     """A reason's wording for the UI: ``confirmation.reason_text`` (the one renderer; ``ended`` for a run that has stopped),
     and a message the parameters cannot complete is a contract bug, never shown half-formatted."""
-    text = confirmation.reason_text(spec, parameters, ended=ended)
+    text = confirmation.reason_text(spec, parameters, ended=ended, ui=True)
     if _PLACEHOLDER.search(text):
         raise ValueError(f"reason parameters {sorted(parameters)} do not complete the message {text!r}")
     return text
@@ -133,12 +134,18 @@ UI_MESSAGE_BANNED = ("derivation", "receipt", "fold")
 
 
 def message_problems(code: str, spec: Mapping[str, Any]) -> list[str]:
-    """Why a registry reason's wordings that reach the UI (its message and its ended wording; the observer passes no
-    ``case``) are not plain enough, else ``[]``."""
+    """Why a registry reason's wordings that reach the UI are not plain enough, else ``[]``: its message, its ended wording,
+    the observer's and the ended wording of a case, and the author's text of every case that has no observer wording of
+    its own (the observer shows that one as written)."""
     if not code.startswith(UI_REASON_FAMILIES):
         return []
+    ui, ended_cases = spec.get("ui_case_messages") or {}, spec.get("ended_case_messages") or {}
+    shown = [("message", spec["message"]), ("ended_message", spec.get("ended_message", ""))]
+    shown += [(f"ui_case_messages.{case}", text) for case, text in ui.items()]
+    shown += [(f"ended_case_messages.{case}", text) for case, text in ended_cases.items()]
+    shown += [(f"case_messages.{case}", text) for case, text in (spec.get("case_messages") or {}).items() if case not in ui]
     problems = []
-    for name, message in (("message", spec["message"]), ("ended_message", spec.get("ended_message", ""))):
+    for name, message in shown:
         if len(message) > UI_MESSAGE_LIMIT:
             problems.append(f"{code} {name}: {len(message)} characters, over {UI_MESSAGE_LIMIT}")
         problems += [f"{code} {name}: uses the jargon {w!r}" for w in UI_MESSAGE_BANNED if w in message.lower()]
@@ -168,7 +175,7 @@ def _record(snapshot: EvaluationSnapshot, record: Mapping[str, Any], prompt_erro
             "quote": record["citation"], "outcome": record["outcome"],
             "class": citations.verification_class(record["source_kind"], record["source_ref"]),
             "status": confirmation.status(snapshot, record),
-            "wait": _wait(confirmation.pending_route(snapshot, record), prompt_error,
+            "wait": _wait(confirmation.wait_route(snapshot, record), prompt_error,
                           snapshot.state.status == "active", audit_pending),
             "retrieve": confirmation.retrieve(snapshot, record),
             "spike_unavailable": record.get("spike_unavailable"),
@@ -176,16 +183,23 @@ def _record(snapshot: EvaluationSnapshot, record: Mapping[str, Any], prompt_erro
 
 
 def _decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating: bool, waiting: bool,
-              prompt_error: str | None) -> dict[str, Any] | None:
-    """A ``needs-decision`` claim's standing: ``approved`` or ``rejected`` once the human answered; else ``deferred``
-    when it is outside the run's scope (nobody is asked), ``waiting`` while the human is asked (``where``), ``unanswered``
-    when the run ended with it open, and ``not_asked`` when it is in scope but nothing asks (it was refuted, say)."""
+              prompt_error: str | None, state: str) -> dict[str, Any] | None:
+    """A ``needs-decision`` claim's standing, with ``state`` the core's derived state of the claim. ``approved`` or
+    ``rejected`` once a human answered, in every mode; else ``deferred`` when it is outside the run's scope (nobody is
+    asked). In an auto run, with no answer, the claim is the author's: ``decided_by_author`` when its evidence approved
+    it, ``rejected_by_evidence`` when evidence discarded it, else ``not_asked`` while the agent owes research and
+    ``unanswered`` once the run ended with it open. In a deliberative run, ``waiting`` while the human is asked
+    (``where``), ``unanswered`` when the run ended with it open, and ``not_asked`` when it is in scope but nothing asks
+    (it was refuted, say)."""
     if claim["kind"] != "needs-decision":
         return None
     answer = confirmation.decision(snapshot, claim["id"], claim_digest(claim))
     active = snapshot.state.status == "active"
+    auto = snapshot.state.governance["control_mode"] == "auto"
+    authored = {"approved": "decided_by_author", "discarded": "rejected_by_evidence"}.get(state)
     status = (("approved" if answer["outcome"] == confirmation.APPROVE else "rejected") if answer
               else "deferred" if not gating
+              else (authored or ("not_asked" if active else "unanswered")) if auto
               else ("waiting" if active else "unanswered") if waiting else "not_asked")
     return {"status": status, "outcome": answer["outcome"] if answer else None,
             "answer": answer.get("answer") if answer else None,
@@ -195,14 +209,14 @@ def _decision(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating: bo
 
 def _claim_detail(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], gating: bool,
                   blocker_message: str | None, waiting: bool, prompt_error: str | None,
-                  audit_pending: bool, stale: set[str]) -> dict[str, Any]:
+                  audit_pending: bool, stale: set[str], state: str) -> dict[str, Any]:
     active = {a["artifact_id"] for a in active_evidence(snapshot, claim)}
     digest = claim_digest(claim)
     return {"id": claim["id"], "blocker_message": blocker_message,
             "records": [_record(snapshot, a, prompt_error, audit_pending) for a in snapshot.history
                         if a.get("kind") == "research" and a.get("claim_id") == claim["id"]
                         and a.get("claim_digest") == digest],
-            "decision": _decision(snapshot, claim, gating, waiting, prompt_error),
+            "decision": _decision(snapshot, claim, gating, waiting, prompt_error, state),
             "research": sum(a["kind"] == "research" and a.get("outcome") == "supporting"
                             for a in active_evidence(snapshot, claim)),
             "proof": _spikes(snapshot, claim, digest, active, stale)}
@@ -578,6 +592,7 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
     blockers = ({b["claim_id"]: b for b in claim_blockers(snapshot, derivation)}
                 if derivation is not None else {})
     scope = set(effective_scope_ids(snapshot)) if graph is not None else set()
+    unresolved = deferred_unresolved(snapshot, derivation) if derivation is not None else {}
     deciding = set(pending_decisions(snapshot, derivation)) if derivation is not None else set()
     batch = view["confirmation_batch"]
     prompt_error = batch["prompt_error"] if batch is not None else None
@@ -664,8 +679,10 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
         "claims": [_claim_detail(snapshot, c, c["id"] in scope,
                                  reason_message(reasons[blockers[c["id"]]["reason"]],
                                                 blockers[c["id"]]["parameters"], ended=ended)
-                                 if c["id"] in blockers else None, c["id"] in deciding, prompt_error,
-                                 audit["pending"], set(derivation.freshness_heads))
+                                 if c["id"] in blockers else
+                                 reason_message(reasons[unresolved[c["id"]][0]], unresolved[c["id"]][1], ended=ended)
+                                 if c["id"] in unresolved else None, c["id"] in deciding, prompt_error,
+                                 audit["pending"], set(derivation.freshness_heads), derivation.states[c["id"]])
                    for c in claims],
     })
     return governance.plain(row), detail

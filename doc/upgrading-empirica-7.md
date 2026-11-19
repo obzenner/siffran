@@ -162,6 +162,45 @@ If you run 7.0.0 or 7.0.1 on Claude Code in auto mode, until you upgrade:
   an Empirica auto run needs a fresh run. 7.0.2 does not need this: its own denial releases and refunds the
   reservation.
 
+## Auto mode asks once and decides its own claims (7.1.0)
+
+An auto run asks a person once, for its configuration. An interactive auto run asks one more thing after that, a budget raise.
+It asks nothing else. A delegated auto run approves its configuration automatically inside the fixed envelope and has nobody to ask.
+
+- **Evidence.** A source that needs a person to confirm it is inert: an `http(s)` URL, a `runtime` note with no file path, or a file
+  the auditor's host cannot read. It stays in the dossier and neither approves nor blocks a claim, so a claim resting only on such
+  sources stays open (`claim.research_missing`, with the text "has only research that a human would have to confirm") until the
+  agent cites a workspace file or a local file the auditor can read, runs a spike, or ends the run with the claim as a residual. A
+  refuting source of that kind still discards the claim.
+- **Decisions.** A `needs-decision` claim in an auto run is decided by the agent: supporting research approves it, refuting
+  research discards it, and the auditor judges the choice. The observer shows them as "Decided by the agent" and "Ruled out by
+  evidence". A human answer already recorded still decides its claim in every mode.
+- **Budget raise.** After its first approval, an interactive auto run's proposal that raises a ceiling above the approved one waits
+  for the person's approval in the host dialog (`governance.raises` says so); a proposal that raises nothing stays automatic. A
+  delegated auto run has nobody to ask, so an exhausted ceiling ends in the honest stop or a fresh run.
+- **Turn ends.** An auto run's turn end continues the agent's work while the view says the agent has a step. Both hosts bound the
+  continuations by `turn_end.bounds`: the K-th turn end on one observation basis (K = 3), or the T-th in a chain (T = 16), ends the
+  chain with the `unattended_residual` notice, which offers `report_convergence intent=stop`. The last continuation before a bound
+  carries that notice as its directive, so the stop is offered while the agent is still reading; `unattended_continue` no longer
+  offers the stop. A run whose view names nobody to act (`turn_end_actor` `none`) continues once, with `unattended_residual` as the
+  directive, and ends with it at its next turn end on that basis.
+- **A shorter skill.** The `empirica` skill keeps the judgment and is shorter: the view, the tool descriptions and the references
+  carry the rules. Read the view's Next action and the reference it names.
+
+Readings that change for a run written by an earlier 7.0.x, active or ended; nothing stored is rewritten, and terminal statuses,
+audit verdicts and receipts stay as recorded. "Raises" is derived from the proposal and the approved ceilings when the run is read,
+so stored runs need no migration:
+
+- An ended auto run may show a decision that read "Undecided when the run stopped" as "Decided by the agent".
+- An active auto run whose decision was left on Later, or that was waiting on a confirmation, now waits on the agent's research,
+  not on a person; a dialog left open across the upgrade can no longer land its answer.
+
+Deliberative runs read as before. To have a person confirm evidence, start the run in deliberative mode.
+
+**Known broken: delegated auto in non-interactive Claude Code** (`claude -p`, the SDK; [#103](https://github.com/obzenner/siffran/issues/103)).
+Claude Code's default permission mode refuses Empirica's own tools there, so the run starts but cannot take a step, the run
+is left active, and the process still exits 0. Run Empirica in an interactive Claude Code session, or in Pi print mode for unattended runs.
+
 ## Qualified hosts
 
 The host versions 7.0.0 was qualified on are recorded here after the operator's native

@@ -66,7 +66,8 @@
       "first_approval": true,
       "pre_approval_revisions": 0,
       "post_approval_revisions": 0,
-      "human_wait": false
+      "human_wait": false,
+      "raises": false
     },
     "contract": {
       "id": "empirica/public",
@@ -153,6 +154,7 @@
         "host.async_unsupported"
       ]
     },
-    "confirmation_batch": null
+    "confirmation_batch": null,
+    "turn_end_actor": "author"
   }
 }

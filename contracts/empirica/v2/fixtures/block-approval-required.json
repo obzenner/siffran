@@ -1,0 +1,188 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-approval-required",
+    "command": {
+      "type": "EvaluateRun",
+      "run_id": "run-fx",
+      "intent": "report_convergence"
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "fx-approval-required",
+    "result": {
+      "type": "Block",
+      "run": {
+        "id": "er2:eyJnIjoxLCJwIjoiczI1Ni0xNDhkZTljNWE3YTQ0ZDE5ZTU2Y2Q5YWUxYTU1NGJmNjc4NDdhZmIwYzU4ZjZlMTJmYTI5YWM3ZGRmY2E5OTQwIiwicyI6InMyNTYtMDQzYTcxODc3NGM1NzJiZDhhMjVhZGJlYjFiZmNkNWMwMjU2YWUxMWNlY2Y5ZjljM2Y5MjVkMGU1MmJlYWY4OSJ9:zFWArl1x3pB-UWMmhkZ1IgidXrUoWSFArvzxWrE7E3s",
+        "goal": "governed task",
+        "invocation": {
+          "host": "test",
+          "interactive": true,
+          "signal": "test",
+          "delegation": false,
+          "audit_retrieval": [
+            "local",
+            "workspace"
+          ],
+          "human_surface": "unavailable"
+        },
+        "status": "active",
+        "spike_backend": {
+          "kind": "spikes_unavailable"
+        },
+        "basis": "sha256:6666666666666666666666666666666666666666666666666666666666666666",
+        "governance": {
+          "state": "pending",
+          "control_mode": "deliberative",
+          "plan_revision": 0,
+          "approved_digest": null,
+          "approval_kind": null,
+          "proposal": {
+            "budgets": {
+              "max_passes": 8,
+              "max_spawns": 1,
+              "max_audit_spawns": 2
+            },
+            "rationale": "sized"
+          },
+          "context": {
+            "author": null,
+            "ingress": "pi_ui",
+            "approval_capability": "human_configuration",
+            "delegation": false,
+            "interactive": true
+          },
+          "proposal_digest": "sha256:c284378832ce2476c6054ff491eda68804c72928a241f5ea3a4d22c6007d373d",
+          "interactions_remaining": {
+            "proposal": 2,
+            "total": 127
+          },
+          "prompt_error": null,
+          "budgets": {
+            "max_passes": 8,
+            "passes_used": 0,
+            "max_spawns": 1,
+            "spawns_used": 0,
+            "max_audit_spawns": 2,
+            "audit_spawns_used": 0
+          },
+          "remaining": {
+            "max_passes": 8,
+            "max_spawns": 1,
+            "max_audit_spawns": 2
+          },
+          "request_ready": true,
+          "display_ready": true,
+          "next_action": "investigation.record",
+          "first_approval": false,
+          "pre_approval_revisions": 0,
+          "post_approval_revisions": 0,
+          "human_wait": true,
+          "raises": false
+        },
+        "contract": {
+          "id": "empirica/public",
+          "version": "6.0.0",
+          "digest": "<contract-digest>",
+          "relevant_sections": []
+        },
+        "obligations": {
+          "active": [
+            {
+              "id": "obligation.route",
+              "required": "Record routing before investigation.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.graph",
+              "required": "Propose a valid claim graph from supplied context before requesting review.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.approval",
+              "required": "Obtain exact host-mediated approval for the current run configuration.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "satisfied"
+            },
+            {
+              "id": "obligation.investigation",
+              "required": "Record investigation only after routing and current approval.",
+              "observed": [],
+              "missing": null,
+              "next": [],
+              "status": "residual"
+            },
+            {
+              "id": "claim:C0",
+              "required": "supplied uncertainty",
+              "observed": [],
+              "missing": {
+                "code": "claim.research_missing",
+                "target_claim_id": "C0",
+                "parameters": {
+                  "claim_id": "C0"
+                }
+              },
+              "next": [
+                "research.record"
+              ],
+              "status": "residual"
+            }
+          ],
+          "deferred": []
+        },
+        "residuals": [],
+        "freshness": {
+          "changes": []
+        },
+        "children": [],
+        "audit": {
+          "verdict": "none",
+          "current": null,
+          "pending": false,
+          "independence": null,
+          "findings": []
+        },
+        "next_actions": [
+          "investigation.record"
+        ],
+        "untrusted_delimiters": {
+          "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+          "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"
+        },
+        "host": {
+          "profile_id": "pi+pi-subagents-foreground-audit-v1",
+          "tier": "foreground_only",
+          "missing_capabilities": [
+            "host.async_unsupported"
+          ]
+        },
+        "confirmation_batch": null,
+        "turn_end_actor": "human"
+      },
+      "reasons": [
+        {
+          "code": "governance.approval_required",
+          "parameters": {},
+          "message": "Issue a task-sized configure_run with all three ceilings and a nonblank rationale, then request host approval. The StartRun placeholder is unapprovable; no investigation is authorized.",
+          "next_actions": [
+            "governance.propose",
+            "residual.accept"
+          ],
+          "sections": [
+            "governance"
+          ]
+        }
+      ]
+    }
+  }
+}

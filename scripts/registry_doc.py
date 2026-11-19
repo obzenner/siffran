@@ -50,7 +50,9 @@ def render_turn_end(registry: dict) -> str:
     the scenarios that prove each row."""
     table = registry["turn_end"]
     modes = list(registry["control_modes"])
-    lines = ["| Outcome | Meaning |", "|---|---|"]
+    bounds = table["bounds"]
+    lines = [f"**Bounds** (K = {bounds['K']}, T = {bounds['T']}; enforced by: {', '.join(bounds['enforced_by'])}). {bounds['definition']}", "",
+             "| Outcome | Meaning |", "|---|---|"]
     lines += [f"| `{name}` | {_cell(meaning)} |" for name, meaning in table["outcomes"].items()]
     lines += ["", "| Run state | " + " | ".join(f"`{mode}`" for mode in modes) + " |", "|---|" + "---|" * len(modes)]
     for state in table["states"]:

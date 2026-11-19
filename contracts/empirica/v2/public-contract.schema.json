@@ -646,6 +646,22 @@
             "ended_message": {
               "type": "string",
               "minLength": 1
+            },
+            "ui_case_messages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minProperties": 1
+            },
+            "ended_case_messages": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "minLength": 1
+              },
+              "minProperties": 1
             }
           }
         }
@@ -794,7 +810,8 @@
           "additionalProperties": false,
           "required": [
             "deliberative",
-            "auto"
+            "auto_interactive",
+            "auto_delegated"
           ],
           "properties": {
             "deliberative": {
@@ -804,7 +821,14 @@
               },
               "maxItems": 0
             },
-            "auto": {
+            "auto_interactive": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 0
+            },
+            "auto_delegated": {
               "type": "array",
               "prefixItems": [
                 {
@@ -829,7 +853,8 @@
         "evidence_report",
         "paused_for_human",
         "paused_for_evidence",
-        "unattended_continue"
+        "unattended_continue",
+        "unattended_residual"
       ],
       "properties": {
         "human_wait": {
@@ -862,6 +887,11 @@
           "type": "string",
           "minLength": 1,
           "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
+        },
+        "unattended_residual": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[^{}]*\\{reason\\}[^{}]*$"
         }
       }
     },
@@ -878,6 +908,8 @@
           "required": [
             "no_governance",
             "governance",
+            "mode",
+            "mode_delegated",
             "budget_usage",
             "converged",
             "run_id",
@@ -934,6 +966,7 @@
             "pending_human",
             "pending_audit",
             "human_note",
+            "budget_raise_note",
             "decision_approve",
             "decision_reject",
             "human_answer",
@@ -959,6 +992,14 @@
               "minLength": 1
             },
             "governance": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mode": {
+              "type": "string",
+              "minLength": 1
+            },
+            "mode_delegated": {
               "type": "string",
               "minLength": 1
             },
@@ -1179,6 +1220,10 @@
               "minLength": 1
             },
             "human_note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "budget_raise_note": {
               "type": "string",
               "minLength": 1
             },

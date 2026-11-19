@@ -146,7 +146,8 @@
           "first_approval": false,
           "pre_approval_revisions": 0,
           "post_approval_revisions": 0,
-          "human_wait": false
+          "human_wait": false,
+          "raises": false
         },
         "audit": {
           "verdict": "none",
@@ -156,6 +157,7 @@
           "findings": []
         },
         "confirmation_batch": null,
+        "turn_end_actor": "author",
         "spike_backend": {
           "kind": "spikes_unavailable"
         }

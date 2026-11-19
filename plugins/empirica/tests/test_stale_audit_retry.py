@@ -213,7 +213,7 @@ class StaleAuditRetryTests(unittest.TestCase):
         result = self.action({"kind": "child_reserve", "purpose": "audit",
             "resource_class": "audit", "role_profile": "canonical-auditor", "execution": "foreground"})
         self.assertEqual(result["reasons"][0]["code"], "budget.exhausted")
-        self.assertEqual(result["reasons"][0]["parameters"], {"resource": "audit_spawn"})
+        self.assertEqual(result["reasons"][0]["parameters"], {"resource": "audit_spawn", "recovery": "raise_human"})
         self.assertEqual(self.runs.data[self.key], before)
         self.assertEqual(self.artifacts.append_calls, writes)
         self.action({"kind": "configure_run", "budgets": {"max_passes": 8, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": SIZED_RATIONALE})
