@@ -252,7 +252,9 @@ class ProductionProbeKernelTests(unittest.TestCase):
             made.append((name, fake))
             return fake
         return qualification.ProductionProbeKernel(
-            self.store, runtime(), profile, image(), D0, effects_factory=factory), made
+            self.store, runtime(), profile, image(), D0, effects_factory=factory,
+            runtime_inspector=runtime_inspector(),
+            implementation_inspector=lambda: {"implementation_digest": D0}), made
 
     def test_exact_five_outcomes_use_production_lifecycle_and_cleanup(self):
         options = {
@@ -274,6 +276,29 @@ class ProductionProbeKernelTests(unittest.TestCase):
         natural = dict(made)["natural-125"]
         self.assertTrue(natural.attached)
         self.assertEqual(natural.exit_code, 125)
+
+    def test_postflight_reobservation_drift_during_a_probe_fails_the_probe(self):
+        drifted = {**runtime(), "endpoint": "unix:///var/run/other.sock"}
+        for label, inspector in (
+            ("daemon", {"runtime_inspector": runtime_inspector(drifted),
+                        "implementation_inspector": lambda: {"implementation_digest": D0}}),
+            ("implementation", {"runtime_inspector": runtime_inspector(),
+                                "implementation_inspector": lambda: {"implementation_digest": D1}}),
+        ):
+            with self.subTest(label=label):
+                store = common.ExecutionStore(
+                    Path(self.temporary.name).resolve() / f"drift-{label}")
+                store.prepare_execution_scaffolding()
+                qualification.generic_journal.GenericJournalStore(store).prepare()
+                kernel = qualification.ProductionProbeKernel(
+                    store, runtime(), "docker-isolated-v1", image(), D0,
+                    effects_factory=lambda operation, name: FakeDocker(operation),
+                    **{"clock": time.monotonic, **inspector})
+                with self.assertRaises(qualification.GenericQualificationFailure) as caught:
+                    kernel.run("realization", "PASS", deadline=time.monotonic() + 55)
+                self.assertIs(caught.exception.reason,
+                              qualification.QualificationReason.CLEANUP_UNAVAILABLE)
+                self.assertIn("drifted", str(caught.exception))
 
     def test_docker_cli_125_failed_start_is_not_natural_125(self):
         kernel, _ = self.kernel(options={"natural-125": {"failed_start": True}})

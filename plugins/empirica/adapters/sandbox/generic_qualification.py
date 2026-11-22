@@ -423,6 +423,8 @@ class ProductionProbeKernel:
         effects_factory: Callable[[planner.ResolvedDockerOperation, str], execution.GenericEffects],
         clock: Callable[[], float] = time.monotonic,
         operation_id_factory: Callable[[], str] | None = None,
+        runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_current_runtime,
+        implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
     ) -> None:
         self.store = store
         self.runtime = authority.validate_runtime(dict(runtime))
@@ -432,15 +434,36 @@ class ProductionProbeKernel:
         self.effects_factory = effects_factory
         self.operation_id_factory = operation_id_factory or (
             lambda: "o-" + secrets.token_hex(16))
+        self.runtime_inspector = runtime_inspector
+        self.implementation_inspector = implementation_inspector
+        self.implementation_digest = implementation_digest
         seed = canonical_digest({
             "schema": CANDIDATE_SCHEMA, "profile": profile,
             "authority": authority.authority_facts(self.runtime),
             "policy": spike_plan.FRAMEWORK_SPIKE_POLICY.digest,
             "implementation": implementation_digest, "image": image.to_data(),
         })
+        self.identity_digest = seed
         self.backend = application.GenericQualifiedBackend("docker", profile, seed, seed)
         self._container_ids_absent = True
         self._network_ids_absent = True
+
+    def _postflight_identity(self, limit: float) -> str:
+        """Re-observe daemon authority and the loaded release after cleanup; any drift while
+        the probe ran fails it (R5)."""
+        observed = self.runtime_inspector(self.runtime, deadline=limit)
+        if type(observed) is not authority.GenericRuntimeInspection:
+            raise authority.GenericQualificationError(
+                "runtime inspector returned an unknown value")
+        current = authority.validate_runtime(observed.runtime)
+        if not authority.authorities_match(self.runtime, current):
+            raise authority.DaemonDrift("Docker daemon authority drifted")
+        manifest = self.implementation_inspector()
+        if (not isinstance(manifest, Mapping)
+                or type(manifest.get("implementation_digest")) is not str
+                or manifest["implementation_digest"] != self.implementation_digest):
+            raise authority.ImplementationDrift("implementation identity drifted")
+        return self.identity_digest
 
     @staticmethod
     def _argv(name: str, profile: str) -> tuple[str, ...]:
@@ -527,7 +550,7 @@ class ProductionProbeKernel:
         try:
             result = execution.execute_generic_operation(
                 self.store, operation, snapshot, effects, backend_deadline=deadline,
-                postflight=lambda limit: self.backend.execution_binding_digest,
+                postflight=self._postflight_identity,
                 authority=authority.authority_facts(self.runtime),
                 clock=self.clock, qualification_controls=controls)
         except execution.GenericExecutionUnavailable as exc:
@@ -727,7 +750,9 @@ def qualify_to_candidate(
                             current.docker_cli, dict(current.environment), current.work_directory))
     kernel = kernel_factory(
         store, runtime, profile_id, image, implementation_digest,
-        effects_factory=lambda operation, name: selected_effects(resolved), clock=clock)
+        effects_factory=lambda operation, name: selected_effects(resolved), clock=clock,
+        runtime_inspector=runtime_inspector,
+        implementation_inspector=implementation_inspector)
     probes = []
     for name, expected in zip(PROBE_ORDER, PROBE_EXPECTED):
         if clock() >= deadline:
