@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """Regenerate Empirica's shipped runtime contracts from the repository SSOT."""
 
-from check_contract_vendor import NAMES, SOURCE, VENDOR
+from check_contract_vendor import CONTRACT_COPIES
 
-VENDOR.mkdir(parents=True, exist_ok=True)
-for path in sorted(VENDOR.rglob("*"), reverse=True):
-    if path.is_file() and path.relative_to(VENDOR).as_posix() not in NAMES:
-        path.unlink()
-    elif path.is_dir() and not any(path.iterdir()):
-        path.rmdir()
-for name in sorted(NAMES):
-    (VENDOR / name).write_bytes((SOURCE / name).read_bytes())
-print(f"synced {len(NAMES)} Empirica runtime contract vendor files")
+for source, vendor, names in CONTRACT_COPIES:
+    vendor.mkdir(parents=True, exist_ok=True)
+    for path in sorted(vendor.rglob("*"), reverse=True):
+        if path.is_file() and path.name not in names:
+            path.unlink()
+        elif path.is_dir() and not any(path.iterdir()):
+            path.rmdir()
+    for name in sorted(names):
+        (vendor / name).write_bytes((source / name).read_bytes())
+print(f"synced {sum(len(names) for _, _, names in CONTRACT_COPIES)} Empirica runtime contract vendor files")

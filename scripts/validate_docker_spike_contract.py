@@ -23,6 +23,13 @@ CONTRACT_DIR = ROOT / "contracts" / "empirica-docker-spike" / "v1"
 PUBLIC_CONTRACT = ROOT / "contracts" / "empirica" / "v2" / "public-contract.json"
 RESPONSE_SCHEMA = ROOT / "contracts" / "empirica" / "v2" / "response.schema.json"
 LIMITS_ID = "evidence/spike/limits"
+#: The shipped copy of the Docker support contract the plugin reads at runtime (Empirica 7.2 §4.3).
+VENDORED_SUPPORT_CONTRACT = ROOT / "plugins" / "empirica" / "vendor" / "contracts" / "empirica-docker-spike" / "v1" / "support-contract.json"
+#: The one trusted probe image: exactly one digest-pinned OCI index reference and its members.
+PROBE_IMAGE_FIELDS = frozenset({"reference", "repository", "index_digest"})
+_SHA256_DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
+_REPOSITORY_COMPONENT = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+_IMAGE_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
 
 from adapters.sandbox import generic_qualification, planner  # noqa: E402
@@ -66,6 +73,34 @@ class ContractError(Exception):
 def require(condition: object, message: str) -> None:
     if not condition:
         raise ContractError(message)
+
+
+def _probe_image(triple: object) -> tuple[str, str, str]:
+    """The closed shape of `qualification.probe_image`: `<name>:<tag>@sha256:<index digest>`, the short
+    repository name whose `RepoDigests` form is `<repository>@<index_digest>`, and that same digest.
+    Matches the runtime reader exactly (adapters/sandbox/probe_image.py; admission keys on RepoDigests
+    because a locally built or retagged image has no matching entry)."""
+    if not isinstance(triple, dict) or set(triple) != PROBE_IMAGE_FIELDS:
+        raise ContractError("qualification.probe_image must be an object with exactly "
+                            f"{sorted(PROBE_IMAGE_FIELDS)}")
+    reference, repository, index_digest = (triple["reference"], triple["repository"],
+                                           triple["index_digest"])
+    if not all(isinstance(member, str) for member in (reference, repository, index_digest)):
+        raise ContractError("qualification.probe_image members must be strings")
+    if reference.count("@") != 1:
+        raise ContractError("qualification.probe_image.reference must be <name>:<tag>@<digest>")
+    name_tag, digest = reference.split("@", 1)
+    if not _SHA256_DIGEST.fullmatch(digest) or index_digest != digest:
+        raise ContractError("qualification.probe_image.index_digest must equal the reference digest")
+    tag = name_tag.rpartition(":")[2]
+    if not name_tag.rpartition(":")[1] or "/" in tag or not _IMAGE_TAG.fullmatch(tag):
+        raise ContractError("qualification.probe_image.reference must be <name>:<tag>@<digest>")
+    components = [component for component in name_tag.rsplit(":", 1)[0].split("/") if component]
+    if (not components or repository != components[-1]
+            or not _REPOSITORY_COMPONENT.fullmatch(repository)):
+        raise ContractError("qualification.probe_image.repository must be the short last name "
+                            "component of the reference, the form RepoDigests keys on")
+    return reference, repository, index_digest
 
 
 def load(name: str) -> object:
@@ -169,7 +204,12 @@ def check_stale_text(root_dir: Path = ROOT) -> None:
 def check_support_contract() -> None:
     contract = load("support-contract.json")
     schema = load("support-contract.schema.json")
-    jsonschema.Draft202012Validator(schema).validate(contract)
+    try:
+        jsonschema.Draft202012Validator(schema).validate(contract)
+    except jsonschema.ValidationError as exc:
+        raise ContractError(
+            f"support-contract.json violates support-contract.schema.json at "
+            f"{list(exc.absolute_path)}: {exc.message}") from exc
 
     profiles = contract["host_support"]["profiles"]
     require(profiles == sorted(spike_plan.NETWORK_PROFILES), "profiles differ")
@@ -177,6 +217,12 @@ def check_support_contract() -> None:
             "qualification probes differ")
     require(generic_qualification.TOTAL_QUALIFICATION_SECONDS
             == contract["qualification"]["deadline_seconds"], "qualification deadline differs")
+
+    # The one trusted probe image is digest-pinned to one OCI index digest (Empirica 7.2 §4.3).
+    pinned = _probe_image(contract["qualification"]["probe_image"])
+    require(pinned == _probe_image(json.loads(
+        VENDORED_SUPPORT_CONTRACT.read_text(encoding="utf-8"))["qualification"]["probe_image"]),
+        "the vendored Docker support contract pin drifted from contracts/; run make vendor-contracts")
 
     policy = spike_plan.FRAMEWORK_SPIKE_POLICY.to_data()
     expected_policy = {

@@ -87,12 +87,22 @@
     },
     "qualification": {
       "type": "object", "additionalProperties": false,
-      "required": ["probes", "deadline_seconds", "candidate", "installation", "image_tools"],
+      "required": ["probes", "probe_image", "deadline_seconds", "candidate", "installation", "image_tools"],
       "properties": {
         "probes": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"enum": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"]}},
+        "probe_image": {"$ref": "#/$defs/probeImage"},
         "deadline_seconds": {"const": 60}, "candidate": {"const": "private-mode-0600-only"},
         "installation": {"const": "separate-explicit-revalidation-and-atomic-publication"},
         "image_tools": {"$ref": "#/$defs/stringArray"}
+      }
+    },
+    "probeImage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reference", "repository", "index_digest"],
+      "properties": {
+        "reference": {"type": "string", "pattern": "^[^:@]+(?::[0-9]+)?(?:/[^:@]+)*:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}@sha256:[0-9a-f]{64}$"},
+        "repository": {"type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"},
+        "index_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       }
     },
     "observer": {

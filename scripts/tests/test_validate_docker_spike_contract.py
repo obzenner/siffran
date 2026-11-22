@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import shutil
 import sys
 import tempfile
@@ -62,6 +63,77 @@ class LimitsClauseTests(unittest.TestCase):
         with mock.patch.object(validator, "REASON_HINTS", hints):
             with self.assertRaisesRegex(validator.ContractError, "cover the closed"):
                 validator.render_limits()
+
+
+class ProbeImageTests(unittest.TestCase):
+    """The qualification probe image must be exactly one digest-pinned OCI index reference."""
+
+    REFERENCE = "docker.io/library/alpine:3.22@sha256:" + "4" * 64
+
+    def contract_with_mutation(self, mutate) -> None:
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = Path(temporary.name)
+        for name in ("support-contract.json", "support-contract.schema.json"):
+            shutil.copy2(validator.CONTRACT_DIR / name, root / name)
+        contract = json.loads((root / "support-contract.json").read_text(encoding="utf-8"))
+        mutate(contract)
+        (root / "support-contract.json").write_text(
+            json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+        with mock.patch.object(validator, "CONTRACT_DIR", root):
+            validator.check_support_contract()
+
+    def apply(self, probe_image):
+        return lambda contract: contract["qualification"].__setitem__("probe_image", probe_image)
+
+    def test_a_missing_pin_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(
+                lambda contract: contract["qualification"].pop("probe_image"))
+
+    def test_a_pin_without_a_digest_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(self.apply({"reference": "docker.io/library/alpine:3.22",
+                                                    "repository": "alpine",
+                                                    "index_digest": "sha256:" + "4" * 64}))
+
+    def test_a_pin_without_a_tag_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(self.apply(
+                {"reference": "docker.io/library/alpine@sha256:" + "4" * 64,
+                 "repository": "alpine", "index_digest": "sha256:" + "4" * 64}))
+
+    def test_a_digest_mismatch_between_reference_and_index_digest_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(self.apply(
+                {"reference": "docker.io/library/alpine:3.22@sha256:" + "4" * 64,
+                 "repository": "alpine", "index_digest": "sha256:" + "5" * 64}))
+
+    def test_a_repository_that_is_not_the_short_name_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(self.apply(
+                {"reference": self.REFERENCE, "repository": "library/alpine",
+                 "index_digest": "sha256:" + "4" * 64}))
+
+    def test_a_repository_that_is_not_the_reference_tail_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(self.apply(
+                {"reference": "docker.io/library/other:3.22@sha256:" + "4" * 64,
+                 "repository": "alpine", "index_digest": "sha256:" + "4" * 64}))
+
+    def test_a_pin_with_extra_fields_fails(self):
+        with self.assertRaisesRegex(validator.ContractError, "probe_image"):
+            self.contract_with_mutation(self.apply(
+                {"reference": self.REFERENCE, "repository": "alpine",
+                 "index_digest": "sha256:" + "4" * 64, "id": "sha256:" + "9" * 64}))
+
+    def test_the_current_pinned_pin_parses(self):
+        contract = json.loads(
+            (validator.CONTRACT_DIR / "support-contract.json").read_text(encoding="utf-8"))
+        reference, repository, index_digest = validator._probe_image(
+            contract["qualification"]["probe_image"])
+        self.assertRegex(f"{reference} {repository} {index_digest}",
+                         r"^[^@]+@sha256:[0-9a-f]{64} alpine sha256:[0-9a-f]{64}$")
 
 
 class StaleTextTests(unittest.TestCase):

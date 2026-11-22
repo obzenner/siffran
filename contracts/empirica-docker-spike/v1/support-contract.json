@@ -60,6 +60,11 @@
   },
   "qualification": {
     "probes": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"],
+    "probe_image": {
+      "reference": "docker.io/library/alpine:3.22@sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f",
+      "repository": "alpine",
+      "index_digest": "sha256:49340b346798875b5592e5d420241f2f9cfba5f47e62ebb1446a1b34734e898f"
+    },
     "deadline_seconds": 60,
     "candidate": "private-mode-0600-only",
     "installation": "separate-explicit-revalidation-and-atomic-publication",
