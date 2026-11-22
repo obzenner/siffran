@@ -134,16 +134,20 @@ class ProbeImageTests(unittest.TestCase):
         self.assertEqual(pin.repo_digest, f"{pin.repository}@{pin.index_digest}")
 
     def test_malformed_or_non_official_names_are_refused_by_the_full_name_check(self):
-        # Parser-direct: neither the schema nor a vendored-copy mismatch can mask acceptance.
+        # Parser-direct against the runtime parser the validator delegates to: neither the
+        # schema nor a vendored-copy mismatch can mask acceptance.
         for reference in ("docker.io//library/alpine:3.22@sha256:" + "4" * 64,
                           "docker.io/library//alpine:3.22@sha256:" + "4" * 64,
                           "registry.example.com/library/alpine:3.22@sha256:" + "4" * 64,
                           "docker.io/team/alpine:3.22@sha256:" + "4" * 64,
                           "docker.io/library/alpine/team:3.22@sha256:" + "4" * 64,
-                          "alpine:3.22@sha256:" + "4" * 64):
-            with self.assertRaisesRegex(validator.ContractError, "docker.io/library"):
-                validator._probe_image({"reference": reference, "repository": "alpine",
-                                        "index_digest": "sha256:" + "4" * 64})
+                          "alpine:3.22@sha256:" + "4" * 64,
+                          "docker.io/library/Alpine:3.22@sha256:" + "4" * 64):
+            with self.assertRaisesRegex(validator.probe_image.ProbeImageError,
+                                        "docker.io/library"):
+                validator.probe_image.parse_probe_image({"reference": reference,
+                                                          "repository": "alpine",
+                                                          "index_digest": "sha256:" + "4" * 64})
 
     def test_the_repository_path_including_library_is_bounded_to_255(self):
         # distribution/reference caps the repository path at 255 characters, library/ included:

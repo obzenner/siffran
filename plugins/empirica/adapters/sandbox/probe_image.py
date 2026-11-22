@@ -2,13 +2,17 @@
 
 The one trusted probe image is a field of the vendored Docker spike support contract
 (``qualification.probe_image``): one OCI image *index* reference
-``<name>:<tag>@sha256:<64-hex digest>`` whose single index covers both canonical
-architectures, ``linux/arm64`` and ``linux/amd64``. Admission (E5) keys on the image's
-``RepoDigests`` containing ``<repository>@<index_digest>`` — never on the daemon-local
-``Id``: the classic store reports the platform config digest as ``Id``, and a locally
-built, loaded or retagged image has no matching ``RepoDigests`` entry at all. The
-contract digest is part of the implementation manifest, so a pin change is a code
-change that invalidates installed qualifications.
+``docker.io/library/<name>:<tag>@sha256:<64-hex digest>`` whose single index covers
+both canonical architectures, ``linux/arm64`` and ``linux/amd64``. Pins are official
+Docker Hub library images only: no other registry and no other namespace qualifies, so
+``<repository>@<index_digest>`` is exactly the RepoDigests form Docker's classic store
+reports for the image (a familiar name that preserves non-default registries and
+non-library namespaces would never match). Admission (E5) keys on the image's
+``RepoDigests`` carrying the expected entry, present (never singleton-equal) — never on
+the daemon-local ``Id``: the classic store reports the platform config digest as ``Id``,
+and a locally built, loaded or retagged image has no matching ``RepoDigests`` entry at
+all. The contract digest is part of the implementation manifest, so a pin change is a
+code change that invalidates installed qualifications.
 """
 from __future__ import annotations
 
@@ -22,6 +26,9 @@ _EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
 PROBE_IMAGE_CONTRACT = _EMPIRICA_ROOT / "vendor" / "contracts" / "empirica-docker-spike" / "v1" / "support-contract.json"
 
 PROBE_IMAGE_FIELDS = frozenset({"reference", "repository", "index_digest"})
+#: Pins are official Docker Hub library images only (Empirica 7.2 coordinator decision on E3b finding 1).
+OFFICIAL_REGISTRY = "docker.io"
+OFFICIAL_NAMESPACE = "library"
 _INDEX_DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
 _REPOSITORY_COMPONENT = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 _TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
@@ -57,7 +64,8 @@ def parse_probe_image(data: object) -> ProbeImagePin:
     """Validate ``qualification.probe_image`` and return the sealed pin.
 
     The data is untrusted: public-contract documents may render anywhere, so the
-    parser accepts exactly the three-field digest-pinned shape and nothing else.
+    parser accepts exactly the three-field digest-pinned official-library shape and
+    nothing else — the full name is validated, not just the reference tail.
     """
     if not isinstance(data, dict) or set(data) != PROBE_IMAGE_FIELDS:
         raise ProbeImageError(
@@ -67,7 +75,9 @@ def parse_probe_image(data: object) -> ProbeImagePin:
     if not all(isinstance(value, str) for value in (reference, repository, index_digest)):
         raise ProbeImageError("qualification.probe_image fields must be strings")
     if reference.count("@") != 1:
-        raise ProbeImageError("qualification.probe_image.reference must be <name>:<tag>@<digest>")
+        raise ProbeImageError(
+            f"qualification.probe_image.reference must be {OFFICIAL_REGISTRY}/{OFFICIAL_NAMESPACE}/"
+            "<name>:<tag>@<digest>")
     name_tag, digest = reference.split("@", 1)
     matched = _INDEX_DIGEST.fullmatch(digest)
     if matched is None:
@@ -79,12 +89,18 @@ def parse_probe_image(data: object) -> ProbeImagePin:
     tag = name_tag.rpartition(":")[2]
     if not name_tag.rpartition(":")[1] or "/" in tag or not _TAG.fullmatch(tag):
         raise ProbeImageError(
-            "qualification.probe_image.reference must be <name>:<tag>@<digest> with a bare tag")
-    components = [component for component in name_tag.rsplit(":", 1)[0].split("/") if component]
-    if not components or repository != components[-1] or not _REPOSITORY_COMPONENT.fullmatch(repository):
+            f"qualification.probe_image.reference must be {OFFICIAL_REGISTRY}/{OFFICIAL_NAMESPACE}/"
+            "<name>:<tag>@<digest> with a bare tag")
+    components = name_tag.rsplit(":", 1)[0].split("/")
+    official = (len(components) == 3 and components[0] == OFFICIAL_REGISTRY
+                and components[1] == OFFICIAL_NAMESPACE and repository == components[2])
+    if (not official or any(not component for component in components)
+            or not _REPOSITORY_COMPONENT.fullmatch(repository)):
         raise ProbeImageError(
-            "qualification.probe_image.repository must be the short last name component of "
-            "the reference, so that <repository>@<index_digest> is the RepoDigests form")
+            "qualification.probe_image.reference must be exactly "
+            f"{OFFICIAL_REGISTRY}/{OFFICIAL_NAMESPACE}/<name>:<tag>@<digest> for an official "
+            "Docker Hub library image, the only form whose RepoDigests are "
+            "<repository>@<index_digest>")
     return ProbeImagePin(reference, repository, index_digest)
 
 

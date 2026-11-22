@@ -4,10 +4,16 @@
 `make empirica-probe-image-pin TAG=<repo:tag>` resolves the tag's multi-platform index
 with `docker buildx imagetools inspect <ref> --format '{{json .Manifest}}'` (network, no
 daemon, no pull) and rewrites `qualification.probe_image` in the normative support
-contract: `reference` becomes the canonical `<name>:<tag>@sha256:<index digest>`,
-`repository` is the short last name component, and `index_digest` is the index digest.
+contract: `reference` becomes `docker.io/library/<name>:<tag>@sha256:<index digest>`,
+`repository` is the short library name, and `index_digest` is the index digest.
+
+Pins are official Docker Hub library images only (`docker.io/library/<name>`, entered as
+`<name>:<tag>` or fully spelled out): other registries and other namespaces are refused
+before any buildx call, and their RepoDigests would not be `<repository>@<index_digest>`.
 The index must be an OCI or Docker *index* (manifest list) carrying both canonical
-architectures, `linux/arm64` and `linux/amd64`; otherwise nothing is written.
+architectures, `linux/arm64` and `linux/amd64`; otherwise nothing is written. The rewrite
+replaces only the `probe_image` member and is published atomically, so the rest of the
+hand-formatted contract stays byte-identical.
 
 A pin change invalidates installed qualifications (the contract is part of the
 implementation manifest), and the vendored copy the plugin ships is refreshed by
@@ -17,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -31,24 +38,50 @@ INDEX_MEDIA_TYPES = ("application/vnd.oci.image.index.v1+json",
 CANONICAL_ARCHITECTURES = ("amd64", "arm64")
 _TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 _SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_PIN_MEMBER = re.compile(r'    "probe_image": \{[^{}]*\}')
 
 sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
 from adapters.sandbox import probe_image  # noqa: E402
 
 
 class PinError(Exception):
-    """The tag is malformed, or its registry index is not a digest-addressable multi-arch index."""
+    """The tag is malformed, not an official library image, or its registry index is not
+    a digest-addressable multi-arch index covering both canonical architectures."""
 
 
-def canonical_name(tag: str) -> str:
-    """The fully-qualified repository name of `<name:tag>`, with Docker Hub's default registry."""
-    name, separator, tail = tag.rpartition(":")
-    if not separator or "/" in tail or "@" in tag or not _TAG.fullmatch(tail):
+def official_reference(tag: str) -> tuple[str, str]:
+    """The fully-qualified `docker.io/library/<name>:<tag>` reference and short name of `<name:tag>`.
+
+    Validates the complete input — shape, registry, namespace and name — through the
+    runtime parser, so nothing ambiguous survives to a buildx call.
+    """
+    if "@" in tag:
         raise PinError(f"TAG must be exactly <name:tag> (got {tag!r}); the digest is resolved here")
-    parts = name.split("/")
-    if len(parts) > 1 and ("." in parts[0] or ":" in parts[0] or parts[0] == "localhost"):
-        return name
-    return f"docker.io/{'library/' if len(parts) == 1 else ''}{name}"
+    name, separator, tail = tag.rpartition(":")
+    if not separator or "/" in tail or not _TAG.fullmatch(tail):
+        raise PinError(f"TAG must be exactly <name:tag> (got {tag!r}); the digest is resolved here")
+    components = name.split("/")
+    if len(components) == 1:
+        components = [probe_image.OFFICIAL_REGISTRY, probe_image.OFFICIAL_NAMESPACE] + components
+    if (len(components) != 3 or components[0] != probe_image.OFFICIAL_REGISTRY
+            or components[1] != probe_image.OFFICIAL_NAMESPACE
+            or any(not component for component in components)):
+        raise PinError("probe-image pins are official Docker Hub library images only: "
+                       "TAG must be <name:tag> or docker.io/library/<name>:<tag>")
+    # The runtime parser owns every spelling rule (the library name's charset included),
+    # so validate the complete would-be pin here, before any network call.
+    placeholder = "sha256:" + "0" * 64
+    try:
+        probed = probe_image.parse_probe_image({
+            "reference": (f"{probe_image.OFFICIAL_REGISTRY}/{probe_image.OFFICIAL_NAMESPACE}/"
+                          f"{components[2]}:{tail}@{placeholder}"),
+            "repository": components[2],
+            "index_digest": placeholder,
+        })
+    except probe_image.ProbeImageError as exc:
+        raise PinError("TAG names no official Docker Hub library image: "
+                       f"{exc}") from exc
+    return probed.reference.rsplit("@", 1)[0], probed.repository
 
 
 def _platform_architectures(manifest: object) -> set[str]:
@@ -63,6 +96,29 @@ def _platform_architectures(manifest: object) -> set[str]:
     return found
 
 
+def localized_rewrite(raw: str, pin: probe_image.ProbeImagePin) -> str:
+    """Replace only the `probe_image` member, keeping the rest of the contract byte-identical."""
+    block = ('    "probe_image": {\n'
+             f'      "reference": {json.dumps(pin.reference)},\n'
+             f'      "repository": {json.dumps(pin.repository)},\n'
+             f'      "index_digest": {json.dumps(pin.index_digest)}\n'
+             '    }')
+    rewritten, count = _PIN_MEMBER.subn(block, raw, count=1)
+    if count != 1:
+        raise PinError("the support contract carries no single probe_image member to rewrite")
+    return rewritten
+
+
+def publish_atomically(path: Path, text: str) -> None:
+    staged = path.with_name(f".{path.name}.{os.getpid()}.pin")
+    try:
+        staged.write_text(text, encoding="utf-8")
+        os.replace(staged, path)
+    except OSError:
+        staged.unlink(missing_ok=True)
+        raise
+
+
 def pin_probe_image(
     tag: str,
     *,
@@ -71,8 +127,7 @@ def pin_probe_image(
 ) -> probe_image.ProbeImagePin:
     """Rewrite `qualification.probe_image` in the contract from the tag's index digest."""
     run = runner if runner is not None else _subprocess_run
-    name = canonical_name(tag)
-    reference = f"{name}:{tag.rpartition(':')[2]}"
+    reference, repository = official_reference(tag)
     completed = run(["docker", "buildx", "imagetools", "inspect", reference, "--format", FORMAT],
                     capture_output=True, text=True, check=False)
     if getattr(completed, "returncode", 1) != 0:
@@ -95,15 +150,15 @@ def pin_probe_image(
                           "one pinned index must cover both canonical architectures")
     pin = probe_image.parse_probe_image({
         "reference": f"{reference}@{digest}",
-        "repository": name.rsplit("/", 1)[-1],
+        "repository": repository,
         "index_digest": digest,
     })
-    contract = json.loads(contract_path.read_text(encoding="utf-8"))
-    if not isinstance(contract.get("qualification"), dict):
-        raise PinError(f"{contract_path.name} carries no qualification section")
-    contract["qualification"]["probe_image"] = {
-        "reference": pin.reference, "repository": pin.repository, "index_digest": pin.index_digest}
-    contract_path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+    raw = contract_path.read_text(encoding="utf-8")
+    publish_atomically(contract_path, localized_rewrite(raw, pin))
+    # The published contract must still be exactly the declared, parsed pin.
+    published = json.loads(contract_path.read_text(encoding="utf-8"))["qualification"]["probe_image"]
+    if probe_image.parse_probe_image(published) != pin:
+        raise PinError("the published probe_image pin does not re-read as the resolved pin")
     return pin
 
 
@@ -116,11 +171,12 @@ def _subprocess_run(argv, **kwargs):
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("tag", metavar="TAG",
-                        help="the <repo:tag> of the multi-platform probe image, e.g. alpine:3.22")
+                        help="the <name:tag> (or docker.io/library/<name>:<tag>) of the "
+                             "multi-platform probe image, e.g. alpine:3.22")
     arguments = parser.parse_args()
     try:
         pin = pin_probe_image(arguments.tag)
-    except (PinError, probe_image.ProbeImageError) as exc:
+    except (PinError, probe_image.ProbeImageError, OSError) as exc:
         print(f"pin-probe-image: {exc}", file=sys.stderr)
         return 1
     print(f"pin-probe-image: pinned {pin.repo_digest} as {pin.reference}")
