@@ -147,6 +147,21 @@ class ProbeImageTests(unittest.TestCase):
                 validator._probe_image({"reference": reference, "repository": "alpine",
                                         "index_digest": "sha256:" + "4" * 64})
 
+    def test_the_repository_path_including_library_is_bounded_to_255(self):
+        # distribution/reference caps the repository path at 255 characters, library/ included:
+        # a validated contract must not pin an image Docker cannot even inspect.
+        long_pin = {"reference": f"docker.io/library/{'a' * 247}:3.22@sha256:" + "4" * 64,
+                    "repository": "a" * 247, "index_digest": "sha256:" + "4" * 64}
+        self.assertEqual(validator._probe_image(long_pin),
+                         (long_pin["reference"], "a" * 247, long_pin["index_digest"]))
+        self.assertEqual(len(f"library/{'a' * 247}"), validator.REPOSITORY_PATH_MAX)
+        for components in (248, 300):
+            over = {"reference": f"docker.io/library/{'a' * components}:3.22@sha256:" + "4" * 64,
+                    "repository": "a" * components, "index_digest": "sha256:" + "4" * 64}
+            self.assertGreater(len(f"library/{'a' * components}"), validator.REPOSITORY_PATH_MAX)
+            with self.assertRaisesRegex(validator.ContractError, "255"):
+                validator._probe_image(over)
+
 
 class StaleTextTests(unittest.TestCase):
     def copy_tree(self):

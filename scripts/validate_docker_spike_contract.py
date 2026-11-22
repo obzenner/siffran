@@ -34,6 +34,9 @@ _IMAGE_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
 #: so `<repository>@<index_digest>` is exactly the RepoDigests form Docker's classic store reports
 #: for them via reference.FamiliarString (Empirica 7.2 coordinator decision on E3b finding 1).
 OFFICIAL_LIBRARY_PREFIX = "docker.io/library"
+#: distribution/reference caps the repository path, including the ``library/`` namespace, at 255
+#: characters; the short library name alone gets 255 - 8 of them.
+REPOSITORY_PATH_MAX = 255
 sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
 
 from adapters.sandbox import generic_qualification, planner  # noqa: E402
@@ -104,13 +107,15 @@ def _probe_image(triple: object) -> tuple[str, str, str]:
         raise ContractError("qualification.probe_image.reference must be "
                             f"{OFFICIAL_LIBRARY_PREFIX}/<name>:<tag>@<digest>")
     components = name_tag.rsplit(":", 1)[0].split("/")
-    if (len(components) != 3 or components[0] != OFFICIAL_LIBRARY_PREFIX.split("/")[0]
-            or components[1] != OFFICIAL_LIBRARY_PREFIX.split("/")[1]
+    registry, namespace = OFFICIAL_LIBRARY_PREFIX.split("/")
+    if (len(components) != 3 or components[0] != registry or components[1] != namespace
             or any(not component for component in components)
-            or repository != components[2] or not _REPOSITORY_COMPONENT.fullmatch(repository)):
+            or repository != components[2] or not _REPOSITORY_COMPONENT.fullmatch(repository)
+            or len(f"{components[1]}/{repository}") > REPOSITORY_PATH_MAX):
         raise ContractError("qualification.probe_image.reference must be exactly "
                             f"{OFFICIAL_LIBRARY_PREFIX}/<name>:<tag>@<digest> for an official "
-                            "Docker Hub library image, with the matching short repository name")
+                            "Docker Hub library image no longer than 255 repository-path "
+                            "characters, with the matching short repository name")
     return reference, repository, index_digest
 
 
