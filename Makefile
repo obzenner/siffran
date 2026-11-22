@@ -37,7 +37,7 @@ EMPIRICA_GENERIC_HARNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_har
 EMPIRICA_GENERIC_AUTHORITY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_authority.py
 EMPIRICA_GENERIC_QUALIFICATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_qualification.py
 EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
-EMPIRICA_SANDBOX_TESTS := $(PLUGINS_DIR)/empirica/tests/test_sandbox_common.py
+EMPIRICA_SANDBOX_TESTS := $(PLUGINS_DIR)/empirica/tests/test_sandbox_common.py $(PLUGINS_DIR)/empirica/tests/test_probe_image.py
 EMPIRICA_WORKSPACE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
 EMPIRICA_PROTOCOL_ISOLATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_protocol_isolation.py
 EMPIRICA_CLAUDE_MCP_LOG_TESTS := $(SCRIPTS)/tests/test_check_claude_mcp_log.py
@@ -372,9 +372,10 @@ contract-schemas: ## Regenerate shared Empirica schema definitions and local emb
 contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_sync_schema_defs.py
 
-empirica-docker-support-contract-check: dev-python ## Validate the current-only normative Docker spike support contract, its emitted refusal codes, and the public evidence/spike/limits clause against the code constants
+empirica-docker-support-contract-check: dev-python ## Validate the current-only normative Docker spike support contract, its digest-pinned probe image, its emitted refusal codes, and the public evidence/spike/limits clause against the code constants
 	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py
 	@$(DEV_PYTHON) -m unittest -q scripts/tests/test_validate_docker_spike_contract.py
+	@$(DEV_PYTHON) -m unittest -q scripts/tests/test_pin_probe_image.py
 
 empirica-manifest-check: ## Check that the implementation manifest (IMPLEMENTATION_SOURCE_PATHS) equals the import closure of its declared roots (doc/testing.md), and test the check against seeded trees
 	@$(PYTHON) -m unittest -q scripts/tests/test_check_implementation_manifest.py
@@ -382,6 +383,10 @@ empirica-manifest-check: ## Check that the implementation manifest (IMPLEMENTATI
 
 empirica-spike-limits: dev-python ## Rewrite the public-contract evidence/spike/limits clause from the code constants (then make vendor-contracts)
 	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py --write-limits
+
+.PHONY: empirica-probe-image-pin
+empirica-probe-image-pin: ## Pin the Docker qualification probe image by its OCI index digest: TAG=<repo:tag> (network via docker buildx imagetools, no daemon); then run make vendor-contracts
+	@$(PYTHON) $(SCRIPTS)/pin_probe_image.py $(TAG)
 
 contract-check: dev-python ## Validate schemas, shared definitions, wire fixtures and conformance; the observer fixtures: both copies byte-equal, no drift from a regeneration, the UI-view validator, the schema-derived generator (every declared enum value producible), and the contract id equal to its folder
 	@printf '$(BOLD)==> contracts$(RESET)\n'
@@ -592,8 +597,8 @@ lifecycle-gates-unit-check: ## Test through make that lint and adr-check fail wi
 
 .PHONY: empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-fixtures empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check generic-docker-qualify-candidate generic-docker-install-candidate empirica-generic-harness-check empirica-generic-execution-check
 
-empirica-sandbox-check: ## Test generic workspace capture, subprocess, scaffolding, lock, and implementation-identity primitives without Docker
-	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_SANDBOX_TESTS)
+empirica-sandbox-check: ## Test generic workspace capture, subprocess, scaffolding, lock, digest-pinned probe image, and implementation-identity primitives without Docker
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -m unittest -q $(EMPIRICA_SANDBOX_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_WORKSPACE_ADAPTER_TESTS)
 
 empirica-spike-plan-draft-check: ## Test closed generic author drafts and pure server-fact sealing

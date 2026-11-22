@@ -92,6 +92,9 @@ declared beside it in `IMPLEMENTATION_ROOTS`:
   extension `adapters/pi/src/index.ts`;
 - `adapters/sandbox/generic_qualification.py`, the module the qualify and install scripts are thin argument adapters
   over;
+- `adapters/sandbox/probe_image.py`, the digest-pinned probe-image reader, with the vendored Docker
+  support-contract directory `vendor/contracts/empirica-docker-spike/v1` it reads: the probe pin and the
+  implementation digest change together.
 - the vendored contract directory `vendor/contracts/empirica/v2`: every JSON document in it, since runtime code reads
   them by constructed path.
 <!-- /implementation-roots -->

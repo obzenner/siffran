@@ -130,10 +130,8 @@ class ProbeImageTests(unittest.TestCase):
     def test_the_current_pinned_pin_parses(self):
         contract = json.loads(
             (validator.CONTRACT_DIR / "support-contract.json").read_text(encoding="utf-8"))
-        reference, repository, index_digest = validator._probe_image(
-            contract["qualification"]["probe_image"])
-        self.assertRegex(f"{reference} {repository} {index_digest}",
-                         r"^[^@]+@sha256:[0-9a-f]{64} alpine sha256:[0-9a-f]{64}$")
+        pin = validator.probe_image.parse_probe_image(contract["qualification"]["probe_image"])
+        self.assertEqual(pin.repo_digest, f"{pin.repository}@{pin.index_digest}")
 
     def test_malformed_or_non_official_names_are_refused_by_the_full_name_check(self):
         # Parser-direct: neither the schema nor a vendored-copy mismatch can mask acceptance.
