@@ -403,10 +403,11 @@ obligations-check: ## Validate obligation schemas and substrate-neutral fixtures
 	@$(PYTHON) $(SCRIPTS)/validate_obligations.py
 
 .PHONY: vendor-check
-vendor-check: ## Verify Empirica's obligation and runtime-contract vendor copies
+vendor-check: ## Verify Empirica's obligation and runtime-contract vendor copies, and the sync's nested-extra repair
 	@printf '$(BOLD)==> Empirica vendor copies$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/check_vendor.py
 	@$(PYTHON) $(SCRIPTS)/check_contract_vendor.py
+	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_contract_vendor_sync.py
 
 .PHONY: activation-check
 activation-check: ## Verify Empirica runtime isolation and thin Claude hook activation

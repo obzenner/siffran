@@ -19,9 +19,9 @@ CONTRACT_COPIES = (
 )
 
 
-def problems() -> list[str]:
+def problems(copies=CONTRACT_COPIES) -> list[str]:
     found = []
-    for source, vendor, names in CONTRACT_COPIES:
+    for source, vendor, names in copies:
         for name in sorted(names):
             if not (source / name).is_file():
                 found.append(f"missing source {source / name}")

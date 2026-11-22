@@ -135,6 +135,18 @@ class ProbeImageTests(unittest.TestCase):
         self.assertRegex(f"{reference} {repository} {index_digest}",
                          r"^[^@]+@sha256:[0-9a-f]{64} alpine sha256:[0-9a-f]{64}$")
 
+    def test_malformed_or_non_official_names_are_refused_by_the_full_name_check(self):
+        # Parser-direct: neither the schema nor a vendored-copy mismatch can mask acceptance.
+        for reference in ("docker.io//library/alpine:3.22@sha256:" + "4" * 64,
+                          "docker.io/library//alpine:3.22@sha256:" + "4" * 64,
+                          "registry.example.com/library/alpine:3.22@sha256:" + "4" * 64,
+                          "docker.io/team/alpine:3.22@sha256:" + "4" * 64,
+                          "docker.io/library/alpine/team:3.22@sha256:" + "4" * 64,
+                          "alpine:3.22@sha256:" + "4" * 64):
+            with self.assertRaisesRegex(validator.ContractError, "docker.io/library"):
+                validator._probe_image({"reference": reference, "repository": "alpine",
+                                        "index_digest": "sha256:" + "4" * 64})
+
 
 class StaleTextTests(unittest.TestCase):
     def copy_tree(self):

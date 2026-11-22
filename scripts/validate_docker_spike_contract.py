@@ -30,6 +30,10 @@ PROBE_IMAGE_FIELDS = frozenset({"reference", "repository", "index_digest"})
 _SHA256_DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
 _REPOSITORY_COMPONENT = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 _IMAGE_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
+#: Pins are official Docker Hub library images only: one canonical registry and one namespace,
+#: so `<repository>@<index_digest>` is exactly the RepoDigests form Docker's classic store reports
+#: for them via reference.FamiliarString (Empirica 7.2 coordinator decision on E3b finding 1).
+OFFICIAL_LIBRARY_PREFIX = "docker.io/library"
 sys.path.insert(0, str(ROOT / "plugins" / "empirica"))
 
 from adapters.sandbox import generic_qualification, planner  # noqa: E402
@@ -76,10 +80,12 @@ def require(condition: object, message: str) -> None:
 
 
 def _probe_image(triple: object) -> tuple[str, str, str]:
-    """The closed shape of `qualification.probe_image`: `<name>:<tag>@sha256:<index digest>`, the short
-    repository name whose `RepoDigests` form is `<repository>@<index_digest>`, and that same digest.
-    Matches the runtime reader exactly (adapters/sandbox/probe_image.py; admission keys on RepoDigests
-    because a locally built or retagged image has no matching entry)."""
+    """The closed shape of `qualification.probe_image`: exactly
+    `docker.io/library/<name>:<tag>@sha256:<index digest>`, the short library name whose `RepoDigests`
+    form is `<repository>@<index_digest>`, and that same digest. The full name is validated, not just
+    its tail; official-library pins only, and no empty components. Matches the runtime reader exactly
+    (adapters/sandbox/probe_image.py; admission keys on RepoDigests because a locally built or retagged
+    image has no matching entry)."""
     if not isinstance(triple, dict) or set(triple) != PROBE_IMAGE_FIELDS:
         raise ContractError("qualification.probe_image must be an object with exactly "
                             f"{sorted(PROBE_IMAGE_FIELDS)}")
@@ -88,18 +94,23 @@ def _probe_image(triple: object) -> tuple[str, str, str]:
     if not all(isinstance(member, str) for member in (reference, repository, index_digest)):
         raise ContractError("qualification.probe_image members must be strings")
     if reference.count("@") != 1:
-        raise ContractError("qualification.probe_image.reference must be <name>:<tag>@<digest>")
+        raise ContractError("qualification.probe_image.reference must be "
+                            f"{OFFICIAL_LIBRARY_PREFIX}/<name>:<tag>@<digest>")
     name_tag, digest = reference.split("@", 1)
     if not _SHA256_DIGEST.fullmatch(digest) or index_digest != digest:
         raise ContractError("qualification.probe_image.index_digest must equal the reference digest")
     tag = name_tag.rpartition(":")[2]
     if not name_tag.rpartition(":")[1] or "/" in tag or not _IMAGE_TAG.fullmatch(tag):
-        raise ContractError("qualification.probe_image.reference must be <name>:<tag>@<digest>")
-    components = [component for component in name_tag.rsplit(":", 1)[0].split("/") if component]
-    if (not components or repository != components[-1]
-            or not _REPOSITORY_COMPONENT.fullmatch(repository)):
-        raise ContractError("qualification.probe_image.repository must be the short last name "
-                            "component of the reference, the form RepoDigests keys on")
+        raise ContractError("qualification.probe_image.reference must be "
+                            f"{OFFICIAL_LIBRARY_PREFIX}/<name>:<tag>@<digest>")
+    components = name_tag.rsplit(":", 1)[0].split("/")
+    if (len(components) != 3 or components[0] != OFFICIAL_LIBRARY_PREFIX.split("/")[0]
+            or components[1] != OFFICIAL_LIBRARY_PREFIX.split("/")[1]
+            or any(not component for component in components)
+            or repository != components[2] or not _REPOSITORY_COMPONENT.fullmatch(repository)):
+        raise ContractError("qualification.probe_image.reference must be exactly "
+                            f"{OFFICIAL_LIBRARY_PREFIX}/<name>:<tag>@<digest> for an official "
+                            "Docker Hub library image, with the matching short repository name")
     return reference, repository, index_digest
 
 

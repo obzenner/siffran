@@ -98,9 +98,10 @@
     },
     "probeImage": {
       "type": "object", "additionalProperties": false,
+      "description": "The one trusted probe image: an official Docker Hub library image, digest-pinned to its OCI index (Empirica 7.2 §4.3). Pins are docker.io/library/<name> only; other registries and namespaces are refused.",
       "required": ["reference", "repository", "index_digest"],
       "properties": {
-        "reference": {"type": "string", "pattern": "^[^:@]+(?::[0-9]+)?(?:/[^:@]+)*:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}@sha256:[0-9a-f]{64}$"},
+        "reference": {"type": "string", "pattern": "^docker\\.io/library/[a-z0-9]+(?:[._-][a-z0-9]+)*:[A-Za-z0-9_][A-Za-z0-9._-]{0,127}@sha256:[0-9a-f]{64}$"},
         "repository": {"type": "string", "pattern": "^[a-z0-9]+(?:[._-][a-z0-9]+)*$"},
         "index_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       }
