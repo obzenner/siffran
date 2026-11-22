@@ -14,7 +14,7 @@ import stat
 import time
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping
 
 from adapters.state import fsio
 from core.freshness import canonical_digest
@@ -169,6 +169,13 @@ class GenericScaffoldingError(RuntimeError):
     """Generic authority scaffolding, implementation identity, or runtime lock is unsafe."""
 
 
+# The digest of the release this process is actually executing, frozen once per process at the
+# real loaded-release boundary (service composition). A disk snapshot taken later is not the
+# loaded release: the still-running process keeps this value even after the tree changes under
+# it. Unfreezing is never an operation; tests reset it directly as the only seam.
+_loaded_release: str | None = None
+
+
 def _file_digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
@@ -263,6 +270,31 @@ def implementation_manifest() -> dict[str, object]:
         files.append({"path": relative, "sha256": file_digest})
     body = {"files": files}
     return {**body, "implementation_digest": canonical_digest(body)}
+
+
+def freeze_loaded_release(
+        implementation_inspector: Callable[[], Mapping[str, Any]] | None = None,
+) -> str:
+    """Bind and return this process's loaded implementation digest, computing it once.
+
+    The first caller (service composition for the shipped adapters, or the first resolver
+    constructed without an injected release) fixes the value for the whole process; a
+    malformed manifest at that boundary fails closed with :class:`GenericScaffoldingError`.
+    """
+    global _loaded_release
+    if _loaded_release is None:
+        manifest = (implementation_inspector or implementation_manifest)()
+        digest = (manifest.get("implementation_digest")
+                  if isinstance(manifest, Mapping) else None)
+        if type(digest) is not str or not digest:
+            raise GenericScaffoldingError("loaded implementation release is malformed")
+        _loaded_release = digest
+    return _loaded_release
+
+
+def loaded_release_digest() -> str | None:
+    """The per-process frozen loaded release, or ``None`` before the first freeze."""
+    return _loaded_release
 
 
 class ExecutionStore:

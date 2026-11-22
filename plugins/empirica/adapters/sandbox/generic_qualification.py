@@ -66,6 +66,17 @@ class GenericQualificationFailure(RuntimeError):
         self.reason = reason
 
 
+class GenericQualificationDrift(GenericQualificationFailure):
+    """Internal typed outcome at the qualification boundary: a probe ended because the daemon
+    or implementation drifted mid-probe (I3/R5). The public reason stays the existing
+    `probe-failed` enum value; E10/E11 map ``drift`` to their public stale-implementation/
+    stale-daemon reasons."""
+
+    def __init__(self, drift: authority.GenericQualificationError) -> None:
+        super().__init__(QualificationReason.PROBE_FAILED, str(drift))
+        self.drift = drift
+
+
 @dataclass(frozen=True, slots=True)
 class QualificationImage:
     reference: str
@@ -456,7 +467,11 @@ class ProductionProbeKernel:
             raise authority.GenericQualificationError(
                 "runtime inspector returned an unknown value")
         current = authority.validate_runtime(observed.runtime)
-        if not authority.authorities_match(self.runtime, current):
+        # Semantic daemon equality plus the pre-/post-probe server version (the spec's residual:
+        # a restart on the same socket with a new version is a different authority). The /2
+        # persisted facts projection keeps its shape; the `/3` record's version rule is E5's.
+        if (not authority.authorities_match(self.runtime, current)
+                or current["server_version"] != self.runtime["server_version"]):
             raise authority.DaemonDrift("Docker daemon authority drifted")
         manifest = self.implementation_inspector()
         if (not isinstance(manifest, Mapping)
@@ -547,6 +562,7 @@ class ProductionProbeKernel:
         controls = execution.QualificationExecutionControls(timeout, 10.0, callback)
         result: execution.GenericExecutionResult | None = None
         caught: execution.GenericExecutionUnavailable | None = None
+        drift: authority.GenericQualificationError | None = None
         try:
             result = execution.execute_generic_operation(
                 self.store, operation, snapshot, effects, backend_deadline=deadline,
@@ -555,6 +571,8 @@ class ProductionProbeKernel:
                 clock=self.clock, qualification_controls=controls)
         except execution.GenericExecutionUnavailable as exc:
             caught = exc
+            if isinstance(exc.__cause__, (authority.DaemonDrift, authority.ImplementationDrift)):
+                drift = exc.__cause__
         finally:
             effects.close()
         attach = effects.last_attach
@@ -575,6 +593,10 @@ class ProductionProbeKernel:
         elif name == "timeout":
             if caught is not None and attach is not None and attach.process.timed_out is True:
                 observed = "UNAVAILABLE_TIMEOUT"
+        if drift is not None:
+            # Drift aborted the probe after the exact-ID removals: the operation stays
+            # journalled for recovery, and the typed cause survives to this boundary.
+            raise GenericQualificationDrift(drift) from caught
         if caught is not None:
             try:
                 residue = (bool(generic_journal.GenericJournalStore(self.store).scan())
@@ -799,7 +821,7 @@ class GenericQualificationInstaller:
         try:
             current = self.runtime_inspector(record["runtime"], deadline=deadline)
             if (type(current) is not authority.GenericRuntimeInspection
-                    or authority.authority_facts(current.runtime) != record["semantic_authority"]):
+                    or not authority.authorities_match(record["runtime"], current.runtime)):
                 raise ValueError("semantic capability drift")
             manifest = self.implementation_inspector()
             if manifest.get("implementation_digest") != record["implementation_digest"]:

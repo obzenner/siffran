@@ -159,6 +159,28 @@ class ImplementationManifestTests(unittest.TestCase):
             next(row for row in changed if row["path"] == path)["sha256"] = "sha256:" + "f" * 64
             self.assertNotEqual(canonical_digest({"files": changed}), original)
 
+    def test_loaded_release_is_frozen_once_per_process_and_fails_closed(self):
+        digest = "sha256:" + "0" * 64
+        other = "sha256:" + "1" * 64
+        common._loaded_release = None
+        self.addCleanup(lambda: setattr(common, "_loaded_release", None))
+        calls = []
+
+        def disk_manifest():
+            calls.append(1)
+            return {"implementation_digest": digest}
+
+        self.assertEqual(common.freeze_loaded_release(disk_manifest), digest)
+        self.assertEqual(common.freeze_loaded_release(
+            lambda: {"implementation_digest": other}), digest)
+        self.assertEqual(common.loaded_release_digest(), digest)
+        self.assertEqual(len(calls), 1)  # the disk is read exactly once, at the first freeze
+        for index, malformed in enumerate((None, [()], 123, {}, {"implementation_digest": 1})):
+            with self.subTest(index=index):
+                common._loaded_release = None
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.freeze_loaded_release(lambda: malformed)
+
 
 if __name__ == "__main__":
     unittest.main()

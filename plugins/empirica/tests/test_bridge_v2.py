@@ -288,9 +288,11 @@ class BridgeV2Tests(unittest.TestCase):
         store = type("Store", (), {"execution_store": execution_store})()
         selector, resolver, image_resolver, docker_harness, service = (
             object(), object(), object(), object(), object())
+        loaded_release = "sha256:" + "0" * 64
         with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
               patch.object(
                   bridge, "GenericBackendSelector", return_value=selector) as selector_type,
+              patch.object(bridge, "freeze_loaded_release", return_value=loaded_release) as frozen,
               patch.object(
                   bridge, "GenericAuthorityResolver", return_value=resolver) as resolver_type,
               patch.object(
@@ -301,7 +303,8 @@ class BridgeV2Tests(unittest.TestCase):
             self.assertIs(bridge.build_service(_CANONICAL_PROFILE), service)
         store_type.assert_called_once_with()
         selector_type.assert_called_once_with(store)
-        resolver_type.assert_called_once_with(store)
+        frozen.assert_called_once_with()
+        resolver_type.assert_called_once_with(store, loaded_release=loaded_release)
         image_type.assert_called_once_with(resolver)
         harness_type.assert_called_once_with(execution_store, resolver)
         self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
@@ -309,7 +312,7 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
 
     def test_sandbox_constructor_failure_degrades_only_spikes(self):
-        names = ("GenericQualificationStore", "GenericBackendSelector",
+        names = ("GenericQualificationStore", "GenericBackendSelector", "freeze_loaded_release",
                  "GenericAuthorityResolver", "DockerLocalImageResolver", "GenericDockerHarness")
         for failing in names:
             store_value = type("Store", (), {"execution_store": object()})()
@@ -318,6 +321,8 @@ class BridgeV2Tests(unittest.TestCase):
                                  return_value=store_value) as store, \
                     patch.object(bridge, "GenericBackendSelector",
                                  return_value=object()) as selector, \
+                    patch.object(bridge, "freeze_loaded_release",
+                                 return_value="sha256:" + "0" * 64) as loaded_release, \
                     patch.object(bridge, "GenericAuthorityResolver",
                                  return_value=object()) as resolver, \
                     patch.object(bridge, "DockerLocalImageResolver",
@@ -325,6 +330,7 @@ class BridgeV2Tests(unittest.TestCase):
                     patch.object(bridge, "GenericDockerHarness",
                                  return_value=object()) as docker_harness:
                 {"GenericQualificationStore": store, "GenericBackendSelector": selector,
+                 "freeze_loaded_release": loaded_release,
                  "GenericAuthorityResolver": resolver,
                  "DockerLocalImageResolver": image_resolver,
                  "GenericDockerHarness": docker_harness}[failing].side_effect = PermissionError(

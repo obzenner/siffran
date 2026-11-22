@@ -8,6 +8,7 @@ import time
 import unittest
 from pathlib import Path
 
+from adapters.sandbox import common
 from adapters.sandbox import generic_authority as authority
 from adapters.sandbox import generic_qualification as qualification
 from adapters.sandbox import planner, process
@@ -301,16 +302,47 @@ class RuntimeCapabilityTests(unittest.TestCase):
         self.assertNotIn("daemon_id", observed)
 
     def test_daemon_id_must_be_nonblank_bounded_and_control_free(self):
-        for index, malformed in enumerate(("", "x" * 129, "bad\nidentity", "bad\x7fidentity",
-                                          123, True, None)):
+        for index, malformed in enumerate(("", "   ", "x" * 129, "bad\nidentity", "bad\x1fidentity",
+                                          "bad\x7fidentity",
+                                          "bad\x85identity", "bad\x9fidentity", 123, True, None)):
             with self.subTest(index=index), self.assertRaises(
                     authority.GenericQualificationError) as caught:
                 authority.validate_runtime({**runtime(), "daemon_id": malformed})
             self.assertEqual(str(caught.exception), "Docker daemon identity is malformed")
-        for index, boundary in enumerate(("x" * 128, "a b x")):
+        for index, boundary in enumerate(("x" * 128, "a b x", "a\u00a0b")):
             with self.subTest(boundary=index):
                 self.assertEqual(authority.validate_runtime(
                     {**runtime(), "daemon_id": boundary})["daemon_id"], boundary)
+
+    def test_shrinking_per_read_timeouts_reach_the_runner_and_stop_after_the_deadline(self):
+        class SteadyClock:
+            def __init__(self, now):
+                self.now = now
+
+            def __call__(self):
+                return self.now
+
+        class OccupiedRunner:
+            """Each read consumes exactly the timeout it was granted, like a busy daemon read."""
+
+            def __init__(self, clock, *results):
+                self.clock, self.results, self.calls = clock, list(results), []
+
+            def run(self, argv, **kwargs):
+                self.calls.append((tuple(argv), kwargs))
+                self.clock.now += kwargs["timeout_seconds"]
+                return self.results.pop(0)
+
+        clock = SteadyClock(1000.0)
+        runner = OccupiedRunner(
+            clock, *[process.CommandResult.fake(stdout=output) for output in (
+                "default", '"unix:///var/run/docker.sock"', '"27"', 'not', 'reached')])
+        with self.assertRaisesRegex(authority.GenericQualificationError, "deadline expired"):
+            authority.inspect_current_runtime(
+                runtime(), deadline=1007.0, runner=runner, clock=clock,
+                host_facts=("Linux", "x86_64"))
+        self.assertEqual([call[1]["timeout_seconds"] for call in runner.calls], [5.0, 2.0])
+        self.assertEqual(len(runner.calls), 2)
 
     def test_docker_29_info_json_is_read_struct_safely_and_projected(self):
         cli = DockerCli()
@@ -370,6 +402,8 @@ class RuntimeCapabilityTests(unittest.TestCase):
 
 class HistoricalResolutionTests(unittest.TestCase):
     def setUp(self):
+        common._loaded_release = None
+        self.addCleanup(lambda: setattr(common, "_loaded_release", None))
         self.record = qualification_record()
         self.backend = generic_spike.GenericQualifiedBackend(
             "docker", "docker-isolated-v1", self.record["qualification_record_digest"],
@@ -426,6 +460,64 @@ class HistoricalResolutionTests(unittest.TestCase):
         with self.assertRaises(authority.DaemonDrift) as caught:
             self.resolver(changed, record=bound).resolve(backend, deadline=time.monotonic() + 10)
         self.assertEqual(str(caught.exception), "Docker daemon authority drifted")
+
+    def test_loaded_release_is_frozen_per_process_not_per_resolver(self):
+        class ReleasesLanded:
+            def __init__(self, *values):
+                self.values = list(values)
+
+            def __call__(self):
+                return {"implementation_digest": self.values.pop(0)}
+
+        def fresh_record(implementation):
+            bound = copy.deepcopy(self.record)
+            bound["implementation_digest"] = implementation
+            backend = generic_spike.GenericQualifiedBackend(
+                "docker", "docker-isolated-v1", bound["qualification_record_digest"],
+                bound["execution_binding_digest"])
+            return bound, backend
+
+        # Composition freezes the digest of the release this process is actually executing.
+        authority.GenericAuthorityResolver(
+            FakeStore(self.record),
+            runtime_inspector=lambda seed, deadline: authority.GenericRuntimeInspection(
+                copy.deepcopy(self.record["runtime"])),
+            implementation_inspector=ReleasesLanded(D0, D0)).resolve(
+            self.backend, deadline=time.monotonic() + 10)
+        # A new release lands on disk and a record is published for those new bytes; the still
+        # executing old release must refuse it, even for a resolver reconstructed now.
+        record, backend = fresh_record(D1)
+        with self.assertRaises(authority.ImplementationDrift) as caught:
+            authority.GenericAuthorityResolver(
+                FakeStore(record),
+                runtime_inspector=lambda seed, deadline: authority.GenericRuntimeInspection(
+                    copy.deepcopy(record["runtime"])),
+                implementation_inspector=ReleasesLanded(D1, D1, D1)).resolve(
+                backend, deadline=time.monotonic() + 10)
+        self.assertEqual(str(caught.exception), "implementation identity drifted")
+
+    def test_injected_loaded_release_overrides_and_validates_the_process_freeze(self):
+        # An injected release that does not match string shape fails closed at construction.
+        for index, malformed in enumerate((123, True, "")):
+            with self.subTest(index=index), self.assertRaises(
+                    authority.GenericQualificationError) as caught:
+                authority.GenericAuthorityResolver(
+                    FakeStore(self.record),
+                    runtime_inspector=lambda seed, deadline: authority.GenericRuntimeInspection(
+                        copy.deepcopy(self.record["runtime"])),
+                    implementation_inspector=lambda: {"implementation_digest": D0},
+                    loaded_release=malformed)
+            self.assertEqual(str(caught.exception), "loaded release digest is malformed")
+        # A composition-frozen other release does not override the injected one: the resolver
+        # compares the injected release with the record and the disk, and accepts this record.
+        common.freeze_loaded_release(lambda: {"implementation_digest": D1})
+        resolved = authority.GenericAuthorityResolver(
+            FakeStore(self.record),
+            runtime_inspector=lambda seed, deadline: authority.GenericRuntimeInspection(
+                copy.deepcopy(self.record["runtime"])),
+            implementation_inspector=lambda: {"implementation_digest": D0},
+            loaded_release=D0).resolve(self.backend, deadline=time.monotonic() + 10)
+        self.assertEqual(resolved.engine_ncpu, 8)
 
     def test_implementation_release_digest_shape_is_enforced(self):
         self.assertEqual(authority.implementation_release_digest(

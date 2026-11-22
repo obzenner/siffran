@@ -60,8 +60,9 @@ MAX_DAEMON_ID_CHARS = 128
 
 
 def _daemon_id(value: object) -> str:
-    if (type(value) is not str or not value or len(value) > MAX_DAEMON_ID_CHARS
-            or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+    if (type(value) is not str or not value.strip() or len(value) > MAX_DAEMON_ID_CHARS
+            or any(ord(character) <= 0x1F or 0x7F <= ord(character) <= 0x9F
+                   for character in value)):
         raise GenericQualificationError("Docker daemon identity is malformed")
     return value
 
@@ -419,13 +420,22 @@ class GenericAuthorityResolver:
     def __init__(self, store: GenericQualificationStore, *,
                  runtime_inspector: PassiveGenericRuntimeInspector = inspect_current_runtime,
                  implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
+                 loaded_release: str | None = None,
                  clock: Callable[[], float] = time.monotonic, **_: Any) -> None:
         self.store = store
         self.runtime_inspector = runtime_inspector
         self.implementation_inspector = implementation_inspector
-        # The loaded release: the implementation manifest frozen when the resolver was composed.
-        self.loaded_implementation_digest = implementation_release_digest(
-            self.implementation_inspector())
+        # The loaded release is frozen once per process at the loaded-release boundary and
+        # injected here; when absent (direct construction), the first resolver seeds the
+        # per-process freeze from its implementation inspector, never its own per-instance
+        # snapshot of a manifest that may already differ from the executing code.
+        if loaded_release is not None:
+            if type(loaded_release) is not str or not loaded_release:
+                raise GenericQualificationError("loaded release digest is malformed")
+            self.loaded_implementation_digest = loaded_release
+        else:
+            self.loaded_implementation_digest = common.freeze_loaded_release(
+                self.implementation_inspector)
         self.clock = clock
 
     def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float) \

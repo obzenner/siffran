@@ -110,6 +110,12 @@ def GenericAuthorityResolver(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
+def freeze_loaded_release():
+    """Freeze the digest of the release this process is executing, once per process."""
+    from adapters.sandbox.common import freeze_loaded_release as implementation
+    return implementation()
+
+
 def DockerLocalImageResolver(*args, **kwargs):
     from adapters.sandbox.generic_authority import DockerLocalImageResolver as implementation
     return implementation(*args, **kwargs)
@@ -201,7 +207,11 @@ def build_service(profile_id: str, *, clock=time.time):
     try:
         qualification_store = GenericQualificationStore()
         spike_authority = GenericBackendSelector(qualification_store)
-        authority_resolver = GenericAuthorityResolver(qualification_store)
+        # The loaded-release boundary: the per-process freeze happens here, inside the guarded
+        # composition, so a failing snapshot freezes spikes unavailable and nothing else.
+        loaded_release = freeze_loaded_release()
+        authority_resolver = GenericAuthorityResolver(
+            qualification_store, loaded_release=loaded_release)
         image_resolver = DockerLocalImageResolver(authority_resolver)
         spike_harness = GenericDockerHarness(
             qualification_store.execution_store, authority_resolver)
