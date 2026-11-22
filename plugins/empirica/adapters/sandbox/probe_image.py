@@ -29,6 +29,9 @@ PROBE_IMAGE_FIELDS = frozenset({"reference", "repository", "index_digest"})
 #: Pins are official Docker Hub library images only (Empirica 7.2 coordinator decision on E3b finding 1).
 OFFICIAL_REGISTRY = "docker.io"
 OFFICIAL_NAMESPACE = "library"
+#: distribution/reference caps the repository path, the ``library/`` namespace included, at 255
+#: characters; the pin must name an image Docker can actually inspect.
+REPOSITORY_PATH_MAX = 255
 _INDEX_DIGEST = re.compile(r"^sha256:([0-9a-f]{64})$")
 _REPOSITORY_COMPONENT = re.compile(r"^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
 _TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9._-]{0,127}$")
@@ -95,12 +98,13 @@ def parse_probe_image(data: object) -> ProbeImagePin:
     official = (len(components) == 3 and components[0] == OFFICIAL_REGISTRY
                 and components[1] == OFFICIAL_NAMESPACE and repository == components[2])
     if (not official or any(not component for component in components)
-            or not _REPOSITORY_COMPONENT.fullmatch(repository)):
+            or not _REPOSITORY_COMPONENT.fullmatch(repository)
+            or len(f"{OFFICIAL_NAMESPACE}/{repository}") > REPOSITORY_PATH_MAX):
         raise ProbeImageError(
             "qualification.probe_image.reference must be exactly "
             f"{OFFICIAL_REGISTRY}/{OFFICIAL_NAMESPACE}/<name>:<tag>@<digest> for an official "
-            "Docker Hub library image, the only form whose RepoDigests are "
-            "<repository>@<index_digest>")
+            "Docker Hub library image of at most 255 repository-path characters, the only "
+            "form whose RepoDigests are <repository>@<index_digest>")
     return ProbeImagePin(reference, repository, index_digest)
 
 

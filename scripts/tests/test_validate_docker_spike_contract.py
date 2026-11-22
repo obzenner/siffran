@@ -154,15 +154,18 @@ class ProbeImageTests(unittest.TestCase):
         # a validated contract must not pin an image Docker cannot even inspect.
         long_pin = {"reference": f"docker.io/library/{'a' * 247}:3.22@sha256:" + "4" * 64,
                     "repository": "a" * 247, "index_digest": "sha256:" + "4" * 64}
-        self.assertEqual(validator._probe_image(long_pin),
+        pin = validator.probe_image.parse_probe_image(long_pin)
+        self.assertEqual((pin.reference, pin.repository, pin.index_digest),
                          (long_pin["reference"], "a" * 247, long_pin["index_digest"]))
-        self.assertEqual(len(f"library/{'a' * 247}"), validator.REPOSITORY_PATH_MAX)
-        for components in (248, 300):
-            over = {"reference": f"docker.io/library/{'a' * components}:3.22@sha256:" + "4" * 64,
-                    "repository": "a" * components, "index_digest": "sha256:" + "4" * 64}
-            self.assertGreater(len(f"library/{'a' * components}"), validator.REPOSITORY_PATH_MAX)
-            with self.assertRaisesRegex(validator.ContractError, "255"):
-                validator._probe_image(over)
+        self.assertEqual(len(f"library/{'a' * 247}"),
+                         validator.probe_image.REPOSITORY_PATH_MAX)
+        for characters in (248, 300):
+            over = {"reference": f"docker.io/library/{'a' * characters}:3.22@sha256:" + "4" * 64,
+                    "repository": "a" * characters, "index_digest": "sha256:" + "4" * 64}
+            self.assertGreater(len(f"library/{'a' * characters}"),
+                               validator.probe_image.REPOSITORY_PATH_MAX)
+            with self.assertRaisesRegex(validator.probe_image.ProbeImageError, "255"):
+                validator.probe_image.parse_probe_image(over)
 
 
 class StaleTextTests(unittest.TestCase):

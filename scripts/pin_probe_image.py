@@ -96,17 +96,49 @@ def _platform_architectures(manifest: object) -> set[str]:
     return found
 
 
-def localized_rewrite(raw: str, pin: probe_image.ProbeImagePin) -> str:
-    """Replace only the `probe_image` member, keeping the rest of the contract byte-identical."""
-    block = ('    "probe_image": {\n'
-             f'      "reference": {json.dumps(pin.reference)},\n'
-             f'      "repository": {json.dumps(pin.repository)},\n'
-             f'      "index_digest": {json.dumps(pin.index_digest)}\n'
-             '    }')
-    rewritten, count = _PIN_MEMBER.subn(block, raw, count=1)
-    if count != 1:
-        raise PinError("the support contract carries no single probe_image member to rewrite")
-    return rewritten
+def _pin_member(pin: probe_image.ProbeImagePin) -> str:
+    """The localized replacement text for the qualification `probe_image` member."""
+    return ('    "probe_image": {\n'
+            f'      "reference": {json.dumps(pin.reference)},\n'
+            f'      "repository": {json.dumps(pin.repository)},\n'
+            f'      "index_digest": {json.dumps(pin.index_digest)}\n'
+            '    }')
+
+
+def verified_rewrite(raw: str, pin: probe_image.ProbeImagePin) -> str:
+    """The one candidate publication whose parsed JSON differs from the original in exactly
+    `qualification.probe_image` — set to the resolved pin and nothing else.
+
+    Every `probe_image`-shaped block in the raw text is tried, and each candidate is parsed
+    and compared with the expected document *before* anything is published: a wrong-location
+    match (a decoy `probe_image` elsewhere in the contract) never verifies, several verifying
+    matches are refused as ambiguous, and no verified match means the `qualification` member
+    is absent. The original bytes survive every refusal.
+    """
+    try:
+        expected = json.loads(raw)
+    except ValueError as exc:
+        raise PinError("the support contract is not JSON the pin tool can rewrite") from exc
+    if not isinstance(expected.get("qualification"), dict):
+        raise PinError("the support contract carries no qualification object to rewrite")
+    member = _pin_member(pin)
+    expected["qualification"]["probe_image"] = {
+        "reference": pin.reference, "repository": pin.repository, "index_digest": pin.index_digest}
+    verified = []
+    for match in _PIN_MEMBER.finditer(raw):
+        candidate = raw[:match.start()] + member + raw[match.end():]
+        try:
+            if json.loads(candidate) == expected:
+                verified.append(candidate)
+        except ValueError:
+            continue
+    if len(verified) > 1:
+        raise PinError("the support contract carries ambiguous probe_image members: "
+                       "refusing to rewrite")
+    if not verified:
+        raise PinError("the support contract carries no qualification probe_image member "
+                       "to rewrite; a first pin belongs in a separate, reviewed change")
+    return verified[0]
 
 
 def publish_atomically(path: Path, text: str) -> None:
@@ -154,11 +186,9 @@ def pin_probe_image(
         "index_digest": digest,
     })
     raw = contract_path.read_text(encoding="utf-8")
-    publish_atomically(contract_path, localized_rewrite(raw, pin))
-    # The published contract must still be exactly the declared, parsed pin.
-    published = json.loads(contract_path.read_text(encoding="utf-8"))["qualification"]["probe_image"]
-    if probe_image.parse_probe_image(published) != pin:
-        raise PinError("the published probe_image pin does not re-read as the resolved pin")
+    # Publish only after the rewritten candidate parses and differs from the original in
+    # exactly qualification.probe_image; every refusal leaves the original bytes untouched.
+    publish_atomically(contract_path, verified_rewrite(raw, pin))
     return pin
 
 

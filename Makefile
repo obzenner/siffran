@@ -385,8 +385,9 @@ empirica-spike-limits: dev-python ## Rewrite the public-contract evidence/spike/
 	@$(DEV_PYTHON) scripts/validate_docker_spike_contract.py --write-limits
 
 .PHONY: empirica-probe-image-pin
+empirica-probe-image-pin: export TAG := $(TAG)
 empirica-probe-image-pin: ## Pin the Docker qualification probe image (an official Docker Hub library image) by its OCI index digest: TAG=<name:tag> (network via docker buildx imagetools, no daemon); then run make vendor-contracts
-	@TAG='$(TAG)' $(PYTHON) $(SCRIPTS)/pin_probe_image.py "$$TAG"
+	@$(PYTHON) $(SCRIPTS)/pin_probe_image.py "$$TAG"
 
 contract-check: dev-python ## Validate schemas, shared definitions, wire fixtures and conformance; the observer fixtures: both copies byte-equal, no drift from a regeneration, the UI-view validator, the schema-derived generator (every declared enum value producible), and the contract id equal to its folder
 	@printf '$(BOLD)==> contracts$(RESET)\n'

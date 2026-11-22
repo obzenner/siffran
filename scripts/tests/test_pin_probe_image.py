@@ -165,17 +165,77 @@ class PinProbeImageTests(unittest.TestCase):
         for old, new in changed:
             self.assertRegex(new, '"(reference|repository|index_digest)": ')
 
+    def test_a_decoy_probe_image_elsewhere_is_never_the_rewritten_member(self):
+        # A `probe_image`-shaped block earlier in the document than the real member: the
+        # candidate that rewrites the decoy fails the parsed-document equality check, and
+        # only the qualification member is published.
+        carrier = json.loads(self.declared)
+        decoy = {"reference": "docker.io/library/decoy:1@sha256:" + "e" * 64,
+                 "repository": "decoy", "index_digest": "sha256:" + "e" * 64}
+        # A 4-space `probe_image` member inside host_support, textually before qualification.
+        carrier["host_support"]["probe_image"] = decoy
+        seeded = self.contract.parent / "decoy.json"
+        seeded.write_text(json.dumps(carrier, indent=2) + "\n", encoding="utf-8")
+        digest = "sha256:" + "7" * 64
+        runner = FakeRunner(stdout=index_manifest(digest))
+        pin_tool.pin_probe_image("alpine:3.22", contract_path=seeded, runner=runner)
+        published = json.loads(seeded.read_text(encoding="utf-8"))
+        self.assertEqual(published["qualification"]["probe_image"]["index_digest"], digest)
+        self.assertEqual(published["host_support"]["probe_image"], decoy)
+
+    def test_a_wrong_location_only_match_is_refused_and_the_bytes_survive(self):
+        # The qualification member is absent and only a decoy exists: refuse before any
+        # publication, leaving the original bytes untouched.
+        carrier = json.loads(self.declared)
+        del carrier["qualification"]["probe_image"]
+        carrier["host_support"]["probe_image"] = {
+            "reference": "docker.io/library/decoy:1@sha256:" + "e" * 64,
+            "repository": "decoy", "index_digest": "sha256:" + "e" * 64}
+        seeded = self.contract.parent / "wrong.json"
+        seeded.write_text(json.dumps(carrier, indent=2) + "\n", encoding="utf-8")
+        before = seeded.read_bytes()
+        runner = FakeRunner(stdout=index_manifest("sha256:" + "7" * 64))
+        with self.assertRaisesRegex(pin_tool.PinError, "no qualification probe_image"):
+            pin_tool.pin_probe_image("alpine:3.22", contract_path=seeded, runner=runner)
+        self.assertEqual(seeded.read_bytes(), before)
+
+    def test_an_ambiguous_or_unparsable_contract_is_refused_and_the_bytes_survive(self):
+        seeded = self.contract.parent / "broken.json"
+        seeded.write_text("{\"qualification\"", encoding="utf-8")
+        before = seeded.read_bytes()
+        runner = FakeRunner(stdout=index_manifest("sha256:" + "7" * 64))
+        with self.assertRaisesRegex(pin_tool.PinError, "not JSON"):
+            pin_tool.pin_probe_image("alpine:3.22", contract_path=seeded, runner=runner)
+        self.assertEqual(seeded.read_bytes(), before)
+
+    def test_a_repository_path_over_255_characters_is_refused_before_any_buildx_call(self):
+        runner = FakeRunner()
+        with self.assertRaisesRegex(pin_tool.PinError, "255"):
+            pin_tool.pin_probe_image("a" * 248 + ":3.22",
+                                     contract_path=self.contract, runner=runner)
+        self.assertIsNone(runner.arguments)
+
 
 class MakeEntryTests(unittest.TestCase):
     def test_a_malformed_tag_through_make_reaches_python_as_one_argument(self):
-        # A spaced TAG proves the make entry point keeps it one shell argument (it is
-        # passed through an environment variable and quoted) and is refused by the
-        # complete-input validation before any Docker call.
+        # A spaced TAG proves the make entry point keeps it one shell argument and it is
+        # refused by the complete-input validation before any Docker call; the recipe never
+        # splices the value into shell source (verified on macOS' GNU Make 3.81).
         done = subprocess.run(["make", "--no-print-directory", "empirica-probe-image-pin",
                                "TAG=alpine:3.22 not-a-tag"],
                               cwd=ROOT, capture_output=True, text=True, check=False)
         self.assertNotEqual(done.returncode, 0)
         self.assertIn("must be exactly <name:tag>", done.stderr + done.stdout)
+
+    def test_an_apostrophe_in_tag_never_breaks_the_recipe_shell(self):
+        # The TAG travels through the environment, never through the recipe text: a literal
+        # apostrophe reaches Python intact and is refused by validation, not by make or the shell.
+        done = subprocess.run(["make", "--no-print-directory", "empirica-probe-image-pin",
+                               "TAG=alpine:3.22'"],
+                              cwd=ROOT, capture_output=True, text=True, check=False)
+        self.assertNotEqual(done.returncode, 0)
+        self.assertIn("must be exactly <name:tag> (got \"alpine:3.22'\")",
+                      done.stderr + done.stdout)
 
 
 if __name__ == "__main__":

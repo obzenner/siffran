@@ -113,6 +113,19 @@ class ParseProbeImageTests(unittest.TestCase):
             probe_image.parse_probe_image(
                 {**PIN, "index_digest": "sha256:" + "5" * 64})
 
+    def test_the_repository_path_including_library_is_bounded_to_255(self):
+        # distribution/reference caps the repository path at 255 characters: the exact
+        # boundary admits and the first over-rejection is one character longer.
+        longest = {"reference": f"docker.io/library/{'a' * 247}:3.22@sha256:" + "4" * 64,
+                   "repository": "a" * 247, "index_digest": "sha256:" + "4" * 64}
+        self.assertEqual(len(f"library/{'a' * 247}"), probe_image.REPOSITORY_PATH_MAX)
+        self.assertEqual(probe_image.parse_probe_image(longest).repository, "a" * 247)
+        for characters in (248, 300):
+            over = {"reference": f"docker.io/library/{'a' * characters}:3.22@sha256:" + "4" * 64,
+                    "repository": "a" * characters, "index_digest": "sha256:" + "4" * 64}
+            with self.assertRaisesRegex(probe_image.ProbeImageError, "255"):
+                probe_image.parse_probe_image(over)
+
 
 if __name__ == "__main__":
     unittest.main()
