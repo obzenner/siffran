@@ -210,6 +210,39 @@ class MutmutTests(unittest.TestCase):
                       "test_observer_agreement", runner)
         self.assertIn("/venv/bin/python -m unittest -q scripts/tests/test_verify.py", runner)
 
+    def test_an_empirica_test_runs_with_the_plugin_on_its_path_as_make_runs_it(self):
+        """A ``plugins/empirica`` test outside ``v2`` imports ``core``/``adapters`` (and its sibling helpers) as top-level
+        packages, so it runs with ``PYTHONPATH=plugins/empirica:plugins/empirica/tests`` the way its Make suite runs it."""
+        runner = mutate.runner(["plugins/empirica/tests/test_generic_authority.py",
+                                "plugins/empirica/adapters/claude/tests/test_activation_lifecycle.py"],
+                               python="/venv/bin/python")
+        self.assertIn("PYTHONPATH=plugins/empirica:plugins/empirica/tests /venv/bin/python "
+                      "plugins/empirica/tests/test_generic_authority.py", runner)
+        self.assertIn("PYTHONPATH=plugins/empirica:plugins/empirica/tests /venv/bin/python "
+                      "plugins/empirica/adapters/claude/tests/test_activation_lifecycle.py", runner)
+
+    def test_an_empirica_test_imports_the_plugin_under_the_runner(self):
+        """Executed as mutmut executes it, from a tree shaped like the scratch copy: the test imports ``core`` and a
+        sibling helper, and passes; without the plugin on its path it would stop at the import."""
+        import shlex
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "plugins/empirica/core").mkdir(parents=True)
+            (Path(tmp) / "plugins/empirica/core/__init__.py").write_text("")
+            (Path(tmp) / "plugins/empirica/core/thing.py").write_text("VALUE = 1\n")
+            (Path(tmp) / "plugins/empirica/tests").mkdir(parents=True)
+            (Path(tmp) / "plugins/empirica/tests/helper_fake.py").write_text("HELP = 1\n")
+            (Path(tmp) / "plugins/empirica/tests/test_fake_core.py").write_text(
+                "import unittest\nfrom core.thing import VALUE\nfrom helper_fake import HELP\n\n"
+                "class T(unittest.TestCase):\n    def test_it(self):\n        self.assertEqual(VALUE + HELP, 2)\n\n"
+                "if __name__ == '__main__':\n    unittest.main()\n")
+            run = mutate.runner(["plugins/empirica/tests/test_fake_core.py"], python=sys.executable)
+            command = mutate.mutmut_command(["py", "-m", "mutmut"], "a.py", run, "/p")
+            given = command[command.index("--runner") + 1]
+            done = subprocess.run(shlex.split(given, posix=True), cwd=tmp, capture_output=True, text=True, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+
     def test_the_runner_mutmut_is_given_executes_as_mutmut_splits_it(self):
         """mutmut 2.5.1 runs ``shlex.split(runner)`` without a shell: the generated runner (a ``cd``, ``&&``, a v2 module,
         a scripts test) must run there, and fail when a test fails."""
@@ -236,6 +269,17 @@ class MutmutTests(unittest.TestCase):
         for source in ("plugins/empirica/application/observer_index.py", "plugins/empirica/core/observer.py"):
             for test in mutate.tests_for(source):
                 self.assertTrue((mutate.ROOT / test).is_file(), test)
+
+    def test_the_scratch_copy_is_a_git_work_tree_of_its_own(self):
+        """The copy excludes ``.git``; tests composing the git-backed service need a repository, so the copy gets a fresh
+        empty one, never the worktree's."""
+        self.assertEqual(mutate.scratch_repository("/tmp/scratch/"), ["git", "init", "-q", "/tmp/scratch"])
+        import subprocess
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            subprocess.run(mutate.scratch_repository(tmp), check=True)
+            inside = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=tmp, capture_output=True, text=True)
+            self.assertEqual(Path(inside.stdout.strip()).resolve(), Path(tmp).resolve())
 
     def test_python_mutates_only_in_a_scratch_copy_and_never_links_a_dependency_into_it(self):
         command = mutate.scratch_copy("/repo", "/tmp/scratch")
