@@ -208,6 +208,28 @@ class PinProbeImageTests(unittest.TestCase):
             pin_tool.pin_probe_image("alpine:3.22", contract_path=seeded, runner=runner)
         self.assertEqual(seeded.read_bytes(), before)
 
+    def test_a_valid_contract_with_duplicate_probe_image_keys_is_refused_and_the_bytes_survive(
+            self):
+        # Valid JSON whose qualification object carries two `probe_image` keys is still
+        # ambiguous: stdlib json.loads would silently keep only the last, so exactly one
+        # candidate could verify against the collapsed document. Duplicates are rejected
+        # before replacements are tried, and the original bytes stay untouched.
+        member = pin_tool._PIN_MEMBER.search(self.declared)
+        self.assertIsNotNone(member)
+        seeded = self.contract.parent / "duplicate.json"
+        seeded.write_text(self.declared[:member.start()] + member.group(0) + ",\n"
+                          + self.declared[member.start():], encoding="utf-8")
+        duplicated = seeded.read_text(encoding="utf-8")
+        self.assertIn('"probe_image": {', duplicated)
+        self.assertEqual(duplicated.count('"probe_image": {'),
+                         self.declared.count('"probe_image": {') + 1)
+        json.loads(duplicated)  # still valid JSON: two keys, not a syntax error
+        before = seeded.read_bytes()
+        runner = FakeRunner(stdout=index_manifest("sha256:" + "7" * 64))
+        with self.assertRaisesRegex(pin_tool.PinError, "duplicate"):
+            pin_tool.pin_probe_image("alpine:3.22", contract_path=seeded, runner=runner)
+        self.assertEqual(seeded.read_bytes(), before)
+
     def test_a_repository_path_over_255_characters_is_refused_before_any_buildx_call(self):
         runner = FakeRunner()
         with self.assertRaisesRegex(pin_tool.PinError, "255"):

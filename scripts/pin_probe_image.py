@@ -96,6 +96,19 @@ def _platform_architectures(manifest: object) -> set[str]:
     return found
 
 
+def _refuse_duplicate_keys(pairs: list[tuple[str, object]]) -> dict[str, object]:
+    """Reject ambiguous JSON: `json.loads` silently keeps only the last of duplicate
+    object keys, so exactly one replacement candidate could otherwise verify against
+    the collapsed document it is checked with."""
+    document: dict[str, object] = {}
+    for key, value in pairs:
+        if key in document:
+            raise PinError(f"the support contract carries duplicate object keys: {key!r}; "
+                            "refusing ambiguous JSON")
+        document[key] = value
+    return document
+
+
 def _pin_member(pin: probe_image.ProbeImagePin) -> str:
     """The localized replacement text for the qualification `probe_image` member."""
     return ('    "probe_image": {\n'
@@ -112,11 +125,12 @@ def verified_rewrite(raw: str, pin: probe_image.ProbeImagePin) -> str:
     Every `probe_image`-shaped block in the raw text is tried, and each candidate is parsed
     and compared with the expected document *before* anything is published: a wrong-location
     match (a decoy `probe_image` elsewhere in the contract) never verifies, several verifying
-    matches are refused as ambiguous, and no verified match means the `qualification` member
-    is absent. The original bytes survive every refusal.
+    matches are refused as ambiguous, duplicate object keys anywhere in the contract are
+    rejected before any replacement is tried, and no verified match means the `qualification`
+    member is absent. The original bytes survive every refusal.
     """
     try:
-        expected = json.loads(raw)
+        expected = json.loads(raw, object_pairs_hook=_refuse_duplicate_keys)
     except ValueError as exc:
         raise PinError("the support contract is not JSON the pin tool can rewrite") from exc
     if not isinstance(expected.get("qualification"), dict):
@@ -128,7 +142,7 @@ def verified_rewrite(raw: str, pin: probe_image.ProbeImagePin) -> str:
     for match in _PIN_MEMBER.finditer(raw):
         candidate = raw[:match.start()] + member + raw[match.end():]
         try:
-            if json.loads(candidate) == expected:
+            if json.loads(candidate, object_pairs_hook=_refuse_duplicate_keys) == expected:
                 verified.append(candidate)
         except ValueError:
             continue
