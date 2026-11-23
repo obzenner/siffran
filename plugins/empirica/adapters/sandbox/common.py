@@ -286,6 +286,8 @@ def freeze_loaded_release(
     manifest at that boundary fails closed with :class:`GenericScaffoldingError` and latches
     the loaded release unavailable for the life of the process: this process's executing
     modules can never be proved to match a later disk digest, so no retry may adopt one.
+    Both latched messages are fixed and path-free constants; the original failure stays
+    chained as the cause, never as the message.
     """
     global _loaded_release, _loaded_release_failed
     if _loaded_release is not None:
@@ -296,12 +298,15 @@ def freeze_loaded_release(
         manifest = (implementation_inspector or implementation_manifest)()
         digest = (manifest.get("implementation_digest")
                   if isinstance(manifest, Mapping) else None)
-        if type(digest) is not str or not digest:
-            raise GenericScaffoldingError("loaded implementation release is malformed")
-        _loaded_release = digest
     except Exception as exc:
-        _loaded_release_failed = str(exc) or "loaded implementation release is unavailable"
+        # The latch is closed: an arbitrary snapshot failure may carry filesystem paths, so
+        # only the fixed constant is latched and raised; the cause stays exc.
+        _loaded_release_failed = "loaded implementation release is unavailable"
         raise GenericScaffoldingError(_loaded_release_failed) from exc
+    if type(digest) is not str or not digest:
+        _loaded_release_failed = "loaded implementation release is malformed"
+        raise GenericScaffoldingError(_loaded_release_failed)
+    _loaded_release = digest
     return _loaded_release
 
 

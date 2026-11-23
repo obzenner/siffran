@@ -196,20 +196,28 @@ class ImplementationManifestTests(unittest.TestCase):
         self.addCleanup(lambda: setattr(common, "_loaded_release_failed", None))
         reads = []
 
-        def unsafe_disk_manifest(message):
-            # an empty failure message exercises the boundary's own fallback reason
+        def unsafe_disk_manifest(failure):
             reads.append(1)
-            raise common.GenericScaffoldingError(message)
-        reasons = ("implementation source cannot be read safely", "")
+            raise failure
+        unavailable = "loaded implementation release is unavailable"
+        failures = (
+            # an arbitrary snapshot failure whose detail carries a filesystem path: the
+            # boundary latches a fixed path-free message, never the cause's text
+            OSError("cannot read /private/tmp/siffran/secret/implementation.py"),
+            # an empty diagnostic must not reach the latched message either
+            common.GenericScaffoldingError(""),
+        )
 
-        for index, reason in enumerate(reasons):
+        for index, failure in enumerate(failures):
             with self.subTest(index=index):
                 common._loaded_release = None
                 common._loaded_release_failed = None
                 with self.assertRaises(common.GenericScaffoldingError) as caught:
-                    common.freeze_loaded_release(lambda: unsafe_disk_manifest(reason))
-                latched = (reason or "loaded implementation release is unavailable")
-                self.assertEqual(str(caught.exception), latched)
+                    common.freeze_loaded_release(lambda: unsafe_disk_manifest(failure))
+                self.assertEqual(str(caught.exception), unavailable)
+                self.assertNotIn("/private", str(caught.exception))
+                # the original failure stays chained as the cause, never as the message
+                self.assertIs(caught.exception.__cause__, failure)
                 # A valid release has now landed on disk; the process that failed its first
                 # snapshot must not adopt it: the loaded release stays unavailable for its life
                 # and the disk is never re-read at the boundary.
@@ -220,10 +228,11 @@ class ImplementationManifestTests(unittest.TestCase):
                         common.freeze_loaded_release(
                             lambda: {"implementation_digest": digest})
                     self.assertEqual(
-                        str(retry.exception), latched)
-                self.assertEqual(common._loaded_release_failed, latched)
+                        str(retry.exception), unavailable)
+                    self.assertNotIn("/private", str(retry.exception))
+                self.assertEqual(common._loaded_release_failed, unavailable)
                 self.assertNotEqual(common._loaded_release, digest)
-        self.assertEqual(reads, [1] * len(reasons))  # one attempt per fresh process, never a retry
+        self.assertEqual(reads, [1] * len(failures))  # one attempt per fresh process, never a retry
 
 
 if __name__ == "__main__":
