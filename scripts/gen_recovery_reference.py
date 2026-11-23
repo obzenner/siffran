@@ -28,6 +28,7 @@ AUTHOR_GUIDANCE = {
     "run.goal_required": "Restate the task as a non-empty goal and start again; no run was created.",
     "run.terminal": "The run is finished: read its residuals with `GetRun` and report them; submit no more actions.",
     "run.corrupt": "Stop using this run and start a fresh one; corrupt state is never repaired.",
+    "run.legacy": "Start a fresh run; a run/4 document is intact read-only data of an earlier state family, never resumed or repaired.",
     "graph.missing": "Submit a claim graph from the supplied context before sizing the run; no investigation is needed first.",
     "graph.invalid": "Read the run, then resubmit a closed, root-connected graph that matches the tool schema; do not change claims inside a frozen scope.",
     "graph.root_not_gating": "Resubmit the graph with a gating root: the root is the goal-level assurance claim, and a non-gating root never converges; defer scope in non-gating claims below it.",

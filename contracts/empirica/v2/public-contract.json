@@ -1091,6 +1091,20 @@
       ],
       "message": "Run state is corrupt; start a fresh run."
     },
+    "run.legacy": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "run.start_fresh"
+      ],
+      "sections": [
+        "run/lifecycle"
+      ],
+      "message": "Run state is read-only legacy (an earlier state family); start a fresh run."
+    },
     "graph.missing": {
       "params": {
         "type": "object",
@@ -2292,7 +2306,11 @@
         },
         {
           "id": "run/lifecycle/corrupt",
-          "text": "Any persisted aggregate that is not exactly valid empirica/v2 state and history returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, or repair."
+          "text": "Any persisted aggregate that is not exactly valid current state and history and is not the one read-only legacy identity (recovery/legacy) returns run.corrupt with run.start_fresh; rejected data contributes no fields, defaults, terminal inference, or repair."
+        },
+        {
+          "id": "run/lifecycle/legacy",
+          "text": "A persisted document of the previous state family empirica.run/4 is read-only legacy, never resumed, decoded, or rewritten; every command but StartRun returns run.legacy with run.start_fresh, and StartRun on a legacy latest starts a fresh generation without touching the legacy bytes. Any other identity stays run.corrupt."
         }
       ]
     },
@@ -2699,6 +2717,10 @@
         {
           "id": "recovery/orphan",
           "text": "Timeout, cancellation, and orphan are residuals with explicit recovery action."
+        },
+        {
+          "id": "recovery/legacy",
+          "text": "RestoreRun and GetRun on a run/4 document report run.legacy: the run is intact data of its era but read-only — never resumed or repaired; the closed next action is a fresh run, which copies nothing from the legacy bytes."
         }
       ]
     },

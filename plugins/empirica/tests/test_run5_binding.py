@@ -373,13 +373,16 @@ class Run5SchemaTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             classified.state.spike_backend["kind"] = "changed"
         self.assertEqual(run_state.encode_state(classified.state), self.fixture)
-        # ADR-0072: every family before the current one classifies corrupt exactly as run/2 does,
-        # with no backwards compatibility and no repair (a distinct run/4 legacy read is E2b).
-        for discriminator in ("empirica.run/4", "empirica.run/3", "empirica.run/2"):
+        # ADR-0072: every family before the current one stays undecodable with no
+        # backwards compatibility or repair; run/4 is the read-only legacy family (E2b),
+        # run/3 and the major run/2 are corrupt.
+        for discriminator, kind in ((run_state.LEGACY_STATE_SCHEMA_ID, "legacy"),
+                                    ("empirica.run/3", "current_corrupt"),
+                                    ("empirica.run/2", "current_corrupt")):
             old = copy.deepcopy(self.fixture)
             old["state_schema"] = discriminator
             with self.subTest(state_schema=discriminator):
-                self.assertEqual(run_state.classify_and_decode(old).kind, "current_corrupt")
+                self.assertEqual(run_state.classify_and_decode(old).kind, kind)
                 self.assertIsNone(run_state.classify_and_decode(old).state)
                 with self.assertRaises(ValueError):
                     run_state.encode_state(replace(classified.state, state_schema=discriminator))
@@ -784,8 +787,69 @@ def legacy_document(state, discriminator):
 
 
 class LegacyRejectionTests(unittest.TestCase):
-    def test_old_handle_is_corrupt_and_cannot_mutate_state_or_artifacts(self):
-        for discriminator in ("empirica.run/4", "empirica.run/3", "empirica.run/2"):
+    def test_only_the_one_legacy_id_classifies_as_read_only_legacy_and_is_never_decoded(self):
+        state = replace(initial(), spike_backend={"kind": "spikes_unavailable"})
+        for discriminator, kind in ((run_state.LEGACY_STATE_SCHEMA_ID, "legacy"),
+                                   ("empirica.run/3", "current_corrupt"),
+                                   ("empirica.run/6", "current_corrupt")):
+            with self.subTest(state_schema=discriminator):
+                classified = run_state.classify_and_decode(
+                    legacy_document(state, discriminator))
+                self.assertEqual(classified.kind, kind)
+                self.assertIsNone(classified.state, "neither legacy nor corrupt state is decoded")
+        wrong_protocol = legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID)
+        wrong_protocol["protocol"] = "empirica/v3"
+        self.assertEqual(run_state.classify_and_decode(wrong_protocol).kind, "current_corrupt")
+        missing = legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID)
+        del missing["state_schema"]
+        self.assertEqual(run_state.classify_and_decode(missing).kind, "current_corrupt")
+
+    def test_a_legacy_run5_family_run_is_never_resumed_or_rewritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runs = FilesystemRunRepository(Path(temporary))
+            artifacts = Artifacts()
+            state, values = chain(initial())
+            key = RunKey(storage_id("p"), storage_id("s"), 1)
+            runs.create(key, legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID))
+            for item in values:
+                artifacts.append(key, item)
+            workspace, harness = Workspace(), Harness()
+            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+            run_id = encode_handle(key)
+            path = runs._doc_path(key)
+            before_bytes = path.read_bytes()
+            before_read = runs.read(key)
+            before_artifacts = copy.deepcopy(artifacts.values[key])
+            for command in (
+                {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
+                {"type": "GetRun", "run_id": run_id},
+                {"type": "RestoreRun", "run_id": run_id},
+                {"type": "GetArgument", "run_id": run_id},
+                {"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
+                {"type": "ObserveAction", "run_id": run_id,
+                 "action": {"kind": "route", "reason": "must not write"}},
+                {"type": "ObserveAction", "run_id": run_id,
+                 "action": {"kind": "spike_request", "claim_id": "C0",
+                            "command": "true", "dependent_files": ["x"]}},
+            ):
+                with self.subTest(command=command["type"]):
+                    result = service._dispatch_validated(
+                        {"request_id": command["type"], "command": command})
+                    self.assertEqual(result["result"]["type"], "Block")
+                    self.assertEqual(result["result"]["reasons"][0]["code"], "run.legacy")
+                    protocol.schema_validator("response").validate(result)
+            self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
+            trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
+            self.assertEqual(trusted["result"]["type"], "Inert")
+            after_read = runs.read(key)
+            self.assertEqual(path.read_bytes(), before_bytes)
+            self.assertEqual(after_read.revision, before_read.revision)
+            self.assertEqual(artifacts.values[key], before_artifacts)
+            self.assertEqual(workspace.calls, [])
+            self.assertEqual(harness.calls, 0)
+
+    def test_older_and_major_families_stay_corrupt_and_cannot_mutate(self):
+        for discriminator in ("empirica.run/3", "empirica.run/2"):
             with self.subTest(state_schema=discriminator), tempfile.TemporaryDirectory() as temporary:
                 runs = FilesystemRunRepository(Path(temporary))
                 artifacts = Artifacts()
@@ -827,6 +891,38 @@ class LegacyRejectionTests(unittest.TestCase):
                 self.assertEqual(artifacts.values[key], before_artifacts)
                 self.assertEqual(workspace.calls, [])
                 self.assertEqual(harness.calls, 0)
+
+    def test_start_run_after_a_legacy_latest_starts_a_fresh_generation_without_touching_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runs = FilesystemRunRepository(Path(temporary))
+            artifacts = Artifacts()
+            state, values = chain(initial())
+            key = RunKey(storage_id("p"), storage_id("s"), 1)
+            runs.create(key, legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID))
+            for item in values:
+                artifacts.append(key, item)
+            before_bytes = runs._doc_path(key).read_bytes()
+            before_artifacts = copy.deepcopy(artifacts.values[key])
+            workspace, harness = Workspace(), Harness()
+            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+            started = service._dispatch_validated({"request_id": "start", "command": {
+                "type": "StartRun", "control_mode": "deliberative",
+                "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+                "goal": "g"}})
+            self.assertEqual(started["result"]["type"], "Allow")
+            fresh = started["result"]["run"]["id"]
+            self.assertNotEqual(fresh, encode_handle(key), "a fresh generation, not a resume")
+            read = service._dispatch_validated({"request_id": "read", "command": {
+                "type": "ResolveRun", "selector": {"project": "p", "session": "s"}}})
+            self.assertEqual(read["result"]["type"], "Allow")
+            self.assertEqual(read["result"]["run"]["id"], fresh)
+            self.assertEqual(runs._doc_path(key).read_bytes(), before_bytes,
+                            "the legacy file is never rewritten")
+            self.assertEqual(artifacts.values[key], before_artifacts)
+            legacy_read = service._dispatch_validated({"request_id": "legacy", "command": {
+                "type": "GetRun", "run_id": encode_handle(key)}})
+            self.assertEqual(legacy_read["result"]["type"], "Block")
+            self.assertEqual(legacy_read["result"]["reasons"][0]["code"], "run.legacy")
 
 
 if __name__ == "__main__":

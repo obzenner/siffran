@@ -1,7 +1,8 @@
 """Strict v2 persisted-state classification and codec (D6 spec §4–5).
 
-Only the exact current protocol/schema identity is decoded. Every other value is corrupt: one
-category, with no field default or mutation.
+Three identities exist: the exact current protocol/schema decodes; the one read-only legacy
+family (``empirica.run/4``, ADR-0074 E2b) classifies ``legacy`` with no decode and no rewrite;
+every other value is corrupt. No category ever contributes a field, default, or mutation.
 """
 from __future__ import annotations
 
@@ -19,6 +20,9 @@ from . import protocol as _proto
 
 _PROTOCOL = _proto.protocol_id()
 _STATE_SCHEMA_ID = _proto.state_schema_id()
+# The one read-only legacy state family (spec §4.2, ADR-0074): an earlier exact id, never
+# resumed, decoded, or rewritten — StartRun on a legacy latest starts a fresh generation.
+LEGACY_STATE_SCHEMA_ID = "empirica.run/4"
 _AUDIT_DOSSIER = jsonschema.Draft202012Validator(
     {"$ref": "#/$defs/argumentView", "$defs": _proto.response_schema()["$defs"]},
     registry=_proto.schema_registry())
@@ -160,9 +164,14 @@ def _procedural_ok(doc: dict) -> bool:
 
 
 def classify_and_decode(raw: Any) -> Classification:
-    """Decode exact current run/5 state; every other identity is corrupt."""
-    if (not isinstance(raw, dict) or raw.get("protocol") != _PROTOCOL
-            or raw.get("state_schema") != _STATE_SCHEMA_ID):
+    """Decode exact current run/5 state; record the one legacy family; every other identity is corrupt."""
+    if not isinstance(raw, dict) or raw.get("protocol") != _PROTOCOL:
+        return Classification("current_corrupt")
+    if raw.get("state_schema") == LEGACY_STATE_SCHEMA_ID:
+        # Read-only legacy: a document of the previous family is intact data of its era, never
+        # corrupt, but it is never decoded or resumed either.
+        return Classification("legacy")
+    if raw.get("state_schema") != _STATE_SCHEMA_ID:
         return Classification("current_corrupt")
     try:
         _proto.schema_validator("state").validate(raw)
