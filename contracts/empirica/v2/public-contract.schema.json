@@ -506,6 +506,12 @@
             },
             "investigate": {
               "$ref": "#/$defs/bootstrapAction"
+            },
+            "environment": {
+              "$ref": "#/$defs/bootstrapAction"
+            },
+            "qualify": {
+              "$ref": "#/$defs/bootstrapAction"
             }
           }
         },
@@ -1423,7 +1429,9 @@
             "route",
             "graph",
             "configure_run",
-            "investigate"
+            "investigate",
+            "environment",
+            "qualify"
           ]
         }
       }

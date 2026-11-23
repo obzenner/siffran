@@ -321,6 +321,14 @@ def _build_action_sample(kind: str) -> dict:
         return {"kind": "investigate"}
     if kind == "freeze":
         return {"kind": "freeze"}
+    if kind == "environment":
+        return {"kind": "environment", "payload": {
+            "profile_id": "docker-isolated-v1",
+            "spike_images": ["docker.io/library/alpine:3.22"],
+            "preparation": ["Report the plan; the host owns the qualification attempt."],
+            "rationale": "One isolated profile over one local proof image."}}
+    if kind == "qualify":
+        return {"kind": "qualify"}
     if kind == "child_reserve":
         return {"kind": "child_reserve", "purpose": "audit",
                 "role_profile": _DEFAULT_PROFILE, "execution": "foreground",

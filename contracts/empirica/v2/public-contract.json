@@ -31,6 +31,8 @@
       "research",
       "spike_request",
       "configure_run",
+      "environment",
+      "qualify",
       "route",
       "investigate",
       "freeze"
@@ -64,6 +66,12 @@
         "evidence": false
       },
       "freeze": {
+        "evidence": false
+      },
+      "environment": {
+        "evidence": false
+      },
+      "qualify": {
         "evidence": false
       }
     }
@@ -369,6 +377,31 @@
           "kind": "investigate"
         },
         "operation": "investigate"
+      },
+      "environment": {
+        "operation": "environment",
+        "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused with environment.not_available, nothing recorded.",
+        "example": {
+          "kind": "environment",
+          "payload": {
+            "profile_id": "docker-isolated-v1",
+            "spike_images": [
+              "docker.io/library/alpine:3.22"
+            ],
+            "preparation": [
+              "Ask the operator to provide the needed images locally; the host never pulls.",
+              "The verifier runs one bounded container per spike under the isolated profile."
+            ],
+            "rationale": "One isolated profile over one local image; spikes stay bounded and offline."
+          }
+        }
+      },
+      "qualify": {
+        "operation": "qualify",
+        "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused with environment.not_available, nothing attempted.",
+        "example": {
+          "kind": "qualify"
+        }
       }
     },
     "tools": {
@@ -2249,6 +2282,20 @@
       "ui_case_messages": {
         "again": "Shown to the human and left open; reporting again asks once more."
       }
+    },
+    "environment.not_available": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "run.inspect"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "The environment and qualify actions are not available yet in this release: no proposal is recorded and no qualification attempt is started. Inspect the run and continue without them; this refusal changes nothing."
     }
   },
   "sections": {
@@ -2807,6 +2854,24 @@
         {
           "id": "governance/decision_timeout",
           "text": "EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS bounds one host approval wait and is displayed read-only. It is a host decision timeout, not an approvable field or a total run deadline; timeout dismisses and grants no authority."
+        }
+      ]
+    },
+    "environment/actions": {
+      "title": "Environment qualification (coming)",
+      "summary": "The run-scoped environment proposal and qualification actions, declared now and not yet available.",
+      "clauses": [
+        {
+          "id": "environment/actions/coming",
+          "text": "Two author actions are coming, after configuration approval and investigation admission and before the first spike: environment submits one closed environment proposal as a new revision (a Docker profile under the host's StartRun.spike_profile ceiling, 1-16 already-local spike image references, 1-8 unverified preparation sentences, and a nonblank rationale), and qualify requests one host qualification attempt of the latest approved revision with no payload (the host owns the attempt, journalling and binding; attempts are bounded per run)."
+        },
+        {
+          "id": "environment/actions/not_available",
+          "text": "Neither action is available yet: the core refuses every environment and qualify action with the one closed reason environment.not_available in every run state. No revision is recorded, no attempt started, no binding changed by the refusal; the run keeps its current spike backend, and the host still qualifies one out of band."
+        },
+        {
+          "id": "environment/actions/ceiling",
+          "text": "StartRun.spike_profile is the host profile ceiling, an explicit wire reinterpretation: absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. It is bound once at StartRun, is never author action data, and no author action can raise it."
         }
       ]
     }

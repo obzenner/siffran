@@ -99,6 +99,10 @@
           {
             "id": "governance",
             "title": "Governed initialization"
+          },
+          {
+            "id": "environment/actions",
+            "title": "Environment qualification (coming)"
           }
         ],
         "reasons": [
@@ -462,6 +466,12 @@
             "sections": [
               "evidence/research"
             ]
+          },
+          {
+            "code": "environment.not_available",
+            "sections": [
+              "environment/actions"
+            ]
           }
         ],
         "next_actions": [
@@ -537,5 +547,5 @@
       }
     }
   },
-  "text": "Contract\ncore — Core concepts\nroles — Role authority\nrun/lifecycle — Run lifecycle\nclaims/graph — Argument graph\nclaims/residuals — Claim residuals\nclaims/refutation — Refutation and conflict\nevidence/research — Research evidence\nevidence/spike — Spike evidence\nevidence/order — Evidence ordering\nevidence/freshness — Evidence freshness\naudit — Audit\naudit/independence — Audit independence\nchildren — Child lifecycle\nbudget — Budget\nroute — Route\nfreeze — Freeze\nterminal — Terminal behavior\nhosts/capabilities — Host capabilities\ntrusted/ingress — Trusted ingress payloads\nrecovery — Recovery and restore\nprotocol — Protocol identity\npresentation/selector — Presentation selector\ngovernance — Governed initialization"
+  "text": "Contract\ncore — Core concepts\nroles — Role authority\nrun/lifecycle — Run lifecycle\nclaims/graph — Argument graph\nclaims/residuals — Claim residuals\nclaims/refutation — Refutation and conflict\nevidence/research — Research evidence\nevidence/spike — Spike evidence\nevidence/order — Evidence ordering\nevidence/freshness — Evidence freshness\naudit — Audit\naudit/independence — Audit independence\nchildren — Child lifecycle\nbudget — Budget\nroute — Route\nfreeze — Freeze\nterminal — Terminal behavior\nhosts/capabilities — Host capabilities\ntrusted/ingress — Trusted ingress payloads\nrecovery — Recovery and restore\nprotocol — Protocol identity\npresentation/selector — Presentation selector\ngovernance — Governed initialization\nenvironment/actions — Environment qualification (coming)"
 }

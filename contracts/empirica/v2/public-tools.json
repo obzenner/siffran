@@ -73,6 +73,31 @@
         "kind": "investigate"
       },
       "operation": "investigate"
+    },
+    "environment": {
+      "operation": "environment",
+      "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused with environment.not_available, nothing recorded.",
+      "example": {
+        "kind": "environment",
+        "payload": {
+          "profile_id": "docker-isolated-v1",
+          "spike_images": [
+            "docker.io/library/alpine:3.22"
+          ],
+          "preparation": [
+            "Ask the operator to provide the needed images locally; the host never pulls.",
+            "The verifier runs one bounded container per spike under the isolated profile."
+          ],
+          "rationale": "One isolated profile over one local image; spikes stay bounded and offline."
+        }
+      }
+    },
+    "qualify": {
+      "operation": "qualify",
+      "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused with environment.not_available, nothing attempted.",
+      "example": {
+        "kind": "qualify"
+      }
     }
   },
   "evidence_actions": [
@@ -817,6 +842,105 @@
                 ]
               },
               {
+                "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused with environment.not_available, nothing recorded.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "environment",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "profile_id",
+                      "spike_images",
+                      "preparation",
+                      "rationale"
+                    ],
+                    "properties": {
+                      "profile_id": {
+                        "enum": [
+                          "docker-isolated-v1",
+                          "docker-networked-v1"
+                        ],
+                        "type": "string"
+                      },
+                      "spike_images": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255,
+                          "pattern": "^(?!.*\\s).+$"
+                        }
+                      },
+                      "preparation": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 600,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment. Embedded, never duplicated."
+                  }
+                },
+                "examples": [
+                  {
+                    "kind": "environment",
+                    "payload": {
+                      "profile_id": "docker-isolated-v1",
+                      "spike_images": [
+                        "docker.io/library/alpine:3.22"
+                      ],
+                      "preparation": [
+                        "Ask the operator to provide the needed images locally; the host never pulls.",
+                        "The verifier runs one bounded container per spike under the isolated profile."
+                      ],
+                      "rationale": "One isolated profile over one local image; spikes stay bounded and offline."
+                    }
+                  }
+                ]
+              },
+              {
+                "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused with environment.not_available, nothing attempted.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "qualify",
+                    "type": "string"
+                  }
+                },
+                "examples": [
+                  {
+                    "kind": "qualify"
+                  }
+                ]
+              },
+              {
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -1290,6 +1414,105 @@
                       "max_audit_spawns": 2
                     },
                     "rationale": "Five gating claims, two needing experiments; one audit plus one retry."
+                  }
+                ]
+              },
+              {
+                "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused with environment.not_available, nothing recorded.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind",
+                  "payload"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "environment",
+                    "type": "string"
+                  },
+                  "payload": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "profile_id",
+                      "spike_images",
+                      "preparation",
+                      "rationale"
+                    ],
+                    "properties": {
+                      "profile_id": {
+                        "enum": [
+                          "docker-isolated-v1",
+                          "docker-networked-v1"
+                        ],
+                        "type": "string"
+                      },
+                      "spike_images": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 16,
+                        "uniqueItems": true,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 255,
+                          "pattern": "^(?!.*\\s).+$"
+                        }
+                      },
+                      "preparation": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "pattern": "\\S"
+                        }
+                      },
+                      "rationale": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 600,
+                        "pattern": "\\S"
+                      }
+                    },
+                    "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment. Embedded, never duplicated."
+                  }
+                },
+                "examples": [
+                  {
+                    "kind": "environment",
+                    "payload": {
+                      "profile_id": "docker-isolated-v1",
+                      "spike_images": [
+                        "docker.io/library/alpine:3.22"
+                      ],
+                      "preparation": [
+                        "Ask the operator to provide the needed images locally; the host never pulls.",
+                        "The verifier runs one bounded container per spike under the isolated profile."
+                      ],
+                      "rationale": "One isolated profile over one local image; spikes stay bounded and offline."
+                    }
+                  }
+                ]
+              },
+              {
+                "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused with environment.not_available, nothing attempted.",
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "kind"
+                ],
+                "properties": {
+                  "kind": {
+                    "const": "qualify",
+                    "type": "string"
+                  }
+                },
+                "examples": [
+                  {
+                    "kind": "qualify"
                   }
                 ]
               },
