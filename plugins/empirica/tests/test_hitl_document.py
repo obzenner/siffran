@@ -186,13 +186,14 @@ def rejected_governance() -> dict:
 
 def _config_snapshot(governance: dict) -> EvaluationSnapshot:
     state = OperationalState(
-        protocol="empirica/v2", state_schema="empirica.run/4",
+        protocol="empirica/v2", state_schema="empirica.run/5",
         spike_backend={"kind": "spikes_unavailable"}, goal=GOAL, invocation=INVOCATION,
         status="active", budgets=_used_budgets(governance["proposal"]["budgets"]),
         governance=governance, selected_graph_artifact_id=None, frozen_claim_ids=None,
         frozen_semantic_digest=None, route_stamp=0, investigation_stamp=0, stamp_seq=0,
         last_derivation_digest=None, children=(), observation_basis_digest="sha256:" + "0" * 64,
-        committed_artifact_head_id=None)
+        committed_artifact_head_id=None,
+        environment=None, environment_history=(), qualification_attempts=())
     return EvaluationSnapshot(state=state, history=(), graph=None,
                               contract=_protocol.CONTRACT_VIEW, run_id=RUN_ID,
                               command={"type": "GetRun", "run_id": RUN_ID})
@@ -266,7 +267,7 @@ def evidence_snapshot() -> EvaluationSnapshot:
         "spike_unavailable": "A fact of definition; no deterministic check can establish it.",
     })
     state = OperationalState(
-        protocol="empirica/v2", state_schema="empirica.run/4",
+        protocol="empirica/v2", state_schema="empirica.run/5",
         spike_backend={"kind": "spikes_unavailable"}, goal=GOAL, invocation=INVOCATION,
         status="active",
         budgets={"max_passes": 8, "passes_used": 0, "max_spawns": 1, "spawns_used": 0,
@@ -274,7 +275,8 @@ def evidence_snapshot() -> EvaluationSnapshot:
         governance=core_governance.initial(GOAL, BUDGETS, "deliberative", INVOCATION, None),
         selected_graph_artifact_id=None, frozen_claim_ids=None, frozen_semantic_digest=None,
         route_stamp=0, investigation_stamp=0, stamp_seq=0, last_derivation_digest=None, children=(),
-        observation_basis_digest="sha256:" + "0" * 64, committed_artifact_head_id=None)
+        observation_basis_digest="sha256:" + "0" * 64, committed_artifact_head_id=None,
+        environment=None, environment_history=(), qualification_attempts=())
     history = tuple({"artifact_id": a["artifact_id"], **a["body"]} for a in (web, runtime))
     graph = {"root": "G0", "claims": claims,
              "edges": [{"from": "G0", "to": "G1", "type": "SupportedBy"}]}

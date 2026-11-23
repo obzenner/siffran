@@ -183,7 +183,7 @@ export function isTerminalBatch(batch: unknown): batch is ConfirmationBatch & { 
 
 /** The run's immutable spike authority selected once at StartRun; qualified is binding, not live health. */
 export type SpikeBackend =
-  | { kind: "spikes_unavailable" }
+  | { kind: "spikes_unavailable" | "unqualified" }
   | {
       kind: "qualified";
       backend: "docker";

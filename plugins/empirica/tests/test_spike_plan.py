@@ -38,6 +38,7 @@ def _without(key):
 MALFORMED_BACKENDS = {
     "empty": {},
     "unavailable extra key": {"kind": "spikes_unavailable", "reason": "absent"},
+    "unqualified extra key": {"kind": "unqualified", "reason": "reinstated"},
     "qualified extra key": _qualified(extra=True),
     **{f"missing {key}": _without(key) for key in _qualified()},
     "wrong backend": _qualified(backend="host"),
@@ -160,12 +161,13 @@ class SpikeProfileAndBackendOwnerTests(unittest.TestCase):
                 self.assertEqual(subject.NETWORK_PROFILES, frozenset(schema["enum"]))
                 self.assertEqual(len(schema["enum"]), len(subject.NETWORK_PROFILES))
 
-    def test_spike_backend_kind_accepts_exactly_the_two_closed_bindings(self):
+    def test_spike_backend_kind_accepts_exactly_the_three_closed_bindings(self):
         for profile in sorted(subject.NETWORK_PROFILES):
             with self.subTest(profile=profile):
                 self.assertEqual(subject.spike_backend_kind(_qualified(profile_id=profile)), "qualified")
         self.assertEqual(subject.spike_backend_kind({"kind": "spikes_unavailable"}),
                          "spikes_unavailable")
+        self.assertEqual(subject.spike_backend_kind({"kind": "unqualified"}), "unqualified")
 
     def test_spike_backend_kind_refuses_every_malformed_binding(self):
         class Text(str):
@@ -189,6 +191,7 @@ class SpikeProfileAndBackendOwnerTests(unittest.TestCase):
             "response": {"$defs": response["$defs"], **response["$defs"]["spikeBackend"]},
         }
         cases = {"unavailable": {"kind": "spikes_unavailable"},
+                 "unqualified": {"kind": "unqualified"},
                  **{profile: _qualified(profile_id=profile) for profile in subject.NETWORK_PROFILES},
                  **MALFORMED_BACKENDS}
         for where, schema in schemas.items():

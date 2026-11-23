@@ -67,8 +67,8 @@ def spike_backend_kind(value: object) -> str | None:
     """The kind of an exact closed spike backend binding (``spikeBackend``), else ``None``."""
     if not isinstance(value, Mapping):
         return None
-    if set(value) == {"kind"} and value["kind"] == "spikes_unavailable":
-        return "spikes_unavailable"
+    if set(value) == {"kind"} and value["kind"] in ("spikes_unavailable", "unqualified"):
+        return value["kind"]
     if (set(value) == QUALIFIED_BACKEND_FIELDS and value["kind"] == "qualified"
             and value["backend"] == "docker"
             and type(value["profile_id"]) is str and value["profile_id"] in NETWORK_PROFILES

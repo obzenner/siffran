@@ -546,6 +546,54 @@
           }
         }
       }
+    },
+    "environmentProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "spike_images",
+        "preparation",
+        "rationale"
+      ],
+      "properties": {
+        "profile_id": {
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
+        "spike_images": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(?!.*\\s).+$"
+          }
+        },
+        "preparation": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "\\S"
+        }
+      },
+      "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment. Embedded, never duplicated."
     }
   }
 }

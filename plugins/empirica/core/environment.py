@@ -19,6 +19,9 @@ MAX_SPIKE_IMAGES = 16
 MAX_PREPARATION_STEPS = 8
 MAX_PREPARATION_CHARS = 200
 MAX_RATIONALE_CHARS = 600
+# State bounds (spec §4.2): immutable earlier revisions and started host attempts per run.
+MAX_ENVIRONMENT_HISTORY = 64
+MAX_QUALIFICATION_ATTEMPTS = 8
 
 _BODY_FIELDS = frozenset({"profile_id", "spike_images", "preparation", "rationale"})
 # C0 and C1 controls never render honestly; free text must never carry them.

@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/4",
+  "state_schema": "empirica.run/5",
   "goal": "Prove child branch shape is rejected by schema.",
   "invocation": {
     "host": "test",

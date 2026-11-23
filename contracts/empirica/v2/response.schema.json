@@ -1556,7 +1556,7 @@
       }
     },
     "spikeBackend": {
-      "description": "Immutable spike authority selected once at StartRun. Qualified means this run is bound to the named exact Docker profile and qualification digests; it does not claim the backend is currently healthy. Unavailable exposes no local diagnostics or repair path.",
+      "description": "Immutable spike authority selected once at StartRun. Unqualified means this run generation has bound no qualification yet; qualified binds the named exact Docker profile and qualification digests and does not claim the backend is currently healthy. Unavailable exposes no local diagnostics or repair path.",
       "oneOf": [
         {
           "type": "object",
@@ -1598,6 +1598,18 @@
           "properties": {
             "kind": {
               "const": "spikes_unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unqualified"
             }
           }
         }

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict run/4 backend binding and legacy run/3, major-version run/2 rejection regressions."""
+"""Strict run/5 backend binding and legacy run/4, run/3, major-version run/2 rejection regressions."""
 from __future__ import annotations
 
 import copy
@@ -16,6 +16,7 @@ from application.location import encode_handle, storage_id
 from application.generic_spike import GenericQualifiedBackend
 from application.ports import SpikesUnavailable
 from application.transaction import Coordinator
+from core import environment
 from core import spike_plan
 from core.records import Conflict, Present, Revision, RunKey
 
@@ -290,17 +291,20 @@ class PublicSpikeBackendTests(unittest.TestCase):
         self.assertIn("SPIKE_BRIDGE_TIMEOUT_MS = 300_000", pi_transport)
 
 
-class Run4SchemaTests(unittest.TestCase):
+class Run5SchemaTests(unittest.TestCase):
     def setUp(self):
         self.schema = protocol.state_schema()
         self.fixture = json.loads((
             ROOT / "contracts/empirica/v2/state-fixtures/valid-active.json"
         ).read_text())
 
-    def test_exact_two_closed_binding_branches(self):
+    def test_exact_three_closed_binding_branches(self):
         unavailable = copy.deepcopy(self.fixture)
         unavailable["spike_backend"] = {"kind": "spikes_unavailable"}
         protocol.schema_validator("state").validate(unavailable)
+        unqualified = copy.deepcopy(self.fixture)
+        unqualified["spike_backend"] = {"kind": "unqualified"}
+        protocol.schema_validator("state").validate(unqualified)
         qualified = copy.deepcopy(self.fixture)
         qualified["spike_backend"] = {
             "kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
@@ -312,6 +316,8 @@ class Run4SchemaTests(unittest.TestCase):
         for binding in (
             {},
             {"kind": "spikes_unavailable", "reason": "absent"},
+            {"kind": "unqualified", "reason": "qualification pending"},
+            {"kind": "unqualified", "record_digest": DIGEST_A},
             {"kind": "qualified", "backend": "host", "profile_id": "docker-isolated-v1",
              "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
             {"kind": "qualified", "backend": "docker", "profile_id": "other",
@@ -360,29 +366,28 @@ class Run4SchemaTests(unittest.TestCase):
         self.assertFalse(protocol.schema_validator("state").is_valid(candidate),
                          "auto may not claim a document")
 
-    def test_roundtrip_is_deeply_immutable_and_encoder_is_run4_only(self):
+    def test_roundtrip_is_deeply_immutable_and_encoder_is_run5_only(self):
         classified = run_state.classify_and_decode(self.fixture)
         self.assertEqual(classified.kind, "valid")
         with self.assertRaises(TypeError):
             classified.state.spike_backend["kind"] = "changed"
         self.assertEqual(run_state.encode_state(classified.state), self.fixture)
+        # ADR-0072: every family before the current one classifies corrupt exactly as run/2 does,
+        # with no backwards compatibility and no repair (a distinct run/4 legacy read is E2b).
+        for discriminator in ("empirica.run/4", "empirica.run/3", "empirica.run/2"):
+            old = copy.deepcopy(self.fixture)
+            old["state_schema"] = discriminator
+            with self.subTest(state_schema=discriminator):
+                self.assertEqual(run_state.classify_and_decode(old).kind, "current_corrupt")
+                self.assertIsNone(run_state.classify_and_decode(old).state)
+                with self.assertRaises(ValueError):
+                    run_state.encode_state(replace(classified.state, state_schema=discriminator))
         run2 = copy.deepcopy(self.fixture)
         run2["state_schema"] = "empirica.run/2"
         run2.pop("spike_backend")
         self.assertEqual(run_state.classify_and_decode(run2).kind, "current_corrupt")
-        self.assertIsNone(run_state.classify_and_decode(run2).state)
-        with self.assertRaises(ValueError):
-            run_state.encode_state(replace(classified.state, state_schema="empirica.run/2"))
         run2["spike_backend"] = {"kind": "spikes_unavailable"}
         self.assertEqual(run_state.classify_and_decode(run2).kind, "current_corrupt")
-        # ADR-0072: run/3 became legacy the moment run/4 shipped — it classifies corrupt exactly
-        # as run/2 does, with no backwards compatibility and no repair.
-        run3 = copy.deepcopy(self.fixture)
-        run3["state_schema"] = "empirica.run/3"
-        self.assertEqual(run_state.classify_and_decode(run3).kind, "current_corrupt")
-        self.assertIsNone(run_state.classify_and_decode(run3).state)
-        with self.assertRaises(ValueError):
-            run_state.encode_state(replace(classified.state, state_schema="empirica.run/3"))
 
         class StringImpostor:
             def __str__(self):
@@ -395,6 +400,192 @@ class Run4SchemaTests(unittest.TestCase):
                     binding[key] = impostor
                     with self.assertRaises(ValueError):
                         replace(classified.state, spike_backend=binding)
+
+
+def _proposal_body():
+    """A valid closed environment proposal body (spec §4.1)."""
+    return {"profile_id": "docker-isolated-v1", "spike_images": ["python:3.12-slim"],
+            "preparation": ["docker pull the pinned probe image"],
+            "rationale": "prepare and qualify the run-scoped environment"}
+
+
+def _environment_member(**changes):
+    proposal = _proposal_body()
+    for key in ("profile_id", "spike_images", "preparation", "rationale"):
+        if key in changes:
+            proposal[key] = changes.pop(key)
+    try:
+        digest = environment.proposal_digest(proposal)
+    except environment.EnvironmentProposalError:
+        # a malformed body has no coherent digest; the shape under test is everything else
+        digest = DIGEST_A
+    row = {"revision": 1, "proposal": proposal,
+           "digest": digest,
+           "state": "pending", "receipt_id": None}
+    row.update(changes)
+    return row
+
+
+def _attempt_member(**changes):
+    row = {"attempt_id": "qualification-1", "revision": 1, "started_stamp": 1,
+           "outcome": "reserved", "record_digest": None, "reason": None}
+    row.update(changes)
+    return row
+
+
+class Run5EnvironmentStateTests(unittest.TestCase):
+    """run/5's three new state members (spec §4.2, fields only): required by the schema, closed
+    and bounded like the pure model, and validated by OperationalState. No behaviour uses them
+    yet; StartRun still binds spikes_unavailable (E9)."""
+
+    def setUp(self):
+        self.fixture = json.loads((
+            ROOT / "contracts/empirica/v2/state-fixtures/valid-active.json"
+        ).read_text())
+
+    def _valid_document(self, **overrides):
+        candidate = copy.deepcopy(self.fixture)
+        candidate["environment"] = overrides.pop("environment", _environment_member())
+        candidate["environment_history"] = overrides.pop("history", [])
+        candidate["qualification_attempts"] = overrides.pop("attempts", [])
+        assert not overrides
+        return candidate
+
+    def test_the_three_members_are_required_and_a_valid_revision_roundtrips(self):
+        candidate = self._valid_document(environment=_environment_member(state="approved"))
+        protocol.schema_validator("state").validate(candidate)
+        classified = run_state.classify_and_decode(candidate)
+        self.assertEqual(classified.kind, "valid")
+        self.assertEqual(run_state.encode_state(classified.state), candidate)
+        with self.assertRaises(TypeError):
+            classified.state.environment["state"] = "rejected"
+        for member in ("environment", "environment_history", "qualification_attempts"):
+            missing = copy.deepcopy(candidate)
+            missing.pop(member)
+            with self.subTest(missing=member):
+                self.assertFalse(protocol.schema_validator("state").is_valid(missing))
+                self.assertEqual(run_state.classify_and_decode(missing).kind, "current_corrupt")
+
+    def test_environment_member_is_closed_and_bounded(self):
+        bad_members = {
+            "extra key": {**_environment_member(), "attempt": 1},
+            "missing key": {k: v for k, v in _environment_member().items() if k != "receipt_id"},
+            "zero revision": _environment_member(revision=0),
+            "boolean revision": _environment_member(revision=True),
+            "unknown state": _environment_member(state="bound"),
+            "empty receipt id": _environment_member(receipt_id=""),
+            "numeric receipt id": _environment_member(receipt_id=7),
+            "unknown profile": _environment_member(profile_id="docker-rust-v1"),
+            "no spike images": _environment_member(spike_images=[]),
+            "duplicated images": _environment_member(spike_images=["python:3.12", "python:3.12"]),
+            "whitespace image": _environment_member(spike_images=["python: 3"]),
+            "no preparation": _environment_member(preparation=[]),
+            "blank preparation": _environment_member(preparation=["   "]),
+            "blank rationale": _environment_member(rationale=" "),
+        }
+        for label, member in bad_members.items():
+            candidate = self._valid_document(environment=member)
+            with self.subTest(member=label):
+                self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
+                self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
+
+    def test_the_environments_digest_is_the_canonical_proposal_digest(self):
+        # the schema only sees a sha256, so this coherence check is the core's alone
+        member = _environment_member()
+        member["digest"] = DIGEST_A
+        candidate = self._valid_document(environment=member)
+        self.assertTrue(protocol.schema_validator("state").is_valid(candidate),
+                        "the schema only pins the digest shape")
+        self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
+        for impostor in (1, True, DIGEST_A.upper()):
+            with self.subTest(digest=impostor):
+                with self.assertRaises(ValueError):
+                    replace(run_state.classify_and_decode(self.fixture).state,
+                            environment=_environment_member(digest=impostor))
+
+    def test_environment_history_is_bounded_at_the_last_smaller_size(self):
+        maximum = environment.MAX_ENVIRONMENT_HISTORY
+        for count, valid in ((maximum, True), (maximum + 1, False)):
+            candidate = self._valid_document(history=[
+                _environment_member(revision=index + 1, state="rejected")
+                for index in range(count)])
+            with self.subTest(history=count):
+                self.assertEqual(protocol.schema_validator("state").is_valid(candidate), valid)
+                if not valid:
+                    self.assertEqual(run_state.classify_and_decode(candidate).kind,
+                                     "current_corrupt")
+
+    def test_operational_state_bounds_the_two_arrays_itself(self):
+        state = run_state.classify_and_decode(self.fixture).state
+        history = tuple(_environment_member(revision=index + 1, state="rejected")
+                       for index in range(environment.MAX_ENVIRONMENT_HISTORY))
+        outcomes = ("reserved", "succeeded", "failed", "superseded")
+        attempts = tuple(
+            _attempt_member(attempt_id=f"qualification-{index + 1}", started_stamp=index + 1,
+                            outcome=outcomes[index % len(outcomes)])
+            for index in range(environment.MAX_QUALIFICATION_ATTEMPTS))
+        replace(state, qualification_attempts=(
+            _attempt_member(attempt_id="q" * 128),
+            _attempt_member(reason="environment-required", outcome="failed"),
+            *attempts[:max(environment.MAX_QUALIFICATION_ATTEMPTS - 2, 0)]))
+        # exactly at the core bound is admitted, one past is refused, schema aside
+        replace(state, environment_history=history)
+        replace(state, qualification_attempts=attempts)
+        with self.assertRaises(ValueError):
+            replace(state, environment_history=(
+                *history, _environment_member(revision=environment.MAX_ENVIRONMENT_HISTORY + 1)))
+        with self.assertRaises(ValueError):
+            replace(state, qualification_attempts=(
+                *attempts, _attempt_member(attempt_id="over-the-bound")))
+        for field, bad in (
+            ("environment", 7), ("environment_history", 7), ("qualification_attempts", 7),
+            ("environment", {"kind": "not-a-member"}),
+            ("environment", _environment_member(revision=True)),
+            ("environment", _environment_member(digest="bad")),
+            ("environment", _environment_member(state="bound")),
+            ("environment", _environment_member(receipt_id="")),
+            ("environment_history", (_environment_member(state="bound"),)),
+            ("qualification_attempts", (_attempt_member(attempt_id="q" * 129),)),
+            ("qualification_attempts", (_attempt_member(revision="1"),)),
+            ("qualification_attempts", (_attempt_member(started_stamp=-1),)),
+            ("qualification_attempts", (_attempt_member(outcome="orphaned"),)),
+            ("qualification_attempts", (_attempt_member(record_digest="bad"),)),
+            ("qualification_attempts", (_attempt_member(reason="Bad Reason"),)),
+            ("qualification_attempts", ({"outcome": "reserved"},)),
+        ):
+            with self.subTest(field=field, bad=bad):
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: bad})
+
+    def test_qualification_attempts_are_closed_bounded_and_pattern_checked(self):
+        maximum = environment.MAX_QUALIFICATION_ATTEMPTS
+        candidate = self._valid_document(attempts=[
+            _attempt_member(attempt_id=f"qualification-{index + 1}", started_stamp=index + 1)
+            for index in range(maximum)])
+        protocol.schema_validator("state").validate(candidate)
+        self.assertEqual(run_state.classify_and_decode(candidate).kind, "valid")
+        over = self._valid_document(attempts=[
+            _attempt_member(attempt_id=f"qualification-{index + 1}", started_stamp=index + 1)
+            for index in range(maximum + 1)])
+        self.assertFalse(protocol.schema_validator("state").is_valid(over))
+        bad_attempts = {
+            "empty attempt id": _attempt_member(attempt_id=""),
+            "boolean stamp": _attempt_member(started_stamp=True),
+            "string revision": _attempt_member(revision="1"),
+            "unknown outcome": _attempt_member(outcome="orphaned"),
+            "blank reason": _attempt_member(reason=""),
+            "uppercase reason": _attempt_member(reason="Environment-Required"),
+            "spaced reason": _attempt_member(reason="environment required"),
+            "malformed record digest": _attempt_member(record_digest="bad"),
+        }
+        base_ok_reason = _attempt_member(reason="environment-required")
+        protocol.schema_validator("state").validate(self._valid_document(
+            attempts=[base_ok_reason]))
+        for label, attempt in bad_attempts.items():
+            candidate = self._valid_document(attempts=[attempt])
+            with self.subTest(attempt=label):
+                self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
+                self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
 
 
 class StartSelectionTests(unittest.TestCase):
@@ -505,7 +696,7 @@ class StartSelectionTests(unittest.TestCase):
         with self.assertRaises(KeyboardInterrupt):
             coordinator.handle(start_command(), "start")
 
-    def test_explicit_start_after_latest_run2_creates_fresh_run4_without_mutating_old(self):
+    def test_explicit_start_after_latest_run2_creates_fresh_run5_without_mutating_old(self):
         selector = CountingSelector()
         coordinator, (_workspace, _harness, runs, artifacts) = self.coordinator(selector)
         historical_state, historical_artifacts = chain(initial())
@@ -523,9 +714,9 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual(selector.calls, 1)
         self.assertEqual(runs.data[old_key], before_read)
         self.assertEqual(artifacts.values[old_key], before_artifacts)
-        self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/4")
+        self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/5")
 
-    def test_unavailable_run4_spike_is_guarded_before_workspace_artifact_and_harness(self):
+    def test_unavailable_run5_spike_is_guarded_before_workspace_artifact_and_harness(self):
         coordinator, (workspace, harness, runs, artifacts) = self.coordinator(
             CountingSelector(SpikesUnavailable()))
         started = coordinator.handle(start_command(), "start")
@@ -541,9 +732,30 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
                          before)
 
-    def test_terminal_run4_spike_is_inert_before_every_side_effect(self):
+    def test_unqualified_run5_spike_is_guarded_before_workspace_artifact_and_harness(self):
+        # run/5 admits an unqualified binding (spec §4.2): every guarded spike path must keep
+        # refusing it exactly like unavailable — no artifact, no harness call, no state rewrite.
+        workspace, harness, runs, artifacts = Workspace(), Harness(), Runs(), Artifacts()
+        state, values = chain(replace(initial(), spike_backend={"kind": "unqualified"}))
+        key = RunKey(storage_id("p"), storage_id("s"), 1)
+        runs.create(key, run_state.encode_state(state))
+        for item in values:
+            artifacts.append(key, item)
+        coordinator = Coordinator(workspace, harness, runs, artifacts, PROFILE, {}, CountingSelector())
+        before = (len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls)
+        result = coordinator.handle({
+            "type": "ObserveAction", "run_id": encode_handle(key),
+            "action": {**spike_action("probe.py")},
+        }, "unqualified-spike")
+        self.assertEqual(result["result"], {
+            "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+            "reason": "spikes-unavailable"})
+        self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
+                         before)
+    def test_terminal_run5_spike_is_inert_before_every_side_effect(self):
         bindings = (
             {"kind": "spikes_unavailable"},
+            {"kind": "unqualified"},
             _persisted(_qualified(DIGEST_A, DIGEST_B)),
         )
         for binding in bindings:
@@ -584,7 +796,7 @@ def legacy_document(state, discriminator):
 
 class LegacyRejectionTests(unittest.TestCase):
     def test_old_handle_is_corrupt_and_cannot_mutate_state_or_artifacts(self):
-        for discriminator in ("empirica.run/3", "empirica.run/2"):
+        for discriminator in ("empirica.run/4", "empirica.run/3", "empirica.run/2"):
             with self.subTest(state_schema=discriminator), tempfile.TemporaryDirectory() as temporary:
                 runs = FilesystemRunRepository(Path(temporary))
                 artifacts = Artifacts()

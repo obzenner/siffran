@@ -23,14 +23,17 @@
     "children",
     "observation_basis_digest",
     "committed_artifact_head_id",
-    "governance"
+    "governance",
+    "environment",
+    "environment_history",
+    "qualification_attempts"
   ],
   "properties": {
     "protocol": {
       "const": "empirica/v2"
     },
     "state_schema": {
-      "const": "empirica.run/4"
+      "const": "empirica.run/5"
     },
     "spike_backend": {
       "oneOf": [
@@ -74,6 +77,18 @@
           "properties": {
             "kind": {
               "const": "spikes_unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "properties": {
+            "kind": {
+              "const": "unqualified"
             }
           }
         }
@@ -535,6 +550,33 @@
             ]
           }
         }
+      }
+    },
+    "environment": {
+      "description": "The run's latest environment proposal revision; null while none exists. Earlier revisions are immutable history in environment_history.",
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/environmentMember"
+        }
+      ]
+    },
+    "environment_history": {
+      "description": "Immutable earlier environment revisions; the latest lives in environment.",
+      "type": "array",
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/environmentMember"
+      }
+    },
+    "qualification_attempts": {
+      "description": "Append-only host qualification attempts; the sequence number is derived, never stored.",
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "$ref": "#/$defs/qualificationAttempt"
       }
     }
   },
@@ -1012,6 +1054,150 @@
     "claimId": {
       "type": "string",
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
+    },
+    "environmentMember": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "proposal",
+        "digest",
+        "state",
+        "receipt_id"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Monotonic per-run proposal revision."
+        },
+        "proposal": {
+          "$ref": "#/$defs/environmentProposal"
+        },
+        "digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Canonical digest of the closed proposal body (core.environment.proposal_digest)."
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ],
+          "description": "pending | approved | rejected."
+        },
+        "receipt_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "description": "The governance receipt that decided this revision, null while pending."
+        }
+      }
+    },
+    "qualificationAttempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt_id",
+        "revision",
+        "started_stamp",
+        "outcome",
+        "record_digest",
+        "reason"
+      ],
+      "properties": {
+        "attempt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The approved revision this attempt qualifies."
+        },
+        "started_stamp": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "stamp_seq value when the attempt was reserved."
+        },
+        "outcome": {
+          "enum": [
+            "reserved",
+            "succeeded",
+            "failed",
+            "superseded"
+          ],
+          "description": "reserved | succeeded | failed | superseded."
+        },
+        "record_digest": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "description": "Content digest of the run-scoped /3 record on success, null otherwise."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-z][a-z0-9-]{0,63}$",
+          "description": "Closed cause on failure, null otherwise."
+        }
+      }
+    },
+    "environmentProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "spike_images",
+        "preparation",
+        "rationale"
+      ],
+      "properties": {
+        "profile_id": {
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
+        "spike_images": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(?!.*\\s).+$"
+          }
+        },
+        "preparation": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S"
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "\\S"
+        }
+      },
+      "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment. Embedded, never duplicated."
     }
   }
 }
