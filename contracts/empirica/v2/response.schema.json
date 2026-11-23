@@ -65,6 +65,147 @@
         }
       }
     },
+    "environmentView": {
+      "description": "The run's environment reference, projected read-only: the current revision's state, its requested profile, how many spike images it names, and the canonical digest of the proposal body. Nothing here is authority to run anything.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "revision",
+        "state",
+        "profile_id",
+        "spike_image_count",
+        "digest"
+      ],
+      "properties": {
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "state": {
+          "enum": [
+            "pending",
+            "approved",
+            "rejected"
+          ]
+        },
+        "profile_id": {
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
+        "spike_image_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 16
+        },
+        "digest": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "qualificationView": {
+      "description": "The run's qualification accounting, projected read-only: attempts used against the per-run ceiling, the active attempt (null when none runs) and the last failure with its closed reason, naming the failed probe exactly when one failed. Nothing here binds or unbinds the spike backend by itself.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempts_used",
+        "attempts_max",
+        "active",
+        "last_failure"
+      ],
+      "properties": {
+        "attempts_used": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "attempts_max": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 8
+        },
+        "active": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "seq",
+                "profile_id",
+                "record_digest"
+              ],
+              "properties": {
+                "seq": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "profile_id": {
+                  "enum": [
+                    "docker-isolated-v1",
+                    "docker-networked-v1"
+                  ]
+                },
+                "record_digest": {
+                  "$ref": "#/$defs/digest256"
+                }
+              }
+            }
+          ]
+        },
+        "last_failure": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "reason"
+              ],
+              "properties": {
+                "reason": {
+                  "enum": [
+                    "docker-unreachable",
+                    "probe-image-untrusted",
+                    "qualification-probe-failed",
+                    "qualification-stale-implementation",
+                    "qualification-stale-daemon",
+                    "qualification-conflict"
+                  ],
+                  "description": "The closed cause the attempt ended with; an admission reason is never an attempt failure."
+                },
+                "probe": {
+                  "enum": [
+                    "realization",
+                    "natural-125",
+                    "output-overflow",
+                    "timeout",
+                    "network-profile"
+                  ],
+                  "description": "The probe that failed, present exactly when the reason is the probe-failure reason."
+                }
+              },
+              "if": {
+                "properties": {
+                  "reason": {
+                    "const": "qualification-probe-failed"
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "probe"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
     "obligations": {
       "type": "object",
       "additionalProperties": false,
@@ -1721,6 +1862,14 @@
         },
         "spike_backend": {
           "$ref": "#/$defs/spikeBackend"
+        },
+        "environment": {
+          "$ref": "#/$defs/environmentView",
+          "description": "Optional read projection of the environment proposal (Empirica 7.2 §7): absent until E7/E9 produce one, never an author-set field."
+        },
+        "qualification": {
+          "$ref": "#/$defs/qualificationView",
+          "description": "Optional read projection of the qualification attempts (Empirica 7.2 §7): absent until E7/E9 produce one, never an author-set field."
         },
         "terminal_note": {
           "type": "string"
@@ -3938,7 +4087,7 @@
           "type": "string"
         },
         "reason": {
-          "description": "Closed spike refusal reason; each value has a hint in public-contract clause evidence/spike/limits.",
+          "description": "Closed spike refusal reason; each value has a hint in public-contract clause evidence/spike/limits. The 7.2 environment/qualification values (Empirica 7.2 §5.1) are declared with no producer yet.",
           "enum": [
             "image-not-local",
             "image-reference-ambiguous",
@@ -3948,10 +4097,24 @@
             "authority-drift",
             "capture-invalid",
             "spikes-unavailable",
+            "environment-required",
+            "environment-pending",
+            "environment-rejected",
+            "qualification-required",
+            "image-not-qualified",
+            "profile-not-allowed",
+            "qualification-attempts-exhausted",
+            "superseded-binding",
             "authority-invalid",
             "lifecycle-unavailable",
             "cleanup-unavailable",
-            "postflight-changed"
+            "postflight-changed",
+            "qualification-stale-implementation",
+            "qualification-stale-daemon",
+            "probe-image-untrusted",
+            "qualification-probe-failed",
+            "docker-unreachable",
+            "qualification-conflict"
           ]
         },
         "fail_direction": {

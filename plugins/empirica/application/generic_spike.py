@@ -23,6 +23,16 @@ class GenericPreparationReason(str, Enum):
     CAPTURE_INVALID = "capture-invalid"
     # The run is bound to `spikes_unavailable`; raised by the transaction, never by preparation.
     SPIKES_UNAVAILABLE = "spikes-unavailable"
+    # Empirica 7.2 §5.1 admission/transaction reasons (E6b): declared on the wire with no producer
+    # yet; the transaction raises them once the environment step lands (E7/E9/E10).
+    ENVIRONMENT_REQUIRED = "environment-required"
+    ENVIRONMENT_PENDING = "environment-pending"
+    ENVIRONMENT_REJECTED = "environment-rejected"
+    QUALIFICATION_REQUIRED = "qualification-required"
+    IMAGE_NOT_QUALIFIED = "image-not-qualified"
+    PROFILE_NOT_ALLOWED = "profile-not-allowed"
+    QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
+    SUPERSEDED_BINDING = "superseded-binding"
 
 
 class GenericPreparationUnavailable(ValueError):
@@ -388,6 +398,14 @@ class GenericUnavailableReason(str, Enum):
     LIFECYCLE_UNAVAILABLE = "lifecycle-unavailable"
     CLEANUP_UNAVAILABLE = "cleanup-unavailable"
     POSTFLIGHT_CHANGED = "postflight-changed"
+    # Empirica 7.2 §5.1 substrate/attempt reasons (E6b): the qualification attempt facts, declared
+    # on the wire with no producer yet; an attempt reports one once it lands (E7/E9).
+    QUALIFICATION_STALE_IMPLEMENTATION = "qualification-stale-implementation"
+    QUALIFICATION_STALE_DAEMON = "qualification-stale-daemon"
+    PROBE_IMAGE_UNTRUSTED = "probe-image-untrusted"
+    QUALIFICATION_PROBE_FAILED = "qualification-probe-failed"
+    DOCKER_UNREACHABLE = "docker-unreachable"
+    QUALIFICATION_CONFLICT = "qualification-conflict"
 
 
 # The closed agent-visible spike Fault `reason` vocabulary (public-contract `evidence/spike/limits`).

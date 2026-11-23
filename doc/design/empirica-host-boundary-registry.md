@@ -221,6 +221,20 @@ Each entry lists `trigger`, `obligation`, closed `outcomes` (Claude / Pi / Codex
 - **failure_policy.** `refuse-transition` for a failed audit child; `report-limitation` for the redaction gap (none today: the `subagent` tool declares no `outputSchema`).
 - **Claude.** A launch Claude Code never runs ends in `PostToolUseFailure` (the call failed) or, in auto mode, `PermissionDenied` (the classifier or a changed-input check denied it; `PostToolUseFailure` does not fire). Both reject the `reserved`, unstarted audit child and refund it (`EHB-TOOL-05`); neither returns `retry`.
 
+#### HX-TOOL-03 — the qualify action is one long host-effect operation, and its refusal passes through unchanged
+- **trigger.** The model calls `empirica_observe` with a closed `qualify` action (the same row covers the `environment` family action while the cycle has not landed).
+- **obligation.** While `environment` and `qualify` are declared but not available (Empirica 7.2, E6a/E6b), the core's one closed refusal is returned on the surface, and a host makes no effect of its own: no Docker call, no wait, no poll, no retry on the refusal, no fallback to an ambient host shell. Once the cycle lands (E9), `qualify` is a long operation: the host transport gives the call the long-operation margin (Pi: the exact-`qualify` classifier next to `spike_request`; Claude: the MCP outer margin), and the core's own attempt deadline bounds the host effect, with journal-first recovery so a killed or timed-out attempt binds nothing.
+- **failure_policy.** The refusal itself is a closed `Block`, never a host failure; an attempt that fails or is interrupted ends with its closed attempt reason and changes no binding.
+- **recovery.** None before the cycle lands: the run view is unchanged and the author continues without an environment. Later: prepare (pull the pinned probe image, start the daemon), then `qualify` again within the per-run attempt ceiling.
+- **visibility.** `model-context`.
+- **forbidden_substitutions.** A host never substitutes its own Docker qualification for the run-scoped one, never renders the refusal as a failure of Docker, and never turns the long margin into permission to wait outside the declared class.
+
+<!-- BEGIN GENERATED: HX-TOOL-03 (make registry-doc) -->
+- **outcomes.** All hosts while the environment cycle has not landed: `refused` — the core's `environment.not_available` Block returns through the surface unchanged: no proposal, no attempt, no binding change, no retry, and a host never launches Docker, waits, polls or falls back on the refusal; a terminal run's observation stays `inert`. Pi once the cycle lands: the exact `qualify` ObserveAction joins the long-operation class beside `spike_request` (`isExactSpikeRequest`'s classifier), so its outer transport margin is the long one, while the core's own attempt deadline (lock wait, recovery, up to 16 inspections, the five probes, cleanup, publication) bounds the host effect; a killed or timed-out attempt binds nothing. Claude once the cycle lands: the MCP call keeps its outer margin and adds no elicitation of its own; the attempt journalling and recovery are the bridge's. Codex: the same core refusal through the bridge; the long-operation classification follows when its transport budget lands (ADR-0074 plan E13).
+- **conformance_scenarios.** `EHB-TOOL-06`
+- **sources.** Empirica 7.2 run-scoped environment qualification, §5 `qualify` (author request, host effect, long-operation class R6) and §4.5 deadline; governance/invocation for the ceiling; `plugins/empirica/adapters/pi/src/stdio-transport.ts` (`isExactSpikeRequest`, the long margin) for the classification today; ADR-0074 delivery plan nodes E9 (binding CAS and deadline), E12/E13 (Pi and Claude transports).
+<!-- END GENERATED -->
+
 ### HB-STOP — turn end
 
 The host finishes responding and would hand control to the human. **One table decides what happens, by control mode and run state, and it is the same on every host** (ADR-0068). A host only maps the table to its own surface.
@@ -726,6 +740,7 @@ Each row is falsifiable: it names the setup, the action, and the expected observ
 | `EHB-STOP-34` | deliberative, auto-interactive-pre, auto-interactive-post, auto-delegated | Pi, every control mode × run state of the turn-end table | the settle handler for each cell | P: each cell equals the outcome the registry table (`turn_end`) names for it, read from the JSON | 1 test |
 | `EHB-INT-05` | any | Pi ordinary (non-auditor) child whose result row is interrupted, detached or stopped, exit 0, no `isError` | `tool_result` | the child is recorded `failed`, never `completed` (one predicate, `childNotTerminal`, for the ordinary and the audit path); a completed child is `pending` then `completed` | 1 test |
 | `EHB-FAIL-07` | any | Pi, the core projects a presentable evidence batch but the host has no dialog to show it in (`hasUI` false, or no select/input) | `report_convergence` | P: the gate reports `presentation_failed` (nothing spent, nothing evaluated) and blocks with that notice and `intent=stop` next; it never permits, which would emit the pause notice for a human nobody asked | 2 tests |
+| `EHB-TOOL-06` | any | an active run, in any state (fresh, approved and investigating, or otherwise) | the model calls `empirica_observe` with a closed `qualify` action (and, in the same family, `environment`) | one Block carrying exactly the closed reason `environment.not_available`, an unchanged run view, and no host effect: no container, no wait, no retry loop, no fallback to a host shell; on a terminal run the observation is inert instead | 3 tests |
 <!-- END GENERATED -->
 
 ## 8. Gaps: what the user must decide
