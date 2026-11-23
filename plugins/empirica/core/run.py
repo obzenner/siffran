@@ -65,6 +65,30 @@ def _immutable(value: Any) -> Any:
     return value
 
 
+def _plain(value: Any) -> Any:
+    """An already-frozen member in the plain decoded form its validator requires: a dict and
+    lists, never a MappingProxyType or a tuple. ``__post_init__`` re-validates the exactly state
+    it froze on the previous construction (an ordinary ``dataclasses.replace`` passes the
+    frozen member back in), and the author-ingress validator keeps demanding plain dict/list
+    shapes, so the frozen form is thawed for that one check instead of loosening the ingress."""
+    if isinstance(value, Mapping):
+        return {key: _plain(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_plain(item) for item in value]
+    return value
+
+
+def _sequence(value: Any, where: str, limit: int) -> list | tuple:
+    """A real bounded sequence of rows: a list or a tuple. A mapping is never one (an empty
+    one would silently read as \"no rows\"), and neither is an unsized iterable (its length is
+    not a fact the bound can be judged on)."""
+    if type(value) not in (list, tuple):
+        raise ValueError(f"run/5 {where} must be a list or a tuple")
+    if len(value) > limit:
+        raise ValueError(f"run/5 {where} exceeds its bound")
+    return value
+
+
 # State-bound vocabularies the pure core owns for the run/5 members (spec §4.2).
 ENVIRONMENT_STATES = ("pending", "approved", "rejected")
 ATTEMPT_OUTCOMES = ("reserved", "succeeded", "failed", "superseded")
@@ -73,14 +97,16 @@ _QUALIFICATION_ATTEMPT_FIELDS = ("attempt_id", "revision", "started_stamp", "out
                                  "record_digest", "reason")
 
 
-def _environment_member(value: Any, where: str) -> Mapping[str, Any]:
-    """The closed {revision, proposal, digest, state, receipt_id} member, or None.
+def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Mapping[str, Any]:
+    """The closed {revision, proposal, digest, state, receipt_id} member.
 
     The bounds mirror ``core.environment``; the digest is the member's own coherence check —
-    it must equal the canonical digest of the exact proposal body it carries.
-    """
+    it must equal the canonical digest of the exact proposal body it carries. ``nullable``: only
+    the current member may be null \"none exists yet\"; a history row is always an object."""
     if value is None:
-        return None
+        if nullable:
+            return None
+        raise ValueError(f"run/5 {where} must be an environment member, not null")
     if not isinstance(value, Mapping) or set(value) != set(_ENVIRONMENT_MEMBER_FIELDS):
         raise ValueError(f"run/5 {where} is malformed")
     revision = value["revision"]
@@ -90,7 +116,7 @@ def _environment_member(value: Any, where: str) -> Mapping[str, Any]:
     try:
         if not spike_plan.is_digest256(value["digest"]):
             raise environment.EnvironmentProposalError("digest shape")
-        if environment.proposal_digest(proposal) != value["digest"]:
+        if environment.proposal_digest(_plain(proposal)) != value["digest"]:
             raise environment.EnvironmentProposalError("digest coherence")
     except environment.EnvironmentProposalError as exc:
         raise ValueError(f"run/5 {where} proposal or digest is malformed") from exc
@@ -157,20 +183,13 @@ class OperationalState:
                 raise ValueError("run/5 closed spike backend kind is malformed")
             raise ValueError("run/5 unavailable spike backend is malformed")
         member = _environment_member(self.environment, "environment")
-        if isinstance(self.environment_history, (str, bytes)) or not hasattr(
-                self.environment_history, "__iter__"):
-            raise ValueError("run/5 environment history is malformed")
-        if len(self.environment_history) > environment.MAX_ENVIRONMENT_HISTORY:
-            raise ValueError("run/5 environment history exceeds its bound")
-        history = tuple(_immutable(_environment_member(item, "environment history"))
-                        for item in self.environment_history)
-        if isinstance(self.qualification_attempts, (str, bytes)) or not hasattr(
-                self.qualification_attempts, "__iter__"):
-            raise ValueError("run/5 qualification attempts are malformed")
-        if len(self.qualification_attempts) > environment.MAX_QUALIFICATION_ATTEMPTS:
-            raise ValueError("run/5 qualification attempts exceed their bound")
-        attempts = tuple(_immutable(_qualification_attempt(item))
-                         for item in self.qualification_attempts)
+        history_rows = _sequence(self.environment_history, "environment history",
+                                 environment.MAX_ENVIRONMENT_HISTORY)
+        history = tuple(_immutable(_environment_member(item, "environment history", nullable=False))
+                        for item in history_rows)
+        attempt_rows = _sequence(self.qualification_attempts, "qualification attempts",
+                                 environment.MAX_QUALIFICATION_ATTEMPTS)
+        attempts = tuple(_immutable(_qualification_attempt(item)) for item in attempt_rows)
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))

@@ -1880,7 +1880,7 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
             or set(attempt_def.get("required", [])) != {
                 "attempt_id", "revision", "started_stamp", "outcome", "record_digest", "reason"}
             or set(attempt_props.get("outcome", {}).get("enum", [])) != set(ATTEMPT_OUTCOMES)
-            or attempt_props.get("reason", {}).get("pattern") != "^[a-z][a-z0-9-]{0,63}$"
+            or attempt_props.get("reason", {}).get("pattern") != "^[a-z][a-z0-9-]{0,63}(?![\\s\\S])"
             or attempt_props.get("record_digest", {}).get("pattern") != "^sha256:[0-9a-f]{64}$"
             or attempt_props.get("revision", {}).get("minimum") != 1
             or attempt_props.get("started_stamp", {}).get("minimum") != 0

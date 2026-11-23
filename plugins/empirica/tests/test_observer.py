@@ -1558,6 +1558,31 @@ class LocationsTests(unittest.TestCase):
         self.assertIsNone(locations.repo("p"), "a symlinked record is refused")
 
 
+class UnqualifiedBindingTests(unittest.TestCase):
+    """E2a review finding 4: a populated run/5 whose binding is ``unqualified`` (spec 7.2 §4.2
+    admits the closed kind; StartRun binds it from E9 on) must be served by the observer as what
+    it is — its own non-authoritative kind on the contract boundary, never dropped to nothing
+    and never read as a qualified profile binding."""
+
+    def test_an_unqualified_run_is_published_as_its_own_non_authoritative_kind(self):
+        from dataclasses import replace
+        from application import run_state
+        b = _Builder()
+        run = b.begin("unq", "unqualified", "Read a generation that bound no qualification.",
+                      _graph("C0", [("C0", "ordinary", "Reasoning alone, no spikes.")], []))
+        key = decode_handle(run)
+        read = b.drv._runs.read(key)
+        assert type(read).__name__ == "_Present"
+        classified = run_state.classify_and_decode(read.value)
+        assert classified.kind == "valid"
+        b.drv._runs.inject(key, run_state.encode_state(
+            replace(classified.state, spike_backend={"kind": "unqualified"})))
+        view, details = observed(Observer(DriverSource(b.store)))
+        detail = details[run_key(key)]
+        self.assertEqual(detail["spike_backend"], {"kind": "unqualified"})
+        self.assertEqual(contract_problems(view, details), [])
+
+
 class HistoricalSpikeLiteralTests(unittest.TestCase):
     """``core.spike_observer`` owns frozen literals by design; today they equal the current owners."""
 

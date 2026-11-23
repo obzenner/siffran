@@ -56,7 +56,7 @@
           "type": "null"
         }
       ],
-      "description": "The run's immutable StartRun binding, copied from the public RunView; qualified is not a live-health claim. Null only when the run state could not be read."
+      "description": "The run's immutable StartRun binding, copied from the public RunView; qualified is not a live-health claim, and unqualified is its own closed no-authority kind. Null only when the run state could not be read."
     },
     "governance": {
       "oneOf": [
@@ -1282,6 +1282,19 @@
           "properties": {
             "kind": {
               "const": "spikes_unavailable"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "kind"
+          ],
+          "description": "run/5's closed non-authoritative kind (state spec 7.2 §4.2): this run generation has bound no qualification yet and holds no spike authority, like unavailable. Never read or rendered as a qualified profile binding.",
+          "properties": {
+            "kind": {
+              "const": "unqualified"
             }
           }
         },

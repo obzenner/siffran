@@ -557,6 +557,60 @@ class Run5EnvironmentStateTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     replace(state, **{field: bad})
 
+    def test_replacing_an_unrelated_field_keeps_the_populated_members_valid(self):
+        """Review finding 1: ``__post_init__`` re-validates a state it had already frozen, the way
+        every ordinary transition moves a decoded run (``dataclasses.replace``). The frozen
+        proposal (current and history) must pass the same validators its decoded form passed,
+        so an unrelated-field replacement survives and nothing is re-derived."""
+        document = self._valid_document(
+            environment=_environment_member(state="approved"),
+            history=[_environment_member(revision=2, state="rejected"),
+                     _environment_member(revision=1, state="pending")],
+            attempts=[_attempt_member(),
+                      _attempt_member(reason="environment-required", outcome="failed")])
+        protocol.schema_validator("state").validate(document)
+        state = run_state.classify_and_decode(document).state
+        moved = replace(state, stamp_seq=state.stamp_seq + 1)
+        again = replace(moved, stamp_seq=moved.stamp_seq + 1)
+        for subject in (moved, again):
+            self.assertEqual(subject.environment["revision"], 1)
+            self.assertEqual(subject.environment["digest"], state.environment["digest"])
+            self.assertEqual([row["revision"] for row in subject.environment_history], [2, 1])
+            self.assertEqual([row["digest"] for row in subject.environment_history],
+                             [row["digest"] for row in state.environment_history])
+            self.assertEqual(len(subject.qualification_attempts), 2)
+        reencoded = run_state.encode_state(again)
+        self.assertEqual(reencoded, {**document, "stamp_seq": document["stamp_seq"] + 2})
+        self.assertEqual(run_state.classify_and_decode(reencoded).kind, "valid")
+
+    def test_history_rows_are_objects_and_the_two_arrays_are_real_sequences(self):
+        """Review finding 2: null speaks for the current member only, and each member demands an
+        actual bounded sequence — a mapping is never one (an empty one would read as "no rows"),
+        and neither is an unsized iterable (its length is not a fact any transition may check)."""
+        state = run_state.classify_and_decode(self.fixture).state
+        replace(state, environment=None)
+        plain_history, plain_attempts = [_environment_member()], [_attempt_member()]
+        for field, row in (("environment_history", plain_history[0]),
+                           ("qualification_attempts", plain_attempts[0])):
+            with self.subTest(member=field):
+                with self.assertRaises(ValueError):
+                    # null is the current member's word; a history row is an object, never null
+                    replace(state, **{field: (None,)})
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: {}})
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: {"0": row}})
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: iter(())})
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: {0}})
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: "rows"})
+                with self.assertRaises(ValueError):
+                    replace(state, **{field: b"rows"})
+        replace(state, environment_history=[], qualification_attempts=())
+        replace(state, environment_history=plain_history, qualification_attempts=plain_attempts)
+
     def test_qualification_attempts_are_closed_bounded_and_pattern_checked(self):
         maximum = environment.MAX_QUALIFICATION_ATTEMPTS
         candidate = self._valid_document(attempts=[
