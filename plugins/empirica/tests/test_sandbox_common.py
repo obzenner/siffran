@@ -163,7 +163,9 @@ class ImplementationManifestTests(unittest.TestCase):
         digest = "sha256:" + "0" * 64
         other = "sha256:" + "1" * 64
         common._loaded_release = None
+        common._loaded_release_failed = None
         self.addCleanup(lambda: setattr(common, "_loaded_release", None))
+        self.addCleanup(lambda: setattr(common, "_loaded_release_failed", None))
         calls = []
 
         def disk_manifest():
@@ -178,8 +180,50 @@ class ImplementationManifestTests(unittest.TestCase):
         for index, malformed in enumerate((None, [()], 123, {}, {"implementation_digest": 1})):
             with self.subTest(index=index):
                 common._loaded_release = None
-                with self.assertRaises(common.GenericScaffoldingError):
+                common._loaded_release_failed = None
+                with self.assertRaises(common.GenericScaffoldingError) as caught:
                     common.freeze_loaded_release(lambda: malformed)
+                self.assertEqual(
+                    str(caught.exception), "loaded implementation release is malformed")
+                self.assertEqual(
+                    common._loaded_release_failed, "loaded implementation release is malformed")
+
+    def test_failed_first_snapshot_latches_loaded_release_unavailable_for_the_process(self):
+        digest = "sha256:" + "2" * 64
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        self.addCleanup(lambda: setattr(common, "_loaded_release", None))
+        self.addCleanup(lambda: setattr(common, "_loaded_release_failed", None))
+        reads = []
+
+        def unsafe_disk_manifest(message):
+            # an empty failure message exercises the boundary's own fallback reason
+            reads.append(1)
+            raise common.GenericScaffoldingError(message)
+        reasons = ("implementation source cannot be read safely", "")
+
+        for index, reason in enumerate(reasons):
+            with self.subTest(index=index):
+                common._loaded_release = None
+                common._loaded_release_failed = None
+                with self.assertRaises(common.GenericScaffoldingError) as caught:
+                    common.freeze_loaded_release(lambda: unsafe_disk_manifest(reason))
+                latched = (reason or "loaded implementation release is unavailable")
+                self.assertEqual(str(caught.exception), latched)
+                # A valid release has now landed on disk; the process that failed its first
+                # snapshot must not adopt it: the loaded release stays unavailable for its life
+                # and the disk is never re-read at the boundary.
+                self.assertEqual(common.loaded_release_digest(), None)
+                for attempt in range(2):
+                    with self.subTest(attempt=attempt), self.assertRaises(
+                            common.GenericScaffoldingError) as retry:
+                        common.freeze_loaded_release(
+                            lambda: {"implementation_digest": digest})
+                    self.assertEqual(
+                        str(retry.exception), latched)
+                self.assertEqual(common._loaded_release_failed, latched)
+                self.assertNotEqual(common._loaded_release, digest)
+        self.assertEqual(reads, [1] * len(reasons))  # one attempt per fresh process, never a retry
 
 
 if __name__ == "__main__":

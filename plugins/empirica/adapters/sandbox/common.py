@@ -172,8 +172,12 @@ class GenericScaffoldingError(RuntimeError):
 # The digest of the release this process is actually executing, frozen once per process at the
 # real loaded-release boundary (service composition). A disk snapshot taken later is not the
 # loaded release: the still-running process keeps this value even after the tree changes under
-# it. Unfreezing is never an operation; tests reset it directly as the only seam.
+# it. A failed first snapshot latches the loaded release unavailable for the rest of the
+# process (``_loaded_release_failed``): the executing modules can never be proved to match a
+# later disk digest, so no later composition retries and adopts one. Unfreezing is never an
+# operation; tests reset these globals directly as the only seam.
 _loaded_release: str | None = None
+_loaded_release_failed: str | None = None
 
 
 def _file_digest(path: Path) -> str:
@@ -275,20 +279,29 @@ def implementation_manifest() -> dict[str, object]:
 def freeze_loaded_release(
         implementation_inspector: Callable[[], Mapping[str, Any]] | None = None,
 ) -> str:
-    """Bind and return this process's loaded implementation digest, computing it once.
+    """Bind and return this process's loaded implementation digest, assessing it exactly once.
 
     The first caller (service composition for the shipped adapters, or the first resolver
-    constructed without an injected release) fixes the value for the whole process; a
-    malformed manifest at that boundary fails closed with :class:`GenericScaffoldingError`.
+    constructed without an injected release) fixes the value for the whole process. A malformed
+    manifest at that boundary fails closed with :class:`GenericScaffoldingError` and latches
+    the loaded release unavailable for the life of the process: this process's executing
+    modules can never be proved to match a later disk digest, so no retry may adopt one.
     """
-    global _loaded_release
-    if _loaded_release is None:
+    global _loaded_release, _loaded_release_failed
+    if _loaded_release is not None:
+        return _loaded_release
+    if _loaded_release_failed is not None:
+        raise GenericScaffoldingError(_loaded_release_failed)
+    try:
         manifest = (implementation_inspector or implementation_manifest)()
         digest = (manifest.get("implementation_digest")
                   if isinstance(manifest, Mapping) else None)
         if type(digest) is not str or not digest:
             raise GenericScaffoldingError("loaded implementation release is malformed")
         _loaded_release = digest
+    except Exception as exc:
+        _loaded_release_failed = str(exc) or "loaded implementation release is unavailable"
+        raise GenericScaffoldingError(_loaded_release_failed) from exc
     return _loaded_release
 
 

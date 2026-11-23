@@ -63,6 +63,7 @@ from sandbox_isolation import (  # noqa: E402
     ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
 
 from adapters import bridge  # noqa: E402
+from adapters.sandbox import common as sandbox_common  # noqa: E402
 from governance_setup import invocation_for  # noqa: E402
 force_absent_sandbox_home()
 
@@ -342,6 +343,55 @@ class BridgeV2Tests(unittest.TestCase):
                 service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
+
+    def test_failed_first_snapshot_latches_spikes_unavailable_for_the_process(self):
+        # Same process: the first composition meets a malformed manifest at the loaded-release
+        # boundary, and a valid newer release then lands on disk. No later composition may
+        # adopt it: spikes stay unavailable for the process's life, and non-spike operations
+        # keep composing.
+        execution_store = object()
+        store = type("Store", (), {"execution_store": execution_store})()
+        landed = {"implementation_digest": "sha256:" + "0" * 64}
+        disk = [{"implementation_digest": {"files": []}}]  # the malformed first manifest
+        reads = []
+
+        def disk_manifest():
+            reads.append(1)
+            return disk[-1]
+
+        sandbox_common._loaded_release = None
+        sandbox_common._loaded_release_failed = None
+        self.addCleanup(lambda: setattr(sandbox_common, "_loaded_release", None))
+        self.addCleanup(lambda: setattr(sandbox_common, "_loaded_release_failed", None))
+
+        def composed_service():
+            return bridge.build_service(_CANONICAL_PROFILE)
+
+        from application.ports import NullSpikeAuthoritySelector
+        with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
+              patch.object(
+                  bridge, "GenericBackendSelector", return_value=object()) as selector_type,
+              patch.object(bridge, "GenericAuthorityResolver", return_value=object()),
+              patch.object(bridge, "DockerLocalImageResolver", return_value=object()),
+              patch.object(bridge, "GenericDockerHarness", return_value=object()),
+              patch.object(sandbox_common, "implementation_manifest", disk_manifest)):
+            services = [composed_service()]
+            # The loaded-release snapshot may be retried never: no composition after the
+            # failed first one reads the disk, constructs a store, or blesses the new digest.
+            for _ in range(2):
+                disk.append(landed)  # a valid release lands on disk under the live process
+                services.append(composed_service())
+            store_type.assert_not_called()
+            selector_type.assert_not_called()
+        for service in services:
+            self.assertIsNone(service._harness)
+            self.assertIsInstance(
+                service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
+            self.assertEqual(response["result"]["type"], "Allow", response)
+        self.assertEqual(reads, [1])  # one snapshot attempt, at the failed first composition
+        self.assertTrue(sandbox_common._loaded_release_failed)
+        self.assertIsNone(sandbox_common.loaded_release_digest())
 
     def test_bridge_construction_performs_no_docker_discovery(self):
         store = SimpleNamespace(execution_store=object())

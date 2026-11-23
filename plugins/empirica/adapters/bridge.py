@@ -205,11 +205,14 @@ def build_service(profile_id: str, *, clock=time.time):
     runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd(), clock=clock)
     artifacts = _LazyGitArtifactRepository(repo_dir)
     try:
+        # The loaded-release boundary stands at the top of the guarded composition, before any
+        # fallible store setup: the first composition of the process binds the release its
+        # modules are executing, or latches it unavailable for the process's life. A failed
+        # snapshot is never retried, so a later composition cannot adopt a newer digest that
+        # no longer matches the still-executing code.
+        loaded_release = freeze_loaded_release()
         qualification_store = GenericQualificationStore()
         spike_authority = GenericBackendSelector(qualification_store)
-        # The loaded-release boundary: the per-process freeze happens here, inside the guarded
-        # composition, so a failing snapshot freezes spikes unavailable and nothing else.
-        loaded_release = freeze_loaded_release()
         authority_resolver = GenericAuthorityResolver(
             qualification_store, loaded_release=loaded_release)
         image_resolver = DockerLocalImageResolver(authority_resolver)
