@@ -121,9 +121,8 @@
           "maximum": 8
         },
         "attempts_max": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 8
+          "const": 8,
+          "description": "The fixed per-run attempt ceiling, generated from the one owner (the run's qualification_attempts bound) — not a sometimes-smaller limit."
         },
         "active": {
           "oneOf": [

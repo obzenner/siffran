@@ -1209,22 +1209,11 @@
                 "$ref": "#/$defs/qualificationProbeName"
               }
             }
-          }
-        },
-        {
-          "if": {
+          },
+          "else": {
             "properties": {
               "probe": {
                 "type": "null"
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "reason": {
-                "not": {
-                  "const": "qualification-probe-failed"
-                }
               }
             }
           }

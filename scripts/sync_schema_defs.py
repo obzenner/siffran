@@ -256,12 +256,13 @@ def _replace_result_facts(value: object) -> object:
 
 def _bound_qualification_view(response: dict, state: dict) -> None:
     """Bind the run view's qualification accounting to the one attempt ceiling the run/5
-    state owns (``qualification_attempts.maxItems``): ``attempts_used``, ``attempts_max`` and
-    ``active.seq`` take that ceiling through generation, never a second literal (ADR-0075).
+    state owns (``qualification_attempts.maxItems``), never a second literal (ADR-0075):
 
-    ``qualification_attempts`` is the single owner of how many qualification attempts one run
-    may ever start (Empirica 7.2 §5.1); the read projection must be able to report at most that
-    many attempts used and may name no sequence above it.
+    ``attempts_used`` and ``active.seq`` are generated an upper bound at that ceiling, and
+    ``attempts_max`` is generated the ceiling's exact value (``const``), because the field
+    reports the fixed run ceiling, not a sometimes-smaller limit. ``qualification_attempts``
+    stays the single owner of how many qualification attempts one run may ever start (Empirica
+    7.2 §5.1).
     """
     attempts = state.get("properties", {}).get("qualification_attempts", {})
     ceiling = attempts.get("maxItems")
@@ -273,8 +274,12 @@ def _bound_qualification_view(response: dict, state: dict) -> None:
     if not isinstance(view, dict) or not {"attempts_used", "attempts_max", "active"} <= set(members):
         raise SchemaGenerationError("response.schema.json qualificationView is not the run's "
                                     "qualification accounting projection")
-    for member in ("attempts_used", "attempts_max"):
-        members[member]["maximum"] = ceiling
+    members["attempts_used"]["maximum"] = ceiling
+    fixed = members["attempts_max"]
+    fixed.pop("type", None)
+    fixed.pop("minimum", None)
+    fixed.pop("maximum", None)
+    fixed["const"] = ceiling
     bound = next((branch for branch in members["active"].get("oneOf", [])
                   if isinstance(branch, dict) and "seq" in branch.get("properties", {})), None)
     if bound is None:

@@ -53,7 +53,7 @@ REASON_HINTS = {
     "qualification-stale-daemon": "the Docker endpoint, daemon identity, version or capability differs from the binding; prepare, then request qualification again",
     "image-not-qualified": "the spike's image is not one of the binding's sealed image IDs; submit an environment proposal that names it",
     "probe-image-untrusted": "the local probe image does not match the pinned probe image digest; pull the pinned reference the refusal renders, then request qualification again",
-    "qualification-probe-failed": "a qualification probe failed (the reason names it); prepare, then request qualification again",
+    "qualification-probe-failed": "a qualification probe failed (the separate probe field names it, never the reason); prepare, then request qualification again",
     "qualification-deadline-exceeded": "the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady",
     "network-egress-unavailable": "the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again",
     "docker-unreachable": "no Docker daemon is reachable at the endpoint; prepare, then request qualification again",
@@ -136,8 +136,9 @@ def render_limits() -> str:
         "Environment step | coming: a spike becomes admissible only through the run's own "
         "environment cycle (environment proposes, the human or the approval provenance approves, "
         "prepare, qualify binds) with the attempts a run may start bounded in the run view; until "
-        "the cycle lands, every environment and qualify action refuses with the closed reason "
-        "environment.not_available and the run keeps its current spike backend",
+        "the cycle lands, in every active run state every environment and qualify action refuses "
+        "with the closed reason environment.not_available (a terminal run is inert instead, and an "
+        "invalid frozen scope still blocks first) and the run keeps its current spike backend",
         "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
         "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
         "it, admission requires the pinned digest in the image's repository digests, and a probe "
