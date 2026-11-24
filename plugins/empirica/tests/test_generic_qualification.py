@@ -254,6 +254,7 @@ class ProductionProbeKernelTests(unittest.TestCase):
         return qualification.ProductionProbeKernel(
             self.store, runtime(), profile, image(), D0, effects_factory=factory,
             runtime_inspector=runtime_inspector(),
+            pinned_reobserver=runtime_inspector(),
             implementation_inspector=lambda: {"implementation_digest": D0}), made
 
     def test_exact_five_outcomes_use_production_lifecycle_and_cleanup(self):
@@ -282,13 +283,17 @@ class ProductionProbeKernelTests(unittest.TestCase):
         drifted_version = runtime()
         drifted_version["server_version"] = "28.0.5"
         cases = (
-            ("daemon", {"runtime_inspector": runtime_inspector(drifted_endpoint),
+            ("daemon", {"pinned_reobserver": runtime_inspector(drifted_endpoint),
                          "implementation_inspector": lambda: {"implementation_digest": D0}},
              authority.DaemonDrift),
-            ("version", {"runtime_inspector": runtime_inspector(drifted_version),
+            ("version", {"pinned_reobserver": runtime_inspector(drifted_version),
                           "implementation_inspector": lambda: {"implementation_digest": D0}},
              authority.DaemonDrift),
-            ("implementation", {"runtime_inspector": runtime_inspector(),
+            ("capability", {"pinned_reobserver": runtime_inspector(
+                                 {**runtime(), "swap_limit": False}),
+                             "implementation_inspector": lambda: {"implementation_digest": D0}},
+             authority.DaemonDrift),
+            ("implementation", {"pinned_reobserver": runtime_inspector(),
                                  "implementation_inspector": lambda: {"implementation_digest": D1}},
              authority.ImplementationDrift),
         )
