@@ -25,6 +25,7 @@ Spec: `doc/design/specs/empirica-7.2-run-scoped-environment-qualification.md` (r
 | E1 | Environment proposal model: closed body, bounds, canonical digest, revisions | core (pure) | E0 | S | `check-core`, mutate |
 | E2a | `run/5` state schema: environment, history, attempts, `unqualified` backend variant; fixtures, run5 binding test | contracts, core, run_state | E1 | M | `empirica-run5-check contract-check` |
 | E2b | `run/4` read-only legacy classification, `run.legacy` restore reason, fresh generation | application, observer | E2a | S | `empirica-run5-check check-observer` |
+| E2c | Contract-driven conformance (ADR-0075): schema-derived Hypothesis strategies for `contracts/empirica/v2`, `x-core-validator`/`x-core-only` annotations, generated core bounds module, bidirectional schema⇔core agreement harness, static annotation guard; replaces hand-written mirror tests of E1/E2a and the parity part of `validate_contracts.py` | scripts, contracts, core | E2a fixes | M | `contract-check check-core check-static` |
 | E3a | Digest-pinned probe image in the support contract: field, README rule, validator + negative tests, vendored copy | contracts, scripts | E0 | M | `empirica-docker-support-contract-check` |
 | E3b | Runtime pin reader, implementation-manifest roots, `make empirica-probe-image-pin` + `scripts/pin_probe_image.py` (fake runner tests) | sandbox, scripts | E3a | M | `empirica-manifest-check`, `check-static` |
 | E4 | Authority observation r2: endpoint pinned once, `daemon_id`, loaded-release digest, real postflight re-observation, uncollapsed reasons | sandbox | E0 | M | `empirica-generic-authority-check` |
@@ -73,7 +74,7 @@ E0 ┬ E1 ┬ E2 ───────┬ E7 ┬ E8 ─────────�
 | W7 | E16 (coordinator + operator) | top |
 
 Up to 3 concurrent workers per wave. Linear `gh stack` order:
-`E0 E0a E1 E3a E3b E4 E2a E2b E6a E6b E5 E7 E8 E9 E10 E11 E12 E13 E17 E18 E19 E20 E21 E23 E22 E14 E15 E16`.
+`E0 E0a E1 E3a E3b E4 E2a E2c E2b E6a E6b E5 E7 E8 E9 E10 E11 E12 E13 E17 E18 E19 E20 E21 E23 E22 E14 E15 E16`.
 
 ## 4. Workers and comms
 
@@ -104,7 +105,24 @@ Up to 3 concurrent workers per wave. Linear `gh stack` order:
    one merge containing 7.2.0.
 6. Nothing is committed, pushed, merged or released without the operator's explicit instruction.
 
-## 6. Operator decisions (recorded 2026-11-22)
+## 6. Contract-driven test migration (after E16)
+
+Operator decision 2026-11-23: tests must not restate contract values; they are generated from the contracts
+(ADR-0075). Inside the e stack, E2c introduces the harness and every later node registers its definitions instead of
+writing mirror tests. Once 7.2.0 has landed, the rest of the project moves to the same approach as its own stack
+(`obzenner/conformance-t*`), one contract family per node, each removing the hand-written tests it replaces:
+
+| Node | Scope | Notes |
+|---|---|---|
+| T0 | Inventory: a script that lists every test assertion restating a contract value (literal bound, enum, pattern, reason code), by file; the baseline count is the migration's progress metric | read-only; fails nothing yet |
+| T1 | `contracts/empirica/v2` remainder: request/response/public-tools/public-contract defs not covered by E2c | largest family |
+| T2 | `contracts/empirica-ui-view/v1`: fold `scripts/ui_view_strategies.py` into the shared harness (it is its origin) | removes the duplicate strategy builder |
+| T3 | `contracts/empirica-docker-spike/v1`: support contract and limits; production constants generated or harness-checked | replaces the constant-comparison half of the Docker contract check |
+| T4 | `contracts/obligations/v1` and `contracts/methodologist/v1` | Methodologist core and MCP adapter |
+| T5 | TypeScript side: fast-check arbitraries from the same schemas for the Pi adapters (`adapters/pi/test`, Methodologist Pi) | one arbitrary builder, generated from the schemas |
+| T6 | Enforcement: the T0 inventory becomes a failing guard in `check-static` (zero restated contract values outside the named `x-core-only` tests); `doc/testing.md` and the review brief updated | lands last |
+
+## 7. Operator decisions (recorded 2026-11-22)
 
 1. Workers may commit on their own `obzenner/empirica-e*` branches in their worktrees; no push.
 2. Probe image: one digest-pinned reference, no image in the repository.

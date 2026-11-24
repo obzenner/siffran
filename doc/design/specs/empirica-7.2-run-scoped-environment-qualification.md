@@ -268,6 +268,20 @@ route → graph → configure_run (approval) → investigate → … research �
 
 The existing `authority-drift`, deadline, egress and cleanup reasons are kept and no longer collapsed (R12).
 
+**Wire and persistence of the probe name (E6b review).** `Fault` gains one optional closed member `probe`, whose
+values are the contract-owned probe-name enumeration (the five names). The response schema makes it *required* when
+`reason` is `qualification-probe-failed` and *forbidden* for every other reason. The run/5 attempt row carries the
+same member (`probe`: a probe name, or `null` unless its `failure_reason` is `qualification-probe-failed`), so a later
+read reproduces it without message prose. The read projection `qualification.last_failure.reason` takes its values
+from the full closed set of qualification failures in this table plus the kept deadline, egress and cleanup reasons,
+never from a shorter list, and never a reason encoded into a string.
+
+**The active binding in reads (E6b review).** `qualification.active` is the installed binding reference (the last
+successful attempt's record digest and seq), not an in-flight attempt: it stays set while a new attempt runs or
+fails, and is `null` only when nothing was ever bound in this run. `attempts_used`, `attempts_max` and `active.seq`
+take their bound from the one run ceiling owner (`qualification_attempts`, 8), through the shared/generated bound
+(ADR-0075), never a second literal.
+
 ## 6. Human in the loop
 
 - HITL `empirica.hitl/1` gains the additive kind `environment`: goal, profile (networked called out), spike images
