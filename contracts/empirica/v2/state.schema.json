@@ -1079,7 +1079,14 @@
         "revision": {
           "type": "integer",
           "minimum": 1,
-          "description": "Monotonic per-run proposal revision."
+          "description": "Monotonic per-run proposal revision.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "proposal": {
           "$ref": "#/$defs/environmentProposal"
@@ -1128,12 +1135,26 @@
         "revision": {
           "type": "integer",
           "minimum": 1,
-          "description": "The approved revision this attempt qualifies."
+          "description": "The approved revision this attempt qualifies.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "started_stamp": {
           "type": "integer",
           "minimum": 0,
-          "description": "stamp_seq value when the attempt was reserved."
+          "description": "stamp_seq value when the attempt was reserved.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "outcome": {
           "enum": [
@@ -1189,7 +1210,14 @@
             "minLength": 1,
             "maxLength": 255,
             "pattern": "^(?:(?:sha256:)?[0-9a-f]{12,64}|(?:[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*|(?:(?:(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?|[a-z0-9]+(?:(?:_|__|-+)[a-z0-9]+)*)(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+))(?:@sha256:[0-9a-f]{64}|(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?))(?![\\s\\S])",
-            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound."
+            "x-grammar": {
+              "bare-digest": "^(?:sha256:)?[0-9a-f]{12,64}(?![\\s\\S])",
+              "repo-digest": "^([^\\n]+)@sha256:[0-9a-f]{64}(?![\\s\\S])",
+              "tag": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}(?![\\s\\S])",
+              "name-component": "^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?![\\s\\S])",
+              "registry-domain": "^(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?(?![\\s\\S])"
+            },
+            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound. The x-grammar pieces are that same admission's own decomposition — the one lexer core.spike_plan reuses from the generated contract constants (bound to this word by the conformance harness) — never a second owner."
           }
         },
         "preparation": {
@@ -1224,5 +1252,10 @@
       },
       "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
     }
-  }
+  },
+  "x-core-ingress": [
+    "/properties/environment",
+    "/properties/environment_history",
+    "/properties/qualification_attempts"
+  ]
 }

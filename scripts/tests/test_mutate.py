@@ -203,6 +203,19 @@ class MutmutTests(unittest.TestCase):
         self.assertIn("plugins/empirica/tests/v2/test_observer_agreement.py", tests)
         self.assertTrue(all(Path(t).name.startswith("test_") for t in tests))
 
+    def test_a_declared_validators_module_mutants_run_against_the_conformance_harness(self):
+        """The harness couples to the core through the contract's own declaration (``x-core-validator``
+        and the core modules those validators reach through their relative imports), never through an
+        import the mutation selector could see: ``core.environment``, ``core.run`` — declared — and
+        ``core.spike_plan`` — reached through ``environment``'s image delegation — all run the harness.
+        ADR-0075: the contract is the coupling."""
+        for source in ("plugins/empirica/core/environment.py", "plugins/empirica/core/run.py",
+                       "plugins/empirica/core/spike_plan.py", "plugins/empirica/core/freshness.py"):
+            tests = mutate.tests_for(source)
+            self.assertIn("plugins/empirica/tests/test_contract_conformance.py", tests, source)
+        self.assertFalse(mutate.declared_core_validator("plugins/empirica/adapters/sandbox/common.py"))
+        self.assertFalse(mutate.declared_core_validator("plugins/empirica/core/observer.py"))
+
     def test_the_runner_runs_each_test_the_way_its_suite_does(self):
         runner = mutate.runner(["plugins/empirica/tests/v2/test_observer_agreement.py", "scripts/tests/test_verify.py"],
                                python="/venv/bin/python")

@@ -4791,5 +4791,6 @@
       },
       "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
     }
-  }
+  },
+  "x-core-ingress": []
 }

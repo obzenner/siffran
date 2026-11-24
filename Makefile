@@ -359,7 +359,7 @@ adr-check: ## Check ADR link health and numbering (adrs doctor; fails when adrs 
 		printf 'error: adrs not installed (install it, or set EMPIRICA_ALLOW_SKIP=1 to skip the ADR check explicitly)\n' >&2; exit 1; \
 	fi
 
-.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits empirica-manifest-check contract-bounds contract-annotations-check
+.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits empirica-manifest-check contract-bounds contract-annotations-check contract-pattern-parity
 contract-fixtures: ## Regenerate the Empirica wire-fixture fields (contracts/empirica/v2/fixtures, from the real service), and the observer fixtures from build_store's FIXTURE_SCENARIOS through the real service and observer, into contracts/empirica-ui-view/v1/fixtures and its byte copy plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures (the built-in demo)
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
@@ -373,9 +373,14 @@ contract-schemas: ## Regenerate shared Empirica schema definitions and local emb
 contract-bounds: dev-python ## Regenerate the core bounds module from the annotated run-state definitions (core/contract_bounds.py)
 	@$(DEV_PYTHON) $(SCRIPTS)/gen_contract_bounds.py
 
-contract-annotations-check: dev-python ## Guard the x-core-validator/x-core-only annotations: reachable definitions annotated, names exist, nothing orphaned, no unknown keyword
+contract-pattern-parity: ## Run every registered contract pattern and grammar piece through Python re and JavaScript RegExp/u on one corpus (node); fail on any verdict either engine keeps to itself
+	@$(DEV_PYTHON) $(SCRIPTS)/check_pattern_parity.py
+
+contract-annotations-check: dev-python ## Guard the x-core-validator/x-core-only/x-grammar annotations: reachable definitions annotated, names exist, nothing orphaned, no unsupported keyword; unit controls for the strategies engine, the Pattern parity scope builder, and the generator's ownership refusal
 	@$(DEV_PYTHON) $(SCRIPTS)/check_core_annotations.py
 	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_check_core_annotations.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_gen_contract_bounds.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_pattern_parity.py
 	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_contract_strategies.py
 
 contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
@@ -403,6 +408,7 @@ contract-check: dev-python ## Validate schemas, shared definitions, wire fixture
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py --check
 	@$(DEV_PYTHON) $(SCRIPTS)/gen_contract_bounds.py --check
 	@$(MAKE) --no-print-directory contract-schema-generator-unit-check
+	@$(MAKE) --no-print-directory contract-pattern-parity
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py --check
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py --check

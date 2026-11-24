@@ -1,21 +1,37 @@
 #!/usr/bin/env python3
-"""ADR-0075 contract conformance: schema and core agree, in both directions, for every annotated definition.
+"""ADR-0075 contract conformance: the schema and the core agree on every registered definition, in
+both directions, differentially, with per-(node, keyword) coverage accounting.
 
-A definition that the core validates declares itself in the contract with ``x-core-validator`` (and, for a rule no
-schema can express, an ``x-core-only`` entry with the one test that pins it). This harness is the ADR-0075 half of
-the shape testing: valid documents are drawn from the definition's keywords by ``scripts/contract_strategies.py``
-(the shared T1 engine) and the core's named validator must accept each; invalid documents derived from the same
-keywords — a bound one past, a character outside a pattern, a wrong type, a missing or extra key, a null row,
-a value outside an enumeration, and, core-side only, an unsized iterable or a mapping where a sequence is
-required — must be refused by both Draft 2020-12 and the core. A derived candidate the schema accepts is not an
-invalid document and is never asserted here.
+A definition the core validates declares itself in the contract: the document names its core ingress
+roots under ``x-core-ingress`` (and every annotated ``$defs`` definition an ingress reaches registers
+too), each carrying ``x-core-validator`` — or, for a rule no schema can express, an ``x-core-only``
+entry whose ``case`` names exactly the differential candidate kind it excuses, pinned by the one test
+it names. This harness is the ADR-0075 half of the shape testing:
 
-Every Hypothesis run is bounded, fixed-seeded and database-free (doc/testing.md, T1). Registration is by
-declaration: an annotated definition lands here with no other change, so later nodes add theirs in the contract
-alone. A shapes hand-written test would violate the operator rule; behaviour lives in the other modules.
+* valid documents are drawn from the definition's keywords by ``scripts/contract_strategies.py``
+  (the shared T1 engine) and the named validator must accept each;
+* challenge candidates are derived from the same keywords *independently of either verdict* — neither
+  verdict is consulted to keep or drop a candidate — and every candidate is adjudicated: Draft 2020-12
+  and the named core validator must agree, refuse-refuse or accept-accept, except where the declared
+  open-disagreement registry names the pair (the run/5 ``$`` digest anchors, red until the E2a
+  re-anchor lands) or an ``x-core-only`` rule on the challenged node names exactly the candidate kind.
+  A ``TypeError`` or any other non-domain exception a validator throws is a harness failure, never a
+  refusal: an accidentally-crashing core is caught, not banked as coverage;
+* coverage is accounted per (node, keyword): every plan entry needs a both-refuse witness, or an
+  explicit unsupported/redundant declaration — one firing mutation is never taken for coverage;
+* acceptance directions are derived too: exact-boundary documents (sizes, lengths, numeric extrema)
+  and a pattern's own grammar witnesses — one per top-level alternative and per present/absent optional
+  group, the spike-image lexeme's branches included — must be accepted by both sides.
+
+Every Hypothesis run is bounded, derandomized, fixed-seeded and database-free (doc/testing.md, T1);
+the deterministic sweeps run on one canonical full-drawn base each. Registration is by declaration:
+an ingress declaration with its annotations lands here with no harness change, so later nodes add
+theirs in the contract alone. A shapes hand-written test would violate the operator rule; behaviour
+lives in the other modules.
 """
 from __future__ import annotations
 
+import copy
 import sys
 import unittest
 from pathlib import Path
@@ -24,37 +40,76 @@ HERE = Path(__file__).resolve().parent
 REPOSITORY = HERE.parents[2]
 sys.path[:0] = [str(HERE), str(HERE.parent), str(REPOSITORY / "scripts")]
 
-from hypothesis import given, settings  # noqa: E402
+from hypothesis import HealthCheck, find, given, settings  # noqa: E402
 
-from contract_strategies import Contract  # noqa: E402
+import contract_strategies as engine  # noqa: E402
+from contract_strategies import KNOWN_OPEN, Contract  # noqa: E402
 
 _CONTRACT = Contract()
-_PROPERTY = settings(max_examples=12, deadline=None, database=None, derandomize=True)
-_VALIDATORS = {pointer: _CONTRACT.import_validator(pointer) for pointer in _CONTRACT.annotated}
+if _CONTRACT.findings:
+    raise ImportError("contract annotations are malformed: " + "; ".join(_CONTRACT.findings))
+_KEYS = sorted(_CONTRACT.registered)
 
 
-def _slug(pointer: str) -> str:
-    return pointer.removeprefix("#/").replace("$defs/", "defs_").replace("properties/", "member_") \
+def unrerandomized(maximum: int) -> settings:
+    return settings(max_examples=maximum, deadline=None, database=None, derandomize=True)
+
+
+_FIND = settings(max_examples=128, database=None, deadline=None, derandomize=True,
+                 suppress_health_check=list(HealthCheck))
+_PROPERTY = unrerandomized(3)
+_FUZZ = unrerandomized(2)
+
+
+def _slug(key: str) -> str:
+    return key.split("#", 1)[1].strip("/").replace("$defs/", "defs_").replace("properties/", "member_") \
         .replace("-", "").replace("/", "_")
 
 
-def _contract_summary(pointer: str) -> str:
-    return f"{pointer} declares {len(_CONTRACT.cases(pointer))} invalid-document cases"
-
-
 class _Base(unittest.TestCase):
-    def assertRefused(self, pointer: str, value: object, label: str) -> None:
+    _bases: dict[str, object] = {}
+
+    @classmethod
+    def canonical(cls, key: str):
+        """One deterministic base per key: a fully-drawn document (every optional member present, every
+        array non-empty, the null alternative never taken) — the coverage sweeps run on it, not on a
+        sample, so every declared node carries a value the plan can reach."""
+        if key not in cls._bases:
+            strategy = _CONTRACT.drawn(key, full=True)
+            cls._bases[key] = find(strategy, lambda document: True, settings=_FIND)
+        return cls._bases[key]
+
+    def assertAccepted(self, key: str, value: object, label: str = "") -> None:
+        self.assertTrue(_CONTRACT.accepts(key, value),
+                        f"a valid {key} document the schema itself refuses ({label})")
         try:
-            _VALIDATORS[pointer](value)
-        except (ValueError, TypeError):
+            _CONTRACT.import_validator(key)(value)
+        except ValueError as exc:
+            raise self.failureException(f"{key}: the named validator refused a valid document "
+                                        f"({label}): {exc}") from exc
+
+    def assertRefused(self, key: str, value: object, label: str) -> None:
+        try:
+            _CONTRACT.import_validator(key)(value)
+        except ValueError:
             return
         raise self.failureException(
-            f"{pointer}: the named validator accepted a derived invalid document — {label}: {value!r}")
+            f"{key}: the named validator accepted a challenge it must refuse — {label}: {value!r}")
 
-    def assertAccepted(self, pointer: str, value: object) -> None:
-        self.assertTrue(_CONTRACT.accepts(pointer, value),
-                        f"a drawn {pointer} document the schema itself refuses")
-        _VALIDATORS[pointer](value)
+    def sweep(self, key: str, base) -> list[str]:
+        """One differential sweep's harness failures: every derived candidate (plan and witness rounds
+        alike) adjudicated with no drops, the failures collected."""
+        failures = []
+        for case in _CONTRACT.cases(key):
+            for derived in _CONTRACT.derive(base, key, case):
+                status = _CONTRACT.adjudicate(key, derived)
+                if status.startswith(("DISAGREEMENT", "NON-DOMAIN")):
+                    failures.append(f"{key}: {status}")
+        for derived in _CONTRACT.witness_challenges(key, base):
+            status = _CONTRACT.adjudicate(key, derived)
+            if status.startswith(("DISAGREEMENT", "NON-DOMAIN")):
+                failures.append(f"{key}: {status}")
+        return failures
 
 
 class ValidDrawTests(_Base):
@@ -67,59 +122,189 @@ class ValidFullDrawTests(_Base):
     never taken — one document reaches every declared node."""
 
 
-class DerivedInvalidTests(_Base):
-    """Every derived invalid document is refused by both sides (the core-only kinds by the core alone)."""
+class DifferentialSweepTests(_Base):
+    """The canonical differential sweep: every derived challenge candidate adjudicated against both
+    judges with no drops. The declared open-disagreement registry (the run/5 ``$`` digest anchors, red
+    until the E2a re-anchor lands) surfaces as ``open disagreement`` statuses here and stays pinned
+    by the KnownOpenTests control below."""
+
+
+class DifferentialFuzzTests(_Base):
+    """The same sweep on freshly drawn bases — a different document shape each example — so the
+    agreement is not one document's accident."""
+
+
+class CoverageAccountingTests(_Base):
+    """Coverage is per (node, keyword), never a firing count: every plan entry needs a candidate both
+    sides refuse, or the entry is explicitly declared unsupported or redundant — and a plan entry whose
+    candidates both sides accept is an acceptance, reported, never silently dropped."""
 
 
 class BoundaryAcceptanceTests(_Base):
-    """The boundary documents of the definitions' own maxima — an array grown to its maxItems (uniqueness
-    held), a string padded to its maxLength (patterns held) — accepted by both sides: sampling never
-    promises to reach a bound, so a validator that narrowed one only ever held through nobody visiting."""
+    """The boundary documents of the definitions' own extrema — arrays grown to maxItems and cut to
+    minItems, strings padded to maxLength and trimmed to minLength, numbers set to minimum/maximum —
+    accepted by both sides: sampling never promises to reach a bound, so a validator that narrowed one
+    only held through nobody visiting. A definition with no such extremum yields no boundary document,
+    which is a fact, not a failure."""
 
 
-for _pointer in sorted(_CONTRACT.annotated):
-    def _valid(pointer: str = _pointer):  # noqa: F811 — one declared harness method per annotated definition
+class GrammarWitnessTests(_Base):
+    """The branch witnesses a pattern's own grammar synthesizes — one per top-level alternative and per
+    present/absent optional group, with no hand-written form — accepted by both sides, so every accepted
+    branch of a grammar (the spike-image lexeme included) is the core's word too."""
+
+
+for _pointer in sorted(_CONTRACT.registered):
+    def _valid(key: str = _pointer):  # noqa: F811 — one declared harness method per registered definition
         @settings(_PROPERTY)
-        @given(document=_CONTRACT.drawn(pointer))
+        @given(document=_CONTRACT.drawn(key))
         def method(self, document) -> None:
-            self.assertAccepted(pointer, document)
+            self.assertAccepted(key, document, "drawn")
         return method
 
-    def _valid_full(pointer: str = _pointer):
+    def _valid_full(key: str = _pointer):
         @settings(_PROPERTY)
-        @given(document=_CONTRACT.drawn(pointer, full=True))
+        @given(document=_CONTRACT.drawn(key, full=True))
         def method(self, document) -> None:
-            self.assertAccepted(pointer, document)
+            self.assertAccepted(key, document, "full draw")
         return method
 
-    def _invalid(pointer: str = _pointer):
-        @settings(_PROPERTY)
-        @given(base=_CONTRACT.drawn(pointer, full=True))
-        def method(self, base) -> None:
-            refused = 0
-            for case in _CONTRACT.cases(pointer):
-                for derived in _CONTRACT.derive(base, pointer, case):
-                    self.assertRefused(pointer, derived.value, derived.label)
-                    refused += 1
-            self.assertGreater(refused, 0,
-                               f"no derived invalid document fired for this draw; "
-                               f"{_contract_summary(pointer)}")
+    def _sweep(key: str = _pointer):
+        def method(self) -> None:
+            self.assertEqual(self.sweep(key, self.canonical(key)), [])
+        method.__doc__ = f"The canonical differential sweep of {key}"
         return method
 
-    def _boundary(pointer: str = _pointer):
-        @settings(max_examples=2, deadline=None, database=None, derandomize=True)
-        @given(base=_CONTRACT.drawn(pointer, full=True))
+    def _fuzz(key: str = _pointer):
+        @settings(_FUZZ)
+        @given(base=_CONTRACT.drawn(key, full=True))
         def method(self, base) -> None:
-            grown = _CONTRACT.at_bounds(pointer, base)
-            self.assertTrue(grown, f"{pointer} declares no maximum to hold a grown document to")
-            for derived in grown:
-                self.assertAccepted(pointer, derived.value)
-                self.assertNotEqual(derived.value, base)
+            self.assertEqual(self.sweep(key, base), [])
+        method.__doc__ = f"The differential fuzz sweep of {key} on freshly drawn bases"
+        return method
+
+    def _coverage(key: str = _pointer):
+        def method(self) -> None:
+            base = self.canonical(key)
+            witnessed: dict[tuple[str, str], set[str]] = {}
+            for case in _CONTRACT.cases(key):
+                if case.kind == "unsupported":
+                    continue  # the plan declared it: no challengeable value exists for this pair
+                for derived in _CONTRACT.derive(base, key, case):
+                    status = _CONTRACT.adjudicate(key, derived)
+                    self.assertFalse(status.startswith(("DISAGREEMENT", "NON-DOMAIN")), f"{key}: {status}")
+                    witnessed.setdefault((derived.node_id, derived.keyword), set()).add(status)
+            for derived in _CONTRACT.witness_challenges(key, base):
+                status = _CONTRACT.adjudicate(key, derived)
+                self.assertFalse(status.startswith(("DISAGREEMENT", "NON-DOMAIN")), f"{key}: {status}")
+                witnessed.setdefault((derived.node_id, derived.keyword), set()).add(status)
+            planned = {(case.node_id, case.keyword): case.kind
+                       for case in _CONTRACT.cases(key)}
+            missing = [f"{node} ({word}): no both-refuse witness — {sorted(statuses)}"
+                       for (node, word), statuses in sorted(witnessed.items())
+                       if "agree-refused" not in statuses and word != "required"]
+            missing += [f"{node} ({word}): planned but no candidate fired"
+                        for (node, word), kind in sorted(planned.items())
+                        if kind != "unsupported" and (node, word) not in witnessed]
+            self.assertEqual(missing, [],
+                             f"{key} coverage is incomplete per (node, keyword); the ledger: "
+                             f"{ {entry: sorted(statuses) for entry, statuses in sorted(witnessed.items())} }")
+        method.__doc__ = f"The per-(node, keyword) coverage accounting of {key}"
+        return method
+
+    def _boundary(key: str = _pointer):
+        def method(self) -> None:
+            for derived in _CONTRACT.at_bounds(key, self.canonical(key)):
+                self.assertAccepted(key, derived.value, derived.label)
+                self.assertEqual(_CONTRACT.adjudicate(key, derived), "agree-accepted",
+                                 f"{key}: a boundary document one side refuses: {derived.label}")
+        method.__doc__ = f"The exact-boundary acceptance of {key}"
+        return method
+
+    def _witnesses(key: str = _pointer):
+        def method(self) -> None:
+            base = self.canonical(key)
+            for path, node, node_id in _CONTRACT._targets(key):
+                for pattern in _CONTRACT._patterns(node):
+                    witnesses = engine.pattern_witnesses(pattern)
+                    self.assertGreaterEqual(
+                        len(witnesses), 2 * engine.pattern_alternatives(pattern),
+                        f"{node_id}: a grammar with {engine.pattern_alternatives(pattern)} top-level "
+                        f"alternative(s) must enumerate its reachable branch witnesses")
+                    for witness in witnesses:
+                        self.assertAccepted(key, _CONTRACT._placed(base, path, witness),
+                                            f"the {node_id} grammar witness {witness!r}")
+        method.__doc__ = f"The grammar-branch witness acceptance of {key}"
         return method
 
     for _group, _builder in ((ValidDrawTests, _valid), (ValidFullDrawTests, _valid_full),
-                             (DerivedInvalidTests, _invalid), (BoundaryAcceptanceTests, _boundary)):
+                             (DifferentialSweepTests, _sweep), (DifferentialFuzzTests, _fuzz),
+                             (CoverageAccountingTests, _coverage),
+                             (BoundaryAcceptanceTests, _boundary), (GrammarWitnessTests, _witnesses)):
         setattr(_group, f"test_{_slug(_pointer)}", _builder(_pointer))
+
+
+class KnownOpenTests(_Base):
+    """The declared open disagreements are a failing harness control: until the E2a re-anchor lands,
+    every registry entry is pinned to its live mismatch — the schema admits a trailing LF/CR the core
+    refuses — and the moment a mismatch heals, this control fails and forces the registry entry's
+    removal. Only a declared pair may ever sit in the registry; the sweep holds everything else."""
+
+    def test_every_declared_open_disagreement_is_live(self):
+        for node_id, kinds in sorted(KNOWN_OPEN.items()):
+            pinned = False
+            for key in _KEYS:
+                base = self.canonical(key)
+                for case in _CONTRACT.cases(key):
+                    if case.node_id != node_id or case.kind not in kinds:
+                        continue
+                    for derived in _CONTRACT.derive(base, key, case):
+                        schema_accepts, core_verdict, crash = _CONTRACT.verdicts(key, derived.value)
+                        with self.subTest(node=node_id, kind=case.kind):
+                            self.assertTrue(schema_accepts, f"{node_id}: the schema already refuses "
+                                           "this — the registry entry has healed; remove it")
+                            self.assertEqual(core_verdict, "refuse", f"{node_id}: the core no longer "
+                                             "refuses — the registry entry has healed; remove it")
+                            self.assertEqual(
+                                _CONTRACT.adjudicate(key, derived),
+                                "open disagreement (a declared registry entry, red until its anchor heals)",
+                                "the judge must cite the registry pair rather than fail on it")
+                        pinned = True
+            self.assertTrue(pinned, f"{node_id}: no derived candidate reaches the registry entry — "
+                            "the entry names something the plan cannot produce")
+
+    def test_the_registry_names_registered_nodes_only(self):
+        targets = {target[2] for key in _KEYS for target in _CONTRACT._targets(key)}
+        for node_id in KNOWN_OPEN:
+            self.assertIn(node_id, targets, "a registry entry that no registered definition reaches")
+
+
+class CoreOnlyRulesTests(_Base):
+    """The core-only rules the contract's ``x-core-only`` entries name with their one pinning test:
+    rules no schema can express, with the differential excusing exactly the candidate kind each
+    entry declares (the coverage sweep proves the same pairs excused, never more)."""
+
+    def test_json_floats_with_a_zeroed_fraction_are_not_python_ints(self):
+        """The core-only rule the contract declares for its integer members (``x-core-only`` entries
+        with ``case: float-for-int``): a JSON number with a zeroed fraction is an integer to draft
+        2020-12 and must not be one to the core — the member, the history rows and the attempt rows
+        alike."""
+        member = self.canonical("state#/$defs/environmentMember")
+        attempt = self.canonical("state#/$defs/qualificationAttempt")
+        for key, document, terminals in (
+                ("state#/$defs/environmentMember", member, ("revision",)),
+                ("state#/properties/environment_history", [copy.deepcopy(member)], ("revision",)),
+                ("state#/$defs/qualificationAttempt", attempt, ("revision", "started_stamp")),
+                ("state#/properties/qualification_attempts", [copy.deepcopy(attempt)],
+                 ("revision", "started_stamp"))):
+            for terminal in terminals:
+                candidate = copy.deepcopy(document)
+                row = candidate if isinstance(candidate, dict) else candidate[0]
+                row[terminal] = float(row[terminal])  # 1 becomes 1.0: an integer to JSON, not to Python
+                with self.subTest(key=key, member=terminal):
+                    self.assertTrue(_CONTRACT.accepts(key, candidate),
+                                    "draft 2020-12 must admit the float — the schema cannot say else")
+                    self.assertRefused(key, candidate, f"a zeroed-fraction {terminal}")
 
 
 if __name__ == "__main__":
