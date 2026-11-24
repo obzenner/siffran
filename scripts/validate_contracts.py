@@ -1836,7 +1836,7 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
     if set(member_props.get("state", {}).get("enum", [])) != set(ENVIRONMENT_STATES):
         errors.append(f"{where}: environmentMember state enum {sorted(member_props.get('state', {}).get('enum', []))} "
                       f"!= core.run.ENVIRONMENT_STATES {sorted(ENVIRONMENT_STATES)}")
-    if (member_props.get("digest", {}).get("pattern") != "^sha256:[0-9a-f]{64}$"
+    if (member_props.get("digest", {}).get("pattern") != r"^sha256:[0-9a-f]{64}(?![\s\S])"
             or member_props.get("proposal", {}).get("$ref") != "#/$defs/environmentProposal"):
         errors.append(f"{where}: environmentMember digest must be digest256 and its proposal must be "
                       "the shared environmentProposal definition")
@@ -1881,7 +1881,7 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
                 "attempt_id", "revision", "started_stamp", "outcome", "record_digest", "reason"}
             or set(attempt_props.get("outcome", {}).get("enum", [])) != set(ATTEMPT_OUTCOMES)
             or attempt_props.get("reason", {}).get("pattern") != "^[a-z][a-z0-9-]{0,63}(?![\\s\\S])"
-            or attempt_props.get("record_digest", {}).get("pattern") != "^sha256:[0-9a-f]{64}$"
+            or attempt_props.get("record_digest", {}).get("pattern") != r"^sha256:[0-9a-f]{64}(?![\s\S])"
             or attempt_props.get("revision", {}).get("minimum") != 1
             or attempt_props.get("started_stamp", {}).get("minimum") != 0
             or attempt_props.get("attempt_id", {}).get("maxLength") != 128):

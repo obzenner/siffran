@@ -65,19 +65,6 @@ def _immutable(value: Any) -> Any:
     return value
 
 
-def _plain(value: Any) -> Any:
-    """An already-frozen member in the plain decoded form its validator requires: a dict and
-    lists, never a MappingProxyType or a tuple. ``__post_init__`` re-validates the exactly state
-    it froze on the previous construction (an ordinary ``dataclasses.replace`` passes the
-    frozen member back in), and the author-ingress validator keeps demanding plain dict/list
-    shapes, so the frozen form is thawed for that one check instead of loosening the ingress."""
-    if isinstance(value, Mapping):
-        return {key: _plain(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain(item) for item in value]
-    return value
-
-
 def _sequence(value: Any, where: str, limit: int) -> list | tuple:
     """A real bounded sequence of rows: a list or a tuple. A mapping is never one (an empty
     one would silently read as \"no rows\"), and neither is an unsized iterable (its length is
@@ -116,7 +103,9 @@ def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Map
     try:
         if not spike_plan.is_digest256(value["digest"]):
             raise environment.EnvironmentProposalError("digest shape")
-        if environment.proposal_digest(_plain(proposal)) != value["digest"]:
+        # A replace() passes the frozen member back in: thaw it to the plain form the ingress
+        # validator requires instead of loosening that validator.
+        if environment.proposal_digest(governance.plain(proposal)) != value["digest"]:
             raise environment.EnvironmentProposalError("digest coherence")
     except environment.EnvironmentProposalError as exc:
         raise ValueError(f"run/5 {where} proposal or digest is malformed") from exc

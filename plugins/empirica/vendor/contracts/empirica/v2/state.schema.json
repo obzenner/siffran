@@ -1076,7 +1076,7 @@
         },
         "digest": {
           "type": "string",
-          "pattern": "^sha256:[0-9a-f]{64}$",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
           "description": "Canonical digest of the closed proposal body (core.environment.proposal_digest)."
         },
         "state": {
@@ -1138,7 +1138,7 @@
             "string",
             "null"
           ],
-          "pattern": "^sha256:[0-9a-f]{64}$",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
           "description": "Content digest of the run-scoped /3 record on success, null otherwise."
         },
         "reason": {
