@@ -49,11 +49,13 @@ REASON_HINTS = {
     "environment-pending": "the environment revision is pending on the human; nothing for the agent to do until they answer",
     "environment-rejected": "the latest environment revision was rejected; submit a revised environment proposal",
     "qualification-required": "an approved revision has nothing bound; request qualification",
-    "qualification-stale-implementation": "the loaded release differs from the binding; prepare, then request qualification again",
+    "qualification-stale-implementation": "the loaded release differs from the binding; request qualification again",
     "qualification-stale-daemon": "the Docker endpoint, daemon identity, version or capability differs from the binding; prepare, then request qualification again",
     "image-not-qualified": "the spike's image is not one of the binding's sealed image IDs; submit an environment proposal that names it",
     "probe-image-untrusted": "the local probe image does not match the pinned probe image digest; pull the pinned reference the refusal renders, then request qualification again",
     "qualification-probe-failed": "a qualification probe failed (the reason names it); prepare, then request qualification again",
+    "qualification-deadline-exceeded": "the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady",
+    "network-egress-unavailable": "the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again",
     "docker-unreachable": "no Docker daemon is reachable at the endpoint; prepare, then request qualification again",
     "profile-not-allowed": "the requested profile is above the host ceiling; propose one within the ceiling",
     "qualification-attempts-exhausted": "the run's qualification attempts are spent; continue on the current binding, stop, or start a fresh run",
@@ -169,6 +171,17 @@ def check_limits() -> None:
     fault = schema["$defs"]["fault"]["properties"]["reason"]["enum"]
     require(fault == list(generic_spike.SPIKE_FAULT_REASONS),
             "response.schema.json fault.reason differs from SPIKE_FAULT_REASONS")
+    require(set(generic_spike.QUALIFICATION_FAILURE_REASONS)
+            <= set(generic_spike.SPIKE_FAULT_REASONS),
+            "the closed qualification failure set must stay a subset of the Fault reasons")
+    last_failure = schema["$defs"]["qualificationView"]["properties"]["last_failure"]
+    failed = next(branch for branch in last_failure["oneOf"]
+                  if branch.get("properties") and "reason" in branch["properties"])
+    require(failed["properties"]["reason"]["enum"]
+            == list(generic_spike.QUALIFICATION_FAILURE_REASONS),
+            "response.schema.json qualification.last_failure.reason differs from the closed "
+            "attempt-failure set (Empirica 7.2 §5.1: every attempt failure plus the kept deadline, "
+            "egress and cleanup reasons, never an admission reason)")
 
 
 def check_stale_text(root_dir: Path = ROOT) -> None:
@@ -205,6 +218,12 @@ def check_support_contract() -> None:
     require(profiles == sorted(spike_plan.NETWORK_PROFILES), "profiles differ")
     require(contract["qualification"]["probes"] == list(generic_qualification.PROBE_ORDER),
             "qualification probes differ")
+    from core import run as core_run
+    require(core_run.QUALIFICATION_PROBE_NAMES == generic_qualification.PROBE_ORDER,
+            "core.run's mirrored probe names differ from the qualification probe order")
+    require(core_run.QUALIFICATION_PROBE_FAILED_REASON
+            == generic_spike.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value,
+            "core.run's mirrored probe-failure reason differs from its application owner")
     require(generic_qualification.TOTAL_QUALIFICATION_SECONDS
             == contract["qualification"]["deadline_seconds"], "qualification deadline differs")
 

@@ -16,6 +16,7 @@ from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACTS = ROOT / "contracts" / "empirica" / "v2"
+DOCKER_SUPPORT = ROOT / "contracts" / "empirica-docker-spike" / "v1" / "support-contract.json"
 TARGETS = ("request.schema.json", "response.schema.json", "state.schema.json")
 IDENTITY_KEYS = ("identity", "provider_id", "model_id", "policy_version", "source", "observed_by")
 INVOCATION_KEYS = ("host", "interactive", "signal", "delegation", "audit_retrieval", "human_surface")
@@ -30,8 +31,9 @@ _GRAPH_DEFS = ("graphClaimItem", "graphEdgeItem", "graphPayload")
 _UNIVERSAL_SHARED_DEFS = ("claimId",)
 _EXTRA_SHARED_DEFS = {
     "request.schema.json": (*_GRAPH_DEFS, "spikePlanDraft", "environmentProposal"),
-    "response.schema.json": (*_GRAPH_DEFS, "governancePresentation", "spikePlanDraft"),
-    "state.schema.json": ("environmentProposal",),
+    "response.schema.json": (*_GRAPH_DEFS, "governancePresentation", "spikePlanDraft",
+                               "qualificationProbeName"),
+    "state.schema.json": ("environmentProposal", "qualificationProbeName"),
 }
 _MANAGED_KEY = "x-generated-public-contract-defs"
 _PUBLIC_PREFIX = "publicContract__"
@@ -44,6 +46,34 @@ class SchemaGenerationError(ValueError):
 
 def _load(name: str) -> dict:
     return json.loads((CONTRACTS / name).read_text(encoding="utf-8"))
+
+
+def _qualification_probe_names() -> list[str]:
+    """The qualification probe names from the Docker spike support contract (their only copy).
+
+    The support contract's ``qualification.probes`` is the owner (validated against the code
+    order by empirica-docker-support-contract-check); the generated ``qualificationProbeName``
+    definition reuses that vocabulary for run/5 rows and the qualification failure and refusal
+    payload, so no target schema restates the names (ADR-0075).
+    """
+    probes = json.loads(DOCKER_SUPPORT.read_text(encoding="utf-8"))["qualification"]["probes"]
+    if not isinstance(probes, list) or not probes or len(probes) != len(set(probes)) \
+            or any(not isinstance(name, str) or not name for name in probes):
+        raise SchemaGenerationError("the Docker spike support contract's qualification probes "
+                                    "are not a nonempty closed set of names")
+    return probes
+
+
+def _shared_definitions() -> dict[str, dict]:
+    shared = copy.deepcopy(_load("shared-defs.json")["$defs"])
+    shared["qualificationProbeName"] = {
+        "enum": _qualification_probe_names(),
+        "description": ("The qualification probe names, owned by the Docker spike support "
+                        "contract (contracts/empirica-docker-spike/v1, its only copy): the "
+                        "run's qualification rows, its last failure and a refusal that names a "
+                        "probe reuse this enumeration, never a second spelling."),
+    }
+    return shared
 
 
 def _pointer(path: tuple[object, ...]) -> str:
@@ -224,9 +254,38 @@ def _replace_result_facts(value: object) -> object:
     return {key: _replace_result_facts(item) for key, item in value.items()}
 
 
+def _bound_qualification_view(response: dict, state: dict) -> None:
+    """Bind the run view's qualification accounting to the one attempt ceiling the run/5
+    state owns (``qualification_attempts.maxItems``): ``attempts_used``, ``attempts_max`` and
+    ``active.seq`` take that ceiling through generation, never a second literal (ADR-0075).
+
+    ``qualification_attempts`` is the single owner of how many qualification attempts one run
+    may ever start (Empirica 7.2 §5.1); the read projection must be able to report at most that
+    many attempts used and may name no sequence above it.
+    """
+    attempts = state.get("properties", {}).get("qualification_attempts", {})
+    ceiling = attempts.get("maxItems")
+    if type(ceiling) is not int or ceiling < 1:
+        raise SchemaGenerationError("state.schema.json qualification_attempts.maxItems is not "
+                                    "the attempt ceiling owner")
+    view = response.get("$defs", {}).get("qualificationView")
+    members = (view or {}).get("properties", {})
+    if not isinstance(view, dict) or not {"attempts_used", "attempts_max", "active"} <= set(members):
+        raise SchemaGenerationError("response.schema.json qualificationView is not the run's "
+                                    "qualification accounting projection")
+    for member in ("attempts_used", "attempts_max"):
+        members[member]["maximum"] = ceiling
+    bound = next((branch for branch in members["active"].get("oneOf", [])
+                  if isinstance(branch, dict) and "seq" in branch.get("properties", {})), None)
+    if bound is None:
+        raise SchemaGenerationError("response.schema.json qualification.active has no installed "
+                                    "binding branch with a sequence")
+    bound["properties"]["seq"]["maximum"] = ceiling
+
+
 def generated_documents() -> dict[str, dict]:
     docs = {name: _load(name) for name in TARGETS}
-    shared = copy.deepcopy(_load("shared-defs.json")["$defs"])
+    shared = _shared_definitions()
     for required in ("identityObservation", "invocationProvenance"):
         if required not in shared:
             raise SchemaGenerationError(f"missing shared definition #/$defs/{required}")
@@ -251,6 +310,8 @@ def generated_documents() -> dict[str, dict]:
                 raise SchemaGenerationError(f"missing shared definition #/$defs/{extra}")
             defs[extra] = copy.deepcopy(shared[extra])
         docs[name] = document
+
+    _bound_qualification_view(docs["response.schema.json"], docs["state.schema.json"])
 
     public_contract = _load("public-contract.json")
     public_contract = _replace_spike_draft(public_contract, shared["spikePlanDraft"])

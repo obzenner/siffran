@@ -105,7 +105,7 @@
       }
     },
     "qualificationView": {
-      "description": "The run's qualification accounting, projected read-only: attempts used against the per-run ceiling, the active attempt (null when none runs) and the last failure with its closed reason, naming the failed probe exactly when one failed. Nothing here binds or unbinds the spike backend by itself.",
+      "description": "The run's qualification accounting, projected read-only: attempts used against the per-run ceiling, the installed binding reference (the last successful attempt's sequence and record digest — it stays set while a newer attempt runs or fails and is null only when nothing was ever bound in this run) and the last failure with its closed reason, naming the failed probe exactly when one failed. Nothing here binds or unbinds the spike backend by itself.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -117,7 +117,8 @@
       "properties": {
         "attempts_used": {
           "type": "integer",
-          "minimum": 0
+          "minimum": 0,
+          "maximum": 8
         },
         "attempts_max": {
           "type": "integer",
@@ -131,6 +132,7 @@
             },
             {
               "type": "object",
+              "description": "The installed binding: the last successful attempt's sequence and record digest, not an in-flight attempt (an in-flight reservation has no record digest, and the previous successful binding stays referenced while a newer attempt runs or fails).",
               "additionalProperties": false,
               "required": [
                 "seq",
@@ -140,7 +142,8 @@
               "properties": {
                 "seq": {
                   "type": "integer",
-                  "minimum": 1
+                  "minimum": 1,
+                  "maximum": 8
                 },
                 "profile_id": {
                   "enum": [
@@ -174,19 +177,16 @@
                     "qualification-probe-failed",
                     "qualification-stale-implementation",
                     "qualification-stale-daemon",
-                    "qualification-conflict"
+                    "qualification-conflict",
+                    "cleanup-unavailable",
+                    "qualification-deadline-exceeded",
+                    "network-egress-unavailable"
                   ],
-                  "description": "The closed cause the attempt ended with; an admission reason is never an attempt failure."
+                  "description": "The closed cause the attempt ended with (Empirica 7.2 §5.1): every attempt failure plus the kept deadline, egress and cleanup reasons, never an admission reason."
                 },
                 "probe": {
-                  "enum": [
-                    "realization",
-                    "natural-125",
-                    "output-overflow",
-                    "timeout",
-                    "network-profile"
-                  ],
-                  "description": "The probe that failed, present exactly when the reason is the probe-failure reason."
+                  "$ref": "#/$defs/qualificationProbeName",
+                  "description": "The probe that failed, present exactly when the reason is the probe-failure reason"
                 }
               },
               "if": {
@@ -200,6 +200,13 @@
                 "required": [
                   "probe"
                 ]
+              },
+              "else": {
+                "not": {
+                  "required": [
+                    "probe"
+                  ]
+                }
               }
             }
           ]
@@ -4114,8 +4121,14 @@
             "probe-image-untrusted",
             "qualification-probe-failed",
             "docker-unreachable",
-            "qualification-conflict"
+            "qualification-conflict",
+            "qualification-deadline-exceeded",
+            "network-egress-unavailable"
           ]
+        },
+        "probe": {
+          "$ref": "#/$defs/qualificationProbeName",
+          "description": "The probe that failed (Empirica 7.2 §5.1): required when the closed reason is qualification-probe-failed, forbidden for every other reason, and never a spelling inside the message."
         },
         "fail_direction": {
           "enum": [
@@ -4125,6 +4138,28 @@
         },
         "run": {
           "$ref": "#/$defs/runView"
+        }
+      },
+      "if": {
+        "properties": {
+          "reason": {
+            "const": "qualification-probe-failed"
+          }
+        },
+        "required": [
+          "reason"
+        ]
+      },
+      "then": {
+        "required": [
+          "probe"
+        ]
+      },
+      "else": {
+        "not": {
+          "required": [
+            "probe"
+          ]
         }
       }
     },
@@ -4983,6 +5018,16 @@
         }
       },
       "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
+    },
+    "qualificationProbeName": {
+      "enum": [
+        "realization",
+        "natural-125",
+        "output-overflow",
+        "timeout",
+        "network-profile"
+      ],
+      "description": "The qualification probe names, owned by the Docker spike support contract (contracts/empirica-docker-spike/v1, its only copy): the run's qualification rows, its last failure and a refusal that names a probe reuse this enumeration, never a second spelling."
     }
   },
   "x-core-ingress": []
