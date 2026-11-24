@@ -59,6 +59,30 @@ CONDITIONAL = {  # the oneOf conditional form a later node registers by declarat
 }
 
 
+TWO_WAY = {  # the two-way if/then/else conditional the run/5 attempt row carries (E6b re-review)
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://siffran.test/two-way",
+    "type": "object",
+    "x-core-ingress": ["/$defs/attempt"],
+    "properties": {"attempt": {"$ref": "#/$defs/attempt"}},
+    "required": ["attempt"],
+    "$defs": {"attempt": {
+        "x-core-validator": "conformance_fixtures.two_way_validator",
+        "type": "object",
+        "additionalProperties": False,
+        "required": ["attempt_id", "reason", "probe"],
+        "properties": {"attempt_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                      "reason": {"type": ["string", "null"],
+                                 "pattern": "^[a-z][a-z0-9-]{0,63}(?![\\s\\S])"},
+                      "probe": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/probeName"}]}},
+        "allOf": [{"if": {"properties": {"reason": {"const": "qualification-probe-failed"}}},
+                   "then": {"properties": {"probe": {"$ref": "#/$defs/probeName"}}},
+                   "else": {"properties": {"probe": {"type": "null"}}}}],
+    },
+        "probeName": {"enum": ["realization", "timeout"]}},
+}
+
+
 def _install_fixture_validator(accepts=None, crashes=False):
     """A validator the synthetic contract names, so the engine's differential against a *disobedient*
     core is controlled: one that accepts what the schema refuses, one that crashes on a candidate."""
@@ -73,8 +97,30 @@ def _install_fixture_validator(accepts=None, crashes=False):
 
     conditional_validator.honest = staticmethod(_honest_conditional)
     module.conditional_validator = conditional_validator
+    module.two_way_validator = _two_way_validator
     sys.modules["conformance_fixtures"] = module
     return module
+
+
+def _two_way_validator(value):
+    """The honest core of the synthetic two-way fixture: refusal by ``ValueError`` only, the row's
+    members checked exactly as its contract writes them (an intentionally disobedient core is mounted
+    by the tests separately, never here)."""
+    import re
+    if not isinstance(value, dict) or set(value) != {"attempt_id", "reason", "probe"}:
+        raise ValueError("malformed")
+    reason, probe = value["reason"], value["probe"]
+    if reason is not None and (not isinstance(reason, str)
+                              or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", reason)):
+        raise ValueError("reason")
+    if (reason == "qualification-probe-failed") != (probe is not None):
+        raise ValueError("the probe is named exactly on the probe-failure reason")
+    if probe is not None and probe not in TWO_WAY["$defs"]["probeName"]["enum"]:
+        raise ValueError("probe unknown")
+    if not isinstance(value["attempt_id"], str) or not value["attempt_id"] \
+            or len(value["attempt_id"]) > 128:
+        raise ValueError("attempt id")
+    return value
 
 
 def _honest_conditional(value):
@@ -112,6 +158,26 @@ class RealContractTests(unittest.TestCase):
         self.assertIn("state#/$defs/environmentProposal", self.contract.registered)
         self.assertIn("request#/$defs/environmentProposal", self.contract.registered,
                       "the request surface registers by its own declaration")
+
+    def test_the_real_attempt_row_draws_both_directions_of_its_pairing(self):
+        """E6b re-review: the run/5 attempt row's two-way conditional (a probe named exactly on the
+        probe-failure word, null on every other reason) is schema-drawn in BOTH directions — the
+        guarded word is read from the contract itself, never restated here."""
+        key = "state#/$defs/qualificationAttempt"
+        row = self.contract.node(key)
+        const = next(entry["if"]["properties"]["reason"]["const"]
+                     for entry in row["allOf"]
+                     if "if" in entry and set(entry["if"].get("properties", {})) == {"reason"})
+        probes = self.contract.node("state#/$defs/qualificationProbeName")["enum"]
+        for guarded, expected in ((True, "probe named"), (False, "probe null")):
+            document = find(self.contract.drawn(key, full=True).filter(
+                lambda document: (document["reason"] == const) is guarded), lambda document: True,
+                settings=DRY)
+            if guarded:
+                self.assertIn(document["probe"], probes)
+            else:
+                self.assertIsNone(document["probe"])
+            self.assertTrue(self.contract.accepts(key, document))
 
     def test_pattern_probes_substitute_and_insert_the_complement_families(self):
         """The families the review demanded: printable-complement and astral probes, not only
@@ -669,6 +735,65 @@ class BoundedWorkTests(unittest.TestCase):
         grown = engine.Contract._overgrown(rows, {"uniqueItems": True}, 64)
         self.assertEqual(len(grown), 64)
         self.assertEqual(len(set(grown)), 64, "the grown rows stay unique")
+
+
+class TwoWayFormTests(unittest.TestCase):
+    """The two-way ``if``/``then``/"``else``" conditional the run/5 attempt row carries (E6b re-review):
+    one entry, both directions — the probe is named exactly when the reason is the probe-failure
+    word and null otherwise. The drawing engine must derive the pair itself and refuse everything
+    else it does not model, and a free-text driver must still draw its guarded word (the const the
+    conditional declares is pinned into the driver's arm, so ``then`` is reachable, never only "else"
+    on a pattern's random text)."""
+
+    def setUp(self):
+        _install_fixture_validator()
+        self.contract = Contract({"two-way": copy.deepcopy(TWO_WAY)})
+
+    def tearDown(self):
+        sys.modules.pop("conformance_fixtures", None)
+
+    def _branch(self, guarded: bool) -> dict:
+        const = TWO_WAY["$defs"]["attempt"]["allOf"][0]["if"]["properties"]["reason"]["const"]
+        strategy = self.contract.drawn("two-way#/$defs/attempt", full=True).filter(
+            lambda document, const=const: (document["reason"] == const) is guarded)
+        return find(strategy, lambda document: True, settings=DRY)
+
+    def test_both_directions_of_the_pairing_are_drawn(self):
+        guarded = self._branch(True)
+        complementary = self._branch(False)
+        self.assertIn(guarded["probe"], TWO_WAY["$defs"]["probeName"]["enum"])
+        self.assertIsNone(complementary["probe"], complementary)
+        for document in (guarded, complementary):
+            self.assertTrue(self.contract.accepts("two-way#/$defs/attempt", document))
+            _two_way_validator(document)  # the honest core accepts both drawn directions
+
+    def test_a_direct_breach_of_the_pairing_is_refused_by_both_judges(self):
+        probes = TWO_WAY["$defs"]["probeName"]["enum"]
+        for label, breach in (("probe absent on its guarded reason", {**self._branch(True), "probe": None}),
+                              ("probe beside another reason", {**self._branch(False), "probe": probes[0]})):
+            with self.subTest(label=label):
+                self.assertFalse(self.contract.accepts("two-way#/$defs/attempt", breach))
+                with self.assertRaises(ValueError):
+                    _two_way_validator(breach)
+
+    def test_shapes_the_engine_does_not_model_stay_refused_never_guessed(self):
+        import copy
+        for bad in (
+                {"if": {"properties": {"reason": {"pattern": "^qualification"}}},
+                 "then": {"properties": {"probe": {"$ref": "#/$defs/probeName"}}},
+                 "else": {"properties": {"probe": {"type": "null"}}}},
+                {"if": {"properties": {"reason": {"const": "qualification-probe-failed"}}},
+                 "then": {"properties": {"probe": {"$ref": "#/$defs/probeName"}}},
+                 "else": {"properties": {"probe": {"type": "null"}, "reason": {"type": "null"}}}},
+                {"if": {"properties": {"reason": {"const": "qualification-probe-failed"}}},
+                 "then": {"properties": {"attempt_id": {"type": "string"}}},
+                 "else": {"properties": {"probe": {"type": "null"}}}},
+        ):
+            document = copy.deepcopy(TWO_WAY)
+            document["$defs"]["attempt"]["allOf"] = [bad]
+            mutant = Contract({"two-way": document})
+            with self.assertRaises(ValueError):
+                mutant.drawn("two-way#/$defs/attempt")
 
 
 class ConditionalFormTests(unittest.TestCase):
