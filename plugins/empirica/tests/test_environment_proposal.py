@@ -19,48 +19,22 @@ def _proposal(**changes):
     return body
 
 
-def _without(key):
-    body = _proposal()
-    del body[key]
-    return body
-
-
-def _images(count: int, first: object = "python:3.12-slim"):
-    return [first if index == 0 else f"python:3.12.{index}" for index in range(count)]
-
-
 class EnvironmentProposalSchemaTests(unittest.TestCase):
     def test_schema_constant_is_pinned(self):
         self.assertEqual(subject.PROPOSAL_SCHEMA, "empirica.environment-proposal/1")
-
-    def test_bounds_constants_are_pinned(self):
-        self.assertEqual(subject.MAX_SPIKE_IMAGES, 16)
-        self.assertEqual(subject.MAX_PREPARATION_STEPS, 8)
-        self.assertEqual(subject.MAX_PREPARATION_CHARS, 200)
-        self.assertEqual(subject.MAX_RATIONALE_CHARS, 600)
 
     def test_valid_proposal_passes_as_given(self):
         body = _proposal()
         self.assertEqual(subject.validate_proposal(body), body)
 
-    def test_body_is_closed(self):
-        malformed = {
-            "empty": {}, "extra key": _proposal(extra=True),
-            **{f"missing {key}": _without(key) for key in _proposal()},
-            "array": [], "null": None, "text": "environment", "number": 7, "boolean": True,
-        }
-        for name, bad in malformed.items():
-            with self.subTest(name=name), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(bad)
+    def test_plain_text_passes_through_unchanged(self):
+        """Behaviour, not a shape: admitted text carries its spaces and its characters exactly as given."""
+        for good in ("docker pull", "a plain sentence", "  padded  ", "unicode libre: café ok"):
+            self.assertEqual(subject.validate_proposal(_proposal(preparation=[good]))["preparation"], [good])
 
-    def test_profile_must_be_a_framework_profile(self):
-        for bad in ("docker-rust-v1", "", "docker-isolated", None, 1, True, ["docker-isolated-v1"]):
-            with self.subTest(bad=bad), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(_proposal(profile_id=bad))
-        self.assertEqual(
-            {subject.validate_proposal(_proposal(profile_id=profile))["profile_id"]
-             for profile in spike_plan.NETWORK_PROFILES},
-            set(spike_plan.NETWORK_PROFILES))
+    # The closed shape, the profile enumeration and every bound/pattern are the contract-conformance
+    # harness's to generate (ADR-0075, plugins/empirica/tests/test_contract_conformance.py); the closed
+    # refusal messages below stay pinned here because a message is behaviour, not a shape.
 
     def test_error_is_a_value_error_with_a_closed_message(self):
         self.assertTrue(issubclass(subject.EnvironmentProposalError, ValueError))
@@ -74,7 +48,9 @@ class EnvironmentProposalSchemaTests(unittest.TestCase):
 
 
 class ClosedMessageTests(unittest.TestCase):
-    """Every refusal names its one short closed message; nothing else escapes the module."""
+    """Every refusal names its one short closed message; nothing else escapes the module. The shapes that
+    trigger them are drawn from schema keywords by the conformance harness (ADR-0075); these pin the
+    message each admission decision carries, with bounds read from the generated core constant."""
 
     def test_every_refusal_carries_its_closed_message(self):
         cases = {
@@ -93,7 +69,7 @@ class ClosedMessageTests(unittest.TestCase):
                                     "environment proposal text must be a string"),
             "text carries controls": (_proposal, {"preparation": ["\x1b[31m"]},
                                       "environment proposal text carries control characters"),
-            "text exceeds its bound": (_proposal, {"rationale": "r" * 601},
+            "text exceeds its bound": (_proposal, {"rationale": "r" * (subject.MAX_RATIONALE_CHARS + 1)},
                                        "environment proposal text exceeds its character bound"),
             "preparation step is blank": (_proposal, {"preparation": [" "]},
                                           "environment proposal preparation step is blank"),
@@ -113,88 +89,6 @@ class ClosedMessageTests(unittest.TestCase):
             with self.subTest(name=name), self.assertRaises(subject.EnvironmentProposalError) as caught:
                 subject.next_revision(bad)
             self.assertEqual(str(caught.exception), message)
-
-
-class SpikeImagesTests(unittest.TestCase):
-    def test_bounds_at_and_beyond_the_limit(self):
-        self.assertEqual(len(subject.validate_proposal(_proposal(spike_images=_images(1)))["spike_images"]), 1)
-        self.assertEqual(len(subject.validate_proposal(_proposal(spike_images=_images(16)))["spike_images"]), 16)
-        malformed = {
-            "empty": [], "over the limit": _images(17), "wholly copied": ["a:1", "a:1"],
-            "not an array": "python:3.12-slim", "null": None, "integer": 3,
-        }
-        for name, bad in malformed.items():
-            with self.subTest(name=name), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(_proposal(spike_images=bad))
-
-    def test_image_syntax_is_the_spike_plan_grammar(self):
-        with self.assertRaises(subject.EnvironmentProposalError) as caught:
-            subject.validate_proposal(_proposal(spike_images=["Python:3.12"]))
-        self.assertIs(type(caught.exception), subject.EnvironmentProposalError)
-        self.assertNotIn("Python", str(caught.exception))
-        for bad in ("", "a b", "python:", "%", "/", 7, True, None):
-            with self.subTest(bad=bad), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(_proposal(spike_images=[bad]))
-        for form in ("python:3.12-slim", "sha256:" + "0" * 64,
-                     "example/probe@sha256:" + "0" * 64, "myregistry:5000/app/web"):
-            self.assertEqual(subject.validate_proposal(_proposal(spike_images=[form]))["spike_images"], [form])
-
-    def test_image_reference_byte_bound_is_the_spike_plan_limit(self):
-        at_limit = "a" * 253 + ":t"  # 255 ASCII characters, the spike draft image byte bound
-        self.assertEqual(subject.validate_proposal(_proposal(spike_images=[at_limit]))["spike_images"], [at_limit])
-        with self.assertRaises(subject.EnvironmentProposalError):
-            subject.validate_proposal(_proposal(spike_images=["a" * 254 + ":t"]))  # 256 characters
-
-    def test_duplicate_images_are_refused_after_syntax(self):
-        with self.assertRaises(subject.EnvironmentProposalError) as caught:
-            subject.validate_proposal(_proposal(spike_images=["python:3.12-slim", "python:3.12-slim"]))
-        self.assertEqual(str(caught.exception), "environment proposal spike images are duplicated")
-
-
-
-class PreparationTests(unittest.TestCase):
-    def test_bounds_at_and_beyond_the_limit(self):
-        self.assertEqual(subject.validate_proposal(_proposal(preparation=["x"]))["preparation"], ["x"])
-        self.assertEqual(len(subject.validate_proposal(_proposal(preparation=["x"] * 8))["preparation"]), 8)
-        malformed = {
-            "empty": [], "over the limit": ["x"] * 9, "not an array": "x",
-            "null": None, "integer": 3, "with a hole": ["x", None],
-        }
-        for name, bad in malformed.items():
-            with self.subTest(name=name), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(_proposal(preparation=bad))
-
-    def test_steps_must_be_nonblank_bounded_text(self):
-        at_limit = "x" * 200
-        self.assertEqual(subject.validate_proposal(_proposal(preparation=[at_limit]))["preparation"], [at_limit])
-        malformed = {
-            "empty string": "", "whitespace only": "  \t ", "null": None, "integer": 7, "boolean": True,
-            "newline": "line\nbreak", "escape": "color\x1b[31m", "delete": "del\x7f", "nul": "nul\x00", "c1": "\x85",
-            "over the limit": "x" * 201, "lone surrogate": "\ud800",
-        }
-        for name, bad in malformed.items():
-            with self.subTest(name=name), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(_proposal(preparation=[bad]))
-
-    def test_plain_text_passes_through_unchanged(self):
-        for good in ("docker pull", "a plain sentence", "  padded  ", "unicode libre: café ok"):
-            self.assertEqual(subject.validate_proposal(_proposal(preparation=[good]))["preparation"], [good])
-
-
-class RationaleTests(unittest.TestCase):
-    def test_bounds_at_and_beyond_the_limit(self):
-        at_limit = "r" * 600
-        self.assertEqual(subject.validate_proposal(_proposal(rationale=at_limit))["rationale"], at_limit)
-        malformed = {
-            "empty": "", "whitespace only": "   \t  ",
-            "over the limit": "r" * 601,
-            "null": None, "integer": 7, "boolean": True, "array": ["reason"],
-            "newline": "multi\nline", "tab": "tab\tchar", "c1": "\u0085 then a space",
-            "lone surrogate": "\ud800 reason",
-        }
-        for name, bad in malformed.items():
-            with self.subTest(name=name), self.assertRaises(subject.EnvironmentProposalError):
-                subject.validate_proposal(_proposal(rationale=bad))
 
 
 class CanonicalAndDigestTests(unittest.TestCase):
