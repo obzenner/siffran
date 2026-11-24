@@ -122,7 +122,15 @@ writing mirror tests. Once 7.2.0 has landed, the rest of the project moves to th
 | T5 | TypeScript side: fast-check arbitraries from the same schemas for the Pi adapters (`adapters/pi/test`, Methodologist Pi) | one arbitrary builder, generated from the schemas |
 | T6 | Enforcement: the T0 inventory becomes a failing guard in `check-static` (zero restated contract values outside the named `x-core-only` tests); `doc/testing.md` and the review brief updated | lands last |
 
-## 7. Operator decisions (recorded 2026-11-22)
+## 7. Review and acceptance policy (operator, 2026-11-23)
+
+- From E7 on, a medium node gets one review round; a fix round is re-checked narrowly with re-seeded defects or by the
+  coordinator, never open-ended.
+- Integration is accepted by real sessions, not by more review: a Pi session run inside the Lima VM (`empirica-box`, the
+  stack branch checked out in the VM), observed in the Empirica UI served from the VM, once E9 and E12 land (environment proposal, human approval, prepare, `qualify`, spike); the final
+  native qualification at E16, also in Lima.
+
+## 8. Operator decisions (recorded 2026-11-22)
 
 1. Workers may commit on their own `obzenner/empirica-e*` branches in their worktrees; no push.
 2. Probe image: one digest-pinned reference, no image in the repository.

@@ -244,6 +244,14 @@ route → graph → configure_run (approval) → investigate → … research �
 - **Deadline (E4 review).** The 60 s operator qualification budget is kept as is until native timing evidence exists.
   The run-scoped `qualify` deadline (proposed 150 s) is set in E5 from that evidence, explicitly budgeting recovery,
   five probes with their re-observations, final re-observation and publication.
+- **Timing evidence (operator session 2026-11-23).** E5 at `fbd7b604`, both profiles, real Docker, temporary sandbox
+  home, no leftover journals. All bound runs were on **Docker Desktop 29.7.2** (the authority is the selected Docker
+  context; `DOCKER_HOST` is not consulted, so runs started with it pointing at Lima still qualified Desktop, as the
+  records' `daemon_id` shows): isolated 17.1–18.5 s, networked 15.1–15.8 s over five attempts each. About 12 s is the two
+  deliberately waiting probes (timeout, and isolated egress refusal); every other stage is under 1.5 s. Journal recovery
+  was not exercised. Lima (`empirica-box`) is used only to run Empirica inside the VM, where the host is Linux and the VM's native
+  Docker Engine is admitted; pointing a macOS process at the VM's daemon is refused (only Docker Desktop is admitted on
+  macOS), which surfaced a misleading `docker-unreachable` reason, fixed in E5. Deadline: **90 s** (five times the worst measured attempt).
 - **Residual (R5).** Equality is semantic: the socket path, `daemon_id`, version and capabilities. A daemon restart
   on the same socket with the same identity is not detectable and is accepted as the same authority.
 
