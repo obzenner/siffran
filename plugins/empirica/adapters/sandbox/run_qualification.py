@@ -38,18 +38,20 @@ from . import (common, generic_admission as admission, generic_authority as auth
                generic_execution as execution, generic_journal,
                generic_qualification as qualification, planner, probe_image, process)
 
-#: The record schema this owner writes; the closed shape is validated by
-#: :func:`validate_run_record` and (once E2c is accepted) registered with the contract
-#: conformance harness in ``contracts/empirica-docker-spike/v1``.
+#: The record schema this owner writes: the closed shape's definition home is
+#: ``contracts/empirica-docker-spike/v1/qualification-record.schema.json`` (vendored at
+#: ``vendor/contracts/...``), validated here by :func:`validate_run_record` and (once
+#: E2c is accepted) registered with the contract conformance harness.
 QUALIFICATION_RECORD_SCHEMA = "siffran.empirica.docker-spike-qualification-record/3"
 NAMESPACE = "docker-spike-qualification-v3"
 MAX_RECORD_BYTES = 2 * 1024 * 1024
 #: One bound over lock wait, recovery, up to 16 inspections, five probes with their
-#: re-observations, final re-observation and publication — PROVISIONAL: the operator
-#: timing session sets the real value from measured evidence before 7.2.0 lands
-#: (spec section 5, "Deadline (E4 review)"); tests and the harness must read this
-#: constant, never a literal. A caller may inject a smaller bound, never a larger one.
-DEFAULT_QUALIFICATION_SECONDS = 150.0
+#: re-observations, final re-observation and publication — set from the operator timing
+#: session's measured evidence (spec section 5, "Timing evidence": worst attempt 18.5 s
+#: on Lima and Docker Desktop, both profiles); the session may re-measure and move it.
+#: Tests and the harness must read this constant, never a literal. A caller may inject a
+#: smaller bound, never a larger one.
+DEFAULT_QUALIFICATION_SECONDS = 90.0
 #: The environment-proposal bound (spec section 4.1): 1..16 local references. The E1
 #: model and the E2c harness own the definition once composed; this constant is the
 #: sandbox-side ceiling the owner enforces today.
@@ -124,7 +126,6 @@ _MAPPED_QUALIFICATION_REASONS = {
         RunQualificationReason.IMAGE_TOOL_MISSING,
     qualification.QualificationReason.IMAGE_UID_UNUSABLE:
         RunQualificationReason.IMAGE_UID_UNUSABLE,
-    qualification.QualificationReason.PROBE_FAILED: RunQualificationReason.PROBE_FAILED,
     qualification.QualificationReason.CLEANUP_UNAVAILABLE:
         RunQualificationReason.CLEANUP_UNAVAILABLE,
     qualification.QualificationReason.NETWORK_EGRESS_UNAVAILABLE:
@@ -140,11 +141,17 @@ _MAPPED_QUALIFICATION_REASONS = {
 
 class _RunFailure(RuntimeError):
     """Internal stage-local carrier: the boundary converts it (and the kept `/2`
-    failures) into one closed :class:`RunQualificationFailed` outcome."""
+    failures) into one closed :class:`RunQualificationFailed` outcome. The closed probe
+    invariant is enforced here already — a probe-failure reason carries exactly one probe
+    name and no other reason ever does — so the boundary can never construct the invalid
+    combination."""
 
     def __init__(self, reason: RunQualificationReason, detail: str,
                  probe: str | None = None) -> None:
         super().__init__(detail)
+        if (probe is None) is (reason is RunQualificationReason.PROBE_FAILED) \
+                or (probe is not None and probe not in qualification.PROBE_ORDER):
+            raise ValueError("run qualification probe identity does not match its reason")
         self.reason = reason
         self.detail = detail
         self.probe = probe
@@ -203,17 +210,19 @@ class RunQualificationBound:
 
 @dataclass(frozen=True, slots=True)
 class RunQualificationFailed:
-    """One closed failure; ``probe`` carries the failing probe name only when the
-    reason is ``qualification-probe-failed`` and is forbidden otherwise (spec 5.1)."""
+    """One closed failure; ``probe`` carries the failing probe name exactly when the
+    reason is ``qualification-probe-failed`` (required then, forbidden otherwise;
+    spec 5.1 — the identity is attached only at its owning boundary)."""
     reason: RunQualificationReason
     detail: str
     probe: str | None = None
 
     def __post_init__(self) -> None:
-        if self.probe is not None:
-            if (self.reason is not RunQualificationReason.PROBE_FAILED
-                    or self.probe not in qualification.PROBE_ORDER):
-                raise ValueError("run qualification probe name is not permitted")
+        if (self.probe is None) is (self.reason is RunQualificationReason.PROBE_FAILED):
+            raise ValueError("run qualification probe identity does not match its reason")
+        if (self.probe is not None
+                and self.probe not in qualification.PROBE_ORDER):
+            raise ValueError("run qualification probe name is not permitted")
 
 
 RunQualificationOutcome = RunQualificationBound | RunQualificationFailed
@@ -372,6 +381,37 @@ def build_run_record(
                                 "qualification_record_digest": canonical_digest(body)})
 
 
+def _durable_record_parent(records: Path) -> None:
+    """Create the record directory chain with every newly created parent durably synced.
+
+    Each missing directory is created, chmod'd and validated like ``common.safe_directory``,
+    and its parent directory is strictly fsynced before the record is published, so a crash
+    can lose neither the record file nor any directory entry that names it (E5 review,
+    blocking finding 5).
+    """
+    missing: list[Path] = []
+    current = records
+    while True:
+        try:
+            current.lstat()
+        except FileNotFoundError:
+            missing.append(current)
+            current = current.parent
+            continue
+        # The nearest existing ancestor is validated before anything is created, so a
+        # planted symlink above the record tree can never receive a new directory.
+        common.safe_directory(current, create=False)
+        break
+    for directory in reversed(missing):
+        try:
+            directory.mkdir(mode=common.MODE_DIR)
+            os.chmod(directory, common.MODE_DIR)
+        except FileExistsError:
+            pass
+        fsio.sync_directory(directory.parent)
+        common.safe_directory(Path(directory), create=False)
+
+
 class RunQualificationStore:
     """Read-only loader for content-addressed `/3` records. The `/2` record and
     pointer namespaces are structurally outside it (different tree, no fallback), and
@@ -388,6 +428,9 @@ class RunQualificationStore:
         if not validate_digest256(record_digest):
             raise authority.GenericQualificationError("run qualification record digest is malformed")
         common.safe_directory(self.root, create=False)
+        # The records directory is validated on load exactly as on write, so a symbolic
+        # link planted between the two checks cannot redirect a read into another tree.
+        common.safe_directory(self.records, create=False)
         raw = common.safe_file(
             self.records / (record_digest.removeprefix("sha256:") + ".json"),
             cap=MAX_RECORD_BYTES)
@@ -406,11 +449,19 @@ class RunQualificationStore:
         return record
 
     def write_record(self, record: Mapping[str, Any]) -> Path:
-        """Publish one validated record content-addressed and durably (write-first)."""
+        """Publish one validated record content-addressed and durably (write-first).
+
+        Publication is strictly durable: the file is fsynced and renamed, the containing
+        directory is strictly fsynced, and every directory newly created for this
+        publication was fsynced into its parent first. A directory-open or fsync error
+        fails the publication, and the identical-bytes retry re-proves durability the
+        same way before returning. Read-back and mode checks alone would not.
+        """
         checked = validate_run_record(dict(record))
         digest = checked["qualification_record_digest"]
-        common.safe_directory(self.root, create=True)
-        common.safe_directory(self.records, create=True)
+        _durable_record_parent(self.records)
+        common.safe_directory(self.root, create=False)
+        common.safe_directory(self.records, create=False)
         path = self.records / (digest.removeprefix("sha256:") + ".json")
         payload = fsio.dump_json(checked)
         if len(payload) > MAX_RECORD_BYTES:
@@ -427,8 +478,11 @@ class RunQualificationStore:
             if readback != payload:
                 raise authority.GenericQualificationError(
                     "run qualification record path contains different bytes")
+            # The retry also proves durability: an interrupted writer can leave the renamed
+            # file behind with no synchronized directory entry (E5 review, blocking 5).
+            fsio.sync_directory(self.records)
             return path
-        fsio.atomic_write(path, payload)
+        fsio.atomic_write(path, payload, durable=True)
         os.chmod(path, common.MODE_FILE)
         if common.safe_file(path, cap=MAX_RECORD_BYTES) != payload:
             raise authority.GenericQualificationError("run qualification record publication differs")
@@ -445,7 +499,12 @@ def _remain(deadline: float, clock: Callable[[], float], stage: str) -> None:
 def _classify_authority_error(exc: Exception, *, observation: bool) -> _RunFailure:
     """Map one Docker-authority observation error onto the closed reason set. During the
     initial observation a read failure is `docker-unreachable` (A1: a stopped daemon);
-    a capability refusal keeps its own kept value; the deadline is never collapsed."""
+    a capability refusal keeps its own kept value — including a reachable daemon whose
+    platform the support contract does not admit (an unsupported engine, never an
+    unreachability); the deadline is never collapsed."""
+    if isinstance(exc, authority.CapabilityRefused):
+        # the endpoint resolved and the daemon answered; its facts do not admit
+        observation = False
     message = str(exc)
     if "resource-limits-unavailable:" in message:
         return _RunFailure(RunQualificationReason.RESOURCE_LIMITS_UNAVAILABLE, message)
@@ -459,9 +518,15 @@ def _classify_authority_error(exc: Exception, *, observation: bool) -> _RunFailu
 def _observe_authority(runtime_inspector: Callable[..., authority.GenericRuntimeInspection],
                        seed: Mapping[str, Any], *, deadline: float,
                        clock: Callable[[], float], stage: str) -> dict[str, Any]:
-    """Observe the authority once (context, version, info including ``daemon_id`` and
-    capabilities): inspect_current_runtime pins every remaining read to the endpoint it
-    resolved, and the returned ``runtime`` pins every later effect."""
+    """Observe the authority once (context, version, info including ``daemon_id``):
+    reads only, no admission.
+
+    ``inspect_current_runtime`` resolves the endpoint once and pins its own remaining
+    reads to it; the raw facts are returned unadmitted because recovery precedes the
+    new attempt's admission (E5 review, blocking finding 2): a capability or
+    implementation refusal must never skip journal recovery. Admission of these same
+    facts happens after recovery.
+    """
     _remain(deadline, clock, stage)
     try:
         observed = runtime_inspector(seed, deadline=deadline)
@@ -470,28 +535,43 @@ def _observe_authority(runtime_inspector: Callable[..., authority.GenericRuntime
     if type(observed) is not authority.GenericRuntimeInspection:
         raise _RunFailure(RunQualificationReason.DOCKER_UNREACHABLE,
                           "the Docker authority observation is unknown")
+    return observed.runtime
+
+
+def _admit_observed_facts(observed: Mapping[str, Any]) -> dict[str, Any]:
+    """Admit the observed facts as the pinned runtime of the new attempt (after recovery):
+    a capability or limits refusal keeps its own kept reason, the deadline is never
+    collapsed, anything else is a closed capability failure."""
     try:
-        return authority.validate_runtime(observed.runtime)
+        return authority.validate_runtime(dict(observed))
     except authority.GenericQualificationError as exc:
         raise _classify_authority_error(exc, observation=False) from exc
 
 
 def _final_reobservation(runtime: Mapping[str, Any], implementation_digest: str, *,
-                         runtime_inspector: Callable[..., authority.GenericRuntimeInspection],
+                         pinned_reobserver: Callable[..., authority.GenericRuntimeInspection],
                          implementation_inspector: Callable[[], Mapping[str, Any]],
                          deadline: float, clock: Callable[[], float]) -> None:
     """Re-observe authority and the implementation after the probes (spec section 5,
-    step 5): semantic equality plus pre/post server-version equality; a change is the
-    stale reason of its own kind, never a collapsed probe failure."""
+    step 5) through the pinned endpoint: semantic equality plus pre/post server-version
+    equality; a change is the stale reason of its own kind, never a collapsed probe
+    failure. Changed observations (any fact that no longer admits, capability included)
+    are stale-daemon; initial capability refusal keeps its own kept reason at the
+    initial observation, and a genuine read failure stays unreachable.
+    """
     _remain(deadline, clock, "the post-probe authority re-observation")
     try:
-        observed = runtime_inspector(runtime, deadline=deadline)
+        observed = pinned_reobserver(runtime, deadline=deadline)
     except authority.GenericQualificationError as exc:
         raise _classify_authority_error(exc, observation=True) from exc
     if type(observed) is not authority.GenericRuntimeInspection:
         raise _RunFailure(RunQualificationReason.STALE_DAEMON,
                           "the Docker authority could not be re-observed after the probes")
-    current = authority.validate_runtime(observed.runtime)
+    try:
+        current = authority.validate_reobserved_runtime(runtime, observed.runtime)
+    except authority.DaemonDrift as exc:
+        raise _RunFailure(RunQualificationReason.STALE_DAEMON,
+                          "the Docker daemon authority drifted during qualification") from exc
     if not authority.authorities_match(runtime, current):
         raise _RunFailure(RunQualificationReason.STALE_DAEMON,
                           "the Docker daemon authority drifted during qualification")
@@ -596,6 +676,7 @@ def qualify_run_environment(
     docker_cli: Path,
     qualification_seconds: float | None = None,
     runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_current_runtime,
+    pinned_reobserver: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_pinned_runtime,
     implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
     image_runner: process.Runner | None = None,
     effects_factory: EffectsStage | None = None,
@@ -605,10 +686,18 @@ def qualify_run_environment(
 ) -> RunQualificationOutcome:
     """Run one qualification attempt for the run binding and write the `/3` record.
 
-    Returns ``bound(record_digest, record)`` only after the record is durably
-    published write-first for the caller's binding compare-and-set, or one closed
-    failure. The attempt holds the shared runtime lock for its whole duration; a
-    failure or a timeout binds nothing and leaves recoverable journals.
+    Returns ``bound(record_digest, record)`` only after the record is durably published
+    write-first — and only after the deadline is re-checked past publication — for the
+    caller's binding compare-and-set, or one closed failure. The attempt holds the
+    shared runtime lock for its whole duration; a failure or a timeout binds nothing
+    and leaves recoverable journals.
+
+    ``runtime_inspector`` performs the one initial discovery (endpoint resolution);
+    ``pinned_reobserver`` performs every later daemon read — the kernel postflights and
+    the final re-observation — at that pinned endpoint, never a fresh context
+    resolution. Expiry anywhere reports the deadline reason: when the budget is gone,
+    every stage error path is converted to the deadline reason before the outcome is
+    built.
     """
     # --- ingress -------------------------------------------------------------
     try:
@@ -635,36 +724,56 @@ def qualify_run_environment(
     budget = float(qualification_seconds)
     began = clock()
     deadline = began + budget
-    stage = "the runtime lock wait"
+    # The stage label for deadline details: the inner attempt keeps it current.
+    stage: list[str] = ["the runtime lock wait"]
+
+    def deadline_outcome() -> RunQualificationFailed:
+        return RunQualificationFailed(
+            RunQualificationReason.DEADLINE_EXCEEDED,
+            "run qualification deadline expired at: " + stage[0])
+
     try:
         return _qualify_locked(binding, spike_images, profile_id, docker_cli, deadline,
                                runtime_inspector=runtime_inspector,
+                               pinned_reobserver=pinned_reobserver,
                                implementation_inspector=implementation_inspector,
                                image_runner=image_runner, effects_factory=effects_factory,
                                kernel_factory=kernel_factory, sandbox_root=sandbox_root,
-                               began=began, clock=clock)
+                               began=began, clock=clock, stage=stage)
     except _RunFailure as exc:
+        if clock() >= deadline:
+            # Expiry anywhere reports the deadline reason (E5 review, blocking 4), including
+            # a stage error that fired while the budget was already gone.
+            return deadline_outcome()
         return RunQualificationFailed(exc.reason, exc.detail, exc.probe)
     except qualification.GenericQualificationDrift as exc:
+        if clock() >= deadline:
+            return deadline_outcome()
         reason = (RunQualificationReason.STALE_IMPLEMENTATION
                   if isinstance(exc.drift, authority.ImplementationDrift)
                   else RunQualificationReason.STALE_DAEMON)
         return RunQualificationFailed(reason, str(exc))
     except qualification.GenericQualificationFailure as exc:
+        if clock() >= deadline:
+            return deadline_outcome()
         reason = _MAPPED_QUALIFICATION_REASONS.get(
             exc.reason, RunQualificationReason.CAPABILITY_UNAVAILABLE)
         return RunQualificationFailed(reason, str(exc))
     except execution.GenericExecutionUnavailable as exc:
+        if clock() >= deadline:
+            return deadline_outcome()
         return RunQualificationFailed(RunQualificationReason.CLEANUP_UNAVAILABLE, str(exc))
     except common.GenericScaffoldingError as exc:
-        message = str(exc)
-        if "deadline expired" in message:
-            return RunQualificationFailed(RunQualificationReason.DEADLINE_EXCEEDED,
-                                          "run qualification deadline expired at: " + stage)
-        return RunQualificationFailed(RunQualificationReason.SANDBOX_UNSAFE, message)
+        if clock() >= deadline or "deadline expired" in str(exc):
+            return deadline_outcome()
+        return RunQualificationFailed(RunQualificationReason.SANDBOX_UNSAFE, str(exc))
     except authority.GenericQualificationError as exc:
+        if clock() >= deadline:
+            return deadline_outcome()
         return RunQualificationFailed(RunQualificationReason.CAPABILITY_UNAVAILABLE, str(exc))
     except Exception as exc:
+        if clock() >= deadline:
+            return deadline_outcome()
         return RunQualificationFailed(RunQualificationReason.CAPABILITY_UNAVAILABLE,
                                       "run qualification failed: " + str(exc))
 
@@ -677,6 +786,7 @@ def _qualify_locked(
     deadline: float,
     *,
     runtime_inspector: Callable[..., authority.GenericRuntimeInspection],
+    pinned_reobserver: Callable[..., authority.GenericRuntimeInspection],
     implementation_inspector: Callable[[], Mapping[str, Any]],
     image_runner: process.Runner | None,
     effects_factory: EffectsStage | None,
@@ -684,6 +794,7 @@ def _qualify_locked(
     sandbox_root: Path | None,
     began: float,
     clock: Callable[[], float],
+    stage: list[str],
 ) -> RunQualificationBound:
     root = (common.sandbox_home() if sandbox_root is None
             else common.canonical_authority_path(Path(sandbox_root)))
@@ -691,14 +802,57 @@ def _qualify_locked(
     store.prepare_execution_scaffolding()
     generic_journal.GenericJournalStore(store).prepare()
     with common.runtime_lock(store, deadline, clock=clock):
-        # Observe authority once: context, version, info (daemon_id) and capability;
-        # inspect_current_runtime resolves the endpoint once and pins its later reads,
-        # and every effect below reuses this pinned `runtime` endpoint.
-        runtime = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
-                                     deadline=deadline, clock=clock,
-                                     stage="the authority observation")
+        # Initial discovery: one observation (context, version, info including
+        # ``daemon_id``) that resolves the endpoint once — reads only, no admission.
+        # Recovery precedes the new attempt's admission, so a capability or
+        # implementation refusal must never skip journal recovery (E5 review, 2).
+        stage[0] = "the authority observation"
+        observed = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
+                                     deadline=deadline, clock=clock, stage=stage[0])
+        # The minimum pinned daemon observation journal recovery needs: the canonical
+        # endpoint and platform only (never capability facts, never the daemon
+        # identifier), so a daemon that now refuses capability still gets recovered.
+        try:
+            identity = authority.pinned_daemon_identity(observed)
+        except authority.GenericQualificationError as exc:
+            raise _RunFailure(RunQualificationReason.DOCKER_UNREACHABLE,
+                              "the Docker authority cannot be identified for recovery") from exc
+        # Private per-attempt authority scaffolding under the run-scoped namespace —
+        # directories only. The config-emptiness admission runs after recovery.
+        namespace = root / NAMESPACE
+        config = namespace / "configs" / profile_id
+        work = namespace / "work"
+        for directory in (namespace, config, work, namespace / "records"):
+            common.safe_directory(directory, create=True)
+        seed = canonical_digest({"schema": QUALIFICATION_RECORD_SCHEMA,
+                                 "attempt": binding.to_data()})
+        recovery_cli = Path(observed.get("docker_cli", str(docker_cli)))
+        recovery = authority.ResolvedGenericAuthority(
+            application.GenericQualifiedBackend("docker", profile_id, seed, seed),
+            recovery_cli, tuple(sorted({
+                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": identity["endpoint"],
+                "DOCKER_CONFIG": str(config),
+            }.items())), work, identity["server_os"], identity["server_architecture"],
+            observed.get("ncpu", 0), observed.get("mem_total", 0), dict(observed))
+        selected_effects = effects_factory or (lambda current, operation, name:
+                                               _concrete_effects(current))
+        # Recover every prior journal under the shared runtime lock, on the pinned
+        # daemon, before any part of the new attempt's admission.
+        stage[0] = "the prior journal recovery"
+        effects = selected_effects(recovery, None, "recovery")
+        try:
+            execution.recover_generic_operations(
+                store, effects, authority=identity, deadline=deadline, clock=clock)
+        finally:
+            effects.close()
+        # --- admission of the new attempt, strictly after recovery -------------------
+        # Capability admission of the same observed facts: a refusal here keeps its own
+        # kept reason and has already recovered its prior journals.
+        stage[0] = "the authority admission"
+        runtime = _admit_observed_facts(observed)
         # The frozen loaded release (E4): one per-process freeze, compared against disk;
         # an unprovable loaded release can never be bound.
+        stage[0] = "the loaded release check"
         try:
             loaded_release = common.freeze_loaded_release(implementation_inspector)
         except common.GenericScaffoldingError as exc:
@@ -711,12 +865,8 @@ def _qualify_locked(
             raise _RunFailure(RunQualificationReason.STALE_IMPLEMENTATION,
                               "the loaded release differs from disk before qualification")
         implementation_digest = validate_digest256(loaded_release)
-        # Private per-attempt authority scaffolding under the run-scoped namespace.
-        namespace = root / NAMESPACE
-        config = namespace / "configs" / profile_id
-        work = namespace / "work"
-        for directory in (namespace, config, work, namespace / "records"):
-            common.safe_directory(directory, create=True)
+        # The private qualification config must be empty for this attempt — admission.
+        stage[0] = "the qualification config admission"
         try:
             if tuple(config.iterdir()):
                 raise _RunFailure(
@@ -726,8 +876,6 @@ def _qualify_locked(
         except OSError as exc:
             raise _RunFailure(RunQualificationReason.CAPABILITY_UNAVAILABLE,
                               "the qualification Docker config is unreadable") from exc
-        seed = canonical_digest({"schema": QUALIFICATION_RECORD_SCHEMA,
-                                 "attempt": binding.to_data()})
         resolved = authority.ResolvedGenericAuthority(
             application.GenericQualifiedBackend("docker", profile_id, seed, seed),
             Path(runtime["docker_cli"]), tuple(sorted({
@@ -735,23 +883,15 @@ def _qualify_locked(
                 "DOCKER_CONFIG": str(config),
             }.items())), work, runtime["server_os"], runtime["server_architecture"],
             runtime["ncpu"], runtime["mem_total"], runtime)
-        selected_effects = effects_factory or (lambda current, operation, name:
-                                               _concrete_effects(current))
-        # Recover every prior journal under the pinning runtime lock, on the pinned
-        # daemon, before any mutation of this attempt.
-        effects = selected_effects(resolved, None, "recovery")
-        try:
-            execution.recover_generic_operations(
-                store, effects, authority=authority.authority_facts(runtime),
-                deadline=deadline, clock=clock)
-        finally:
-            effects.close()
         runner = process.BoundedRunner() if image_runner is None else image_runner
         # Trusted probe image admission (4.3), then spike-image resolution and sealing.
+        stage[0] = "the trusted probe image inspection"
         probe_row, probe_image_ = admit_probe_image(
             runtime, config=config, runner=runner, deadline=deadline, clock=clock)
+        stage[0] = "the spike image inspection"
         spike_rows = []
         for reference in spike_images:
+            stage[0] = "the spike image inspection " + reference
             _remain(deadline, clock, "the spike image inspection " + reference)
             try:
                 sealed = qualification.inspect_qualification_image(
@@ -769,9 +909,11 @@ def _qualify_locked(
             store, runtime, profile_id, probe_image_, implementation_digest,
             effects_factory=lambda operation, name: selected_effects(resolved, operation, name),
             clock=clock, runtime_inspector=runtime_inspector,
+            pinned_reobserver=pinned_reobserver,
             implementation_inspector=implementation_inspector)
         probes = []
         for name, expected in zip(qualification.PROBE_ORDER, qualification.PROBE_EXPECTED):
+            stage[0] = "the qualification probe " + name
             _remain(deadline, clock, "the qualification probe " + name)
             try:
                 probes.append(kernel.run(name, expected, deadline=deadline))
@@ -781,11 +923,14 @@ def _qualify_locked(
                           else RunQualificationReason.STALE_DAEMON)
                 raise _RunFailure(reason, str(exc)) from exc
             except qualification.GenericQualificationFailure as exc:
-                reason = _MAPPED_QUALIFICATION_REASONS.get(
-                    exc.reason, RunQualificationReason.CAPABILITY_UNAVAILABLE)
+                reason = (RunQualificationReason.PROBE_FAILED
+                          if exc.reason is qualification.QualificationReason.PROBE_FAILED
+                          else _MAPPED_QUALIFICATION_REASONS.get(
+                              exc.reason, RunQualificationReason.CAPABILITY_UNAVAILABLE))
                 raise _RunFailure(
                     reason, str(exc),
                     name if reason is RunQualificationReason.PROBE_FAILED else None) from exc
+        stage[0] = "the qualification cleanup proof"
         try:
             kernel.cleanup_proof()
         except qualification.GenericQualificationFailure as exc:
@@ -794,12 +939,23 @@ def _qualify_locked(
                     exc.reason, RunQualificationReason.CAPABILITY_UNAVAILABLE),
                 str(exc)) from exc
         _final_reobservation(runtime, implementation_digest,
-                              runtime_inspector=runtime_inspector,
+                              pinned_reobserver=pinned_reobserver,
                               implementation_inspector=implementation_inspector,
                               deadline=deadline, clock=clock)
         _remain(deadline, clock, "the qualification record publication")
+        stage[0] = "the qualification record publication"
         record = build_run_record(binding, profile_id, runtime, implementation_digest,
                                    probe_row, spike_rows, tuple(probes),
                                    int((clock() - began) * 1000))
-        RunQualificationStore(root).write_record(record)
+        try:
+            RunQualificationStore(root).write_record(record)
+        except OSError as exc:
+            # Strict durability fails the publication: a directory the record cannot be
+            # proven durable in is a sandbox storage failure, never a capability one.
+            raise _RunFailure(RunQualificationReason.SANDBOX_UNSAFE,
+                              "the qualification record could not be published durably") from exc
+        # Recheck the deadline after publication: an attempt whose budget died during
+        # the build or the durable write returns failed, never a timed-out binding; the
+        # written record stays an inert orphan for its own digest and lineage.
+        _remain(deadline, clock, "the qualification record publication")
         return RunQualificationBound(record["qualification_record_digest"], record)

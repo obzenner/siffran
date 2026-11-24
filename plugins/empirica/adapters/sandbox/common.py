@@ -165,6 +165,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "vendor/contracts/empirica/v2/request.schema.json",
     "vendor/contracts/empirica/v2/response.schema.json",
     "vendor/contracts/empirica/v2/state.schema.json",
+    "vendor/contracts/empirica-docker-spike/v1/qualification-record.schema.json",
     "vendor/contracts/empirica-docker-spike/v1/support-contract.json",
 }))
 
@@ -231,6 +232,14 @@ def safe_directory(path: Path, *, create: bool) -> None:
             raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}")
         try:
             path.mkdir(parents=True, mode=MODE_DIR)
+        except FileExistsError:
+            pass  # a concurrent first initializer (E5 review, finding 3) won the create;
+            # the validation below owns the identity, so the loser validates the winner's
+            # directory instead of refusing a same-identity concurrent first use
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                f"sandbox directory cannot be created safely: {path.name}") from exc
+        try:
             os.chmod(path, MODE_DIR)
             info = path.lstat()
         except OSError as exc:
@@ -335,11 +344,45 @@ class ExecutionStore:
     def prepare_execution_scaffolding(self) -> None:
         for path in (self.home, self.runtime, self.staging):
             safe_directory(path, create=True)
+        self._create_runtime_lock_exclusively()
+        self._check_runtime_lock()
+
+    def _create_runtime_lock_exclusively(self) -> None:
+        """Initialize the shared runtime lock without ever replacing an existing inode.
+
+        First use creates the lock with ``O_CREAT|O_EXCL`` and then every attempt opens the
+        same name, so concurrent first users race only the exclusive create: the loser sees
+        the winner's inode and serializes on ``flock``. Atomic replacement is forbidden here
+        on purpose — its rename could unlink a lock file that is already held, letting both
+        attempts enter recovery and the probes (E5 review, blocking finding 3).
+        """
         try:
             self.runtime_lock.lstat()
+            return  # an existing lock inode is the shared lock; never replace it
         except FileNotFoundError:
-            fsio.atomic_write(self.runtime_lock, b"")
-        self._check_runtime_lock()
+            pass
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                "sandbox runtime lock cannot be inspected safely") from exc
+        try:
+            fd = os.open(self.runtime_lock,
+                         os.O_CREAT | os.O_EXCL | os.O_WRONLY | NOFOLLOW | CLOEXEC, MODE_FILE)
+        except FileExistsError:
+            return  # lost the exclusive-create race: the winner's inode is the lock
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                "sandbox runtime lock cannot be created safely") from exc
+        try:
+            os.fchmod(fd, MODE_FILE)
+            os.fsync(fd)
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                "sandbox runtime lock cannot be initialized safely") from exc
+        finally:
+            os.close(fd)
+        # Best-effort control-file durability only: a lost lock dirent is recreated on the
+        # next preparation; the publication path is where strict sync is required.
+        fsio._fsync_dir(self.home)
 
     def check_execution_scaffolding(self) -> None:
         for path in (self.home, self.runtime, self.staging):
