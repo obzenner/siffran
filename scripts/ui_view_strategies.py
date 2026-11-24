@@ -16,9 +16,9 @@ from hypothesis import strategies as st
 
 from validate_ui_view import view_schemas
 
-KNOWN = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf", "properties",
-         "required", "additionalProperties", "items", "minItems", "maxItems", "minimum", "maximum", "minLength",
-         "pattern", "allOf"}
+KNOWN = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf",
+         "anyOf", "properties", "required", "additionalProperties", "items", "minItems", "maxItems",
+         "uniqueItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "allOf", "not"}
 #: Generated arrays and maps are short: what is checked is the shape, never the volume.
 MAX_ITEMS = 3
 _TEXT = st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), max_size=12)
@@ -38,6 +38,8 @@ class Strategies:
         self.pin = pin
         self.ui = ui or view_schemas()
         self.by_id = {s["$id"]: s for s in self.ui.values()}
+        #: The schema keywords this generator derives; a subclass extends it with its own annotations.
+        self.known = KNOWN
         self._memo: dict[tuple[str, str], st.SearchStrategy] = {}
 
     def document(self, name: str) -> st.SearchStrategy:
@@ -53,7 +55,7 @@ class Strategies:
         return node, doc, fragment
 
     def node(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
-        unknown = set(node) - KNOWN
+        unknown = set(node) - self.known
         if unknown:
             raise ValueError(f"{doc['$id']}#{pointer}: keywords this generator does not derive: {sorted(unknown)}")
         if "$ref" in node:
@@ -68,13 +70,15 @@ class Strategies:
             if self.pin is not None and self.pin[:2] == (doc["$id"], pointer):
                 return st.just(self.pin[2])
             return st.sampled_from(node["enum"])
-        if "oneOf" in node:
-            branches = list(enumerate(node["oneOf"]))
-            if self.full and len(branches) > 1:
-                branches = [(n, b) for n, b in branches if b.get("type") != "null"] or branches
-            if self.pin is not None:
-                branches = [(n, b) for n, b in branches if self.reaches(b, doc, f"{pointer}/oneOf/{n}")] or branches
-            return st.one_of([self.node(b, doc, f"{pointer}/oneOf/{n}") for n, b in branches])
+        for combinator in ("oneOf", "anyOf"):
+            if combinator in node:
+                branches = list(enumerate(node[combinator]))
+                if self.full and len(branches) > 1:
+                    branches = [(n, b) for n, b in branches if b.get("type") != "null"] or branches
+                if self.pin is not None:
+                    branches = [(n, b) for n, b in branches
+                                if self.reaches(b, doc, f"{pointer}/{combinator}/{n}")] or branches
+                return st.one_of([self.node(b, doc, f"{pointer}/{combinator}/{n}") for n, b in branches])
         types = node.get("type")
         if types is None:
             raise ValueError(f"{doc['$id']}#{pointer}: a node with no type")
@@ -95,6 +99,7 @@ class Strategies:
             seen.add((tdoc["$id"], fragment))
             return self.reaches(target, tdoc, fragment, seen)
         subs = [(b, f"{pointer}/oneOf/{n}") for n, b in enumerate(node.get("oneOf", ()))]
+        subs += [(b, f"{pointer}/anyOf/{n}") for n, b in enumerate(node.get("anyOf", ()))]
         subs += [(v, f"{pointer}/properties/{k}") for k, v in node.get("properties", {}).items()]
         if isinstance(node.get("additionalProperties"), dict):
             subs.append((node["additionalProperties"], f"{pointer}/additionalProperties"))
@@ -113,20 +118,39 @@ class Strategies:
             return ints if kind == "integer" else st.one_of(ints, st.floats(
                 min_value=low, max_value=high, allow_nan=False, allow_infinity=False))
         if kind == "string":
-            if "pattern" in node:
-                return st.from_regex(re.compile(node["pattern"]), fullmatch=True)
-            return st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)),
-                           min_size=node.get("minLength", 0), max_size=max(12, node.get("minLength", 0)))
+            return self._string(node, doc, pointer)
         if kind == "array":
             items = node.get("items")
             if items is None:
                 raise ValueError(f"{doc['$id']}#{pointer}: an array with no items")
             low = max(node.get("minItems", 0), 1 if self.full else 0)
             return st.lists(self.node(items, doc, f"{pointer}/items"), min_size=low,
-                            max_size=min(node.get("maxItems", MAX_ITEMS), max(low, MAX_ITEMS)))
+                            max_size=min(node.get("maxItems", MAX_ITEMS), max(low, MAX_ITEMS)),
+                            unique=bool(node.get("uniqueItems")))
         if kind == "object":
             return self._object(node, doc, pointer)
         raise ValueError(f"{doc['$id']}#{pointer}: type {kind}")
+
+    def _string(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
+        """A string node: its pattern (and every plain pattern its ``allOf`` adds, Draft-2020-12 ``search`` semantics)
+        within its length bounds. A string node's ``allOf`` may only add patterns; anything else is refused."""
+        patterns = [node["pattern"]] if "pattern" in node else []
+        for entry in node.get("allOf", ()):
+            if set(entry) != {"pattern"}:
+                raise ValueError(f"{doc['$id']}#{pointer}: an allOf entry this generator does not derive: {sorted(entry)}")
+            patterns.append(entry["pattern"])
+        low, high = node.get("minLength", 0), node.get("maxLength")
+        if not patterns:
+            return st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), min_size=low,
+                           max_size=(min(max(12, low), high) if high is not None else max(12, low)))
+        drawn = st.from_regex(re.compile(patterns[0]), fullmatch=True)
+        for extra in patterns[1:]:
+            drawn = drawn.filter(lambda s, extra=extra: re.search(extra, s) is not None)
+        if high is not None:
+            drawn = drawn.filter(lambda s: len(s) <= high)
+        if low:
+            drawn = drawn.filter(lambda s: len(s) >= low)
+        return drawn
 
     def _implications(self, node: dict, doc: dict, pointer: str) -> list[tuple[str, str, Any, str, dict]]:
         """The member-to-member couplings this node's ``allOf`` states, as one derivation rule set:
@@ -158,8 +182,13 @@ class Strategies:
         return rules
 
     def _object(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
-        props = node.get("properties", {})
+        forbidden = set(node.get("not", {}).get("required", ()))
         required = set(node.get("required", ()))
+        if forbidden & required:
+            raise ValueError(f"{doc['$id']}#{pointer}: a member that is both required and forbidden")
+        # A ``not: {required: [...]}`` branch (ADR-0075 conditional form): the branch may not carry
+        # those members at all, so they are never drawn — a full document excludes a forbidden member.
+        props = {key: value for key, value in node.get("properties", {}).items() if key not in forbidden}
         rules = self._implications(node, doc, pointer)
         if rules and len({(rule[0], rule[3]) for rule in rules}) == 1:
             driver, target = rules[0][0], rules[0][3]

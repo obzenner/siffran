@@ -12,20 +12,36 @@ from typing import Any
 
 from . import spike_plan
 from .canonical import canonical_digest
+from .contract_bounds import (
+    ENVIRONMENT_HISTORY_MAX_ITEMS,
+    ENVIRONMENT_PROPOSAL_PREPARATION_MAX_ITEMS,
+    ENVIRONMENT_PROPOSAL_PREPARATION_MAX_LENGTH,
+    ENVIRONMENT_PROPOSAL_RATIONALE_MAX_LENGTH,
+    ENVIRONMENT_PROPOSAL_RATIONALE_PATTERNS,
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_MAX_ITEMS,
+    QUALIFICATION_ATTEMPTS_MAX_ITEMS,
+)
 
 PROPOSAL_SCHEMA = "empirica.environment-proposal/1"
 
-MAX_SPIKE_IMAGES = 16
-MAX_PREPARATION_STEPS = 8
-MAX_PREPARATION_CHARS = 200
-MAX_RATIONALE_CHARS = 600
+#: The bounds are the contract's own word (contracts/empirica/v2/state.schema.json, regenerated straight from
+#: its annotated definitions into core.contract_bounds by ``make contract-bounds``): neither side rewrites the
+#: number, and drift fails ``make contract-check``.
+MAX_SPIKE_IMAGES = ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_MAX_ITEMS
+MAX_PREPARATION_STEPS = ENVIRONMENT_PROPOSAL_PREPARATION_MAX_ITEMS
+MAX_PREPARATION_CHARS = ENVIRONMENT_PROPOSAL_PREPARATION_MAX_LENGTH
+MAX_RATIONALE_CHARS = ENVIRONMENT_PROPOSAL_RATIONALE_MAX_LENGTH
 # State bounds (spec §4.2): immutable earlier revisions and started host attempts per run.
-MAX_ENVIRONMENT_HISTORY = 64
-MAX_QUALIFICATION_ATTEMPTS = 8
+MAX_ENVIRONMENT_HISTORY = ENVIRONMENT_HISTORY_MAX_ITEMS
+MAX_QUALIFICATION_ATTEMPTS = QUALIFICATION_ATTEMPTS_MAX_ITEMS
 
 _BODY_FIELDS = frozenset({"profile_id", "spike_images", "preparation", "rationale"})
 # C0 and C1 controls never render honestly; free text must never carry them.
 _CONTROL_CHARACTERS = re.compile("[\x00-\x1f\x7f-\x9f]")
+# The contract writes blankness itself: the explicit cross-host whitespace class of the environmentProposal
+# definition (U+FEFF inside it, where JavaScript's \S says blank and Python's strip does not). No host language's
+# \s or strip semantics decides what a blank step or rationale is — the pattern is the one word.
+_NON_BLANK = re.compile(ENVIRONMENT_PROPOSAL_RATIONALE_PATTERNS[0])
 
 
 class EnvironmentProposalError(ValueError):
@@ -70,7 +86,7 @@ def _text(value: object, maximum: int, message: str) -> str:
         raise EnvironmentProposalError("environment proposal text must be UTF-8") from exc
     if len(value) > maximum:
         raise EnvironmentProposalError("environment proposal text exceeds its character bound")
-    if not value.strip():
+    if not _NON_BLANK.search(value):
         raise EnvironmentProposalError(message)
     return value
 
