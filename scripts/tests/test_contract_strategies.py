@@ -4,8 +4,8 @@
 The harness (plugins/empirica/tests/test_contract_conformance.py) sweeps the real registered contracts;
 these controls prove the engine itself: the differential discipline (a candidate is never dropped, a
 ``ValueError`` is the domain and a ``TypeError`` is a finding), the declared open-disagreement registry
-(run/5's ``$`` digest anchors, red until the E2a re-anchor lands — the controls pin the mismatch live),
-the oneOf conditional form a later node registers by declaration, the grammar synthesizer's branch
+(empty at this head: the run/5 digest anchors healed when 07c5f66b re-anchored both, and the controls
+pin the *absence* of any excusal), the oneOf conditional form a later node registers by declaration, the grammar synthesizer's branch
 enumeration, the integer-float core-only excuse, and the bounded-work rules (no per-iteration list
 copies, an ``_absent_key`` that terminates). Every control is derandomized: the same corpus on every
 machine (doc/testing.md T1).
@@ -159,24 +159,25 @@ class RealContractTests(unittest.TestCase):
             status = self.contract.adjudicate(key, derived)
             self.assertTrue(status.startswith("excused core-only"), status)
 
-    def test_the_declared_open_disagreement_registry_pins_the_digest_anchor(self):
-        """The run/5 digest anchor: ``$`` lets a trailing LF through Draft 2020-12 and the core
-        refuses it — declared red until the E2a re-anchor lands. The engine keeps the pair named, and
-        the pin holds: the mismatch is live (the moment it heals, the harness's KnownOpenTests
-        control fails and forces the entry's removal)."""
-        marker = engine.KNOWN_OPEN["state#/$defs/environmentMember/properties/digest"]
-        self.assertIn("lf-suffix", marker)
-        key = "state#/$defs/environmentMember"
-        base = _drawn(self.contract, key)
-        lf = [derived for derived in self._derived(key, base)
-              if derived.kind == "lf-suffix" and derived.node_id.endswith("/properties/digest")]
-        self.assertTrue(lf)
-        for derived in lf:
-            schema_accepts, core_verdict, crash = self.contract.verdicts(key, derived.value)
-            self.assertTrue(schema_accepts, "the registry entry has healed — remove it")
-            self.assertEqual(core_verdict, "refuse", "the registry entry has healed — remove it")
-            self.assertEqual(self.contract.adjudicate(key, derived), "open disagreement "
-                             "(a declared registry entry, red until its anchor heals)")
+    def test_the_open_disagreement_registry_is_empty_and_the_digest_anchor_is_healed(self):
+        """The run/5 digest anchors ended in ``$`` — a trailing LF passed Draft 2020-12 while the core
+        refused it — and that was the registry's two entries. 07c5f66b re-anchored both with
+        ``(?![\s\\S])``, the pins fired, the entries were removed: the engine holds no excusal at
+        this head, and the healed anchor refuses the trailing line feed in *both* judges — the gap
+        would have to re-enter through a new declared entry, never silently."""
+        self.assertEqual(engine.KNOWN_OPEN, {}, "no schema/core verdict gap may hide behind the registry")
+        for key, digest in (("state#/$defs/environmentMember", "/properties/digest"),
+                            ("state#/$defs/qualificationAttempt", "/properties/record_digest")):
+            base = _drawn(self.contract, key)
+            suffixed = [derived for derived in self._derived(key, base)
+                        if derived.kind in ("lf-suffix", "cr-suffix")
+                        and derived.node_id.endswith(digest)]
+            self.assertTrue(suffixed, f"{key}{digest}: the line-feed candidates must be derived")
+            for derived in suffixed:
+                schema_accepts, core_verdict, crash = self.contract.verdicts(key, derived.value)
+                self.assertFalse(schema_accepts, "the anchor healed — both judges refuse the suffix")
+                self.assertEqual(core_verdict, "refuse", "the core keeps refusing the suffix")
+                self.assertEqual(self.contract.adjudicate(key, derived), "agree-refused")
 
     def test_grammar_witnesses_enumerate_each_accepted_branch(self):
         """The spike-image lexeme's own grammar: top-level alternatives and optional groups each hold a

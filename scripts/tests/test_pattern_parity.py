@@ -5,9 +5,9 @@ The parity target itself runs both engines for real (``make contract-pattern-par
 contract-check); these controls pin the logic without Node: the corpus carries the standing
 cross-engine families (blank, mixed, astral, lone-surrogate — the review's demand), every registered
 pattern and grammar piece is in scope, a Node verdict that disagrees with Python outside the declared
-open family is a finding, the excusing spans the declared anchors' trailing-terminator family only,
-and an entirely-agreeing pair of engines — the shape the coming E2a re-anchor will produce — makes
-the live pin fire and demand the registrar entry's removal. A machine without Node reports a skip
+open family is a finding, and the excusing would span a declared open anchor's trailing-terminator
+family only — the registry is empty at this head (the run/5 digest anchors healed when 07c5f66b
+re-anchored them, and the pins fired as designed). A machine without Node reports a skip
 and never a fake verdict (CI runners carry no Node; a developer machine always does).
 """
 from __future__ import annotations
@@ -45,8 +45,10 @@ class CorpusTests(unittest.TestCase):
     def test_every_registered_pattern_and_piece_is_in_scope(self):
         contract = Contract(documents=module_documents())
         patterns, open_patterns = parity.patterns_of(contract)
-        self.assertIn("^sha256:[0-9a-f]{64}$", patterns)
-        self.assertIn("^sha256:[0-9a-f]{64}$", open_patterns)
+        self.assertIn("^sha256:[0-9a-f]{64}(?![\\s\\S])", patterns,
+                      "the re-anchored run/5 digest pattern is a registered pattern")
+        self.assertEqual(open_patterns, {}, "no pattern is excused at this head: the run/5 digest "
+                         "anchors healed (07c5f66b re-anchored both absolutely) and the registry is empty")
 
     def _findings(self, node_flip=None):
         def seeing(records):
@@ -72,9 +74,10 @@ class CorpusTests(unittest.TestCase):
         self.assertTrue(any("Python accepts and Node/u refuses" in word for word in findings),
                         findings)
 
-    def test_the_excusing_spans_only_the_declared_anchors_trailing_terminators(self):
-        """A disagreement on a declared-open pattern whose case is not a trailing line terminator
-        stays a finding — the excusing is narrow, never a blanket for the pattern."""
+    def test_the_excusing_would_span_only_a_declared_anchors_trailing_terminators(self):
+        """The narrowness logic, kept as a control against a future re-entry: a disagreement on a
+        digest-family pattern whose case is not a trailing line terminator stays a finding — the
+        excusing follows a declared node and its declared kind, never a whole pattern blanketly."""
         def flip(pattern_and_case, value):
             pattern, probe = pattern_and_case
             if "sha256" in pattern and probe and not probe.endswith(parity.LINE_TERMINATORS):
@@ -84,11 +87,13 @@ class CorpusTests(unittest.TestCase):
         findings = self._findings(node_flip=flip)
         self.assertTrue(any("Python" in word and "Node/u" in word for word in findings), findings)
 
-    def test_an_entirely_agreeing_pair_of_engines_forces_the_registry_entry_out(self):
-        """The E2a re-anchor's destination shape: both engines then agree everywhere, the declared
-        open mismatch no longer exists, and the live pin fires instead of excusing a stale entry."""
+    def test_an_agreeing_pair_of_engines_has_no_finding_and_nothing_to_pin(self):
+        """The empty-registry shape, as it stands at this head: both engines agree everywhere, the
+        live pin stays silent (nothing to demand removal), and no mismatch hides behind an entry.
+        A future registry entry comes back only by re-declaring its node and kind in the engine
+        registrar, at which point the live pins cover it again."""
         findings = self._findings(node_flip=lambda key, value: value)
-        self.assertTrue(any("the anchor has healed" in word for word in findings), findings)
+        self.assertEqual(findings, [], findings)
 
     def test_check_runs_one_corpus_through_both_engines(self):
         patterns, _ = parity.patterns_of(Contract(documents=module_documents()))

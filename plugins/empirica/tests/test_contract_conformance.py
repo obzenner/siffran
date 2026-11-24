@@ -13,8 +13,9 @@ it names. This harness is the ADR-0075 half of the shape testing:
 * challenge candidates are derived from the same keywords *independently of either verdict* — neither
   verdict is consulted to keep or drop a candidate — and every candidate is adjudicated: Draft 2020-12
   and the named core validator must agree, refuse-refuse or accept-accept, except where the declared
-  open-disagreement registry names the pair (the run/5 ``$`` digest anchors, red until the E2a
-  re-anchor lands) or an ``x-core-only`` rule on the challenged node names exactly the candidate kind.
+  open-disagreement registry names the pair (it is empty at this head — the run/5 digest anchors it
+  once carried are absolutely anchored now, their entries removed) or an ``x-core-only`` rule on the
+  challenged node names exactly the candidate kind.
   A ``TypeError`` or any other non-domain exception a validator throws is a harness failure, never a
   refusal: an accidentally-crashing core is caught, not banked as coverage;
 * coverage is accounted per (node, keyword): every plan entry needs a both-refuse witness, or an
@@ -124,9 +125,9 @@ class ValidFullDrawTests(_Base):
 
 class DifferentialSweepTests(_Base):
     """The canonical differential sweep: every derived challenge candidate adjudicated against both
-    judges with no drops. The declared open-disagreement registry (the run/5 ``$`` digest anchors, red
-    until the E2a re-anchor lands) surfaces as ``open disagreement`` statuses here and stays pinned
-    by the KnownOpenTests control below."""
+    judges with no drops. The declared open-disagreement registry's entries (when there are any)
+    surface as ``open disagreement`` statuses here and stay pinned by the
+    KnownOpenTests control below."""
 
 
 class DifferentialFuzzTests(_Base):
@@ -245,33 +246,35 @@ for _pointer in sorted(_CONTRACT.registered):
 
 
 class KnownOpenTests(_Base):
-    """The declared open disagreements are a failing harness control: until the E2a re-anchor lands,
-    every registry entry is pinned to its live mismatch — the schema admits a trailing LF/CR the core
-    refuses — and the moment a mismatch heals, this control fails and forces the registry entry's
-    removal. Only a declared pair may ever sit in the registry; the sweep holds everything else."""
+    """The declared open disagreements: at this head there are none. The registry stays the only
+    way a schema/core verdict gap may be excused; while the run/5 digest patterns ended in ``$``
+    its two entries were pinned to their live mismatch (a trailing line feed passed Draft 2020-12,
+    the core refused it), and the pins fired when 07c5f66b re-anchored both digests absolutely —
+    the healed anchor is now the control: both judges refuse the trailing line feed together, and
+    no verdict gap hides behind an entry."""
 
-    def test_every_declared_open_disagreement_is_live(self):
-        for node_id, kinds in sorted(KNOWN_OPEN.items()):
-            pinned = False
-            for key in _KEYS:
-                base = self.canonical(key)
-                for case in _CONTRACT.cases(key):
-                    if case.node_id != node_id or case.kind not in kinds:
-                        continue
-                    for derived in _CONTRACT.derive(base, key, case):
-                        schema_accepts, core_verdict, crash = _CONTRACT.verdicts(key, derived.value)
-                        with self.subTest(node=node_id, kind=case.kind):
-                            self.assertTrue(schema_accepts, f"{node_id}: the schema already refuses "
-                                           "this — the registry entry has healed; remove it")
-                            self.assertEqual(core_verdict, "refuse", f"{node_id}: the core no longer "
-                                             "refuses — the registry entry has healed; remove it")
-                            self.assertEqual(
-                                _CONTRACT.adjudicate(key, derived),
-                                "open disagreement (a declared registry entry, red until its anchor heals)",
-                                "the judge must cite the registry pair rather than fail on it")
-                        pinned = True
-            self.assertTrue(pinned, f"{node_id}: no derived candidate reaches the registry entry — "
-                            "the entry names something the plan cannot produce")
+    def test_the_registry_is_empty_at_head(self):
+        self.assertEqual(KNOWN_OPEN, {}, "every schema/core verdict gap must fail, never be excused; "
+                         "a new entry needs its node, its candidate kind, and a pin to its live mismatch")
+
+    def test_the_run5_digest_anchors_refuse_the_trailing_line_feed_together(self):
+        """The healed anchor, as a regression: the member digest and the attempt record digest refuse
+        a trailing line feed in both judges — the gap that was once the registry's two entries."""
+        healed = ("state#/$defs/environmentMember/properties/digest",
+                  "state#/$defs/qualificationAttempt/properties/record_digest")
+        reached = set()
+        for key in _KEYS:
+            base = self.canonical(key)
+            for case in _CONTRACT.cases(key):
+                if case.node_id not in healed or case.kind not in ("lf-suffix", "cr-suffix"):
+                    continue
+                for derived in _CONTRACT.derive(base, key, case):
+                    with self.subTest(node=case.node_id, kind=case.kind, label=derived.label):
+                        self.assertEqual(_CONTRACT.adjudicate(key, derived), "agree-refused",
+                                         "the digest anchors must refuse the trailing line feed in both "
+                                         "judges — or the gap is back and needs a registry entry")
+                    reached.add(case.node_id)
+        self.assertEqual(reached, set(healed), "both digest anchors were exercised")
 
     def test_the_registry_names_registered_nodes_only(self):
         targets = {target[2] for key in _KEYS for target in _CONTRACT._targets(key)}

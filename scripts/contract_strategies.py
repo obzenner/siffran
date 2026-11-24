@@ -15,10 +15,10 @@ to agreement:
 
 a candidate the schema accepts and the core refuses is allowed only where an ``x-core-only`` entry on exactly
 that node declares exactly that candidate kind (a rule no schema can express), or where the declared
-open-disagreement registry below names the pair (the run/5 digest anchors, red until the E2a landing re-anchors
-them — the KnownOpen controls pin each registry entry to its *live* mismatch, so when a mismatch heals the
-empty entry fails and forces its removal). A candidate the schema refuses and the core accepts is never
-allowed. Nothing is dropped: every derived candidate is adjudicated.
+open-disagreement registry below names the pair — it is empty at this head: the run/5 digest anchors it
+once carried were re-anchored absolutely (07c5f66b), the KnownOpen controls' live pins fired, and the
+entries were removed, so no verdict gap hides behind a registry entry. A candidate the schema refuses
+and the core accepts is never allowed. Nothing is dropped: every derived candidate is adjudicated.
 
 The kinds come from the keywords: a bound one past and one under, a character outside a pattern substituted
 and inserted through it (control, blank, printable-complement, astral and lone-surrogate probes, plus the
@@ -68,15 +68,15 @@ X_GRAMMAR = "x-grammar"
 CASE_KINDS = frozenset({"float-for-int"})
 #: A document with no ``case`` keys and no core-only entries covers nothing excusable; keep the registry domain
 #: explicit for the annotation guard, which refuses a ``case`` that is not one of these.
-#: The declared open disagreements of this head: the run/5 digests are anchored with ``$``, so a trailing LF
-#: or CR passes Draft 2020-12 and the core refuses it. The coordinator holds the uncommitted E2a fix that
-#: re-anchors both digests with ``(?![\s\S])``; until it lands these entries stay. The KnownOpen controls pin
-#: each entry to its live mismatch (they fail the moment a disagreement heals, forcing the entry's removal),
-#: and the differential sweep holds every disagreement it finds that is not declared here.
-KNOWN_OPEN: dict[str, frozenset[str]] = {
-    "state#/$defs/environmentMember/properties/digest": frozenset({"lf-suffix"}),
-    "state#/$defs/qualificationAttempt/properties/record_digest": frozenset({"lf-suffix"}),
-}
+#: The declared open disagreements of this head: none. The registry stays the only way a schema/Core
+#: verdict gap may be excused instead of failing — the run/5 digest anchors were its two entries while
+#: both patterns ended in ``$`` (a trailing line feed passed Draft 2020-12 and the core refused it);
+#: 07c5f66b re-anchored both with ``(?![\s\S])``, the mismatch healed, the pins fired, and the
+#: entries were removed. A future disagreement re-enters only by declaring its node, kind, and pin
+#: here; the differential sweep then holds everything else, and the parity check fails the re-anchored
+#: excusal the moment an entry stops matching reality. Keeping the registry empty is the intent
+#: of this head: no verdict gap may hide behind it.
+KNOWN_OPEN: dict[str, frozenset[str]] = {}
 #: Probe characters for pattern challenges, one per family: the newline anchors, C0, DEL, C1, a lone
 #: surrogate, the tab, the ASCII blank, the blank set the free-text contract itself writes (doc/testing.md
 #: cross-host parity; U+FEFF included), printable-complement probes that reach inside machine classes,

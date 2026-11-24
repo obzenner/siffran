@@ -4,11 +4,12 @@
 The contract's patterns are specified for Python ``re`` and JavaScript ``RegExp`` **with the ``u``
 flag**, code-point semantics: the two hosts read a pattern identically or the contract has said
 something no host can keep. This check runs one corpus through both engines and fails on any verdict
-mismatch that is not the declared open disagreement — the two run/5 digest anchors, whose ``$`` end
+mismatch that is not a declared open disagreement — a registry pattern whose anchor ended in ``$``
 Python reads as *before a trailing newline only* and JavaScript as *before any trailing line
-terminator* (LF, CR, U+2028, U+2029). Those pairs are red until the E2a re-anchor lands, pinned live
-here exactly as the harness pins them: the moment an entry's mismatch heals, this check fails and
-forces the registry entry's removal.
+terminator* (LF, CR, U+2028, U+2029). Such pairs are pinned live here exactly as the harness pins
+them: the moment an entry's mismatch heals, this check fails and forces the registry entry's removal
+(the run/5 digest anchors were the registry's first pair; 07c5f66b healed them and the entries are
+gone — the head below carries none).
 
 The corpus is derived, never hand-listed per pattern: the pattern's own grammar witnesses, witness-
 seeded suffix and substitution probes (the newline family included), and the standing cross-engine
@@ -121,8 +122,8 @@ def node_verdicts(records: list[dict]) -> dict | None:
 
 def check() -> list[str]:
     """The parity findings: every cross-engine mismatch outside the declared open pairs, and the live
-    pins of the open pairs themselves (each declared pattern keeps exhibiting its divergence until the
-    E2a re-anchor lands)."""
+    pins of the open pairs themselves (each declared pattern keeps exhibiting its live divergence;
+    a healed one fails the pin instead of being excused)."""
     contract = Contract(documents=module_documents())
     if contract.findings:
         return contract.findings
@@ -143,7 +144,7 @@ def check() -> list[str]:
             continue
         trailing = probe.endswith(LINE_TERMINATORS) or any(probe.endswith(stop) for stop in LINE_TERMINATORS)
         if pattern in open_patterns and trailing:
-            lives[pattern].add(probe)  # declared open: the anchor quirk, red until E2a lands
+            lives[pattern].add(probe)  # declared open: the anchor quirk, pinned red while declared
             continue
         findings.append(f"{pattern}: Python {accepts_word(python_accepts)} and Node/u "
                         f"{accepts_word(node_accepts)} the case {probe!r}")
@@ -168,13 +169,6 @@ def main() -> int:
 
 
 def main_from_findings(findings: list[str]) -> int:
-    for line in findings:
-        print(line)
-    if findings:
-        print(f"{len(findings)} pattern-parity finding(s)", file=sys.stderr)
-        return 1
-    print("contract patterns agree across Python re and JavaScript RegExp/u")
-    return 0
     for line in findings:
         print(line)
     if findings:
