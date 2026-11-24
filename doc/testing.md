@@ -97,6 +97,9 @@ declared beside it in `IMPLEMENTATION_ROOTS`:
 - `adapters/sandbox/probe_image.py`, the digest-pinned probe-image reader, with the vendored Docker
   support-contract directory `vendor/contracts/empirica-docker-spike/v1` it reads: the probe pin and the
   implementation digest change together.
+- `adapters/sandbox/run_qualification.py`, the run-scoped qualification owner: it writes the content-addressed
+  run-scoped /3 qualification record (Empirica 7.2) and carries its own closed reason values; the binding
+  compare-and-set stays with its caller.
 - the vendored contract directory `vendor/contracts/empirica/v2`: every JSON document in it, since runtime code reads
   them by constructed path.
 <!-- /implementation-roots -->

@@ -40,6 +40,7 @@ IMPLEMENTATION_ROOTS = (
     "adapters/pi/src/index.ts",
     "adapters/sandbox/generic_qualification.py",
     "adapters/sandbox/probe_image.py",
+    "adapters/sandbox/run_qualification.py",
     "vendor/contracts/empirica/v2",
     "vendor/contracts/empirica-docker-spike/v1",
 )
@@ -115,6 +116,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "adapters/sandbox/generic_journal.py",
     "adapters/sandbox/generic_qualification.py",
     "adapters/sandbox/probe_image.py",
+    "adapters/sandbox/run_qualification.py",
     "adapters/sandbox/generic_staging.py",
     "adapters/sandbox/planner.py",
     "adapters/sandbox/process.py",
