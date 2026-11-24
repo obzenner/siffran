@@ -553,6 +553,7 @@
       }
     },
     "environment": {
+      "x-core-validator": "core.run.validate_environment",
       "description": "The run's latest environment proposal revision; null while none exists. Earlier revisions are immutable history in environment_history.",
       "oneOf": [
         {
@@ -564,6 +565,7 @@
       ]
     },
     "environment_history": {
+      "x-core-validator": "core.run.validate_environment_history",
       "description": "Immutable earlier environment revisions; the latest lives in environment.",
       "type": "array",
       "maxItems": 64,
@@ -572,6 +574,7 @@
       }
     },
     "qualification_attempts": {
+      "x-core-validator": "core.run.validate_qualification_attempts",
       "description": "Append-only host qualification attempts; the sequence number is derived, never stored.",
       "type": "array",
       "maxItems": 8,
@@ -1056,6 +1059,13 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
     },
     "environmentMember": {
+      "x-core-validator": "core.run.validate_environment_member",
+      "x-core-only": [
+        {
+          "rule": "The member's digest equals the canonical digest of its own proposal body, as core.environment.proposal_digest recomputes it over the thawed proposal: the schema can only see the digest's shape, never the binding to the member it rides in (ADR-0075).",
+          "test": "plugins/empirica/tests/test_run5_binding.py::Run5EnvironmentStateTests.test_the_environments_digest_is_the_canonical_proposal_digest"
+        }
+      ],
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1098,6 +1108,7 @@
       }
     },
     "qualificationAttempt": {
+      "x-core-validator": "core.run.validate_qualification_attempt",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1152,6 +1163,7 @@
       }
     },
     "environmentProposal": {
+      "x-core-validator": "core.environment.validate_proposal",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1188,20 +1200,20 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "pattern": "\\S",
+            "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
             "allOf": [
               {
                 "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
               }
             ],
-            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set."
+            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set. Blank itself means the explicit cross-host whitespace set this member's own pattern writes (U+FEFF included, where JavaScript's \\S says blank and Python's strip does not); no host language's \\s or strip decides."
           }
         },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "maxLength": 600,
-          "pattern": "\\S",
+          "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
           "allOf": [
             {
               "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"

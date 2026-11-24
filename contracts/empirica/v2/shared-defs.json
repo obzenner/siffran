@@ -548,6 +548,7 @@
       }
     },
     "environmentProposal": {
+      "x-core-validator": "core.environment.validate_proposal",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -584,20 +585,20 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "pattern": "\\S",
+            "pattern": "[^ \t\n\r\f\u000b\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]",
             "allOf": [
               {
                 "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
               }
             ],
-            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set."
+            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set. Blank itself means the explicit cross-host whitespace set this member\u0027s own pattern writes (U+FEFF included, where JavaScript\u0027s \u005cS says blank and Python\u0027s strip does not); no host language\u0027s \u005cs or strip decides."
           }
         },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "maxLength": 600,
-          "pattern": "\\S",
+          "pattern": "[^ \t\n\r\f\u000b\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]",
           "allOf": [
             {
               "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
