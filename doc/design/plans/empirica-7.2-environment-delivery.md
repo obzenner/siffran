@@ -124,9 +124,9 @@ writing mirror tests. Once 7.2.0 has landed, the rest of the project moves to th
 
 ## 7. Review and acceptance policy (operator, 2026-11-23)
 
-- From E7 on, a medium node gets one review round; a fix round is re-checked narrowly with re-seeded defects or by the
-  coordinator, never open-ended.
-- Integration is accepted by real sessions, not by more review: a Pi session run inside the Lima VM (`empirica-box`, the
+- Every node is reviewed until accepted, as many rounds as it takes; from E7 on each node registers its own new
+  shapes with the conformance harness, so review concentrates on behaviour.
+- Integration is additionally accepted by real sessions: a Pi session run inside the Lima VM (`empirica-box`, the
   stack branch checked out in the VM), observed in the Empirica UI served from the VM, once E9 and E12 land (environment proposal, human approval, prepare, `qualify`, spike); the final
   native qualification at E16, also in Lima.
 
