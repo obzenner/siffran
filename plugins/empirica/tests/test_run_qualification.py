@@ -581,3 +581,105 @@ class _ExpiringInspector:  # pragma: no cover - direct message carrier
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutcomeAndStoreGuardTests(unittest.TestCase):
+    """Typed-outcome and store guards the owner depends on: behaviour, not shape."""
+
+    def test_a_failure_may_carry_a_probe_name_only_with_the_probe_failure_reason(self):
+        from adapters.sandbox.run_qualification import (RunQualificationFailed,
+                                                        RunQualificationReason)
+        legal = RunQualificationFailed(
+            RunQualificationReason.PROBE_FAILED, "d",
+            run_owner.qualification.PROBE_ORDER[0])
+        self.assertEqual(legal.probe, run_owner.qualification.PROBE_ORDER[0])
+        for reason in (member for member in RunQualificationReason
+                       if member is not RunQualificationReason.PROBE_FAILED):
+            with self.subTest(reason=reason.value), self.assertRaises(ValueError):
+                RunQualificationFailed(reason, "d", run_owner.qualification.PROBE_ORDER[0])
+        with self.assertRaises(ValueError):
+            RunQualificationFailed(RunQualificationReason.PROBE_FAILED, "d", "not-a-probe")
+
+    def test_publishing_the_same_record_twice_is_an_inert_idempotent_write(self):
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = (Path(temporary.name) / "sandbox").resolve()
+        root.mkdir(mode=0o700)
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        harness = OwnerHarness(root)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        store = run_owner.RunQualificationStore(root)
+        first = store.write_record(outcome.record)
+        second = store.write_record(outcome.record)
+        self.assertEqual(first, second)
+        self.assertEqual(len(list(store.records.iterdir())), 1)
+        with self.assertRaises(Exception):
+            store.write_record({**dict(outcome.record), "probe_image_id": D0})
+
+    def test_authority_read_failure_is_docker_unreachable_and_never_capability(self):
+        for message, reason in (
+            ("Docker context read failed", run_owner.RunQualificationReason.DOCKER_UNREACHABLE),
+            (run_owner.RunQualificationReason.RESOURCE_LIMITS_UNAVAILABLE.value
+             + ": Docker SwapLimit must be enabled",
+             run_owner.RunQualificationReason.RESOURCE_LIMITS_UNAVAILABLE),
+        ):
+            with self.subTest(message=message):
+                import tempfile
+                temporary = tempfile.TemporaryDirectory()
+                self.addCleanup(temporary.cleanup)
+                root = (Path(temporary.name) / "sandbox").resolve()
+                root.mkdir(mode=0o700)
+                common._loaded_release = None
+                common._loaded_release_failed = None
+
+                def inspector(seed, *, deadline, message=message):
+                    raise authority.GenericQualificationError(message)
+
+                harness = OwnerHarness(root)
+                harness.runtime_inspector = inspector
+                outcome = harness.call()
+                self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                self.assertIs(outcome.reason, reason)
+                self.assertIsNone(outcome.probe)
+
+    def test_the_injected_budget_must_be_positive_and_within_the_provisional_default(self):
+        for budget in (0, -1.0, run_owner.DEFAULT_QUALIFICATION_SECONDS + 0.1, True):
+            with self.subTest(budget=budget):
+                import tempfile
+                temporary = tempfile.TemporaryDirectory()
+                self.addCleanup(temporary.cleanup)
+                root = (Path(temporary.name) / "sandbox").resolve()
+                root.mkdir(mode=0o700)
+                common._loaded_release = None
+                common._loaded_release_failed = None
+                harness = OwnerHarness(root)
+                outcome = harness.call(qualification_seconds=budget)
+                self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+
+    def test_the_record_elapsed_milliseconds_come_from_the_injected_clock(self):
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = (Path(temporary.name) / "sandbox").resolve()
+        root.mkdir(mode=0o700)
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        harness = OwnerHarness(root)
+        march = [1.5]
+        original_factory = harness.effects_factory
+
+        def factory(resolved, operation, name):
+            if name == "recovery":
+                march[0] += 0.25
+                harness.clock.now = harness.clock.now
+                harness.clock.advance(march[0])
+            return original_factory(resolved, operation, name)
+
+        harness.effects_factory = factory
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        self.assertGreaterEqual(outcome.record["qualification_elapsed_ms"], 800)

@@ -385,20 +385,19 @@ class RunQualificationStore:
     def load_record(self, record_digest: str, *, project_id: str, run_id: str,
                     generation: int) -> dict[str, Any]:
         """Load one exact record and verify its run-generation lineage."""
-        digest = validate_digest256(record_digest, "qualification record digest") \
-            if False else record_digest
-        if not validate_digest256(digest):
+        if not validate_digest256(record_digest):
             raise authority.GenericQualificationError("run qualification record digest is malformed")
         common.safe_directory(self.root, create=False)
-        raw = common.safe_file(self.records / (digest.removeprefix("sha256:") + ".json"),
-                               cap=MAX_RECORD_BYTES)
+        raw = common.safe_file(
+            self.records / (record_digest.removeprefix("sha256:") + ".json"),
+            cap=MAX_RECORD_BYTES)
         try:
             document = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise authority.GenericQualificationError(
                 "run qualification record file is malformed") from exc
         record = validate_run_record(document)
-        if record["qualification_record_digest"] != digest:
+        if record["qualification_record_digest"] != record_digest:
             raise authority.GenericQualificationError("run qualification record path differs")
         binding = record["run_binding"]
         if (binding["project_id"] != project_id or binding["run_id"] != run_id
