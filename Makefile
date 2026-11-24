@@ -38,6 +38,7 @@ EMPIRICA_GENERIC_STAGING_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_sta
 EMPIRICA_GENERIC_HARNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_harness.py
 EMPIRICA_GENERIC_AUTHORITY_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_authority.py
 EMPIRICA_GENERIC_QUALIFICATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_qualification.py
+EMPIRICA_RUN_QUALIFICATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_run_qualification.py
 EMPIRICA_OBSERVATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_observation.py
 EMPIRICA_SANDBOX_TESTS := $(PLUGINS_DIR)/empirica/tests/test_sandbox_common.py $(PLUGINS_DIR)/empirica/tests/test_probe_image.py
 EMPIRICA_WORKSPACE_ADAPTER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_execution_adapter.py
@@ -644,6 +645,7 @@ empirica-generic-authority-check: ## Test passive Docker capability authority, r
 
 empirica-generic-qualification-check: ## Test five-probe candidate qualification and explicit installation without Docker or publication
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_GENERIC_QUALIFICATION_TESTS)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_RUN_QUALIFICATION_TESTS)
 
 generic-docker-qualify-candidate: ## QUALIFY ONLY: write a private candidate with PROFILE= IMAGE= DOCKER= OUT= WORK=; OUT= must not exist and its parent must already be your own mode-0700 directory (checked when the candidate is written, after the probes); never installs authority
 	@test -n "$(PROFILE)" -a -n "$(IMAGE)" -a -n "$(DOCKER)" -a -n "$(OUT)" -a -n "$(WORK)" || { echo 'PROFILE, IMAGE, DOCKER, OUT, and WORK are required' >&2; exit 2; }
