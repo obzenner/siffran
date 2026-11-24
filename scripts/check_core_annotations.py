@@ -25,11 +25,14 @@ response ``Fault`` registers by declaration:
   test exists — and its ``case``, when it excuses a differential candidate kind, names one of the
   harness's declared kinds (``contract_strategies.CASE_KINDS``);
 * every ``x-grammar`` piece compiles, and a grammar rides a node that carries the pattern it refines;
-* every ``x-regression-witnesses`` corpus is a non-empty list of strings each *refused statically by
-  the node's own patterns* — a known-defect corpus value the schema still admits is a contract bug —
-  and the harness runs each value through both judges;
-* every ``x-work-limit`` override names bounds the engine reads (``maxItems``, ``maxLength``), as
-  integers at least the node's own bound — it is the feasible-work limit's declared exception;
+* every ``x-regression-witnesses`` corpus is a *bounded corpus of evidenced defects*: at most eight
+  entries, unique, each an object ``{"value": <string>, "defect": <a short reference — the review file
+  and its finding, or the commit that fixed it>}``; a corpus value the node's own Draft 2020-12 verdict
+  still accepts is a contract bug (never ``any(re.fullmatch(...))``, which read the pattern semantics
+  backwards), and the differential harness is the second check — the core's verdict;
+* every ``x-work-limit`` override names bounds the engine reads (``maxItems``, ``maxLength``,
+  ``minItems``, ``minLength``), as integers at least the node's own bound — it is the feasible-work
+  limit's declared exception, and the limit bounds *every* allocation-driving keyword, minima included;
 * every schema keyword the closures use is one the strategy engines derive (``ui_view_strategies.KNOWN``
   plus the annotation keywords) — a definition that grows a keyword the engines cannot draw fails here.
 
@@ -143,38 +146,80 @@ def document_value_at(document: dict, pointer: str, word: str) -> object:
     return node.get(word) if isinstance(node, dict) else "?"
 
 
+#: The corpus cap: a node declares its evidenced defects, it does not bank a test suite.
+REGRESSION_CORPUS_CAP = 8
+#: A regression witness must be refused by the node's own draft word: the pattern keyword searches
+#: (an unanchored ``a`` accepts ``ba``), every conjunct must agree — the reviewer's ``any(fullmatch)``
+#: got exactly those two cases backwards.
+_DRAFT_OF_NODE = ("type", "enum", "const", "pattern", "minLength", "maxLength")
+
+
+def _draft_refuses(node: dict, value: str) -> bool:
+    """Whether the node's own Draft 2020-12 word refuses a corpus value: the node's applicable
+    keywords plus every conjunct pattern (``contract_strategies.Contract._patterns``), validated with
+    the same validator the conformance engine uses — never ``any(re.fullmatch(...))``, which accepted
+    ``ba`` for an unanchored ``a`` and rejected ``a`` when one conjunct refused it."""
+    from jsonschema import Draft202012Validator
+    schema = {key: node[key] for key in node if key in _DRAFT_OF_NODE}
+    schema["allOf"] = [{"pattern": pattern}
+                       for pattern in Contract._patterns(node) if pattern != node.get("pattern")]
+    validator = Draft202012Validator(schema)
+    return bool(list(validator.iter_errors(value)))
+
+
 def _regression_errors(node: dict, node_id: str) -> list[str]:
-    """A named regression-witness corpus (``x-regression-witnesses``): a list of strings, each a
-    known-defect value the node's own patterns must refuse statically *here* — a witness the schema
-    still accepts is a contract bug, not a test — and the core's verdict is the harness's job
-    (the exact ``Python:3.12`` image spelling is the review's finding)."""
+    """A named regression-witness corpus (``x-regression-witnesses``) — a *bounded* corpus of evidenced
+    defects, never a back door for hand-written cases: at most {} entries, unique values, each an
+    object ``{{"value": <string>, "defect": <a short reference>}}`` naming the demonstrated defect
+    (the review file and its finding, or the commit that fixed it); a corpus value the node's own
+    Draft 2020-12 word still accepts is a contract bug, and the differential harness is the second
+    check (the core's verdict).""".format(REGRESSION_CORPUS_CAP)
     witnesses = node.get(X_REGRESSION_WITNESSES)
     if not isinstance(witnesses, list) or not witnesses:
-        return [f"{node_id}: an x-regression-witnesses corpus must be a non-empty list of strings"]
+        return [f"{node_id}: an x-regression-witnesses corpus must be a non-empty list of "
+                f"evidenced defects ({{\"value\": …, \"defect\": …}} objects)"]
     out = []
-    patterns = Contract._patterns(node)
-    if not patterns:
-        return [f"{node_id}: an x-regression-witnesses corpus rides a node with no pattern to violate"]
-    for witness in witnesses:
-        if not isinstance(witness, str):
-            out.append(f"{node_id}: a regression witness that is not a string: {witness!r}")
+    if len(witnesses) > REGRESSION_CORPUS_CAP:
+        out.append(f"{node_id}: an x-regression-witnesses corpus of {len(witnesses)} entries "
+                   f"exceeds the cap of {REGRESSION_CORPUS_CAP} — a node declares its evidenced "
+                   "defects, it does not bank a test suite")
+    if not any(Contract._patterns(node) for _ in [0]):
+        out.append(f"{node_id}: an x-regression-witnesses corpus rides a node with no pattern to violate")
+    seen_values = set()
+    for entry in witnesses:
+        if not isinstance(entry, dict) or set(entry) != {"value", "defect"}:
+            out.append(f"{node_id}: a regression entry must be an object of exactly \"value\" and "
+                       f"\"defect\": {entry!r}")
             continue
-        import re
-        if any(re.fullmatch(pattern, witness) for pattern in patterns if isinstance(pattern, str)):
-            out.append(f"{node_id}: a named regression witness the pattern still accepts: {witness!r} "
-                       "— a known-defect value the contract itself admits is a contract bug")
+        value, defect = entry.get("value"), entry.get("defect")
+        if not isinstance(value, str):
+            out.append(f"{node_id}: a regression entry value that is not a string: {value!r}")
+            continue
+        if value in seen_values:
+            out.append(f"{node_id}: a duplicated regression entry value: {value!r}")
+            continue
+        seen_values.add(value)
+        if not isinstance(defect, str) or not defect.strip():
+            out.append(f"{node_id}: a regression entry without its evidenced defect reference "
+                       f"({value!r}): a short reference — the review file and its finding, or the "
+                       "commit that fixed it — is required")
+            continue
+        if not _draft_refuses(node, value):
+            out.append(f"{node_id}: a named regression witness the node's Draft 2020-12 word still "
+                       f"accepts: {value!r} — a value the contract itself admits is not a defect")
     return out
 
 
 def _work_limit_errors(node: dict, node_id: str) -> list[str]:
     """An ``x-work-limit`` override (the feasible-work limit's declared exception): an object of integer
-    bounds (``maxItems``, ``maxLength``), riding the very node whose bound it overrides."""
+    bounds (``maxItems``, ``maxLength``, ``minItems``, ``minLength`` — minima included) riding the very
+    node whose bound it overrides, at least as large as that bound."""
     override = node.get(X_WORK_LIMIT)
     if not isinstance(override, dict) or not override:
         return [f"{node_id}: an x-work-limit override must be a non-empty object of named bounds"]
     out = []
     for bound, value in sorted(override.items()):
-        if bound not in ("maxItems", "maxLength"):
+        if bound not in ("maxItems", "maxLength", "minItems", "minLength"):
             out.append(f"{node_id}: an x-work-limit bound the engine does not read: {bound!r}")
             continue
         if not isinstance(value, int) or isinstance(value, bool) or value < node.get(bound, 0):

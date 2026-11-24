@@ -40,6 +40,7 @@ form, and no witness restates a contract value.  Dev-only: imports Hypothesis, j
 from __future__ import annotations
 
 import copy
+import math
 import json
 import re
 import sys
@@ -462,42 +463,102 @@ def _wrong_types(node: dict) -> list[Any]:
     return out
 
 
-def _outside_values(held: Any | list) -> list[Any]:
-    """Same-family value probes a const or an enumeration cannot hold — fresh content of the *same
-    JavaScript Object Notation type as the held values* (a string for a string enumeration, an integer
-    for an integer one), never a whole other family: a cross-family value challenges ``type`` and the
-    ledger must never credit it with covering ``const`` or ``enum`` — cross-type challenges are the
-    plan's own separate ``wrong type`` kinds. The review's re-run caught the old probe handing an
-    integer ``765`` for a string constant; this is the refusal of that shape."""
-    pool = list(held) if isinstance(held, (list, tuple)) else [held]
-    probes: dict[str, list] = {
-        "string": ["outside", "elsewhere", "elsewhere-once-more", "elsewhere-twice"],
-        "integer": [sum(map(ord, "outside")), -sum(map(ord, "outside"))],
-        "boolean": [True, False],
-        "array": [["outside"], []],
-        "object": [{"outside": True}],
-        "null": [None],
-    }
+def _outside_values(held: Any | list, *, enum_alternatives: bool) -> list[Any]:
+    """A fresh value of the *same JavaScript Object Notation type as the held set* but outside it —
+    generated against the finite set, never a hard-coded probe list: a string family extends its
+    longest value (a four-probe enumeration still yields a fresh string), numbers continue to the next
+    integer or the next representable decimal (``[1.5]`` yields a fresh decimal, never a crash), a
+    const array yields an array substitute, never a flattening of its members. A cross-family value
+    challenges ``type``, and the ledger never credits it — cross-type challenges are the plan's
+    separate ``wrong type`` kinds. Only the exhaustible families (booleans, null) may return empty, and
+    their ``unsupported`` declaration names a real exhaustion."""
+    pool = list(held) if enum_alternatives else [held]
+    families = sorted({_json_type(member) for member in pool})
     out = []
-    for held_family in sorted({_json_type(member) for member in pool}):
-        for probe in probes[held_family]:
-            if probe not in pool:
-                out.append(probe)
-                break
+    for family in families:
+        members = [member for member in pool if _json_type(member) == family]
+        if family == "string":
+            out.append(_fresh_string(members))
+        elif family in ("integer", "number"):
+            out.append(_fresh_number(members, family))
+        elif family == "array":
+            out.append(_fresh_array(members))
+        elif family == "object":
+            out.append(_fresh_object(members))
+        else:  # boolean or null: the only exhaustible families — no third boolean, no second null
+            for probe in ((True, False) if family == "boolean" else (None,)):
+                if probe not in members:
+                    out.append(probe)
+                    break
     return out
+
+
+def _fresh_string(pool: list) -> str:
+    """A never-held string *generated against the finite set*: the longest held value extended by a
+    counter suffix until the candidate is absent — arbitrarily many fresh strings exist, so a string
+    family is never exhausted (the re-review filled four string probes into an enumeration and the old
+    hard-coded list called it done)."""
+    longest = max((member for member in pool if isinstance(member, str)), key=len, default="")
+    counter = 1
+    candidate = longest
+    while candidate in pool:
+        counter += 1
+        candidate = f"{longest}x{counter}"
+    return candidate
+
+
+def _fresh_number(pool: list, family: str):
+    """A never-held number *generated against the finite set*: for integers the next integer above the
+    highest; for decimals the next representable value above the peak (``math.nextafter``), so a
+    ``[1.5]`` enumeration yields a fresh decimal and never crashes with a missing family (the
+    re-review's finding)."""
+    members = [member for member in pool if isinstance(member, (int, float)) and not isinstance(member, bool)]
+    peak = max(members)
+    if family == "integer":
+        candidate = peak + 1
+        while candidate in pool:
+            candidate += 1
+        return candidate
+    return math.nextafter(float(peak), math.inf)
+
+
+def _fresh_array(pool: list) -> list:
+    """A never-held array: strictly longer than any held one (a const array gets an array substitute,
+    never a flattening of its members; an enumeration's array alternatives are all shorter)."""
+    tallest = max((len(member) for member in pool if isinstance(member, list)), default=-1)
+    return [None] * (tallest + 1)
+
+
+def _fresh_object(pool: list) -> dict:
+    counter = 0
+    candidate = {"fresh": None}
+    while candidate in pool:
+        counter += 1
+        candidate = {"fresh": counter}
+    return candidate
+
+
+#: The families whose fresh-value generation is a *finite* check: only booleans and the single JSON
+#: null genuinely exhaust (there is no third boolean and no second null) — everything else generates.
+EXHAUSTIBLE = {"boolean", "null"}
 
 
 def witness_of_family(case: "Case") -> bool:
     """Whether a const/enum challenge's candidate is of the keyword's OWN family — the ledger credits a
     keyword only from such a witness. A wrong-family value (an integer where a string constant is
-    challenged) is refused by the ``type`` rules and must never stand in for a const/enum witnesship,
-    so the generated coverage asserts this on every family-restricted case before crediting."""
+    challenged) is refused by the ``type`` rules and must never stand in for a const/enum witnessship,
+    so the generated coverage asserts this on every family-restricted case before crediting. A const
+    array's family is ``array`` (its members are not the alternatives)."""
     if case.kind not in ("const outside", "enum outside"):
         return True
     node = case.node
-    held = node.get("const", node.get("enum")) if isinstance(node, dict) else None
-    pool = list(held) if isinstance(held, (list, tuple)) else [held]
-    if not pool:
+    if not isinstance(node, dict):
+        return False
+    if "const" in node:
+        pool = [node["const"]]
+    elif "enum" in node:
+        pool = list(node["enum"])
+    else:
         return False
     families = {_json_type(member) for member in pool}
     return _json_type(case.holding) in families
@@ -604,18 +665,22 @@ class Contract:
             self.findings.extend(self._feasibility_errors(key, noted))
 
     def _feasibility_errors(self, key: str, noted: set[str]) -> list[str]:
-        """The generation feasibility limit (the re-review's non-blocking finding): registered definitions
-        whose own high bounds ask for unbounded-in-practice work — a ``maxItems`` of tens of thousands of
-        rows, a ``maxLength`` of millions of characters — are refused at load, naming the node and the
-        bound, instead of letting the harness's work scale with an arbitrary future schema. A definition
-        whose larger work is honest declares an ``x-work-limit`` override for the named bound."""
+        """The generation feasibility limit (the two re-reviews' findings): a registered definition whose
+        own allocation-driving bounds — an array's ``maxItems``/``minItems``, a string's
+        ``maxLength``/``minLength``, *minima included because a minimum allocates on every draw*
+        (a ``minLength`` of a million with no ``maxLength`` is the reviewer's seed) — ask for more rows
+        or characters than these ceilings is refused at load with a finding naming the node and the
+        bound. A definition whose larger work is honest declares an ``x-work-limit`` override."""
         findings: list[str] = []
         for _, node, node_id in self._targets(key):
             if not isinstance(node, dict) or node_id in noted:
                 continue  # the shared proposal is every key's neighbour; one refusal suffices
             noted.add(node_id)
             override = node.get(X_WORK_LIMIT) if isinstance(node.get(X_WORK_LIMIT), dict) else {}
-            for bound, ceiling in (("maxItems", FEASIBLE_ROWS), ("maxLength", FEASIBLE_CHARS)):
+            # every allocation-driving bound, minima included: a minLength of a million allocates a
+            # million characters a draw, exactly as a maxLength caps one (numbers are constant-size).
+            for bound, ceiling in (("maxItems", FEASIBLE_ROWS), ("minItems", FEASIBLE_ROWS),
+                                   ("maxLength", FEASIBLE_CHARS), ("minLength", FEASIBLE_CHARS)):
                 if isinstance(node.get(bound), int) and not isinstance(node.get(bound), bool):
                     allowed = override.get(bound, ceiling)
                     if not isinstance(allowed, int):
@@ -628,20 +693,24 @@ class Contract:
         return findings
 
     def regression_challenges(self, key: str, base: Any) -> list[Derived]:
-        """The named regression-witness corpus of a definition — a list of *known-defect values* the
-        contract itself carries on a patterned node (``x-regression-witnesses``), each placed in a drawn
-        base and fed to both judges: both must refuse (the re-review's exact ``Python:3.12`` seed died
-        here and nowhere else, because a spelling defect normalizing one input is invisible to the
-        generic probes and lives only as a named case)."""
+        """The named regression-witness corpus of a definition — the bounded list of *evidenced defects*
+        the contract itself carries on a patterned node (``x-regression-witnesses``: ``value`` plus its
+        defect reference, at most eight per node, all unique), each placed in a drawn base and fed to
+        both judges: both must refuse (the reviewed ``Python:3.12`` seed dies here and nowhere else,
+        because a defect that normalizes one input is invisible to the generic probes and lives only as
+        a named case)."""
         out: list[Derived] = []
         for path, node, node_id in self._targets(key):
             if not isinstance(node, dict):
                 continue
-            witnesses = node.get(X_REGRESSION_WITNESSES) or []
-            for witness in witnesses if isinstance(witnesses, list) else []:
-                placed = self._placed(base, path, witness)
-                out.append(Derived(f"the named regression witness {witness!r} at {node_id}", placed,
-                                   node_id, "regression witness", "pattern"))
+            entries = node.get(X_REGRESSION_WITNESSES) or []
+            for entry in entries if isinstance(entries, list) else []:
+                if not (isinstance(entry, dict) and isinstance(entry.get("value"), str)):
+                    continue  # the annotation guard already refuses the malformed corpus
+                placed = self._placed(base, path, entry["value"])
+                out.append(Derived(f"the named regression witness {entry['value']!r} "
+                                   f"({entry.get('defect', 'an unnamed defect')}) at {node_id}",
+                                   placed, node_id, "regression witness", "pattern"))
         return out
 
     def _reachable_defs(self, key: str) -> set[str]:
@@ -842,7 +911,7 @@ class Contract:
                                     "not-required", node, node_id,
                                     (member, json.dumps(schema_for_member))))
             if "const" in node:
-                candidates = _outside_values(node["const"])
+                candidates = _outside_values(node["const"], enum_alternatives=False)
                 if candidates:
                     out.append(Case(f"{at}: a same-family value other than the const", path, "const outside",
                                     "const", node, node_id, candidates[0]))
@@ -850,7 +919,7 @@ class Contract:
                     out.append(Case(f"{at}: no fresh same-family value exists for the const", path,
                                     "unsupported", "const", node, node_id, None))
             if "enum" in node:
-                candidates = _outside_values(node["enum"])
+                candidates = _outside_values(node["enum"], enum_alternatives=True)
                 if candidates:
                     out.append(Case(f"{at}: a same-family value outside the enumeration", path, "enum outside",
                                     "enum", node, node_id, candidates[0]))

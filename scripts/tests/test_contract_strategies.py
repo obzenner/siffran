@@ -289,11 +289,79 @@ class FamilyWitnessTests(unittest.TestCase):
         """A boolean const that holds every value of its family has no same-family harvest left: the
         plan declares the pair unsupported instead of crediting a cross-family value (the premise of
         the wrong-family finding, made explicit)."""
-        probed = engine._outside_values([True, False])
-        self.assertEqual(probed, [], "the boolean family is exhausted")
-        probes = engine._outside_values("empirica.run/5")
+        probed = engine._outside_values([True, False], enum_alternatives=True)
+        self.assertEqual(probed, [], "the boolean family is genuinely exhausted")
+        probes = engine._outside_values("empirica.run/5", enum_alternatives=False)
         self.assertTrue(probes and all(isinstance(probe, str) for probe in probes),
-                        "a string const harvests a string")
+                        "a string const generates a fresh string")
+
+
+    _PROBE_DOC = {  # a synthetic registered document: fresh-value families against the real plan
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://siffran.test/family-probe",
+    "type": "object",
+    "x-core-ingress": ["/$defs/probe"],
+    "properties": {"probe": {"$ref": "#/$defs/probe"}},
+    "required": ["probe"],
+    "$defs": {"probe": {
+        "x-core-validator": "conformance_fixtures.pass_through",
+        "type": "object",
+        "properties": {"v": {"type": "string"}},
+        "required": ["v"],
+        "additionalProperties": False}},
+}
+
+    def _contract_for(self, vocabulary) -> Contract:
+        import types
+        module = types.ModuleType("conformance_fixtures")
+        module.pass_through = staticmethod(lambda value: value)
+        sys.modules["conformance_fixtures"] = module
+        document = copy.deepcopy(self._PROBE_DOC)
+        document["$defs"]["probe"]["properties"]["v"] = vocabulary
+        return Contract({"probe_document": document})
+
+    def test_a_four_probe_string_enumeration_still_yields_a_fresh_string(self):
+        """The re-review's seed: an enumeration holding every string of the old hard-coded probe list
+        mistook probe exhaustion for family exhaustion. Fresh strings always exist — the plan generates
+        one (the longest held value extended by a counter) instead of declaring the pair unsupported."""
+        held = ["outside", "elsewhere", "elsewhere-once-more", "elsewhere-twice"]
+        contract = self._contract_for({"type": "string", "enum": held})
+        cases = [case for case in contract.cases("probe_document#/$defs/probe")
+                 if case.keyword in ("const", "enum") and case.node_id.endswith("/properties/v")]
+        kinds = sorted({case.kind for case in cases})
+        self.assertIn("enum outside", kinds, kinds)
+        self.assertNotIn("unsupported", kinds, "a string family is never exhausted")
+        candidate = next(case for case in cases if case.kind == "enum outside")
+        self.assertIn(engine._json_type(candidate.holding), "string")
+        self.assertNotIn(candidate.holding, held, "the fresh value is outside the enumeration")
+        self.assertTrue(engine.witness_of_family(candidate))
+
+    def test_a_decimal_enumeration_yields_the_next_representable_decimal(self):
+        """The re-review's seed: ``[1.5]`` crashed the old probe table with a missing number family.
+        The fresh decimal continues above the peak instead (the next representable value, outside the
+        finite set, of the enumeration's own family)."""
+        contract = self._contract_for({"type": "number", "enum": [1.5]})
+        cases = [case for case in contract.cases("probe_document#/$defs/probe")
+                 if case.keyword in ("const", "enum") and case.node_id.endswith("/properties/v")]
+        self.assertTrue(cases, "the decimal enumeration is challengeable")
+        for case in cases:
+            self.assertEqual(case.kind, "enum outside")
+            self.assertEqual(engine._json_type(case.holding), "number", case.holding)
+            self.assertTrue(engine.witness_of_family(case))
+
+    def test_an_array_constant_gets_an_array_substitute_not_a_flattening(self):
+        """The re-review's seed: a const array was flattened as if its members were enumeration
+        alternatives, so the array family never saw a substitute. The const holds ONE array; the fresh
+        value is a longer array of the same family."""
+        contract = self._contract_for({"type": "array", "const": ["row", "second"]})
+        cases = [case for case in contract.cases("probe_document#/$defs/probe")
+                 if case.keyword in ("const", "enum") and case.node_id.endswith("/properties/v")]
+        self.assertTrue(cases, "the array constant is challengeable")
+        for case in cases:
+            self.assertEqual(case.kind, "const outside", case.kind)
+            self.assertEqual(engine._json_type(case.holding), "array", case.holding)
+            self.assertNotEqual(case.holding, ["row", "second"], "a fresh array, never the const itself")
+            self.assertTrue(engine.witness_of_family(case))
 
 
 class MethodNameTests(unittest.TestCase):
@@ -336,6 +404,33 @@ class FeasibleWorkTests(unittest.TestCase):
             "maxLength": 100000, "x-work-limit": {"maxLength": 100000}}
         findings = Contract(documents).findings
         self.assertFalse([line for line in findings if "feasible-work" in line], findings)
+
+
+    def test_an_allocation_driving_minimum_refuses_the_definition_too(self):
+        """The re-review 2 finding 3 seed: a string node with no maxLength and a ``minLength`` of one
+        million. A minimum allocates on every draw — it is bounded by the same limit, not only maxima."""
+        documents = copy.deepcopy(engine.module_documents())
+        node = documents["state"]["$defs"]["environmentProposal"]["properties"]["rationale"]
+        node |= {"minLength": 1000000}
+        node.pop("maxLength", None)
+        findings = Contract(documents).findings
+        self.assertTrue(any("the feasible-work limit refuses" in line and "minLength" in line
+                            for line in findings), findings)
+
+    def test_a_declared_override_admits_an_honest_minimum(self):
+        documents = copy.deepcopy(engine.module_documents())
+        node = documents["state"]["$defs"]["environmentProposal"]["properties"]["rationale"]
+        node |= {"minLength": 100000, "x-work-limit": {"minLength": 100000}}
+        findings = [line for line in Contract(documents).findings if "feasible-work" in line]
+        self.assertEqual(findings, [])
+
+    def test_a_row_minimum_is_bounded_like_its_maximum(self):
+        documents = copy.deepcopy(engine.module_documents())
+        node = documents["state"]["$defs"]["environmentProposal"]["properties"]["spike_images"]
+        node |= {"minItems": 4000}
+        findings = Contract(documents).findings
+        self.assertTrue(any("the feasible-work limit refuses" in line and "minItems" in line
+                            for line in findings), findings)
 
 
 class GrowthTests(unittest.TestCase):
@@ -388,22 +483,28 @@ class CaseSwapTests(unittest.TestCase):
 
 
 class RegressionCorpusTests(unittest.TestCase):
-    """The re-review's finding 3, second mechanism: the contract's named regression-witness corpus —
-    known-defect values (the exact spellings a deleted hand-written test once held), fed through both
-    judges and refused by both. The values live in the contract (``x-regression-witnesses``); the test
-    reads them from there, never restating one."""
+    """The re-review 2 finding 2: the contract's named regression-witness corpus is a *bounded corpus
+    of evidenced defects* — every entry an object ``{"value", "defect"}``, at most eight per node, the
+    values refused by both judges. The entries live in the contract (``x-regression-witnesses``); the
+    test reads them from there, never restating one."""
 
     def test_the_corpus_is_read_from_the_contract_and_refused_by_both_judges(self):
         contract = Contract()
         key = "state#/$defs/environmentProposal"
-        item = contract.node(key + "/properties/spike_images/items")
-        corpus = item["x-regression-witnesses"]
-        self.assertTrue(any(isinstance(witness, str) and witness not in ("",) for witness in corpus))
+        corpus = contract.node(key + "/properties/spike_images/items")["x-regression-witnesses"]
+        self.assertTrue(corpus and len(corpus) <= 8, "the corpus is a bounded one")
+        self.assertEqual(len({entry["value"] for entry in corpus}), len(corpus), "values are unique")
+        for entry in corpus:
+            with self.subTest(value=entry["value"]):
+                self.assertIsInstance(entry["value"], str)
+                self.assertIsInstance(entry["defect"], str)  # the evidenced-defect reference
+                self.assertTrue(entry["defect"].strip())
         drawn = find(contract.drawn(key, full=True), lambda document: True, settings=DRY)
         challenges = contract.regression_challenges(key, drawn)
         placed = {challenge.value["spike_images"][0] for challenge in challenges}
         self.assertEqual(len(challenges), len(corpus))
-        self.assertEqual(placed, set(corpus), "every corpus value is placed, exactly once")
+        self.assertEqual(placed, {entry["value"] for entry in corpus},
+                         "every corpus value is placed, exactly once")
         for challenge in challenges:
             with self.subTest(label=challenge.label):
                 self.assertEqual(contract.adjudicate(key, challenge), "agree-refused",

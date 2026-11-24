@@ -205,13 +205,26 @@ class GuardControlTests(unittest.TestCase):
         finally:
             registry.REGISTERED_DEFINITIONS = declared
 
-    def test_a_regression_witness_the_pattern_still_accepts_is_a_contract_bug(self):
+    def test_a_regression_witness_the_draft_word_still_accepts_is_a_contract_bug(self):
         def accepted(documents_map):
-            for document in documents_map.values():
-                for node in _patterned_spike_items(documents_map):
-                    node["x-regression-witnesses"] = ["python:3.12-slim"]
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "python:3.12-slim", "defect": "a reference"}]
         found = findings_for(accepted)
-        self.assertTrue(any("the pattern still accepts" in line for line in found), found)
+        self.assertTrue(any("the node's Draft 2020-12 word still accepts" in line for line in found),
+                        found)
+
+    def test_the_draft_word_uses_search_semantics_not_fullmatch(self):
+        """The re-review 2 finding 2 example: an *unanchored* pattern ``a`` accepts ``ba`` under the
+        draft (the pattern keyword searches) — the old ``any(re.fullmatch(...))`` guard refused ``ba``
+        as a negative witness it could not refuse and accepted ``a`` when one conjunct refused it;
+        the guard's word is the draft verdict now."""
+        def unanchored(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [{"value": "ba", "defect": "a reference"}]
+        found = findings_for(unanchored)
+        self.assertTrue(any("the node's Draft 2020-12 word still accepts: 'ba'" in line for line in found),
+                        found)
 
     def test_a_malformed_regression_corpus_is_refused(self):
         def malformed(documents_map):
@@ -219,6 +232,47 @@ class GuardControlTests(unittest.TestCase):
                 node["x-regression-witnesses"] = {"a": 1}
         found = findings_for(malformed)
         self.assertTrue(any("corpus must be a non-empty list" in line for line in found), found)
+
+    def test_a_flooded_corpus_of_ten_thousand_is_refused(self):
+        """The re-review 2 seed: ten thousand duplicated bare entries — the old guard accepted them
+        all and every one became a candidate. The cap, the duplicates, and the shape all fire."""
+        def flooded(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = ["duplicate"] * 10000
+        found = findings_for(flooded)
+        self.assertTrue(any("exceeds the cap of 8" in line for line in found), found)
+        self.assertTrue(any("must be an object of exactly" in line for line in found), found)
+
+    def test_a_corpus_of_nine_barely_overflows_and_is_refused(self):
+        def nine(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": f"x{index}", "defect": "a reference"} for index in range(9)]
+        found = findings_for(nine)
+        self.assertTrue(any("exceeds the cap of 8" in line for line in found), found)
+
+    def test_duplicate_corpus_values_are_refused(self):
+        def duplicated(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "same", "defect": "a reference"},
+                    {"value": "same", "defect": "another reference"}]
+        found = findings_for(duplicated)
+        self.assertTrue(any("duplicated regression entry value" in line for line in found), found)
+
+    def test_an_entry_without_its_evidenced_defect_reference_is_refused(self):
+        def bare(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [{"value": "somevalue"}]
+        found = findings_for(bare)
+        self.assertTrue(any("an object of exactly \"value\" and \"defect\"" in line for line in found),
+                        found)
+
+        def blank(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [{"value": "gv", "defect": "   "}]
+        also = findings_for(blank)
+        self.assertTrue(any("without its evidenced defect reference" in line for line in also), also)
 
     def test_a_work_limit_override_must_name_bounds_the_engine_reads(self):
         def override(documents_map):
