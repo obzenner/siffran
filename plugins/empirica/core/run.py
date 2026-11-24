@@ -140,6 +140,15 @@ def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Map
     return value
 
 
+def validate_qualification_probe_name(value: Any) -> str:
+    """One qualification probe name — the contract-conformance harness's validator for the shared
+    ``qualificationProbeName`` definition (``x-core-validator``, ADR-0075): the enumeration the
+    Docker spike support contract owns, pinned here by ``empirica-docker-support-contract-check``."""
+    if type(value) is not str or value not in QUALIFICATION_PROBE_NAMES:
+        raise ValueError("qualification probe name is unknown")
+    return value
+
+
 def validate_qualification_attempt(value: Any) -> Mapping[str, Any]:
     """One closed host qualification attempt — the contract-conformance harness's validator for the
     annotated ``qualificationAttempt`` definition (ADR-0075); shape only, sequence and admission are derived."""

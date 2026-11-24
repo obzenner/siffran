@@ -715,8 +715,11 @@ class D6StrictRunStateTests(unittest.TestCase):
         run2["spike_backend"] = {"kind": "spikes_unavailable"}
         self.assertEqual(mod.classify_and_decode(run2).kind, "current_corrupt")
 
-    def test_a_schema_valid_state_the_decoder_refuses_is_current_corrupt(self):
-        """The schema's ``$`` also matches before a final newline; the decoder's ``fullmatch`` does not."""
+    def test_a_trailing_newline_inside_a_digest_is_refused_by_both_the_schema_and_the_decoder(self):
+        """The run/5 digest anchors are absolutely anchored (ADR-0075 re-anchoring; E6c): the
+        schema's own word no longer admits a digest with a final newline, so the schema and
+        the decoder's ``fullmatch`` agree — the drift this test once recorded is healed."""
+        import jsonschema
         mod = _import_run_state()
         from application.protocol import schema_validator
         for field in ("qualification_record_digest", "execution_binding_digest"):
@@ -728,7 +731,8 @@ class D6StrictRunStateTests(unittest.TestCase):
                     "execution_binding_digest": "sha256:" + "b" * 64}
                 self.assertEqual(mod.classify_and_decode(raw).kind, "valid")
                 raw["spike_backend"][field] += "\n"
-                schema_validator("state").validate(raw)
+                with self.assertRaises(jsonschema.ValidationError, msg=field):
+                    schema_validator("state").validate(raw)
                 classified = mod.classify_and_decode(raw)
                 self.assertEqual(classified.kind, "current_corrupt")
                 self.assertIsNone(classified.state)

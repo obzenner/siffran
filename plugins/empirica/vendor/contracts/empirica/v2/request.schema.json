@@ -274,7 +274,7 @@
     },
     "digest256": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
     },
     "nullableDigest256": {
       "type": [
@@ -804,7 +804,8 @@
         "payload": {
           "$ref": "#/$defs/environmentProposal"
         }
-      }
+      },
+      "x-core-validator": "core.environment.validate_action_environment"
     },
     "actionQualify": {
       "description": "Coming with run-scoped environment qualification: request one host qualification attempt of the latest approved environment revision. Carries no payload; the host owns the attempt, its journalling and its binding. Not yet available in this release: in every active run state the core refuses the qualify action with the closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact (an invalid frozen scope still blocks first); a terminal run is Inert, and no attempt is started in either case.",
@@ -817,7 +818,8 @@
         "kind": {
           "const": "qualify"
         }
-      }
+      },
+      "x-core-validator": "core.environment.validate_action_qualify"
     },
     "actionRoute": {
       "type": "object",
@@ -1964,6 +1966,8 @@
     }
   },
   "x-core-ingress": [
+    "/$defs/actionEnvironment",
+    "/$defs/actionQualify",
     "/$defs/environmentProposal"
   ]
 }

@@ -5,6 +5,8 @@ and the annotated ``$defs`` they reach; ADR-0075). Every maximum, minimum, patte
 below is the contract's own word, regenerated into the core by ``make contract-bounds``;
 ``make contract-check`` runs the same generator in check mode and fails on drift.
 """
+DIGEST256_PATTERNS = ('^sha256:[0-9a-f]{64}(?![\\s\\S])',)
+
 ENVIRONMENT_HISTORY_MAX_ITEMS = 64
 
 ENVIRONMENT_MEMBER_DIGEST_PATTERNS = ('^sha256:[0-9a-f]{64}(?![\\s\\S])',)
@@ -49,6 +51,12 @@ ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_MIN_LENGTH = 1
 
 ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_PATTERNS = ('^(?:(?:sha256:)?[0-9a-f]{12,64}|(?:[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*|(?:(?:(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?|[a-z0-9]+(?:(?:_|__|-+)[a-z0-9]+)*)(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+))(?:@sha256:[0-9a-f]{64}|(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?))(?![\\s\\S])',)
 
+ENVIRONMENT_VIEW_REVISION_MINIMUM = 1
+
+ENVIRONMENT_VIEW_SPIKE_IMAGE_COUNT_MAXIMUM = 16
+
+ENVIRONMENT_VIEW_SPIKE_IMAGE_COUNT_MINIMUM = 1
+
 QUALIFICATION_ATTEMPTS_MAX_ITEMS = 8
 
 QUALIFICATION_ATTEMPT_ATTEMPT_ID_MAX_LENGTH = 128
@@ -62,3 +70,11 @@ QUALIFICATION_ATTEMPT_RECORD_DIGEST_PATTERNS = ('^sha256:[0-9a-f]{64}(?![\\s\\S]
 QUALIFICATION_ATTEMPT_REVISION_MINIMUM = 1
 
 QUALIFICATION_ATTEMPT_STARTED_STAMP_MINIMUM = 0
+
+QUALIFICATION_VIEW_ACTIVE_SEQ_MAXIMUM = 8
+
+QUALIFICATION_VIEW_ACTIVE_SEQ_MINIMUM = 1
+
+QUALIFICATION_VIEW_ATTEMPTS_USED_MAXIMUM = 8
+
+QUALIFICATION_VIEW_ATTEMPTS_USED_MINIMUM = 0

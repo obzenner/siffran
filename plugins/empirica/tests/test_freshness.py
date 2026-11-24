@@ -371,8 +371,16 @@ class CoreFactsImmutability(unittest.TestCase):
         for name in ("state", "request", "response"):
             with self.subTest(schema=name):
                 schema = json.loads((vendored / f"{name}.schema.json").read_text(encoding="utf-8"))
-                self.assertEqual(schema["$defs"]["digest256"],
-                                 {"type": "string", "pattern": fr.DIGEST256_PATTERN})
+                digest = schema["$defs"]["digest256"]
+                self.assertEqual(digest["type"], "string")
+                self.assertEqual(digest["pattern"], fr.DIGEST256_PATTERN)
+                if name == "response":
+                    # the registered def's validator is this module's own (ADR-0075); the
+                    # annotation guard checks existence and per-document agreement, the pin
+                    # checks ownership. State and request copies keep the word but register
+                    # with their run-view closure at migration node T1.
+                    self.assertEqual(digest.get("x-core-validator"),
+                                     "core.freshness.validate_digest256")
 
     def test_is_digest256_accepts_only_the_exact_lowercase_form_of_a_plain_string(self):
         class Text(str):

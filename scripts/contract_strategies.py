@@ -46,7 +46,7 @@ import math
 import json
 import re
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
@@ -412,6 +412,24 @@ class Case:
     node: dict = field(default=None, repr=False)
     node_id: str = ""
     holding: Any = None           # the kind's payload: a key, a count, a character, an impostor document
+    gate: tuple | None = None     # the (driver, guarded word) of the conditional that holds this
+                                  # member: placed for a challenge whose own base drew the other side
+
+
+@dataclass
+class _Pairing:
+    """One conditional the registered closures carry, read from the keywords alone: ``driver`` holds
+    ``word`` (a const read from the schema, never restated), and ``target`` follows the branch that
+    word satisfies — a value schema per side on the ``allOf`` form (the run/5 attempt row), presence
+    and absence on the node-level form (the run view's last failure and the public fault)."""
+
+    driver: str
+    word: Any
+    target: str
+    demanded: bool               # the guard's ``if`` requires the driver, so absence falls to else
+    then_side: tuple             # ("value", schema) | ("present", schema | None) | ("absent", None)
+    else_side: tuple
+    at_allOf: bool
 
 
 @dataclass
@@ -871,9 +889,13 @@ class Contract:
             visited.add(marker)
             found.append((path, node, node_id))
             for word in ("oneOf", "anyOf"):
-                for branch in node.get(word, ()):
+                # each branch keeps the holder's placement path but owns its own identity: a
+                # second branch is never dropped as the first one's duplicate (the views' inline
+                # object branches — the installed binding, the last failure — stay challengeable),
+                # while the same node along two paths still collapses to one marker.
+                for index, branch in enumerate(node.get(word, ())):
                     if isinstance(branch, dict):
-                        walk(branch, path, f"{node_id}/{word}")
+                        walk(branch, path, f"{node_id}/{word}/{index}")
             for member, sub in node.get("properties", {}).items():
                 if isinstance(sub, dict):
                     walk(sub, (*path, ("p", member)), f"{node_id}/properties/{member}")
@@ -1014,7 +1036,8 @@ class Contract:
                     out.append(Case(f"{at}: one {bound} bound past", path, "set to", bound,
                                     node, node_id, node[bound] + sign))
             out.extend(self._couplings(node, path, at, node_id, name))
-        return out
+            out.extend(self._pairing_flips(node, path, at, node_id, name))
+        return self._gates_for(key, out)
 
     def _isolating_substitute(self, node: dict, keyword: str, series: list) -> Any | None:
         """The first same-family candidate the node itself admits with only the challenged keyword
@@ -1048,6 +1071,175 @@ class Contract:
             return list(sub["enum"])
         return None
 
+    def _pairings_of(self, node: dict, name: str) -> list[_Pairing]:
+        """Every conditional form these registered contracts carry, read from the keywords alone: the
+        two-way ``allOf`` ``{if, then, else}`` value pairing of the run/5 attempt row (the probe named
+        exactly on the probe-failure word, null otherwise) and the node-level presence pairing of the
+        run view's last failure (the probe present on the guarded word, forbidden on every other —
+        an absent driver falls per the guard's ``if.required``, the public fault's mirror). A form
+        the drawing engine refuses stays unparsed here too: never a silent record."""
+        out: list[_Pairing] = []
+        for entry in node.get("allOf", ()):
+            if not (isinstance(entry, dict) and set(entry) == {"if", "then", "else"}):
+                continue
+            cond = entry["if"]
+            if set(cond) not in ({"properties"}, {"properties", "required"}):
+                continue
+            if len(cond.get("properties", {})) != 1:
+                continue
+            (driver, guard), = cond["properties"].items()
+            then, otherwise = entry["then"], entry["else"]
+            if (set(guard) != {"const"} or set(then) != {"properties"}
+                    or set(otherwise) != {"properties"}
+                    or len(then["properties"]) != 1 or len(otherwise["properties"]) != 1
+                    or set(then["properties"]) != set(otherwise["properties"])):
+                continue
+            (target, then_schema), = then["properties"].items()
+            (_, else_schema), = otherwise["properties"].items()
+            out.append(_Pairing(driver, guard["const"], target, "required" in cond,
+                                ("value", then_schema), ("value", else_schema), True))
+        if isinstance(node.get("if"), dict):
+            cond = node["if"]
+            if set(cond) in ({"properties"}, {"properties", "required"}) \
+                    and len(cond.get("properties", {})) == 1:
+                (driver, guard), = cond["properties"].items()
+
+                def _side(branch: object, where: str) -> tuple[str, dict | None, str] | None:
+                    """A presence side: the one paired member demanded (``required``, with its value
+                    schema when the side writes one), forbidden (``not.required``), or None when the
+                    pairing needs the member's own property node."""
+                    if not isinstance(branch, dict):
+                        raise ValueError(f"(at the presence pairing): missing {where} side")
+                    if set(branch) == {"required"} and len(branch["required"]) == 1:
+                        return ("present", None, branch["required"][0])
+                    if (set(branch) == {"not"} and set(branch["not"]) == {"required"}
+                            and len(branch["not"]["required"]) == 1):
+                        return ("absent", None, branch["not"]["required"][0])
+                    if set(branch) == {"properties"} and len(branch["properties"]) == 1:
+                        (member, schema) = next(iter(branch["properties"].items()))
+                        return ("present", schema, member)
+                    return None
+
+                if set(guard) == {"const"}:
+                    then_side = _side(node.get("then"), "then")
+                    else_side = _side(node.get("else"), "else")
+                    if (then_side is not None and else_side is not None
+                            and then_side[2] == else_side[2]
+                            and {then_side[0], else_side[0]} == {"present", "absent"}):
+                        out.append(_Pairing(driver, guard["const"], then_side[2], "required" in cond,
+                                            then_side[:2], else_side[:2], False))
+        return out
+
+    def _side_ops(self, side: tuple, target: str, props: dict, name: str) -> list[tuple]:
+        """The placements one branch of a pairing demands of its paired member, as derive-time
+        operations: a present side sets the member (its side schema, or the member's own property
+        node when the side demands only ``required``), a value side sets the branch's schema value,
+        an absent side takes the member away."""
+        kind, schema = side
+        if kind == "absent":
+            return [("drop", target, None)]
+        drawn_from = schema if schema is not None else props.get(target, {"type": "string"})
+        return [("set", target, _representative(self.dereferenced(drawn_from, name)))]
+
+    def _pairing_flips(self, node: dict, path: tuple, at: str, node_id: str, name: str) -> list[Case]:
+        """The breaches that cross a conditional's branches, derived from the pairing itself (its
+        guarded word read from the schema, never restated): the guard turned to its guarded word
+        while the paired member stays on its other side, the pair kept beside an unguarded word, and
+        — on the presence pairing whose ``if`` demands the driver while the object leaves it optional —
+        the driverless row still carrying the guarded side's member (the reasonless fault with a
+        probe). Each flip changes at least one member of the drawn side it is applied to, so it fires
+        on every base and both judges must refuse it."""
+        props = node.get("properties", {})
+        out: list[Case] = []
+        for pairing in self._pairings_of(node, name):
+            else_ops = self._side_ops(pairing.else_side, pairing.target, props, name)
+            then_ops = self._side_ops(pairing.then_side, pairing.target, props, name)
+            out.append(Case(f"{at}: the {pairing.driver!r} guard flipped to its guarded word while "
+                            f"the paired member {pairing.target!r} stays on its other side",
+                            path, "pairing flip", "if/then/else", node, node_id,
+                            [("set", pairing.driver, pairing.word), *else_ops]))
+            other = self._unguarded_word_value(pairing, props)
+            if other is not None:
+                out.append(Case(f"{at}: the pair from its guarded side kept beside an unguarded "
+                                f"{pairing.driver!r} word", path, "pairing flip", "if/then/else",
+                                node, node_id, [("set", pairing.driver, other), *then_ops]))
+            if (not pairing.at_allOf and pairing.demanded
+                    and pairing.driver in props and pairing.driver not in node.get("required", ())
+                    and pairing.then_side[0] == "present"):
+                out.append(Case(f"{at}: the {pairing.driver!r} member removed while the guarded "
+                                f"side's {pairing.target!r} stays — the driverless breach",
+                                path, "pairing flip", "if/then/else", node, node_id,
+                                [("drop", pairing.driver, None), *then_ops]))
+        return out
+
+    def _unguarded_word_value(self, pairing: _Pairing, props: dict) -> Any | None:
+        """A driver value on the other side of the guard, read from the driver node's own keywords —
+        an enumerated member other than the guarded word, or a pattern's grammar witness — never a
+        restated literal; None when the node's own alternatives are exhausted, and the flip that
+        needs one is never derived."""
+        if pairing.driver not in props:
+            return None
+        node = self.dereferenced(props[pairing.driver], "state")
+        if "enum" in node:
+            for value in node["enum"]:
+                if value != pairing.word:
+                    return value
+            return None
+        patterns = self._patterns(node)
+        if patterns:
+            for witness in pattern_witnesses(patterns[0]):
+                if witness != pairing.word:
+                    return witness
+        return None
+
+    def _gates_for(self, key: str, cases: list[Case]) -> list[Case]:
+        """Mark every case whose placement lands on a conditional's paired member with that
+        conditional's (driver, guarded word): a challenge must be judged inside the branch that
+        allows the member to exist at all, so a base that drew the other side gets the guard placed
+        for it too — the candidate then wrongs only its own keyword, never the pairing."""
+        cache: dict[tuple, list[_Pairing]] = {}
+
+        def object_at(path: tuple) -> list[_Pairing]:
+            if path not in cache:
+                name = key.partition("#")[0]
+                holder = self._node_at(key, path)
+                found_here = list(self._pairings_of(holder, name))
+                for word in ("oneOf", "anyOf", "allOf"):
+                    for branch in holder.get(word, ()) if isinstance(holder, dict) else ():
+                        if isinstance(branch, dict):
+                            # the paired member's own object may live inside a branch the placement
+                            # path cannot see (the last failure's failure row), so the pairing
+                            # lookup walks into the branches just as the target table does.
+                            found_here += self._pairings_of(self.dereferenced(branch, name), name)
+                cache[path] = found_here
+            return cache[path]
+
+        gated: list[Case] = []
+        for case in cases:
+            gate = None
+            if (case.path and case.path[-1][0] == "p"
+                    and case.kind not in ("unsupported", "redundant", "pairing flip")):
+                for pairing in object_at(case.path[:-1]):
+                    if pairing.target == case.path[-1][1]:
+                        gate = (pairing.driver, pairing.word)
+            gated.append(replace(case, gate=gate) if gate is not None else case)
+        return gated
+
+    def _node_at(self, key: str, path: tuple) -> dict:
+        """The schema node a member path walks to, references followed — the pairing lookup's own
+        walk, independent of the target table."""
+        name = key.partition("#")[0]
+        walked: Any = self.node(key)
+        for step, which in path:
+            if not isinstance(walked, dict):
+                return {}
+            walked = self.dereferenced(walked, name)
+            try:
+                walked = walked["properties"][which] if step == "p" else walked["items"]
+            except (KeyError, TypeError):
+                return {}
+        return walked if isinstance(walked, dict) else {}
+
     def _couplings(self, node: dict, path: tuple, at: str, node_id: str, name: str) -> list[Case]:
         """The guard flips of a conditional pair: a oneOf/anyOf of closed branches that share one required
         guard member with disjoint closed guard sets. A flip sets the guard to another branch's word while
@@ -1078,11 +1270,38 @@ class Contract:
         """The concrete derived documents one case yields against one drawn full base document."""
         document = copy.deepcopy(base)
         place = _walk(document, case.path)
+        if place is None and getattr(case, "gate", None) is not None:
+            # the challenge lands on a conditional's paired member and this base drew the other
+            # side: place the guard for it, so the candidate wrongs only its own keyword. The
+            # emit-only kinds (a fresh value into the slot, never a read of what it holds) may
+            # create the member itself — the guarded branch demands it; the reading kinds keep
+            # skipping, nothing honest to place for them.
+            driver, word = case.gate
+            holder = _walk(document, case.path[:-1]) if case.path[:-1] else (document, _WHOLE)
+            if holder is not None:
+                h_parent, h_slot = holder
+                holding = document if h_slot is _WHOLE else h_parent[h_slot]
+                if isinstance(holding, dict):
+                    holding[driver] = copy.deepcopy(word)
+                    place = _walk(document, case.path)
+                    if (place is None and case.path and case.path[-1][0] == "p"
+                            and case.kind in ("set to", "const outside", "enum outside",
+                                              "wrong type")):
+                        place = (holding, case.path[-1][1])
         if place is None:
             return []
         parent, slot = place
         whole = slot is _WHOLE
-        value = document if whole else parent[slot]
+        # a gated emit-only challenge may hold a slot the base never drew (the conditional's other
+        # side): reading a missing slot yields None so the value-reading kinds skip instead of
+        # crashing the sweep, while an array row's slot stays a real index read.
+        if whole or (isinstance(parent, (list, tuple))
+                     and isinstance(slot, int) and 0 <= slot < len(parent)):
+            value = document if whole else parent[slot]
+        elif isinstance(parent, dict):
+            value = parent.get(slot)
+        else:
+            value = None
 
         def emit(candidate: Any, case_kind: str = case.kind, label: str = case.label,
                  core_only: bool = False) -> list[Derived]:
@@ -1093,6 +1312,19 @@ class Contract:
             return [Derived(label, document, case.node_id, case_kind, case.keyword, core_only)]
 
         target = case.holding
+        if case.kind == "pairing flip":
+            # a conditional breach: its operations land on the object that carries the pairing
+            # itself (the case's own slot), and one of them always changes the drawn side, so the
+            # flip never degrades into the unchanged base.
+            carrier = document if whole else parent[slot]
+            if not isinstance(carrier, dict):
+                return []
+            for op, member, value in target:
+                if op == "set":
+                    carrier[member] = copy.deepcopy(value)
+                else:
+                    carrier.pop(member, None)
+            return [Derived(case.label, document, case.node_id, case.kind, case.keyword)]
         if case.kind == "drop":
             if isinstance(value, dict) and target in value:
                 del value[target]

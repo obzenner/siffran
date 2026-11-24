@@ -19,6 +19,7 @@ from validate_ui_view import view_schemas
 KNOWN = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf",
          "anyOf", "properties", "required", "additionalProperties", "items", "minItems", "maxItems",
          "uniqueItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "allOf", "not",
+         "if", "then", "else",
          "x-core-validator", "x-core-only", "x-grammar", "x-core-ingress", "x-work-limit",
          "x-regression-witnesses"}  # the annotation family: shapes stay the generators' word, annotation words the guard's
 #: Generated arrays and maps are short: what is checked is the shape, never the volume.
@@ -239,6 +240,99 @@ class Strategies:
             rules.append((member, mode, value, target, schema))
         return rules
 
+    def _presence_pairing(self, node: dict, doc: dict, pointer: str) -> dict | None:
+        """The node-level ``if``/``then``/``else`` presence pairing, exactly as these contracts write
+        it (the run view's last failure and the public fault, Empirica 7.2 §5.1): ``if`` one guarded
+        member carries one ``{const}`` word — with ``required: [<driver>]`` naming it, so an absent
+        driver fails the guard and falls to ``else`` — then the one paired member is present,
+        ``else`` it is forbidden. Every other shape is refused, never guessed."""
+        if "if" not in node:
+            return None
+        cond, then, otherwise = node["if"], node.get("then"), node.get("else")
+        if set(cond) not in ({"properties"}, {"properties", "required"}):
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence guard must name exactly one member")
+        (driver, guard), = cond["properties"].items()
+        if set(guard) != {"const"}:
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence guard is a const, exactly")
+        demanded = "required" in cond
+        if demanded and cond["required"] != [driver]:
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence guard requires only its own member")
+
+        def _side(branch: object, where: str) -> tuple[str, dict, dict | None]:
+            if not isinstance(branch, dict):
+                raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing must name both its sides")
+            if set(branch) == {"required"} and len(branch["required"]) == 1:
+                return "present", {"required": branch["required"]}, None
+            if (set(branch) == {"not"} and set(branch["not"]) == {"required"}
+                    and len(branch["not"]["required"]) == 1):
+                return "absent", {"not": branch["not"]}, None
+            if set(branch) == {"properties"} and len(branch["properties"]) == 1:
+                (member, schema) = next(iter(branch["properties"].items()))
+                return "present", {"required": [member]}, schema
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence side ({where}) demands or forbids "
+                             "one member, exactly")
+
+        then_side, else_side = _side(then, "then"), _side(otherwise, "else")
+        both = []
+        for kind, shape, schema in (then_side, else_side):
+            member = (shape["required"] if kind == "present" else shape["not"]["required"])[0]
+            both.append((member, kind))
+        if both[0][0] != both[1][0] or both[0][1] == both[1][1]:
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing holds one paired member "
+                             "present on exactly one of its two sides")
+        return {"driver": driver, "word": guard["const"], "demanded": demanded,
+                "target": both[0][0], "then": then_side, "else": else_side}
+
+    def _presence_object(self, node: dict, doc: dict, pointer: str,
+                         pairing: dict) -> st.SearchStrategy:
+        """Draw one document of a presence-coupled object: the driver is drawn from its own member
+        node (its guarded word pinned beside the free draw, so both branches stay reachable; a full
+        draw never takes an absent driver an optional member allows), and the paired member follows
+        the branch that driver value satisfies — present and drawn from the side's schema (or its
+        own property node) on ``then``, absent on ``else``."""
+        (driver, word, demanded) = (pairing["driver"], pairing["word"], pairing["demanded"])
+        paired_side = pairing["then"] if pairing["then"][0] == "present" else pairing["else"]
+        target, side_schema = pairing["target"], paired_side[2]
+        props, required = node.get("properties", {}), set(node.get("required", []))
+        if driver not in props:
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing over a member its own "
+                             "object does not hold")
+        driver_types = props[driver].get("type")
+        if (isinstance(driver_types, list) and "null" in driver_types) or driver_types == "null":
+            raise ValueError(f"{doc['$id']}#{pointer}: a presence driver that may itself be null is "
+                             "not this form — the pairing cannot tell a value from an absence")
+        others = {key: value for key, value in props.items() if key not in (driver, target)}
+        fixed = {key: self.node(value, doc, f"{pointer}/properties/{key}")
+                 for key, value in others.items() if key in required}
+        optional = {key: self.node(value, doc, f"{pointer}/properties/{key}")
+                    for key, value in others.items() if key not in required}
+        rest = (st.fixed_dictionaries({**fixed, **optional}) if self.full
+                else st.fixed_dictionaries(fixed, optional=optional))
+        driven = self.node(props[driver], doc, f"{pointer}/properties/{driver}")
+        if self._admits(props[driver], word):
+            driven = st.one_of(driven, st.just(word))
+        if driver not in required and not self.full:
+            driven = st.one_of(driven, st.none())  # an absent driver: falls per the guard's demand
+        then_side = pairing["then"]
+        drawn_from = self.node(side_schema if side_schema is not None else props[target],
+                               doc, f"{pointer}/properties/{target}")
+
+        def _chosen(pair: tuple) -> tuple[dict, bool]:
+            driver_value, rest_values = pair
+            satisfies = (driver_value == word) if driver_value is not None else not demanded
+            partial = {**rest_values}
+            if driver_value is not None:
+                partial[driver] = driver_value
+            return partial, (then_side[0] == "present") is satisfies
+
+        def _presence(choice: tuple) -> st.SearchStrategy:
+            partial, present = choice
+            if not present:
+                return st.just(partial)
+            return drawn_from.map(lambda value, partial=partial: {**partial, target: value})
+
+        return st.tuples(driven, rest).map(_chosen).flatmap(_presence)
+
     def _object(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
         forbidden = set(node.get("not", {}).get("required", ()))
         required = set(node.get("required", ()))
@@ -247,6 +341,9 @@ class Strategies:
         # A ``not: {required: [...]}`` branch (ADR-0075 conditional form): the branch may not carry
         # those members at all, so they are never drawn — a full document excludes a forbidden member.
         props = {key: value for key, value in node.get("properties", {}).items() if key not in forbidden}
+        presence = self._presence_pairing(node, doc, pointer)
+        if presence is not None:
+            return self._presence_object(node, doc, pointer, presence)
         rules = self._implications(node, doc, pointer)
         if rules and len({(rule[0], rule[3]) for rule in rules}) == 1:
             driver, target = rules[0][0], rules[0][3]

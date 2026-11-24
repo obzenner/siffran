@@ -670,7 +670,7 @@
                       },
                       "observed_content_digest": {
                         "type": "string",
-                        "pattern": "^sha256:[0-9a-f]{64}$"
+                        "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
                       },
                       "spike_unavailable": {
                         "type": "string",
@@ -931,6 +931,7 @@
                     "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
                   }
                 },
+                "x-core-validator": "core.environment.validate_action_environment",
                 "examples": [
                   {
                     "kind": "environment",
@@ -961,6 +962,7 @@
                     "type": "string"
                   }
                 },
+                "x-core-validator": "core.environment.validate_action_qualify",
                 "examples": [
                   {
                     "kind": "qualify"
@@ -1273,7 +1275,7 @@
                       },
                       "observed_content_digest": {
                         "type": "string",
-                        "pattern": "^sha256:[0-9a-f]{64}$"
+                        "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
                       },
                       "spike_unavailable": {
                         "type": "string",
@@ -1534,6 +1536,7 @@
                     "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
                   }
                 },
+                "x-core-validator": "core.environment.validate_action_environment",
                 "examples": [
                   {
                     "kind": "environment",
@@ -1564,6 +1567,7 @@
                     "type": "string"
                   }
                 },
+                "x-core-validator": "core.environment.validate_action_qualify",
                 "examples": [
                   {
                     "kind": "qualify"

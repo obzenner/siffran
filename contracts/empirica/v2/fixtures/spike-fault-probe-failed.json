@@ -1,0 +1,35 @@
+{
+  "request": {
+    "protocol": "empirica/v2",
+    "request_id": "spike-fault-probe-failed",
+    "command": {
+      "type": "ObserveAction",
+      "run_id": "run-spike-fault-probe-failed",
+      "action": {
+        "kind": "spike_request",
+        "claim_id": "claim-probe-fixture-failed",
+        "plan": {
+          "schema": "empirica.spike-plan-draft/2",
+          "image": "fixture-probe-fault-image:latest",
+          "argv": [
+            "/usr/local/bin/probe-fixture"
+          ],
+          "inputs": [],
+          "environment": {}
+        }
+      }
+    }
+  },
+  "expected": {
+    "protocol": "empirica/v2",
+    "request_id": "spike-fault-probe-failed",
+    "result": {
+      "type": "Fault",
+      "code": "unavailable",
+      "fail_direction": "closed",
+      "message": "spike refused: the qualification probe realization failed",
+      "reason": "qualification-probe-failed",
+      "probe": "realization"
+    }
+  }
+}

@@ -14,9 +14,10 @@ class PathContractError(FreshnessContractError): ...
 DigestContractError = CanonicalJSONError
 class ObservationContractError(FreshnessContractError): ...
 
-# The one digest form; the literal is the vendored schemas' $defs/digest256 pattern (a test pins the
-# equality). Always applied with ``fullmatch``, so a trailing newline never matches.
-DIGEST256_PATTERN = r"^sha256:[0-9a-f]{64}$"
+# The one digest form; the literal is the vendored schemas' $defs/digest256 pattern (a test pins
+# the equality), absolutely anchored so no engine's `$` decides the end (ADR-0075 re-anchoring).
+# Always applied with ``fullmatch``, so a trailing newline never matches.
+DIGEST256_PATTERN = r"^sha256:[0-9a-f]{64}(?![\s\S])"
 _DIGEST_RE = re.compile(DIGEST256_PATTERN)
 # The one claim-identifier pattern; the literal mirrors shared-defs.json#/$defs/claimId (a test
 # pins the equality). The final lookahead means absolute end under both Python ``re.search`` and

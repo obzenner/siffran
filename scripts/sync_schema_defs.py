@@ -66,7 +66,11 @@ def _qualification_probe_names() -> list[str]:
 
 def _shared_definitions() -> dict[str, dict]:
     shared = copy.deepcopy(_load("shared-defs.json")["$defs"])
+    # The ADR-0075 registration rides the definition itself: the annotation names the one core
+    # callable that validates a probe word (both target copies register through it), while the
+    # enumeration stays the support contract's own generated word, never re-owned here.
     shared["qualificationProbeName"] = {
+        "x-core-validator": "core.run.validate_qualification_probe_name",
         "enum": _qualification_probe_names(),
         "description": ("The qualification probe names, owned by the Docker spike support "
                         "contract (contracts/empirica-docker-spike/v1, its only copy): the "

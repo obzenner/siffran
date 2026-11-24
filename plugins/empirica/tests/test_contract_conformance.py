@@ -339,7 +339,8 @@ class CoreOnlyRulesTests(_Base):
         """The core-only rule the contract declares for its integer members (``x-core-only`` entries
         with ``case: float-for-int``): a JSON number with a zeroed fraction is an integer to draft
         2020-12 and must not be one to the core — the member, the history rows and the attempt rows
-        alike."""
+        alike, and (E6c) the response projections' own integers: the environment revision and image
+        count, the attempts used and the installed binding's sequence."""
         member = self.canonical("state#/$defs/environmentMember")
         attempt = self.canonical("state#/$defs/qualificationAttempt")
         for key, document, terminals in (
@@ -347,11 +348,23 @@ class CoreOnlyRulesTests(_Base):
                 ("state#/properties/environment_history", [copy.deepcopy(member)], ("revision",)),
                 ("state#/$defs/qualificationAttempt", attempt, ("revision", "started_stamp")),
                 ("state#/properties/qualification_attempts", [copy.deepcopy(attempt)],
-                 ("revision", "started_stamp"))):
+                 ("revision", "started_stamp")),
+                ("response#/$defs/environmentView",
+                 self.canonical("response#/$defs/environmentView"), ("revision", "spike_image_count")),
+                ("response#/$defs/qualificationView",
+                 self.canonical("response#/$defs/qualificationView"), ("attempts_used",)),
+                ("response#/$defs/qualificationView",
+                 {**self.canonical("response#/$defs/qualificationView")},
+                 ("active/seq",))):
             for terminal in terminals:
                 candidate = copy.deepcopy(document)
-                row = candidate if isinstance(candidate, dict) else candidate[0]
-                row[terminal] = float(row[terminal])  # 1 becomes 1.0: an integer to JSON, not to Python
+                if terminal == "active/seq":
+                    # a full draw never takes the null alternative, so the canonical base always
+                    # holds an installed binding whose sequence can carry the zeroed fraction.
+                    candidate["active"]["seq"] = float(candidate["active"]["seq"])
+                else:
+                    row = candidate if isinstance(candidate, dict) else candidate[0]
+                    row[terminal] = float(row[terminal])  # 1 becomes 1.0: an integer to JSON only
                 with self.subTest(key=key, member=terminal):
                     self.assertTrue(_CONTRACT.accepts(key, candidate),
                                     "draft 2020-12 must admit the float — the schema cannot say else")

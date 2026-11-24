@@ -586,7 +586,7 @@
   "$defs": {
     "digest256": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
     },
     "childRecord": {
       "type": "object",
@@ -1296,6 +1296,7 @@
       "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
     },
     "qualificationProbeName": {
+      "x-core-validator": "core.run.validate_qualification_probe_name",
       "enum": [
         "realization",
         "natural-125",
