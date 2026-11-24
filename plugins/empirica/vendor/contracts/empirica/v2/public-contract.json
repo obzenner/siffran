@@ -380,7 +380,7 @@
       },
       "environment": {
         "operation": "environment",
-        "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused with environment.not_available, nothing recorded.",
+        "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing recorded.",
         "example": {
           "kind": "environment",
           "payload": {
@@ -398,7 +398,7 @@
       },
       "qualify": {
         "operation": "qualify",
-        "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused with environment.not_available, nothing attempted.",
+        "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing attempted.",
         "example": {
           "kind": "qualify"
         }
@@ -2867,11 +2867,11 @@
         },
         {
           "id": "environment/actions/not_available",
-          "text": "Neither action is available yet: the core refuses every environment and qualify action with the one closed reason environment.not_available in every run state. No revision is recorded, no attempt started, no binding changed by the refusal; the run keeps its current spike backend, and the host still qualifies one out of band."
+          "text": "Neither action is available yet: in every active run state the core refuses both with the one closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact; an invalid frozen scope still blocks first (graph.invalid), and a terminal run stays Inert. No revision is recorded, no attempt started, no binding changed by the refusal; the run keeps its current spike backend, and the host still qualifies one out of band."
         },
         {
           "id": "environment/actions/ceiling",
-          "text": "StartRun.spike_profile is the host profile ceiling, an explicit wire reinterpretation: absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. It is bound once at StartRun, is never author action data, and no author action can raise it."
+          "text": "StartRun.spike_profile is the host profile ceiling, an explicit wire reinterpretation: absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. It is bound once at StartRun, is never author action data, and no author action can raise it. Until the cycle lands, the host selector still uses this field to select exactly one profile for the run; permitting both under docker-networked-v1 is the forthcoming ceiling meaning, not current behaviour."
         }
       ]
     }

@@ -322,13 +322,9 @@ def _build_action_sample(kind: str) -> dict:
     if kind == "freeze":
         return {"kind": "freeze"}
     if kind == "environment":
-        return {"kind": "environment", "payload": {
-            "profile_id": "docker-isolated-v1",
-            "spike_images": ["docker.io/library/alpine:3.22"],
-            "preparation": ["Report the plan; the host owns the qualification attempt."],
-            "rationale": "One isolated profile over one local proof image."}}
+        return copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["environment"]["example"])
     if kind == "qualify":
-        return {"kind": "qualify"}
+        return copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["qualify"]["example"])
     if kind == "child_reserve":
         return {"kind": "child_reserve", "purpose": "audit",
                 "role_profile": _DEFAULT_PROFILE, "execution": "foreground",
