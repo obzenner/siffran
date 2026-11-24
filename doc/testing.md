@@ -153,8 +153,8 @@ converge on `adapters.bridge.handle`; Pi converges through `adapters/pi/bridge.p
 or can select a weaker harness.
 
 Empirica 6's public backend projection is covered by `make empirica-run5-check`: both exact closed
-RunView/GetArgument shapes, no diagnostic extension, exact host-owned profile selection only at `StartRun`, immutable persisted binding, rejection of every non-run/5 state discriminator without mutation
-(including the legacy `empirica.run/4` and `empirica.run/3` and the major `empirica.run/2`), and a fresh run/5 generation. The same target binds the agent-visible 120/210/300/360 hierarchy and resource/no-evidence
+RunView/GetArgument shapes, no diagnostic extension, exact host-owned profile selection only at `StartRun`, immutable persisted binding, the one read-only run/4 legacy classification (refused with its own closed reason wherever it is met, never resumed or rewritten) and rejection of every other non-run/5 state
+discriminator without mutation (`empirica.run/3` and the major `empirica.run/2`), and a fresh run/5 generation. The same target binds the agent-visible 120/210/300/360 hierarchy and resource/no-evidence
 wording to the sandbox, Pi transport, and Claude MCP constants. UI contract and fixture copies
 are display-only and remain byte-owned by `make contract-fixtures`/`make vendor-contracts`.
 
