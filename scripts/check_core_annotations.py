@@ -26,8 +26,12 @@ response ``Fault`` registers by declaration:
   harness's declared kinds (``contract_strategies.CASE_KINDS``);
 * every ``x-grammar`` piece compiles, and a grammar rides a node that carries the pattern it refines;
 * every ``x-regression-witnesses`` corpus is a *bounded corpus of evidenced defects*: at most eight
-  entries, unique, each an object ``{"value": <string>, "defect": <a short reference — the review file
-  and its finding, or the commit that fixed it>}``; a corpus value the node's own Draft 2020-12 verdict
+  entries, unique, each an object ``{"value": <string>, "defect": <a structured reference>}`` — the
+  value at most 256 characters and inside the node's own length bounds where they are smaller (a length
+  refusal is a shape defect, never a pattern regression), the defect reference at most 120 characters
+  and pattern-checked: ``<review file>.md#<finding number>`` or ``commit:<40 lowercase hex>`` (the
+  guard cannot prove the named evidence, so code review is the control for the corpus itself); a
+  corpus value the node's own Draft 2020-12 verdict
   still accepts is a contract bug (never ``any(re.fullmatch(...))``, which read the pattern semantics
   backwards), and the differential harness is the second check — the core's verdict;
 * every ``x-work-limit`` override names bounds the engine reads (``maxItems``, ``maxLength``,
@@ -148,6 +152,16 @@ def document_value_at(document: dict, pointer: str, word: str) -> object:
 
 #: The corpus cap: a node declares its evidenced defects, it does not bank a test suite.
 REGRESSION_CORPUS_CAP = 8
+#: A regression-witness value is bounded short: at most this many characters, and inside the node's
+#: own ``minLength``/``maxLength`` bounds where they are smaller — a length refusal is a shape defect
+#: the generated length challenges already cover, never a pattern regression.
+REGRESSION_VALUE_CAP = 256
+#: A defect reference is bounded and structured, never prose: ``<review file>#<finding number>`` or
+#: ``commit:<40 lowercase hex>``. The guard pattern-checks the shape; the evidence itself is what code
+#: review controls — the guard cannot prove a reference names a real defect.
+REGRESSION_DEFECT_CAP = 120
+DEFECT_REFERENCE = re.compile(
+    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md#[1-9][0-9]*|commit:[0-9a-f]{40})")
 #: A regression witness must be refused by the node's own draft word: the pattern keyword searches
 #: (an unanchored ``a`` accepts ``ba``), every conjunct must agree — the reviewer's ``any(fullmatch)``
 #: got exactly those two cases backwards.
@@ -170,10 +184,16 @@ def _draft_refuses(node: dict, value: str) -> bool:
 def _regression_errors(node: dict, node_id: str) -> list[str]:
     """A named regression-witness corpus (``x-regression-witnesses``) — a *bounded* corpus of evidenced
     defects, never a back door for hand-written cases: at most {} entries, unique values, each an
-    object ``{{"value": <string>, "defect": <a short reference>}}`` naming the demonstrated defect
-    (the review file and its finding, or the commit that fixed it); a corpus value the node's own
-    Draft 2020-12 word still accepts is a contract bug, and the differential harness is the second
-    check (the core's verdict).""".format(REGRESSION_CORPUS_CAP)
+    object ``{{"value": <string>, "defect": <a structured reference>}}`` naming the demonstrated
+    defect — the review file and its finding (``<review file>.md#<finding number>``), or the commit
+    that fixed it (``commit:<40 lowercase hex>``) — with the value a string of at most {cap_v}
+    characters and inside the node's own ``minLength``/``maxLength`` bounds where they are smaller
+    (a length refusal is a shape defect, never a pattern regression), and the defect reference at
+    most {cap_d} characters, pattern-checked. The guard cannot prove the named evidence is real, so
+    code review is the control for the corpus itself; a corpus value the node's own Draft 2020-12
+    word still accepts is a contract bug, and the differential harness is the second check (the
+    core's verdict).""".format(REGRESSION_CORPUS_CAP, cap_v=REGRESSION_VALUE_CAP,
+    cap_d=REGRESSION_DEFECT_CAP)
     witnesses = node.get(X_REGRESSION_WITNESSES)
     if not isinstance(witnesses, list) or not witnesses:
         return [f"{node_id}: an x-regression-witnesses corpus must be a non-empty list of "
@@ -185,6 +205,11 @@ def _regression_errors(node: dict, node_id: str) -> list[str]:
                    "defects, it does not bank a test suite")
     if not any(Contract._patterns(node) for _ in [0]):
         out.append(f"{node_id}: an x-regression-witnesses corpus rides a node with no pattern to violate")
+    minimum = node.get("minLength")
+    maximum = node.get("maxLength")
+    low = minimum if isinstance(minimum, int) and not isinstance(minimum, bool) else 0
+    ceiling = min(REGRESSION_VALUE_CAP, maximum if isinstance(maximum, int)
+                  and not isinstance(maximum, bool) else REGRESSION_VALUE_CAP)
     seen_values = set()
     for entry in witnesses:
         if not isinstance(entry, dict) or set(entry) != {"value", "defect"}:
@@ -199,10 +224,26 @@ def _regression_errors(node: dict, node_id: str) -> list[str]:
             out.append(f"{node_id}: a duplicated regression entry value: {value!r}")
             continue
         seen_values.add(value)
+        if not low <= len(value) <= ceiling:
+            out.append(f"{node_id}: a regression witness value of {len(value)} characters outside "
+                        f"the node's length bounds ({low} to {ceiling} — the cap "
+                        f"{REGRESSION_VALUE_CAP} and the node's own minLength/maxLength, whichever "
+                        "is smaller): a length refusal is a shape defect, never a pattern "
+                        "regression")
+            continue
         if not isinstance(defect, str) or not defect.strip():
             out.append(f"{node_id}: a regression entry without its evidenced defect reference "
-                       f"({value!r}): a short reference — the review file and its finding, or the "
-                       "commit that fixed it — is required")
+                       f"({value!r}): a structured reference — the review file and its finding, or "
+                       "the commit that fixed it — is required")
+            continue
+        if len(defect) > REGRESSION_DEFECT_CAP:
+            out.append(f"{node_id}: a defect reference of {len(defect)} characters exceeds the cap "
+                        f"of {REGRESSION_DEFECT_CAP}: {defect!r}")
+            continue
+        if not DEFECT_REFERENCE.fullmatch(defect):
+            out.append(f"{node_id}: a defect reference that is not structured evidence — "
+                       "'<review file>.md#<finding number>' or 'commit:<40 lowercase hex>', "
+                       f"never prose: {defect!r}")
             continue
         if not _draft_refuses(node, value):
             out.append(f"{node_id}: a named regression witness the node's Draft 2020-12 word still "

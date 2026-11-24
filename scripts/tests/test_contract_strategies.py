@@ -238,7 +238,10 @@ class RealContractTests(unittest.TestCase):
 class FamilyWitnessTests(unittest.TestCase):
     """The re-review's finding 1: a same-family substitution for a const or an enumeration is a value
     of the SAME JSON type outside the allowed set (a string for a string enum), and the ledger credits a
-    keyword only from a witness of that keyword's own family — a wrong-family value must never stand in."""
+    keyword only from a witness of that keyword's own family — a wrong-family value must never stand in.
+
+    The re-review 3's finding 2 strengthens the credit: the substitution must also be one the rest of
+    the schema admits with only the challenged keyword removed — see IsolatingSubstituteTests."""
 
     def test_every_const_and_enum_candidate_is_of_its_own_family(self):
         contract = Contract()
@@ -285,15 +288,19 @@ class FamilyWitnessTests(unittest.TestCase):
                            "doc#node", "outside-any-run")
         self.assertTrue(engine.witness_of_family(right))
 
-    def test_a_fresh_probe_free_family_declares_itself_unsupported(self):
-        """A boolean const that holds every value of its family has no same-family harvest left: the
-        plan declares the pair unsupported instead of crediting a cross-family value (the premise of
-        the wrong-family finding, made explicit)."""
-        probed = engine._outside_values([True, False], enum_alternatives=True)
-        self.assertEqual(probed, [], "the boolean family is genuinely exhausted")
-        probes = engine._outside_values("empirica.run/5", enum_alternatives=False)
-        self.assertTrue(probes and all(isinstance(probe, str) for probe in probes),
-                        "a string const generates a fresh string")
+    def test_a_boolean_enumeration_holding_every_value_stays_unsupported(self):
+        """A boolean family genuinely exhausts (no third boolean): the substitute series is empty and
+        the plan declares the pair unsupported instead of crediting a cross-family value — while a
+        string family always generates fresh values, so its series is never empty."""
+        self.assertEqual(engine._family_substitutes({"type": "boolean"}, [True, False]), [])
+        series = engine._family_substitutes({"type": "string"}, ["empirica.run/5"])
+        self.assertTrue(series and all(isinstance(candidate, str) for candidate in series),
+                        "a string family generates fresh strings, never exhaustion")
+        contract = self._contract_for({"type": "boolean", "enum": [True, False]})
+        cases = [case for case in contract.cases("probe_document#/$defs/probe")
+                 if case.keyword == "enum" and case.node_id.endswith("/properties/v")]
+        self.assertEqual([case.kind for case in cases], ["unsupported"],
+                         "the exhausted family declares itself, never a cross-family credit")
 
 
     _PROBE_DOC = {  # a synthetic registered document: fresh-value families against the real plan
@@ -352,7 +359,8 @@ class FamilyWitnessTests(unittest.TestCase):
     def test_an_array_constant_gets_an_array_substitute_not_a_flattening(self):
         """The re-review's seed: a const array was flattened as if its members were enumeration
         alternatives, so the array family never saw a substitute. The const holds ONE array; the fresh
-        value is a longer array of the same family."""
+        value is a fresh array of the same family — shorter or longer (the isolating series tries every
+        length from the empty array up), never the const itself, never a flattening."""
         contract = self._contract_for({"type": "array", "const": ["row", "second"]})
         cases = [case for case in contract.cases("probe_document#/$defs/probe")
                  if case.keyword in ("const", "enum") and case.node_id.endswith("/properties/v")]
@@ -362,6 +370,138 @@ class FamilyWitnessTests(unittest.TestCase):
             self.assertEqual(engine._json_type(case.holding), "array", case.holding)
             self.assertNotEqual(case.holding, ["row", "second"], "a fresh array, never the const itself")
             self.assertTrue(engine.witness_of_family(case))
+
+
+class IsolatingSubstituteTests(unittest.TestCase):
+    """The re-review 3's finding 2: crediting a same-family substitute with covering ``const`` or
+    ``enum`` requires the rest of the schema itself to admit it, with only the challenged keyword
+    removed — a candidate a sibling keyword refuses (``maxItems`` turning away the always-longer array
+    against a two-row const) is the sibling's word, never the keyword's. When the siblings admit no
+    substitute at all, the ledger records the keyword redundant or unsupported — never covered."""
+
+    _SOL_DOC = {  # Sol's seed: a two-row const alongside maxItems 2 — the false-coverage low water mark
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://siffran.test/sol-two-row-const",
+        "type": "object",
+        "x-core-ingress": ["/$defs/pinned"],
+        "properties": {"pinned": {"$ref": "#/$defs/pinned"}},
+        "required": ["pinned"],
+        "$defs": {"pinned": {
+            "x-core-validator": "conformance_fixtures.pinned_validator",
+            "type": "array",
+            "const": ["row", "second"],
+            "maxItems": 2}}}
+
+    _SIBLINGED_DOC = {  # the siblings alone admit only the const itself, so the keyword is not isolable
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "$id": "https://siffran.test/sibling-subsumed-const",
+        "type": "object",
+        "x-core-ingress": ["/$defs/pinned"],
+        "properties": {"pinned": {"$ref": "#/$defs/pinned"}},
+        "required": ["pinned"],
+        "$defs": {"pinned": {
+            "x-core-validator": "conformance_fixtures.pinned_validator",
+            "type": "array",
+            "const": ["row"],
+            "minItems": 1,
+            "maxItems": 1,
+            "uniqueItems": True,
+            "items": {"enum": ["row"]}}}}
+
+    def _install_core(self, enforce_const: bool) -> None:
+        """A validator the synthetic documents name: one enforcing only ``maxItems`` (Sol's seed — it
+        refuses a three-row array and accepts anything else, const included), and one honest core that
+        also refuses any array other than the pinned rows."""
+        module = types.ModuleType("conformance_fixtures")
+
+        def pinned_validator(value):
+            if not isinstance(value, list):
+                raise ValueError("not an array")
+            if len(value) > 2:
+                raise ValueError("too many rows")
+            if enforce_const and list(value) != ["row", "second"]:
+                raise ValueError("not the pinned rows")
+            return value
+
+        module.pinned_validator = staticmethod(pinned_validator)
+        sys.modules["conformance_fixtures"] = module
+
+    @staticmethod
+    def _rest_admits(case) -> bool:
+        """Whether the node with only the challenged keyword removed admits the substitute."""
+        from jsonschema import Draft202012Validator
+        rest = {word: value for word, value in case.node.items() if word != case.keyword}
+        return not list(Draft202012Validator(rest).iter_errors(case.holding))
+
+    def test_sol_control_a_two_row_const_with_maxitems_two_is_uncredited(self):
+        """Sol's exact control: a core enforcing only ``maxItems`` used to pass the sweep, because the
+        always-longer probe array was refused for length by both judges and the ledger credited the
+        ``const`` keyword with the sibling's refusal. The substitute must fit the sibling bound, so the
+        missing const refusal surfaces as a disagreement and the keyword is never credited."""
+        self._install_core(enforce_const=False)
+        contract = Contract({"sol": copy.deepcopy(self._SOL_DOC)})
+        key = "sol#/$defs/pinned"
+        substitute = next(case for case in contract.cases(key) if case.keyword == "const")
+        self.assertEqual(substitute.kind, "const outside", substitute.label)
+        self.assertLessEqual(len(substitute.holding), substitute.node["maxItems"],
+                             "the substitute must fit the sibling bound, never only exceed the const")
+        self.assertNotEqual(substitute.holding, substitute.node["const"])
+        self.assertTrue(self._rest_admits(substitute),
+                        "the rest of the schema admits the substitute with only the const removed")
+        self.assertTrue(engine.witness_of_family(substitute))
+        base = find(contract.drawn(key, full=True), lambda document: True, settings=DRY)
+        statuses = {contract.adjudicate(key, derived)
+                    for derived in contract.derive(base, key, substitute)}
+        self.assertTrue(statuses, "the const candidate must fire")
+        self.assertTrue(any(status.startswith("DISAGREEMENT") for status in statuses),
+                        f"a maxItems-only core must fail on the const candidate, not pass: {statuses}")
+        self.assertNotIn("agree-refused", statuses,
+                         "a maxItems refusal must never be credited to the const keyword")
+
+    def test_an_honest_core_is_credited_from_the_isolating_witness(self):
+        """The teeth of the same control: a core that also refuses the const-substitute yields the
+        both-refuse witness, so the credit belongs to the isolated keyword — and only to it."""
+        self._install_core(enforce_const=True)
+        contract = Contract({"sol": copy.deepcopy(self._SOL_DOC)})
+        key = "sol#/$defs/pinned"
+        substitute = next(case for case in contract.cases(key) if case.keyword == "const")
+        base = find(contract.drawn(key, full=True), lambda document: True, settings=DRY)
+        statuses = {contract.adjudicate(key, derived)
+                    for derived in contract.derive(base, key, substitute)}
+        self.assertEqual(statuses, {"agree-refused"},
+                         "the honest core refuses the isolating witness, and only that is credit")
+
+    def test_a_const_the_siblings_subsume_is_declared_redundant(self):
+        """The complementary half: when ``minItems``/``maxItems``/``uniqueItems``/``items`` alone admit
+        only the const itself, no substituting refusal can be isolated — the plan declares the keyword
+        redundant and no candidate is derived the ledger could ever credit."""
+        self._install_core(enforce_const=True)
+        contract = Contract({"subsumed": copy.deepcopy(self._SIBLINGED_DOC)})
+        key = "subsumed#/$defs/pinned"
+        declared = [case for case in contract.cases(key) if case.keyword == "const"]
+        self.assertEqual([case.kind for case in declared], ["redundant"],
+                         [case.label for case in declared])
+        base = find(contract.drawn(key, full=True), lambda document: True, settings=DRY)
+        for case in declared:
+            with self.subTest(label=case.label):
+                self.assertEqual(contract.derive(base, key, case), [],
+                                 "a redundant keyword derives no candidate coverage could credit")
+
+    def test_every_real_const_and_enum_substitute_is_admitted_by_the_rest(self):
+        """The standing word, held against the real registered contracts: every const/enum challenge
+        candidate is a value the rest of its node admits with only the challenged keyword removed."""
+        contract = Contract()
+        seen = 0
+        for key in sorted(contract.registered):
+            for case in contract.cases(key):
+                if case.kind not in ("const outside", "enum outside"):
+                    continue
+                with self.subTest(key=key, label=case.label):
+                    self.assertTrue(self._rest_admits(case),
+                                    "the sibling keywords must admit the substitute, or the keyword "
+                                    "is declared redundant/unsupported, never covered")
+                    seen += 1
+        self.assertGreater(seen, 0, "the real contracts carry const/enum challenges to hold")
 
 
 class MethodNameTests(unittest.TestCase):

@@ -209,7 +209,7 @@ class GuardControlTests(unittest.TestCase):
         def accepted(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "python:3.12-slim", "defect": "a reference"}]
+                    {"value": "python:3.12-slim", "defect": "pr-E2c-gpt-6.2-sol.md#7"}]
         found = findings_for(accepted)
         self.assertTrue(any("the node's Draft 2020-12 word still accepts" in line for line in found),
                         found)
@@ -221,7 +221,7 @@ class GuardControlTests(unittest.TestCase):
         the guard's word is the draft verdict now."""
         def unanchored(documents_map):
             for node in _patterned_spike_items(documents_map):
-                node["x-regression-witnesses"] = [{"value": "ba", "defect": "a reference"}]
+                node["x-regression-witnesses"] = [{"value": "ba", "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
         found = findings_for(unanchored)
         self.assertTrue(any("the node's Draft 2020-12 word still accepts: 'ba'" in line for line in found),
                         found)
@@ -247,7 +247,8 @@ class GuardControlTests(unittest.TestCase):
         def nine(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": f"x{index}", "defect": "a reference"} for index in range(9)]
+                    {"value": f"x{index}", "defect": f"pr-E2c-gpt-6.2-sol.md#{index + 1}"}
+                    for index in range(9)]
         found = findings_for(nine)
         self.assertTrue(any("exceeds the cap of 8" in line for line in found), found)
 
@@ -255,8 +256,8 @@ class GuardControlTests(unittest.TestCase):
         def duplicated(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "same", "defect": "a reference"},
-                    {"value": "same", "defect": "another reference"}]
+                    {"value": "same", "defect": "pr-E2c-gpt-6.2-sol.md#5"},
+                    {"value": "same", "defect": "commit:0123456789abcdef0123456789abcdef01234567"}]
         found = findings_for(duplicated)
         self.assertTrue(any("duplicated regression entry value" in line for line in found), found)
 
@@ -273,6 +274,85 @@ class GuardControlTests(unittest.TestCase):
                 node["x-regression-witnesses"] = [{"value": "gv", "defect": "   "}]
         also = findings_for(blank)
         self.assertTrue(any("without its evidenced defect reference" in line for line in also), also)
+
+    def test_a_witness_value_over_the_cap_alone_is_refused(self):
+        """The re-review 3 finding 1: the value carried no length bound, so a hand-written case of any
+        size was banked. With the node's own maxLength gone the 256-character cap is the only ceiling:
+        257 characters is refused, and 256 at the cap stays admissible."""
+        def over(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node.pop("maxLength", None)
+                node["x-regression-witnesses"] = [
+                    {"value": "x" * 257, "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+        found = findings_for(over)
+        self.assertTrue(any("outside the node's length bounds" in line and "257" in line
+                            for line in found), found)
+
+        def at_cap(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node.pop("maxLength", None)
+                node["x-regression-witnesses"] = [
+                    {"value": "X" * 256, "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+        also = findings_for(at_cap)
+        self.assertEqual(also, [], "a value inside the cap and refused by the draft word banked cleanly")
+
+    def test_a_witness_value_outside_the_nodes_own_bounds_is_refused(self):
+        """The node's own minLength/maxLength bound the value where they are smaller than the cap: a
+        length refusal is a shape defect the generated length challenges already cover, never a
+        pattern regression."""
+        def over(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "x" * 300, "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+        found = findings_for(over)
+        self.assertTrue(any("outside the node's length bounds" in line and "(1 to 255" in line
+                            for line in found), found)
+
+        def under(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "", "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+        also = findings_for(under)
+        self.assertTrue(any("outside the node's length bounds" in line for line in also), also)
+
+    def test_a_defect_reference_over_the_cap_is_refused(self):
+        """The reference is bounded at 120 characters even when its shape is the structured form, so
+        prose of any length is no longer smuggled in through a .md suffix."""
+        def prose(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "x", "defect": "p" * 116 + ".md#1"}]
+        found = findings_for(prose)
+        self.assertEqual(len("p" * 116 + ".md#1"), 121)
+        self.assertTrue(any("exceeds the cap of 120" in line for line in found), found)
+
+    def test_an_unstructured_or_short_commit_defect_reference_is_refused(self):
+        """The reference must be structured evidence — '<review file>.md#<finding number>' or
+        'commit:<40 lowercase hex>' — never a bare word, and a short hash is not a commit."""
+        def unstructured(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "x", "defect": "a reference"}]
+        found = findings_for(unstructured)
+        self.assertTrue(any("not structured evidence" in line for line in found), found)
+
+        def short_commit(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "x", "defect": "commit:abc123"}]
+        also = findings_for(short_commit)
+        self.assertTrue(any("not structured evidence" in line for line in also), also)
+
+    def test_both_admissible_defect_reference_forms_are_accepted(self):
+        """The positive control: a review-file reference and a commit reference are both admissible,
+        so the corpus entry the shape admits is exactly the two evidenced forms."""
+        def both_forms(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = [
+                    {"value": "Python:94x", "defect": "pr-E2c-gpt-6.2-sol.md#5"},
+                    {"value": "Python:3.13", "defect": "commit:0123456789abcdef0123456789abcdef01234567"}]
+        found = findings_for(both_forms)
+        self.assertEqual(found, [], "both structured forms bank cleanly")
 
     def test_a_work_limit_override_must_name_bounds_the_engine_reads(self):
         def override(documents_map):

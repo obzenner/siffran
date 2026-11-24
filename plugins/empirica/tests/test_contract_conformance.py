@@ -136,7 +136,8 @@ class DifferentialFuzzTests(_Base):
 
 class CoverageAccountingTests(_Base):
     """Coverage is per (node, keyword), never a firing count: every plan entry needs a candidate both
-    sides refuse, or the entry is explicitly declared unsupported or redundant — and a plan entry whose
+    sides refuse, or the entry is explicitly declared unsupported or redundant — and the ledger records
+    a declared (node, keyword) pair without ever crediting it with coverage, while a plan entry whose
     candidates both sides accept is an acceptance, reported, never silently dropped."""
 
 
@@ -198,13 +199,20 @@ for _pointer in sorted(_CONTRACT.registered):
         def method(self) -> None:
             base = self.canonical(key)
             witnessed: dict[tuple[str, str], set[str]] = {}
+            declared: dict[tuple[str, str], str] = {}
             for case in _CONTRACT.cases(key):
-                if case.kind == "unsupported":
-                    continue  # the plan declared it: no challengeable value exists for this pair
+                if case.kind in ("unsupported", "redundant"):
+                    # the plan declared it: no challengeable value isolates this pair — an exhausted
+                    # family (unsupported) or a sibling keyword that refuses every substitute
+                    # (redundant) — and the ledger records the declaration without ever crediting it.
+                    declared[(case.node_id, case.keyword)] = case.kind
+                    continue
                 with self.subTest(case=case.label):
                     # the family gate: a const/enum entry's witness must be of its OWN family — a
                     # wrong-family value (an integer where a string constant is challenged) is a type
-                    # refusal and must never be credited with covering the const/enum rules.
+                    # refusal and must never be credited with covering the const/enum rules. The
+                    # isolating requirement is the plan's own word too: a substitute a sibling keyword
+                    # refuses is that sibling's coverage, so the plan never offers it as a witness.
                     self.assertTrue(engine.witness_of_family(case),
                                     f"{key}: {case.label}: a wrong-family candidate must never be "
                                     "credited as a const/enum witness")
@@ -216,17 +224,23 @@ for _pointer in sorted(_CONTRACT.registered):
                 status = _CONTRACT.adjudicate(key, derived)
                 self.assertFalse(status.startswith(("DISAGREEMENT", "NON-DOMAIN")), f"{key}: {status}")
                 witnessed.setdefault((derived.node_id, derived.keyword), set()).add(status)
+            for pair, kind in sorted(declared.items()):
+                self.assertNotIn(pair, witnessed,
+                                f"{key}: the declared {kind} pair {pair} must never be credited "
+                                "as covered")
             planned = {(case.node_id, case.keyword): case.kind
-                       for case in _CONTRACT.cases(key)}
+                       for case in _CONTRACT.cases(key)
+                       if case.kind not in ("unsupported", "redundant")}
             missing = [f"{node} ({word}): no both-refuse witness — {sorted(statuses)}"
                        for (node, word), statuses in sorted(witnessed.items())
                        if "agree-refused" not in statuses and word != "required"]
             missing += [f"{node} ({word}): planned but no candidate fired"
                         for (node, word), kind in sorted(planned.items())
-                        if kind != "unsupported" and (node, word) not in witnessed]
+                        if kind not in ("unsupported", "redundant") and (node, word) not in witnessed]
             self.assertEqual(missing, [],
                              f"{key} coverage is incomplete per (node, keyword); the ledger: "
-                             f"{ {entry: sorted(statuses) for entry, statuses in sorted(witnessed.items())} }")
+                             f"{ {entry: sorted(statuses) for entry, statuses in sorted(witnessed.items())} }"
+                             f" (declared, never covered: {dict(sorted(declared.items()))})")
         method.__doc__ = f"The per-(node, keyword) coverage accounting of {key}"
         return method
 

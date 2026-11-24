@@ -23,7 +23,9 @@ and the core accepts is never allowed. Nothing is dropped: every derived candida
 The kinds come from the keywords: a bound one past and one under, a character outside a pattern substituted
 and inserted through it (control, blank, printable-complement, astral and lone-surrogate probes, plus the
 ``\\n``/``\\r`` suffixes that reach a ``$`` anchor's blind spot), a wrong JSON type, a float with a zeroed
-fraction where the core lands a Python int, a value outside a const or enumeration, a missing required key, an
+fraction where the core lands a Python int, a same-family value outside a const or enumeration that
+the node's remaining keywords admit with only the challenged one removed (a sibling keyword's refusal
+is an explicit redundant/unsupported declaration, never coverage), a missing required key, an
 extra key on a closed object, a breach of a ``not.required`` forbidden member, a guard flip across a
 conditional pair, a duplicated row, one row under and beyond the item bounds — and, since no JSON document can
 carry them but the core must still refuse them, an unsized iterable or a mapping where a sequence is required.
@@ -463,84 +465,100 @@ def _wrong_types(node: dict) -> list[Any]:
     return out
 
 
-def _outside_values(held: Any | list, *, enum_alternatives: bool) -> list[Any]:
-    """A fresh value of the *same JavaScript Object Notation type as the held set* but outside it —
-    generated against the finite set, never a hard-coded probe list: a string family extends its
-    longest value (a four-probe enumeration still yields a fresh string), numbers continue to the next
-    integer or the next representable decimal (``[1.5]`` yields a fresh decimal, never a crash), a
-    const array yields an array substitute, never a flattening of its members. A cross-family value
-    challenges ``type``, and the ledger never credits it — cross-type challenges are the plan's
-    separate ``wrong type`` kinds. Only the exhaustible families (booleans, null) may return empty, and
-    their ``unsupported`` declaration names a real exhaustion."""
-    pool = list(held) if enum_alternatives else [held]
-    families = sorted({_json_type(member) for member in pool})
-    out = []
-    for family in families:
-        members = [member for member in pool if _json_type(member) == family]
-        if family == "string":
-            out.append(_fresh_string(members))
-        elif family in ("integer", "number"):
-            out.append(_fresh_number(members, family))
-        elif family == "array":
-            out.append(_fresh_array(members))
-        elif family == "object":
-            out.append(_fresh_object(members))
-        else:  # boolean or null: the only exhaustible families — no third boolean, no second null
-            for probe in ((True, False) if family == "boolean" else (None,)):
-                if probe not in members:
-                    out.append(probe)
-                    break
-    return out
-
-
-def _fresh_string(pool: list) -> str:
-    """A never-held string *generated against the finite set*: the longest held value extended by a
-    counter suffix until the candidate is absent — arbitrarily many fresh strings exist, so a string
-    family is never exhausted (the re-review filled four string probes into an enumeration and the old
-    hard-coded list called it done)."""
-    longest = max((member for member in pool if isinstance(member, str)), key=len, default="")
-    counter = 1
-    candidate = longest
-    while candidate in pool:
-        counter += 1
-        candidate = f"{longest}x{counter}"
-    return candidate
-
-
-def _fresh_number(pool: list, family: str):
-    """A never-held number *generated against the finite set*: for integers the next integer above the
-    highest; for decimals the next representable value above the peak (``math.nextafter``), so a
-    ``[1.5]`` enumeration yields a fresh decimal and never crashes with a missing family (the
-    re-review's finding)."""
-    members = [member for member in pool if isinstance(member, (int, float)) and not isinstance(member, bool)]
-    peak = max(members)
-    if family == "integer":
-        candidate = peak + 1
-        while candidate in pool:
-            candidate += 1
-        return candidate
-    return math.nextafter(float(peak), math.inf)
-
-
-def _fresh_array(pool: list) -> list:
-    """A never-held array: strictly longer than any held one (a const array gets an array substitute,
-    never a flattening of its members; an enumeration's array alternatives are all shorter)."""
-    tallest = max((len(member) for member in pool if isinstance(member, list)), default=-1)
-    return [None] * (tallest + 1)
-
-
-def _fresh_object(pool: list) -> dict:
-    counter = 0
-    candidate = {"fresh": None}
-    while candidate in pool:
-        counter += 1
-        candidate = {"fresh": counter}
-    return candidate
-
-
+#: The most substitute candidates one family contributes to the series the isolating check
+#: (``Contract._isolating_substitute``) draws from — a series is bounded, never a search.
+FAMILY_SERIES_CAP = 8
 #: The families whose fresh-value generation is a *finite* check: only booleans and the single JSON
 #: null genuinely exhaust (there is no third boolean and no second null) — everything else generates.
 EXHAUSTIBLE = {"boolean", "null"}
+
+
+def _family_substitutes(node: dict, held: Any | list) -> list[Any]:
+    """A bounded series of fresh values of the same JavaScript Object Notation types as the held set,
+    generated against the finite set — the pool the *isolating* substitute
+    (``Contract._isolating_substitute``) draws from: a string family extends its longest value and
+    shortens its members (a four-probe enumeration still yields a fresh string), an integer family
+    continues above the peak and below the trough, a number family steps to the representables both
+    sides of its extremes (``[1.5]`` yields a fresh decimal, never a crash), a *const array* holds one
+    array and gets an array series — every length from the empty array up past the tallest, plus one
+    row removed and one row added — never a flattening of its members, and objects generate fresh
+    objects. A cross-family value challenges ``type``, and the ledger never credits it — cross-type
+    challenges are the plan's separate ``wrong type`` kinds. Only the genuinely exhaustible families
+    (booleans, null) may return an empty series, and their ``unsupported`` declaration names a real
+    exhaustion; a non-empty series the node's sibling keywords refuse outright is the ``redundant``
+    declaration's word, never covered."""
+    pool = list(held)
+    out: list[Any] = []
+    for family in sorted({_json_type(member) for member in pool}):
+        members = [member for member in pool if _json_type(member) == family]
+        series: list[Any] = []
+        if family == "string":
+            longest = max((member for member in members if isinstance(member, str)), key=len, default="")
+            counter = 1
+            while len(series) < 3:
+                counter += 1
+                candidate = f"{longest}x{counter}"
+                if candidate not in pool and candidate not in series:
+                    series.append(candidate)
+                if counter > len(pool) + 3:
+                    break  # a fresh counter extension always exists; a held set cannot exhaust them
+            for member in sorted((candidate for candidate in members if isinstance(candidate, str)),
+                                key=len, reverse=True):
+                if len(series) >= FAMILY_SERIES_CAP:
+                    break
+                piece = member[:-1]
+                while piece and piece in pool:
+                    piece = piece[:-1]
+                if piece and piece not in pool and piece not in series:
+                    series.append(piece)
+        elif family == "integer":
+            plain = [member for member in members
+                     if isinstance(member, int) and not isinstance(member, bool)]
+            peak, trough = max(plain), min(plain)
+            for candidate in (peak + 1, peak + 2, trough - 1, trough - 2):
+                if len(series) >= FAMILY_SERIES_CAP:
+                    break
+                if candidate not in pool and candidate not in series:
+                    series.append(candidate)
+        elif family == "number":
+            plain = [member for member in members
+                     if isinstance(member, float)]
+            for candidate in (math.nextafter(max(plain), math.inf),
+                              math.nextafter(min(plain), -math.inf)):
+                if len(series) >= FAMILY_SERIES_CAP:
+                    break
+                if candidate not in pool and candidate not in series:
+                    series.append(candidate)
+        elif family == "array":
+            arrays = [member for member in members if isinstance(member, list)]
+            tallest = max((len(array) for array in arrays), default=-1)
+            trials: list[Any] = [[]]
+            trials.extend([None] * length for length in range(1, min(tallest + 2, FAMILY_SERIES_CAP)))
+            for array in arrays:
+                if array:
+                    trials.append(array[:-1])
+                    trials.append([*array, None])
+                trials.append(array[1:])
+            for trial in trials:
+                if len(series) >= FAMILY_SERIES_CAP:
+                    break
+                if trial not in pool and trial not in series:
+                    series.append(trial)
+        elif family == "object":
+            counter = 0
+            while len(series) < FAMILY_SERIES_CAP:
+                candidate = {} if counter == 0 else ({"fresh": None} if counter == 1 else {"fresh": counter - 1})
+                counter += 1
+                if candidate not in pool and candidate not in series:
+                    series.append(candidate)
+        else:  # boolean or null: the only exhaustible families — no third boolean, no second null
+            for probe in ((True, False) if family == "boolean" else (None,)):
+                if probe not in members:
+                    series.append(probe)
+                    break
+        out.extend(series[:FAMILY_SERIES_CAP])
+    return out
+
 
 
 def witness_of_family(case: "Case") -> bool:
@@ -911,18 +929,29 @@ class Contract:
                                     "not-required", node, node_id,
                                     (member, json.dumps(schema_for_member))))
             if "const" in node:
-                candidates = _outside_values(node["const"], enum_alternatives=False)
-                if candidates:
+                held = [node["const"]]
+                series = _family_substitutes(node, held)
+                substitute = self._isolating_substitute(node, "const", series)
+                if substitute is not None:
                     out.append(Case(f"{at}: a same-family value other than the const", path, "const outside",
-                                    "const", node, node_id, candidates[0]))
+                                    "const", node, node_id, substitute))
+                elif series:
+                    out.append(Case(f"{at}: the sibling keywords alone admit only the const itself — "
+                                    "the const is redundant here", path, "redundant", "const", node,
+                                    node_id, None))
                 else:
                     out.append(Case(f"{at}: no fresh same-family value exists for the const", path,
                                     "unsupported", "const", node, node_id, None))
             if "enum" in node:
-                candidates = _outside_values(node["enum"], enum_alternatives=True)
-                if candidates:
+                series = _family_substitutes(node, node["enum"])
+                substitute = self._isolating_substitute(node, "enum", series)
+                if substitute is not None:
                     out.append(Case(f"{at}: a same-family value outside the enumeration", path, "enum outside",
-                                    "enum", node, node_id, candidates[0]))
+                                    "enum", node, node_id, substitute))
+                elif series:
+                    out.append(Case(f"{at}: the sibling keywords alone admit only the enumerated values — "
+                                    "the enum is redundant here", path, "redundant", "enum", node,
+                                    node_id, None))
                 else:
                     out.append(Case(f"{at}: no fresh same-family value exists for the enumeration", path,
                                     "unsupported", "enum", node, node_id, None))
@@ -986,6 +1015,28 @@ class Contract:
                                     node, node_id, node[bound] + sign))
             out.extend(self._couplings(node, path, at, node_id, name))
         return out
+
+    def _isolating_substitute(self, node: dict, keyword: str, series: list) -> Any | None:
+        """The first same-family candidate the node itself admits with only the challenged keyword
+        removed: Draft 2020-12 over the node's remaining keywords — the ``x-`` annotations are ignored
+        by the draft, exactly as the test-side word computes it — must accept it, or the refusal the
+        sweep would find belongs to a sibling keyword, never to this one (the re-review 3's control: a
+        two-row ``const`` beside ``maxItems: 2`` used to feed an always-longer probe both judges
+        refused for length, and a core enforcing only ``maxItems`` was silently credited with covering
+        ``const``). ``None`` means no candidate isolates the keyword — an empty series is the genuinely
+        exhausted family (``unsupported``), a refused one is the siblings' word (``redundant``) —
+        and the ledger never credits either with coverage."""
+        if not series:
+            return None
+        rest = {word: value for word, value in node.items() if word != keyword}
+        validator = Draft202012Validator(rest)
+        for candidate in series:
+            try:
+                if not list(validator.iter_errors(candidate)):
+                    return candidate
+            except Exception:
+                continue  # a sibling the draft cannot resolve here is no isolation ground
+        return None
 
     @staticmethod
     def _guarded_values(branch: dict, member: str) -> list | None:
