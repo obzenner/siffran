@@ -235,6 +235,181 @@ class RealContractTests(unittest.TestCase):
         self.assertTrue(self.contract.at_bounds(key, base))  # revision minimum and digest bounds exist
 
 
+class FamilyWitnessTests(unittest.TestCase):
+    """The re-review's finding 1: a same-family substitution for a const or an enumeration is a value
+    of the SAME JSON type outside the allowed set (a string for a string enum), and the ledger credits a
+    keyword only from a witness of that keyword's own family — a wrong-family value must never stand in."""
+
+    def test_every_const_and_enum_candidate_is_of_its_own_family(self):
+        contract = Contract()
+        for key in sorted(contract.registered):
+            for case in contract.cases(key):
+                if case.kind == "unsupported":
+                    continue
+                if case.kind not in ("const outside", "enum outside"):
+                    continue
+                with self.subTest(key=key, label=case.label):
+                    self.assertTrue(engine.witness_of_family(case),
+                                    "a const/enum candidate must be of the held family")
+                    node = case.node
+                    held = node.get("const", node.get("enum"))
+                    pool = list(held) if isinstance(held, (list, tuple)) else [held]
+                    families = {engine._json_type(member) for member in pool}
+                    self.assertIn(engine._json_type(case.holding), families)
+
+    def test_a_string_const_is_challenged_with_a_string(self):
+        contract = Contract()
+        key = "state#/$defs/environmentMember"
+        transcribed = [case for case in contract.cases(key)
+                       if case.kind in ("const outside", "enum outside")
+                       and case.node_id.endswith("/properties/state")]
+        self.assertTrue(transcribed, "the member's state vocabulary is enumerated and challenged")
+        for case in transcribed:
+            self.assertIsInstance(case.holding, str, "the state vocabulary is a string family")
+            self.assertNotIn(case.holding, case.node["enum"])
+        wrong_types = [case for case in contract.cases(key) if case.kind == "wrong type"
+                       and case.node_id.endswith("/properties/state")]
+        self.assertTrue(any(isinstance(case.holding, int) for case in wrong_types),
+                        "cross-type challenges keep their own wrong-type kinds")
+
+    def test_a_wrong_family_value_is_never_credited(self):
+        """The control the coordinator asked for: with a corrupted plan handing an integer where a
+        string constant is challenged, the family gate refuses it — it would have been a type refusal,
+        not a const witnessship."""
+        node = {"const": "empirica.run/5"}
+        wrong = engine.Case("a harvested same-family value", (), "const outside", "const", node,
+                            "doc#node", 765)
+        self.assertFalse(engine.witness_of_family(wrong),
+                         "an integer must never be credited as covering a string const")
+        right = engine.Case("a harvested same-family value", (), "const outside", "const", node,
+                           "doc#node", "outside-any-run")
+        self.assertTrue(engine.witness_of_family(right))
+
+    def test_a_fresh_probe_free_family_declares_itself_unsupported(self):
+        """A boolean const that holds every value of its family has no same-family harvest left: the
+        plan declares the pair unsupported instead of crediting a cross-family value (the premise of
+        the wrong-family finding, made explicit)."""
+        probed = engine._outside_values([True, False])
+        self.assertEqual(probed, [], "the boolean family is exhausted")
+        probes = engine._outside_values("empirica.run/5")
+        self.assertTrue(probes and all(isinstance(probe, str) for probe in probes),
+                        "a string const harvests a string")
+
+
+class MethodNameTests(unittest.TestCase):
+    """The re-review's finding 2, naming half: generated test names carry the document identity, and a
+    collision is refused rather than silently merged."""
+
+    def test_the_document_identity_separates_two_same_named_definitions(self):
+        taken: set[str] = set()
+        state = engine.method_name("state#/$defs/environmentProposal", taken)
+        request = engine.method_name("request#/$defs/environmentProposal", taken)
+        self.assertNotEqual(state, request)
+        self.assertIn("state", state)
+        self.assertIn("request", request)
+
+    def test_a_collision_is_refused_not_merged(self):
+        taken: set[str] = set()
+        first = engine.method_name("state#/$defs/environmentProposal", taken)
+        with self.assertRaises(ValueError) as caught:
+            engine.method_name("state#/$defs/environmentProposal", {first})
+        self.assertIn("collision", str(caught.exception))
+
+
+class FeasibleWorkTests(unittest.TestCase):
+    """The re-review's finding 4: an explicit feasible-work limit refuses a definition whose bounds ask
+    for unbounded-in-practice work; a declared x-work-limit override admits honest larger work."""
+
+    def test_the_real_definitions_pass(self):
+        self.assertEqual(Contract().findings, [])
+
+    def test_an_infeasible_bound_is_refused_at_load(self):
+        documents = copy.deepcopy(engine.module_documents())
+        documents["state"]["$defs"]["environmentProposal"]["properties"]["rationale"] |= {"maxLength": 100000}
+        findings = Contract(documents).findings
+        self.assertTrue(any("the feasible-work limit refuses" in line and "maxLength" in line
+                            for line in findings), findings)
+
+    def test_a_declared_override_admits_the_honest_work(self):
+        documents = copy.deepcopy(engine.module_documents())
+        documents["state"]["$defs"]["environmentProposal"]["properties"]["rationale"] |= {
+            "maxLength": 100000, "x-work-limit": {"maxLength": 100000}}
+        findings = Contract(documents).findings
+        self.assertFalse([line for line in findings if "feasible-work" in line], findings)
+
+
+class GrowthTests(unittest.TestCase):
+    def test_unique_string_growth_is_linear(self):
+        rows = ["a"]
+        grown = engine.Contract._overgrown(rows, {"uniqueItems": True}, 64)
+        self.assertEqual(len(grown), 64)
+        self.assertEqual(len(set(grown)), 64, "the grown rows stay unique")
+        self.assertLessEqual(sum(len(row) for row in grown), 64 * (1 + 4),
+                              "total characters stay near-linear: the old prefixing growth was quadratic")
+
+    def test_growth_never_collides_with_a_held_row(self):
+        rows = ["0" + str(index) + "a" for index in range(5)] + ["a"]
+        grown = engine.Contract._overgrown(rows, {"uniqueItems": True}, 20)
+        self.assertEqual(len(grown), 20)
+        self.assertEqual(len({row for row in grown if isinstance(row, str)}),
+                         len([row for row in grown if isinstance(row, str)]))
+
+
+class CaseSwapTests(unittest.TestCase):
+    """The re-review's finding 3, first mechanism: a grammar-derived case witness for each
+    case-restricted class (an uppercase in a lowercase-only name component), derived from the grammar
+    and fired in place."""
+
+    def test_each_case_restricted_class_its_pair(self):
+        pairs = engine._case_restricted_letters(
+            ["^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?![\s\S])"])
+        self.assertEqual(pairs, [("z", "Z")], "a lowercase-only class yields its in-place flip")
+        self.assertEqual(engine._case_restricted_letters(
+            ["^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}(?![\s\S])"]), [],
+            "a class admitting both cases has no case to violate")
+
+    def test_the_case_swap_fires_and_both_judges_refuse(self):
+        contract = Contract()
+        key = "state#/$defs/environmentProposal"
+        drawn = copy.deepcopy(find(contract.drawn(key, full=True),
+                                   lambda document: True, settings=DRY))
+        case = next(case for case in contract.cases(key)
+                    if case.kind == "case-swap"
+                    and case.node_id.endswith("/properties/spike_images/items"))
+        held, _ = case.holding
+        if not any(isinstance(row, str) and held in row for row in drawn["spike_images"]):
+            # a bounded, derandomized draw of an all-digit image never holds the name letter; a
+            # drawn base that does is seeded the same way the corpus seeds itself
+            drawn["spike_images"] = ["maintenance" + held + "/probe"]
+        fired = [d for d in contract.derive(drawn, key, case) if d.kind == "case-swap"]
+        self.assertTrue(fired, "the in-place case flip fires on a name holding the class letter")
+        for item in fired:
+            self.assertEqual(contract.adjudicate(key, item), "agree-refused", item.label)
+
+
+class RegressionCorpusTests(unittest.TestCase):
+    """The re-review's finding 3, second mechanism: the contract's named regression-witness corpus —
+    known-defect values (the exact spellings a deleted hand-written test once held), fed through both
+    judges and refused by both. The values live in the contract (``x-regression-witnesses``); the test
+    reads them from there, never restating one."""
+
+    def test_the_corpus_is_read_from_the_contract_and_refused_by_both_judges(self):
+        contract = Contract()
+        key = "state#/$defs/environmentProposal"
+        item = contract.node(key + "/properties/spike_images/items")
+        corpus = item["x-regression-witnesses"]
+        self.assertTrue(any(isinstance(witness, str) and witness not in ("",) for witness in corpus))
+        drawn = find(contract.drawn(key, full=True), lambda document: True, settings=DRY)
+        challenges = contract.regression_challenges(key, drawn)
+        placed = {challenge.value["spike_images"][0] for challenge in challenges}
+        self.assertEqual(len(challenges), len(corpus))
+        self.assertEqual(placed, set(corpus), "every corpus value is placed, exactly once")
+        for challenge in challenges:
+            with self.subTest(label=challenge.label):
+                self.assertEqual(contract.adjudicate(key, challenge), "agree-refused",
+                                 "a named regression witness one judge admits")
+
+
 class BoundedWorkTests(unittest.TestCase):
     """The review's non-blocking findings: bounded work, a terminating absent-key probe."""
 

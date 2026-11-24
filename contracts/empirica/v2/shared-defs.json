@@ -581,7 +581,18 @@
               "name-component": "^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?![\\s\\S])",
               "registry-domain": "^(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?(?![\\s\\S])"
             },
-            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound. The x-grammar pieces are that same admission's own decomposition — the one lexer core.spike_plan reuses from the generated contract constants (bound to this word by the conformance harness) — never a second owner."
+            "x-regression-witnesses": [
+              "",
+              "a b",
+              "python:",
+              "%",
+              "/",
+              " Python:3",
+              "UPPER/name:tag",
+              "python@sha256:12",
+              "Python:3.12"
+            ],
+            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound. The x-grammar pieces are that same admission's own decomposition — the one lexer core.spike_plan reuses from the generated contract constants (bound to this word by the conformance harness) — never a second owner. The x-regression-witnesses list is the named corpus of known-defect spellings a deleted hand-written test once held (each refused by this word, the exact Python:3.12 image spelling among them); the conformance harness feeds each through both judges, so a core that normalizes one input dies there and nowhere else."
           }
         },
         "preparation": {

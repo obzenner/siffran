@@ -18,7 +18,9 @@ from validate_ui_view import view_schemas
 
 KNOWN = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf",
          "anyOf", "properties", "required", "additionalProperties", "items", "minItems", "maxItems",
-         "uniqueItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "allOf", "not"}
+         "uniqueItems", "minimum", "maximum", "minLength", "maxLength", "pattern", "allOf", "not",
+         "x-core-validator", "x-core-only", "x-grammar", "x-core-ingress", "x-work-limit",
+         "x-regression-witnesses"}  # the annotation family: shapes stay the generators' word, annotation words the guard's
 #: Generated arrays and maps are short: what is checked is the shape, never the volume.
 MAX_ITEMS = 3
 _TEXT = st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), max_size=12)

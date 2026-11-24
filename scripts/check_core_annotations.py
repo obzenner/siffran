@@ -5,13 +5,18 @@ The contract is the single source of a shape, so the annotations themselves are 
 gate — on every ``contracts/empirica/v2`` schema document, not only the state document, so a later node's
 response ``Fault`` registers by declaration:
 
-* every document that carries an annotation declares its core ingress roots (``x-core-ingress``, a list
-  of local pointers), each entry a well-formed pointer to a node carrying ``x-core-validator`` — removing
-  only a member's annotation is caught here, because the declared ingress inventory demands it;
+* the registration is two independent declarations and they must agree: the contract's
+  ``x-core-ingress`` inventory (each entry a well-formed pointer to a node carrying
+  ``x-core-validator``, every reachable annotated ``$defs`` registered) and the core's own word in
+  ``core.contract_registry`` — deleting a validator and its ingress entry *together* still fails on
+  the core's declaration, and undeclaring on the core side fails on the contract's;
 * every annotation found anywhere in a document — walked in full: through ``properties``, ``items``
   rows, schema-valued ``additionalProperties``, ``oneOf``/``anyOf``/``allOf`` branches, ``not``, and the
   ``$defs`` — must be attached to a node inside a declared ingress's reachable closure: an annotation
   nothing reaches is orphaned and refused;
+* an ``x-core-validator`` placement is a registration, never a decoration: it sits on a declared
+  ingress root or a reachable annotated ``$defs`` definition *exactly* — an interior placement (the
+  re-review seeded one on a member's revision) is reported whatever name it carries, real or not;
 * every ``$defs`` definition inside a declared closure that the core validates carries its own
   annotation — a definition can never slip out of the harness by riding in unannotated;
 * an ingress that names a property holds a member its own object requires;
@@ -20,6 +25,11 @@ response ``Fault`` registers by declaration:
   test exists — and its ``case``, when it excuses a differential candidate kind, names one of the
   harness's declared kinds (``contract_strategies.CASE_KINDS``);
 * every ``x-grammar`` piece compiles, and a grammar rides a node that carries the pattern it refines;
+* every ``x-regression-witnesses`` corpus is a non-empty list of strings each *refused statically by
+  the node's own patterns* — a known-defect corpus value the schema still admits is a contract bug —
+  and the harness runs each value through both judges;
+* every ``x-work-limit`` override names bounds the engine reads (``maxItems``, ``maxLength``), as
+  integers at least the node's own bound — it is the feasible-work limit's declared exception;
 * every schema keyword the closures use is one the strategy engines derive (``ui_view_strategies.KNOWN``
   plus the annotation keywords) — a definition that grows a keyword the engines cannot draw fails here.
 
@@ -38,12 +48,13 @@ for _p in (ROOT, ROOT / "scripts", ROOT / "plugins" / "empirica"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from contract_strategies import (CASE_KINDS, X_CORE_ONLY, X_GRAMMAR, X_INGRESS, X_VALIDATOR,  # noqa: E402
-                                 Contract)
+from contract_strategies import (CASE_KINDS, X_CORE_ONLY, X_GRAMMAR, X_INGRESS,  # noqa: E402
+                                 X_REGRESSION_WITNESSES, X_VALIDATOR, X_WORK_LIMIT, Contract)
+from core import contract_registry  # noqa: E402
 import validate_contracts  # noqa: E402
 from ui_view_strategies import KNOWN  # noqa: E402
 
-ANNOTATIONS = (X_VALIDATOR, X_CORE_ONLY, X_GRAMMAR)
+ANNOTATIONS = (X_VALIDATOR, X_CORE_ONLY, X_GRAMMAR, X_REGRESSION_WITNESSES, X_WORK_LIMIT)
 KNOWN_KEYWORDS = KNOWN | set(ANNOTATIONS) | {X_INGRESS}
 
 
@@ -96,6 +107,82 @@ def _reachable_defs(contract: Contract) -> set[str]:
     return reached
 
 
+def _registry_disagreements(contract: Contract) -> list[str]:
+    """The ADR-0075 registration is two independent declarations and they must agree: the contract's
+    ``x-core-ingress`` inventory (its roots and the annotated ``$defs`` their closures reach) and the
+    core's own hand-written word in ``core.contract_registry`` (``plugins/empirica/core/
+    contract_registry.py``). Deleting a validator *and* its ingress entry together no longer hides
+    the registration — the core's declaration still names the key; undeclaring it here no longer
+    hides it either — the contract's inventory still does."""
+    try:
+        declared = contract_registry.REGISTERED_DEFINITIONS
+    except AttributeError as exc:
+        return [f"core.contract_registry is malformed (no REGISTERED_DEFINITIONS): {exc}"]
+    core_side = {f"{document}#{pointer}" for document, pointer in declared}
+    if len(core_side) != len(declared):
+        return ["core.contract_registry names one registered key twice"]
+    contract_side = set(contract.registered)
+    out = []
+    for key in sorted(contract_side - core_side):
+        out.append(f"{key}: registered by the contract's x-core-ingress inventory but never declared "
+                   "by core.contract_registry — the two declarations disagree")
+    for key in sorted(core_side - contract_side):
+        out.append(f"{key}: declared by core.contract_registry but the contract registers nothing — "
+                   "the two declarations disagree (a validator and its ingress entry deleted together "
+                   "still fail here)")
+    return out
+
+
+def document_value_at(document: dict, pointer: str, word: str) -> object:
+    """The annotation value at a discovered pointer, for reporting ('?' on any traversal trouble)."""
+    node: object = document
+    for token in (token.replace("~1", "/").replace("~0", "~") for token in pointer.strip("/").split("/") if token):
+        if not isinstance(node, dict) or token not in node:
+            return "?"
+        node = node[token]
+    return node.get(word) if isinstance(node, dict) else "?"
+
+
+def _regression_errors(node: dict, node_id: str) -> list[str]:
+    """A named regression-witness corpus (``x-regression-witnesses``): a list of strings, each a
+    known-defect value the node's own patterns must refuse statically *here* — a witness the schema
+    still accepts is a contract bug, not a test — and the core's verdict is the harness's job
+    (the exact ``Python:3.12`` image spelling is the review's finding)."""
+    witnesses = node.get(X_REGRESSION_WITNESSES)
+    if not isinstance(witnesses, list) or not witnesses:
+        return [f"{node_id}: an x-regression-witnesses corpus must be a non-empty list of strings"]
+    out = []
+    patterns = Contract._patterns(node)
+    if not patterns:
+        return [f"{node_id}: an x-regression-witnesses corpus rides a node with no pattern to violate"]
+    for witness in witnesses:
+        if not isinstance(witness, str):
+            out.append(f"{node_id}: a regression witness that is not a string: {witness!r}")
+            continue
+        import re
+        if any(re.fullmatch(pattern, witness) for pattern in patterns if isinstance(pattern, str)):
+            out.append(f"{node_id}: a named regression witness the pattern still accepts: {witness!r} "
+                       "— a known-defect value the contract itself admits is a contract bug")
+    return out
+
+
+def _work_limit_errors(node: dict, node_id: str) -> list[str]:
+    """An ``x-work-limit`` override (the feasible-work limit's declared exception): an object of integer
+    bounds (``maxItems``, ``maxLength``), riding the very node whose bound it overrides."""
+    override = node.get(X_WORK_LIMIT)
+    if not isinstance(override, dict) or not override:
+        return [f"{node_id}: an x-work-limit override must be a non-empty object of named bounds"]
+    out = []
+    for bound, value in sorted(override.items()):
+        if bound not in ("maxItems", "maxLength"):
+            out.append(f"{node_id}: an x-work-limit bound the engine does not read: {bound!r}")
+            continue
+        if not isinstance(value, int) or isinstance(value, bool) or value < node.get(bound, 0):
+            out.append(f"{node_id}: an x-work-limit {bound} must be an integer at least the node's own "
+                       f"bound, not {value!r}")
+    return out
+
+
 def check(documents_map: dict[str, dict] | None = None, schema: dict | None = None) -> list[str]:
     """The guard's findings, as human-readable lines; an empty list is the pass."""
     try:
@@ -109,6 +196,7 @@ def check(documents_map: dict[str, dict] | None = None, schema: dict | None = No
                           "with its x-core-validator annotation")
     closure = _closure_of(contract)
     closed_defs = _reachable_defs(contract)
+    errors.extend(_registry_disagreements(contract))
 
     for name in sorted(contract.documents):
         document = contract.documents[name]
@@ -116,11 +204,35 @@ def check(documents_map: dict[str, dict] | None = None, schema: dict | None = No
         for pointer, word in found:
             where = f"{name}#{pointer}"
             under = any(where == entry or where.startswith(entry + "/") for entry in closure)
+            if word == X_VALIDATOR:
+                # a validator placement is a *registration*, never a decoration: it sits on an
+                # x-core-ingress root or a reachable annotated $defs definition exactly, or it is
+                # reported — an interior placement (the review seeded one on a member's revision)
+                # is a finding whatever name it carries, and whatever it names must also resolve.
+                if where in contract.registered:
+                    continue
+                errors.append(f"{where}: an x-core-validator placement the inventory never "
+                              "registered — it sits neither on a declared x-core-ingress root nor on "
+                              "a reachable annotated $defs definition; interior placements are "
+                              "reported, whatever they name")
+                module, _, callable_name = str(document_value_at(document, pointer, word)).rpartition(".")
+                if module:
+                    imported = None
+                    try:
+                        imported = __import__(module, fromlist=[callable_name])
+                    except ImportError:
+                        pass
+                    if imported is not None and not callable(getattr(imported, callable_name, None)):
+                        errors.append(f"{where}: the unregistered x-core-validator also names no "
+                                      f"callable of {module}: {callable_name!r}")
+                continue
             if under:
                 continue
-            hint = ("a declared x-core-ingress root, or a definition one reaches" if word == X_VALIDATOR
-                    else "the core-validated definition that owns its node" if word == X_CORE_ONLY
-                    else "the patterned node it refines inside a registered closure")
+            hint = ("the core-validated definition that owns its node" if word == X_CORE_ONLY
+                    else "the patterned node it refines inside a registered closure" if word == X_GRAMMAR
+                    else "the patterned node it witnesses inside a registered closure" if
+                    word == X_REGRESSION_WITNESSES
+                    else "the bounded node it overrides inside a registered closure")
             errors.append(f"{where}: an orphaned {word} — it is attached to {hint}")
         if not isinstance(document.get(X_INGRESS), list):
             declared = sorted({word for _, word in found})
@@ -175,6 +287,10 @@ def check(documents_map: dict[str, dict] | None = None, schema: dict | None = No
                 if missing:
                     errors.append(f"{node_id}: the named x-core-only test does not exist: "
                                   f"{missing!r} in {module_path!r}")
+            if isinstance(node, dict) and X_REGRESSION_WITNESSES in node:
+                errors.extend(_regression_errors(node, node_id))
+            if isinstance(node, dict) and X_WORK_LIMIT in node:
+                errors.extend(_work_limit_errors(node, node_id))
             grammar = node.get(X_GRAMMAR) if isinstance(node, dict) else None
             if grammar is not None:
                 if not isinstance(grammar, dict) or not grammar:

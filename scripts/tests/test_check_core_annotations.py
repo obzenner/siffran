@@ -27,6 +27,29 @@ import contract_strategies as engine  # noqa: E402
 from contract_strategies import module_documents  # noqa: E402
 
 
+def _patterned_spike_items(documents_map) -> list[dict]:
+    """Every embedded spike-images items node across the documents (the shared-defs embedding)."""
+    out = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if "properties" in node and isinstance(node["properties"], dict) and \
+                    "spike_images" in node["properties"] and \
+                    isinstance(node["properties"]["spike_images"], dict):
+                items = node["properties"]["spike_images"].get("items")
+                if isinstance(items, dict) and "pattern" in items:
+                    out.append(items)
+            for value in node.values():
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    for document in documents_map.values():
+        walk(document)
+    return out
+
+
 def findings_for(mutation, documents_map=None) -> list[str]:
     loaded = copy.deepcopy(documents_map if documents_map is not None else module_documents())
     mutation(loaded)
@@ -138,6 +161,81 @@ class GuardControlTests(unittest.TestCase):
         found = findings_for(spawn)
         self.assertTrue(any("do not derive" in line for line in findings_for(spawn)), found)
 
+    def test_a_nested_validator_placement_is_reported_whatever_it_names(self):
+        """The re-review's seed: an x-core-validator under a registered closure, on an interior node,
+        naming a callable that never resolved. Discovered anywhere, a placement is a registration —
+        an interior one is reported even when the name itself is real."""
+        def nested(documents_map):
+            _state(documents_map)["$defs"]["environmentMember"]["properties"]["revision"] |= {
+                "x-core-validator": "core.run.does_not_exist"}
+        found = findings_for(nested)
+
+        def real_name(documents_map):
+            _state(documents_map)["$defs"]["environmentMember"]["properties"]["revision"] |= {
+                "x-core-validator": "core.run.validate_environment"}
+        also = findings_for(real_name)
+        for word in (found, also):
+            self.assertTrue(any("the inventory never registered" in line for line in word), word)
+        self.assertTrue(any("names no callable" in line for line in found), found)
+        self.assertFalse(any("names no callable" in line for line in also), also)
+
+    def test_deleting_a_validator_and_its_ingress_entry_together_still_fails(self):
+        """Two independent declarations: the inventory runs both ways, so the re-review's
+        delete-both escape no longer hides an unregistered definition — the core's own declaration
+        (core.contract_registry) still names it."""
+        def delete_both(documents_map):
+            _state(documents_map).pop("x-core-ingress")
+            _state(documents_map)["properties"].pop("environment")
+            _state(documents_map)["required"].remove("environment")
+        found = findings_for(delete_both)
+        self.assertTrue(any("declared by core.contract_registry but the contract registers nothing"
+                            in line for line in found), found)
+
+    def test_a_core_registry_drift_is_reported_both_ways(self):
+        registry, declared = guard.contract_registry, guard.contract_registry.REGISTERED_DEFINITIONS
+        dropped = tuple(entry for entry in declared if entry != ("state", "/properties/environment"))
+        extra = (*declared, ("response", "/$defs/fault"))
+        try:
+            registry.REGISTERED_DEFINITIONS = dropped
+            self.assertTrue(any("never declared by core.contract_registry" in line
+                                for line in guard.check()), "a missing core-side declaration")
+            registry.REGISTERED_DEFINITIONS = extra
+            self.assertTrue(any("declared by core.contract_registry but the contract registers nothing"
+                                in line for line in guard.check()), "an undeclared core-side key")
+        finally:
+            registry.REGISTERED_DEFINITIONS = declared
+
+    def test_a_regression_witness_the_pattern_still_accepts_is_a_contract_bug(self):
+        def accepted(documents_map):
+            for document in documents_map.values():
+                for node in _patterned_spike_items(documents_map):
+                    node["x-regression-witnesses"] = ["python:3.12-slim"]
+        found = findings_for(accepted)
+        self.assertTrue(any("the pattern still accepts" in line for line in found), found)
+
+    def test_a_malformed_regression_corpus_is_refused(self):
+        def malformed(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node["x-regression-witnesses"] = {"a": 1}
+        found = findings_for(malformed)
+        self.assertTrue(any("corpus must be a non-empty list" in line for line in found), found)
+
+    def test_a_work_limit_override_must_name_bounds_the_engine_reads(self):
+        def override(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node |= {"maxItems": 4096, "x-work-limit": {"maxWords": 8}}
+        found = findings_for(override)
+        self.assertTrue(any("an x-work-limit bound the engine does not read" in line for line in found),
+                        found)
+        self.assertTrue(any("the feasible-work limit refuses" in line for line in found), found)
+
+    def test_a_declared_work_limit_override_makes_the_bound_feasible(self):
+        def override(documents_map):
+            for node in _patterned_spike_items(documents_map):
+                node |= {"maxItems": 4096, "x-work-limit": {"maxItems": 4096}}
+        found = findings_for(override)
+        self.assertFalse(any("the feasible-work limit refuses" in line for line in found), found)
+
     def test_an_orphaned_x_grammar_is_refused(self):
         def orphan(documents_map):
             _state(documents_map)["$defs"]["claimId"]["x-grammar"] = {"a-piece": "a"}
@@ -181,7 +279,20 @@ class RegistrationByDeclarationTests(unittest.TestCase):
     conditional-form derivation, with no harness change — and the guard accepts it as it stands."""
 
     def test_the_synthetic_conditional_declaration_is_consistent(self):
-        self.assertEqual(guard.check({"conditional": copy.deepcopy(CONDITIONAL)}), [])
+        """The mechanism registers the document by its declaration — and the two-declaration
+        discipline reports exactly what a brand-new document must still do: declare its keys
+        on the core side too (core.contract_registry), which the synthetic does not."""
+        registry = guard.contract_registry
+        declared = registry.REGISTERED_DEFINITIONS
+        registry.REGISTERED_DEFINITIONS = ()  # a synthetic document declares nothing on the core side
+        try:
+            found = guard.check({"conditional": copy.deepcopy(CONDITIONAL)})
+        finally:
+            registry.REGISTERED_DEFINITIONS = declared
+        self.assertEqual([line for line in found if "disagree" in line],
+                         ["conditional#/$defs/failure: registered by the contract's x-core-ingress "
+                          "inventory but never declared by core.contract_registry — the two "
+                          "declarations disagree"], found)
         contract = engine.Contract({"conditional": copy.deepcopy(CONDITIONAL)})
         self.assertEqual(sorted(contract.registered), ["conditional#/$defs/failure"])
 

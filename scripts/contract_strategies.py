@@ -64,6 +64,15 @@ X_VALIDATOR = "x-core-validator"
 X_CORE_ONLY = "x-core-only"
 X_INGRESS = "x-core-ingress"
 X_GRAMMAR = "x-grammar"
+X_REGRESSION_WITNESSES = "x-regression-witnesses"
+X_WORK_LIMIT = "x-work-limit"
+#: The feasible-work limit for generation (T1's bounded work, not the review's unbounded scaling): a
+#: registered definition whose own high bounds — an array's ``maxItems``, a string's ``maxLength`` —
+#: ask for more rows or characters than these ceilings is refused at load with a finding naming the
+#: node and the bound, instead of the harness silently scaling with an arbitrary schema. A definition
+#: whose larger work is honest declares an ``x-work-limit`` override (per bound) and is drawn anyway.
+FEASIBLE_ROWS = 128
+FEASIBLE_CHARS = 8192
 #: The candidate kinds an ``x-core-only`` entry may declare (its ``"case"``), the harness's own words.
 CASE_KINDS = frozenset({"float-for-int"})
 #: A document with no ``case`` keys and no core-only entries covers nothing excusable; keep the registry domain
@@ -238,6 +247,71 @@ def _in_probes(clause) -> list[str]:
     return firsts[:2] or ["a"]
 
 
+def _class_holds(items: list, character: str) -> bool:
+    """Whether a non-negated character-class's items admit one code point (literals and ranges only)."""
+    code = ord(character)
+    for kind, value in items:
+        if kind is _sre.LITERAL and value == code:
+            return True
+        if kind is _sre.RANGE and value[0] <= code <= value[1]:
+            return True
+    return False
+
+
+def _case_restricted_letters(patterns: list[str]) -> list[tuple[str, str]]:
+    """(the letter a case-restricted class holds, its case flip the class does not) pairs, one per
+    restricted class of a node's patterns: a lowercase-only ``[a-z0-9]`` name component yields
+    ``('a', 'A')`` — the in-place uppercase challenge of *each case-restricted class* (the re-review's
+    seeded spelling defect was an uppercase exactly where the grammar admits only lowercase), derived
+    from the grammar, never a hand-listed value. Classes that admit both cases have no case to violate."""
+    if not (sys.version_info >= (3, 11)):
+        import sre_parse  # noqa: F401 — the fallback parser import above already guarded this
+    out: list[tuple[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def scan(clause) -> None:
+        if clause is None:
+            return
+        kind, value = clause
+        if kind is _sre.IN:
+            items = list(value)
+            if any(item[0] is _sre.NEGATE or item[0] is _sre.CATEGORY for item in items):
+                scan_down(items)
+                return
+            for held in "zayb":
+                flip = held.upper()
+                if not (held.isalpha() and flip != held):
+                    continue
+                if _class_holds(items, held) and not _class_holds(items, flip):
+                    if (held, flip) not in seen:
+                        seen.add((held, flip))
+                        out.append((held, flip))
+                    break  # one pair per class: the first letter it holds whose flip it does not
+        elif kind in (_sre.BRANCH,):
+            for branch in value[1]:
+                for part in branch:
+                    scan(part)
+        elif kind is _sre.SUBPATTERN:
+            for part in value[3]:
+                scan(part)
+        elif kind in (_sre.MAX_REPEAT, _sre.MIN_REPEAT):
+            for part in value[2]:
+                scan(part)
+        elif kind in (_sre.ASSERT, _sre.ASSERT_NOT):
+            for part in value[1]:
+                scan(part)
+
+    def scan_down(items: list) -> None:
+        for kind, value in items:
+            if kind is _sre.CATEGORY:
+                continue  # a category's case behaviour is the class engine's word, never assumed here
+
+    for pattern in patterns:
+        for clause in _sre_parser.parse(pattern, 0):
+            scan(clause)
+    return out
+
+
 def _witnesses(clause) -> list[str]:
     """Witness strings for one pattern AST clause, splitting at every decision point: each top-level
     alternative, and each optional (zero-minimum) group both present and absent."""
@@ -389,8 +463,12 @@ def _wrong_types(node: dict) -> list[Any]:
 
 
 def _outside_values(held: Any | list) -> list[Any]:
-    """Same-family value probes a const or an enumeration cannot hold — fresh content (never a contract
-    word restated), tried until one is distinct from every held value of the same family."""
+    """Same-family value probes a const or an enumeration cannot hold — fresh content of the *same
+    JavaScript Object Notation type as the held values* (a string for a string enumeration, an integer
+    for an integer one), never a whole other family: a cross-family value challenges ``type`` and the
+    ledger must never credit it with covering ``const`` or ``enum`` — cross-type challenges are the
+    plan's own separate ``wrong type`` kinds. The review's re-run caught the old probe handing an
+    integer ``765`` for a string constant; this is the refusal of that shape."""
     pool = list(held) if isinstance(held, (list, tuple)) else [held]
     probes: dict[str, list] = {
         "string": ["outside", "elsewhere", "elsewhere-once-more", "elsewhere-twice"],
@@ -401,12 +479,46 @@ def _outside_values(held: Any | list) -> list[Any]:
         "null": [None],
     }
     out = []
-    for family, family_probes in probes.items():
-        for probe in family_probes:
-            if probe not in pool and all(_json_type(member) != family for member in pool):
+    for held_family in sorted({_json_type(member) for member in pool}):
+        for probe in probes[held_family]:
+            if probe not in pool:
                 out.append(probe)
                 break
     return out
+
+
+def witness_of_family(case: "Case") -> bool:
+    """Whether a const/enum challenge's candidate is of the keyword's OWN family — the ledger credits a
+    keyword only from such a witness. A wrong-family value (an integer where a string constant is
+    challenged) is refused by the ``type`` rules and must never stand in for a const/enum witnesship,
+    so the generated coverage asserts this on every family-restricted case before crediting."""
+    if case.kind not in ("const outside", "enum outside"):
+        return True
+    node = case.node
+    held = node.get("const", node.get("enum")) if isinstance(node, dict) else None
+    pool = list(held) if isinstance(held, (list, tuple)) else [held]
+    if not pool:
+        return False
+    families = {_json_type(member) for member in pool}
+    return _json_type(case.holding) in families
+
+
+def method_name(key: str, taken: set[str]) -> str:
+    """The harness test-method name of one registered key — the *document identity is part of the name*:
+    the state definition's ``defs_environmentproposal`` and the request definition's never overwrite one
+    another (the re-review found the request copy's seven methods silently dropped when the name kept
+    only the pointer). A collision — two registered keys whose names normalize alike — is *refused*
+    (raised), never silently merged."""
+    document, _, pointer = key.partition("#")
+    name = (document + "_" + pointer.strip("/")).replace("$defs/", "defs_").replace("properties/", "member_") \
+        .replace("-", "").replace("/", "_").lower()
+    if not name or not re.fullmatch(r"[a-z][a-z0-9_]*", name):
+        raise ValueError(f"the registered key {key} names no valid test method")
+    if name in taken:
+        raise ValueError(f"a generated test-name collision: {key} normalizes like an earlier registered "
+                         "key — give the documents distinct names or identifiers")
+    taken.add(name)
+    return name
 
 
 def _pattern_probes() -> list[tuple[str, str]]:
@@ -487,6 +599,50 @@ class Contract:
                 if any(key in self._reachable_defs(root) for root in self.registered):
                     self.registered[key] = node
                     self.validators[key] = node[X_VALIDATOR]
+        noted: set[str] = set()
+        for key in sorted(self.registered):
+            self.findings.extend(self._feasibility_errors(key, noted))
+
+    def _feasibility_errors(self, key: str, noted: set[str]) -> list[str]:
+        """The generation feasibility limit (the re-review's non-blocking finding): registered definitions
+        whose own high bounds ask for unbounded-in-practice work — a ``maxItems`` of tens of thousands of
+        rows, a ``maxLength`` of millions of characters — are refused at load, naming the node and the
+        bound, instead of letting the harness's work scale with an arbitrary future schema. A definition
+        whose larger work is honest declares an ``x-work-limit`` override for the named bound."""
+        findings: list[str] = []
+        for _, node, node_id in self._targets(key):
+            if not isinstance(node, dict) or node_id in noted:
+                continue  # the shared proposal is every key's neighbour; one refusal suffices
+            noted.add(node_id)
+            override = node.get(X_WORK_LIMIT) if isinstance(node.get(X_WORK_LIMIT), dict) else {}
+            for bound, ceiling in (("maxItems", FEASIBLE_ROWS), ("maxLength", FEASIBLE_CHARS)):
+                if isinstance(node.get(bound), int) and not isinstance(node.get(bound), bool):
+                    allowed = override.get(bound, ceiling)
+                    if not isinstance(allowed, int):
+                        findings.append(f"{node_id}: an x-work-limit {bound} that is not an integer: {allowed!r}")
+                        continue
+                    if node[bound] > allowed:
+                        findings.append(f"{node_id}: the feasible-work limit refuses to draw it: "
+                                        f"{bound} {node[bound]} exceeds {allowed} — declare an honest "
+                                        f"x-work-limit override or lower the bound")
+        return findings
+
+    def regression_challenges(self, key: str, base: Any) -> list[Derived]:
+        """The named regression-witness corpus of a definition — a list of *known-defect values* the
+        contract itself carries on a patterned node (``x-regression-witnesses``), each placed in a drawn
+        base and fed to both judges: both must refuse (the re-review's exact ``Python:3.12`` seed died
+        here and nowhere else, because a spelling defect normalizing one input is invisible to the
+        generic probes and lives only as a named case)."""
+        out: list[Derived] = []
+        for path, node, node_id in self._targets(key):
+            if not isinstance(node, dict):
+                continue
+            witnesses = node.get(X_REGRESSION_WITNESSES) or []
+            for witness in witnesses if isinstance(witnesses, list) else []:
+                placed = self._placed(base, path, witness)
+                out.append(Derived(f"the named regression witness {witness!r} at {node_id}", placed,
+                                   node_id, "regression witness", "pattern"))
+        return out
 
     def _reachable_defs(self, key: str) -> set[str]:
         """Every ``#/$defs/<name>`` definition inside the key's closure, its references followed
@@ -686,15 +842,21 @@ class Contract:
                                     "not-required", node, node_id,
                                     (member, json.dumps(schema_for_member))))
             if "const" in node:
-                for candidate in _outside_values(node["const"]):
+                candidates = _outside_values(node["const"])
+                if candidates:
                     out.append(Case(f"{at}: a same-family value other than the const", path, "const outside",
-                                    "const", node, node_id, candidate))
-                    break
+                                    "const", node, node_id, candidates[0]))
+                else:
+                    out.append(Case(f"{at}: no fresh same-family value exists for the const", path,
+                                    "unsupported", "const", node, node_id, None))
             if "enum" in node:
-                for candidate in _outside_values(node["enum"]):
+                candidates = _outside_values(node["enum"])
+                if candidates:
                     out.append(Case(f"{at}: a same-family value outside the enumeration", path, "enum outside",
-                                    "enum", node, node_id, candidate))
-                    break
+                                    "enum", node, node_id, candidates[0]))
+                else:
+                    out.append(Case(f"{at}: no fresh same-family value exists for the enumeration", path,
+                                    "unsupported", "enum", node, node_id, None))
             for candidate in _wrong_types(node):
                 out.append(Case(f"{at}: the wrong type {_json_type(candidate)}", path, "wrong type", "type",
                                 node, node_id, candidate))
@@ -726,6 +888,9 @@ class Contract:
                         out.append(Case(f"{at}: {character!r} appended onto the patterned string", path,
                                         "pattern-append", "pattern", node, node_id, character))
                     emitted += 1
+            for held, flipped in _case_restricted_letters(patterns) if patterns else ():
+                out.append(Case(f"{at}: a case-restricted class violated in place ({held!r} -> {flipped!r})",
+                                path, "case-swap", "pattern", node, node_id, (held, flipped)))
             if "string" in types or patterns:
                 if "minLength" in node and node["minLength"] >= 1:
                     out.append(Case(f"{at}: one under minLength", path, "short below", "minLength",
@@ -829,6 +994,12 @@ class Contract:
         elif case.kind == "float-for-int":
             if isinstance(value, int) and not isinstance(value, bool):
                 return emit(float(value))
+        elif case.kind == "case-swap":
+            held, flipped = target
+            if isinstance(value, str):
+                index = value.find(held)
+                if index >= 0:
+                    return emit(value[:index] + flipped + value[index + 1:])
         elif case.kind in ("lf-suffix", "cr-suffix"):
             if isinstance(value, str):
                 return emit(value + target)
@@ -1022,10 +1193,17 @@ class Contract:
         if len(rows) >= target:
             return rows
         grown = list(rows)
+        taken = {row for row in grown if isinstance(row, str)}
         for index in range(len(grown), target):
             extra = copy.deepcopy(rows[0])
             if node.get("uniqueItems") and isinstance(extra, str):
-                extra = UNIQUIFY * (target - index) + extra
+                stamp = index
+                fresh = f"{UNIQUIFY}{stamp}{extra}"
+                while fresh in taken:  # the digits grow logarithmically: total size stays linear
+                    stamp += 1
+                    fresh = f"{UNIQUIFY}{stamp}{extra}"
+                taken.add(fresh)
+                extra = fresh
             grown.append(extra)
         return grown
 

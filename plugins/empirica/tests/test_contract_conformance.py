@@ -62,11 +62,10 @@ _PROPERTY = unrerandomized(3)
 _FUZZ = unrerandomized(2)
 
 
-def _slug(key: str) -> str:
-    return key.split("#", 1)[1].strip("/").replace("$defs/", "defs_").replace("properties/", "member_") \
-        .replace("-", "").replace("/", "_")
-
-
+#: The generated method names keep the document identity (the state definition's methods and the
+#: request definition's never overwrite one another) and refuse a collision: two registered keys that
+#: normalize alike raise instead of silently merging - the re-review's finding was the request
+#: definition's methods disappearing under the state definition's name.
 class _Base(unittest.TestCase):
     _bases: dict[str, object] = {}
 
@@ -149,10 +148,21 @@ class BoundaryAcceptanceTests(_Base):
     which is a fact, not a failure."""
 
 
+class RegressionWitnessTests(_Base):
+    """The contract's named regression-witness corpus - known-defect values (the exact spellings a
+    deleted hand-written test once held: the review's `Python:3.12` seed died only here), each placed
+    in a drawn base and refused by BOTH judges. A spelling defect that normalizes one input in the core
+    is invisible to the generic probes and lives on only as a named case; the corpus is contract-owned
+    (`x-regression-witnesses`), never a test-side restatement."""
+
+
 class GrammarWitnessTests(_Base):
     """The branch witnesses a pattern's own grammar synthesizes — one per top-level alternative and per
     present/absent optional group, with no hand-written form — accepted by both sides, so every accepted
     branch of a grammar (the spike-image lexeme included) is the core's word too."""
+
+
+_group_NAMED: dict[type, set[str]] = {}
 
 
 for _pointer in sorted(_CONTRACT.registered):
@@ -191,6 +201,13 @@ for _pointer in sorted(_CONTRACT.registered):
             for case in _CONTRACT.cases(key):
                 if case.kind == "unsupported":
                     continue  # the plan declared it: no challengeable value exists for this pair
+                with self.subTest(case=case.label):
+                    # the family gate: a const/enum entry's witness must be of its OWN family — a
+                    # wrong-family value (an integer where a string constant is challenged) is a type
+                    # refusal and must never be credited with covering the const/enum rules.
+                    self.assertTrue(engine.witness_of_family(case),
+                                    f"{key}: {case.label}: a wrong-family candidate must never be "
+                                    "credited as a const/enum witness")
                 for derived in _CONTRACT.derive(base, key, case):
                     status = _CONTRACT.adjudicate(key, derived)
                     self.assertFalse(status.startswith(("DISAGREEMENT", "NON-DOMAIN")), f"{key}: {status}")
@@ -222,6 +239,17 @@ for _pointer in sorted(_CONTRACT.registered):
         method.__doc__ = f"The exact-boundary acceptance of {key}"
         return method
 
+    def _regressions(key: str = _pointer):
+        def method(self) -> None:
+            base = self.canonical(key)
+            for derived in _CONTRACT.regression_challenges(key, base):
+                with self.subTest(label=derived.label):
+                    self.assertEqual(_CONTRACT.adjudicate(key, derived), "agree-refused",
+                                     f"{key}: a named regression witness one judge admits: "
+                                     f"{derived.label}")
+        method.__doc__ = f"The named regression witnesses of {key}, refused by both sides"
+        return method
+
     def _witnesses(key: str = _pointer):
         def method(self) -> None:
             base = self.canonical(key)
@@ -238,11 +266,17 @@ for _pointer in sorted(_CONTRACT.registered):
         method.__doc__ = f"The grammar-branch witness acceptance of {key}"
         return method
 
-    for _group, _builder in ((ValidDrawTests, _valid), (ValidFullDrawTests, _valid_full),
-                             (DifferentialSweepTests, _sweep), (DifferentialFuzzTests, _fuzz),
-                             (CoverageAccountingTests, _coverage),
-                             (BoundaryAcceptanceTests, _boundary), (GrammarWitnessTests, _witnesses)):
-        setattr(_group, f"test_{_slug(_pointer)}", _builder(_pointer))
+    # the loop's group name never joins the module's names: unittest would otherwise run one
+    # generated group twice under its class name and the loop variable's alias alike.
+    for suite_group, builder in ((ValidDrawTests, _valid), (ValidFullDrawTests, _valid_full),
+                                 (DifferentialSweepTests, _sweep), (DifferentialFuzzTests, _fuzz),
+                                 (CoverageAccountingTests, _coverage),
+                                 (BoundaryAcceptanceTests, _boundary), (GrammarWitnessTests, _witnesses),
+                                 (RegressionWitnessTests, _regressions)):
+        setattr(suite_group, f"test_{engine.method_name(_pointer, _group_NAMED.setdefault(suite_group, set()))}",
+                builder(_pointer))
+del suite_group, builder, _pointer, _valid, _valid_full, _sweep, _fuzz, _coverage, _boundary, \
+    _witnesses, _regressions  # the loop's names never leak as a second alias of a generated group
 
 
 class KnownOpenTests(_Base):
