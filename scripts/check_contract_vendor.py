@@ -13,9 +13,11 @@ CONTRACT_COPIES = (
       "public-tools.json", "request.schema.json", "response.schema.json", "state.schema.json")),
     # The digest-pinned probe image (Empirica 7.2 §4.3) is read at runtime by
     # adapters/sandbox/probe_image.py; its digest is part of the implementation manifest.
+    # The /3 run-scoped qualification record shape (§4.5) is the definition home for
+    # adapters/sandbox/run_qualification.py.
     (ROOT / "contracts/empirica-docker-spike/v1",
      ROOT / "plugins/empirica/vendor/contracts/empirica-docker-spike/v1",
-     ("support-contract.json",)),
+     ("support-contract.json", "qualification-record.schema.json")),
 )
 
 

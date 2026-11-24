@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://siffran.dev/contracts/empirica-docker-spike/v1/qualification-record.schema.json",
+  "title": "Empirica run-scoped Docker spike qualification record /3",
+  "description": "The closed shape of siffran.empirica.docker-spike-qualification-record/3 (Empirica 7.2 section 4.5), written durably and content-addressed under $EMPIRICA_SANDBOX_HOME/docker-spike-qualification-v3/records/ before the run's binding compare-and-set (write-first). This schema is the record shape's definition home; the runtime validator (adapters/sandbox/run_qualification.py:validate_run_record) remains the authoritative admission and is registered with the contract conformance harness only when E2c is accepted. Semantic checks this schema cannot express are listed in x-harness-semantic-checks and stay behaviour-tested in the owner: the exact content-addressed file name and qualification_record_digest equality, the execution_binding_digest recomputation, the run-generation lineage on load, the /2 namespace isolation, and the probe order/expected equality.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "run_binding",
+    "profile_id",
+    "runtime",
+    "semantic_authority",
+    "authority_digest",
+    "policy_digest",
+    "implementation_digest",
+    "probe_image_id",
+    "qualification_image",
+    "spike_images",
+    "probes",
+    "cleanup",
+    "qualification_elapsed_ms",
+    "execution_binding_digest",
+    "qualification_record_digest"
+  ],
+  "properties": {
+    "schema": {"const": "siffran.empirica.docker-spike-qualification-record/3"},
+    "run_binding": {"$ref": "#/$defs/runBinding"},
+    "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+    "runtime": {
+      "type": "object",
+      "description": "The observed Docker runtime facts of the pinned daemon, exactly the /2 runtime shape (docker_cli, endpoint, context, versions, platforms, security options, resource-limit capability flags, capacity, host facts, discovery_reads, optional daemon_id). The closed field set and the capability admission are the /2 authority contract's; they are not restated here."
+    },
+    "semantic_authority": {
+      "type": "object",
+      "description": "The canonical semantic projection of the runtime (endpoint, platform, required security, resource-limit capability flags, optional daemon_id); equal to the bound authority up to the documented daemon_id rule."
+    },
+    "authority_digest": {"$ref": "#/$defs/digest"},
+    "policy_digest": {"$ref": "#/$defs/digest"},
+    "implementation_digest": {"$ref": "#/$defs/digest"},
+    "daemon_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+      "description": "Docker info.ID when the observed daemon reports one; present exactly when the runtime carries it, and equal to it."
+    },
+    "probe_image_id": {"$ref": "#/$defs/digest"},
+    "qualification_image": {"$ref": "#/$defs/probeImage"},
+    "spike_images": {"$ref": "#/$defs/spikeImages"},
+    "probes": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {"$ref": "#/$defs/probe"}
+    },
+    "cleanup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["container_ids_absent", "network_ids_absent", "staging_empty", "journals_empty"],
+      "properties": {
+        "container_ids_absent": {"const": true},
+        "network_ids_absent": {"const": true},
+        "staging_empty": {"const": true},
+        "journals_empty": {"const": true}
+      }
+    },
+    "qualification_elapsed_ms": {
+      "type": "integer",
+      "minimum": 0,
+      "exclusiveMaximum": 90000,
+      "description": "Measured with the injected qualification clock. The exclusive maximum is the 90 s default qualification budget, set from the operator timing session's measured evidence (spec section 5, Timing evidence: worst attempt 18.5 s); the owner constant DEFAULT_QUALIFICATION_SECONDS owns the binding code-side and re-measuring the timing session may move it."
+    },
+    "execution_binding_digest": {"$ref": "#/$defs/digest"},
+    "qualification_record_digest": {"$ref": "#/$defs/digest"}
+  },
+  "x-harness-semantic-checks": [
+    "qualification_record_digest is the canonical digest of the record body and names the record file (<digest-hex>.json)",
+    "execution_binding_digest is the canonical digest of the closed binding body (schema, run_binding, profile_id, authority_digest, policy_digest, implementation_digest, server_version, daemon_id, probe_image_id, qualification_image_digest, spike_images_digest, probe_digest, cleanup)",
+    "daemon_id is present exactly when runtime carries it and equals it",
+    "probes are exactly the five fixed probes in order with their fixed expected outcomes and no realization digest on unavailable probes",
+    "the last probe's running_network_membership equals the profile, earlier probes never hold it",
+    "run_binding identifiers are printable, separator-free and at most 128 UTF-8 bytes; generation and revision are 1..2^31-1",
+    "loading verifies the run-generation lineage (project, run, generation) and the exact content digest",
+    "/2 records, pointers and factories are never read or written; no pointer namespace exists in /3"
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "identifier": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[^\\u0000-\\u0020/\\\\\\u007f-\\u009f][^\\u0000-\\u0020/\\\\\\u007f-\\u009f]*$"
+    },
+    "counter": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+    "runBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["project_id", "run_id", "generation", "attempt_id", "revision", "proposal_digest"],
+      "properties": {
+        "project_id": {"$ref": "#/$defs/identifier"},
+        "run_id": {"$ref": "#/$defs/identifier"},
+        "generation": {"$ref": "#/$defs/counter"},
+        "attempt_id": {"$ref": "#/$defs/identifier"},
+        "revision": {"$ref": "#/$defs/counter"},
+        "proposal_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "imageRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "id", "raw_os", "os", "raw_architecture", "architecture", "declared_volumes", "capabilities"],
+      "properties": {
+        "reference": {"type": "string", "minLength": 1, "maxLength": 255},
+        "id": {"$ref": "#/$defs/digest"},
+        "raw_os": {"type": "string", "minLength": 1},
+        "os": {"enum": ["linux"]},
+        "raw_architecture": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "declared_volumes": {"type": "array", "maxItems": 0, "items": {"type": "string"}},
+        "capabilities": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "probeImage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reference", "id", "raw_os", "os", "raw_architecture", "architecture", "declared_volumes", "capabilities", "repo_digest"],
+      "properties": {
+        "reference": {"$ref": "#/$defs/repoDigest"},
+        "id": {"$ref": "#/$defs/digest"},
+        "raw_os": {"type": "string", "minLength": 1},
+        "os": {"enum": ["linux"]},
+        "raw_architecture": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1},
+        "declared_volumes": {"type": "array", "maxItems": 0, "items": {"type": "string"}},
+        "capabilities": {
+          "type": "array",
+          "minItems": 12,
+          "maxItems": 12,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "repo_digest": {"$ref": "#/$defs/repoDigest"}
+      }
+    },
+    "repoDigest": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]{0,253}@sha256:[0-9a-f]{64}$"
+    },
+    "spikeImages": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "items": {"$ref": "#/$defs/imageRow"},
+      "description": "The environment proposal's 1..16 approved local references, each sealed to its daemon image ID and canonical server-native platform with no declared volumes (Empirica 7.2 section 4.1)."
+    },
+    "probe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "expected", "observed", "operation_digest", "cleanup_proven", "duration_ms", "running_network_membership", "realization_digest"],
+      "properties": {
+        "name": {
+          "enum": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"]
+        },
+        "expected": {"enum": ["PASS", "FAIL", "UNAVAILABLE_OUTPUT_LIMIT", "UNAVAILABLE_TIMEOUT"]},
+        "observed": {"enum": ["PASS", "FAIL", "UNAVAILABLE_OUTPUT_LIMIT", "UNAVAILABLE_TIMEOUT"]},
+        "operation_digest": {"$ref": "#/$defs/digest"},
+        "cleanup_proven": {"const": true},
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 59999},
+        "running_network_membership": {"type": "boolean"},
+        "realization_digest": {
+          "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}],
+          "description": "The container's observed top-level Image realization digest on verdict probes; an unavailable probe admits no result, so it records none."
+        }
+      }
+    }
+  }
+}
