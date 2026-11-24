@@ -225,31 +225,61 @@ def sandbox_home(env: Mapping[str, str] | None = None) -> Path:
 
 
 def safe_directory(path: Path, *, create: bool) -> None:
+    """Validate a scaffolding directory's identity and apply our mode to it.
+
+    Identity is validated first through a descriptor opened without following symlinks
+    (re-review, blocking 3), and permissions are only ever changed through that already
+    validated descriptor — never through the path: a directory that lost a concurrent
+    first-use race to a planted symlink is refused with its target's permissions
+    untouched, and the inode whose identity was validated is exactly the inode chmod'ed.
+    """
+    own_creation = False  # whether this call is the one that created the directory
     try:
-        info = path.lstat()
+        path.lstat()
     except FileNotFoundError:
         if not create:
             raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}")
         try:
             path.mkdir(parents=True, mode=MODE_DIR)
+            own_creation = True
         except FileExistsError:
-            pass  # a concurrent first initializer (E5 review, finding 3) won the create;
-            # the validation below owns the identity, so the loser validates the winner's
-            # directory instead of refusing a same-identity concurrent first use
-        except OSError as exc:
-            raise GenericScaffoldingError(
-                f"sandbox directory cannot be created safely: {path.name}") from exc
-        try:
-            os.chmod(path, MODE_DIR)
-            info = path.lstat()
+            # a concurrent first initializer (E5 review, finding 3) won the create: its
+            # directory (or, under attack, a planted entry) is validated below and is
+            # never changed before the validation accepts it (re-review, blocking 3)
+            own_creation = False
         except OSError as exc:
             raise GenericScaffoldingError(
                 f"sandbox directory cannot be created safely: {path.name}") from exc
     except OSError as exc:
         raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}") from exc
-    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != MODE_DIR):
-        raise GenericScaffoldingError(f"sandbox directory has unsafe ownership/mode: {path.name}")
+    try:
+        descriptor = os.open(path, os.O_RDONLY | NOFOLLOW | CLOEXEC)
+    except OSError as exc:
+        # a planted symlink (or other non-directory) at the named path cannot be opened
+        # without following it, so it is refused without any permission change to it
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be opened safely: {path.name}") from exc
+    try:
+        info = os.fstat(descriptor)
+        if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
+                or info.st_uid != os.getuid()):
+            raise GenericScaffoldingError(
+                f"sandbox directory has unsafe ownership/mode: {path.name}")
+        if own_creation:
+            # our directory just created by this call: the mode is applied through the
+            # validated descriptor (a restrictive umask could have masked it in mkdir)
+            os.fchmod(descriptor, MODE_DIR)
+            if stat.S_IMODE(os.fstat(descriptor).st_mode) != MODE_DIR:
+                raise GenericScaffoldingError(
+                    f"sandbox directory has unsafe ownership/mode: {path.name}")
+        elif stat.S_IMODE(info.st_mode) != MODE_DIR:
+            raise GenericScaffoldingError(
+                f"sandbox directory has unsafe ownership/mode: {path.name}")
+    except OSError as exc:
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be initialized safely: {path.name}") from exc
+    finally:
+        os.close(descriptor)
 
 
 def safe_file(path: Path, *, cap: int = MAX_CONTROL_FILE_BYTES) -> bytes:

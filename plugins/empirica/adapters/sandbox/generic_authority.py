@@ -349,14 +349,24 @@ def _admit_command_result(value: object, ceiling: int, where: str) -> process.Co
     return value
 
 
-def inspect_current_runtime(
+def inspect_observed_runtime(
     recorded_runtime: Mapping[str, Any], *, deadline: float,
     runner: process.Runner | None = None,
     clock: Callable[[], float] = time.monotonic,
     host_facts: tuple[str, str] | None = None,
     **_: Any,
 ) -> GenericRuntimeInspection:
-    """Perform exactly five bounded passive Docker reads and admit semantic capabilities."""
+    """Perform exactly five bounded passive Docker reads and project the raw facts.
+
+    The non-admitting observation (re-review, blocking 1): the endpoint is resolved once
+    and the remaining reads are pinned to it exactly as before, but no capability
+    admission runs — the raw facts are returned, so journal recovery runs on them before
+    the new attempt's admission decides the capability. A capability refusal observed
+    through this function is therefore an observation to recover on, never a boundary
+    error that would skip recovery. Command-launch and read failures are normalized at
+    this boundary (re-review, blocking 4): the refined difference stays between the
+    admitting wrapper and the owner classifier, never an unclassified transport error.
+    """
     cli = _verified_cli(recorded_runtime, deadline=deadline, clock=clock)
     selected = process.BoundedRunner() if runner is None else runner
     environment = {"LANG": "C", "LC_ALL": "C"}
@@ -365,10 +375,16 @@ def inspect_current_runtime(
         remaining = deadline - clock()
         if remaining <= 0:
             raise GenericQualificationError("passive verification deadline expired")
-        result = _admit_command_result(selected.run(
-            (cli, *args), timeout_seconds=min(5.0, remaining),
-            output_limit_bytes=MAX_POINTER_BYTES, env=environment),
-            MAX_POINTER_BYTES, where)
+        try:
+            launched = selected.run(
+                (cli, *args), timeout_seconds=min(5.0, remaining),
+                output_limit_bytes=MAX_POINTER_BYTES, env=environment)
+        except OSError as exc:
+            # a daemon command that could not be launched or read (missing CLI, refused
+            # spawn, lost descriptor) is one closed read failure of the observed daemon
+            raise GenericQualificationError(
+                where + " could not be launched at the observed daemon") from exc
+        result = _admit_command_result(launched, MAX_POINTER_BYTES, where)
         if (result.timed_out
                 or result.output_limited or result.returncode != 0):
             raise GenericQualificationError(where + " failed")
@@ -422,12 +438,30 @@ def inspect_current_runtime(
     }
     if "ID" in info:
         runtime["daemon_id"] = info["ID"]
-    # The endpoint resolved and every read succeeded; a facts projection that does not
-    # admit is a capability/platform refusal of a reachable daemon (for example a macOS
-    # engine that is not Docker Desktop), never an unreachability. The closed admission
-    # decision itself is unchanged - only its boundary is marked.
+    return GenericRuntimeInspection(runtime)
+
+
+def inspect_current_runtime(
+    recorded_runtime: Mapping[str, Any], *, deadline: float,
+    runner: process.Runner | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    host_facts: tuple[str, str] | None = None,
+    **_: Any,
+) -> GenericRuntimeInspection:
+    """Observe the authority once and admit its facts (the admitting wrapper).
+
+    Existing callers keep this semantics: the non-admitting
+    :func:`inspect_observed_runtime` resolves the endpoint and reads the facts, and the
+    wrapper admits them here. The endpoint resolved and every read succeeded, so a facts
+    projection that does not admit is a capability/platform refusal of a reachable daemon
+    (for example a macOS engine that is not Docker Desktop), never an unreachability. The
+    closed admission decision itself is unchanged — only its boundary is marked.
+    """
+    observed = inspect_observed_runtime(
+        recorded_runtime, deadline=deadline, runner=runner, clock=clock,
+        host_facts=host_facts)
     try:
-        validated = validate_runtime(runtime)
+        validated = validate_runtime(observed.runtime)
     except GenericQualificationError as exc:
         raise CapabilityRefused(str(exc)) from exc
     return GenericRuntimeInspection(validated)
@@ -464,10 +498,17 @@ def inspect_pinned_runtime(
         remaining = deadline - clock()
         if remaining <= 0:
             raise GenericQualificationError("passive verification deadline expired")
-        result = _admit_command_result(selected.run(
-            (cli, *args), timeout_seconds=min(5.0, remaining),
-            output_limit_bytes=MAX_POINTER_BYTES, env=environment),
-            MAX_POINTER_BYTES, where)
+        try:
+            launched = selected.run(
+                (cli, *args), timeout_seconds=min(5.0, remaining),
+                output_limit_bytes=MAX_POINTER_BYTES, env=environment)
+        except OSError as exc:
+            # normalized at the observation boundary (re-review, blocking 4): a command
+            # that could not be launched or read at the pinned endpoint is one closed
+            # read failure, classified unreachable by the owner, never a capability guess
+            raise GenericQualificationError(
+                where + " could not be launched at the pinned daemon") from exc
+        result = _admit_command_result(launched, MAX_POINTER_BYTES, where)
         if (result.timed_out or result.output_limited or result.returncode != 0):
             raise GenericQualificationError(where + " failed")
         try:

@@ -40,8 +40,9 @@ from . import (common, generic_admission as admission, generic_authority as auth
 
 #: The record schema this owner writes: the closed shape's definition home is
 #: ``contracts/empirica-docker-spike/v1/qualification-record.schema.json`` (vendored at
-#: ``vendor/contracts/...``), validated here by :func:`validate_run_record` and (once
-#: E2c is accepted) registered with the contract conformance harness.
+#: ``vendor/contracts/...``), validated here by :func:`validate_run_record` and
+#: registered with the contract conformance harness at the restack, through that
+#: harness's own discovery and annotation conventions.
 QUALIFICATION_RECORD_SCHEMA = "siffran.empirica.docker-spike-qualification-record/3"
 NAMESPACE = "docker-spike-qualification-v3"
 MAX_RECORD_BYTES = 2 * 1024 * 1024
@@ -381,35 +382,16 @@ def build_run_record(
                                 "qualification_record_digest": canonical_digest(body)})
 
 
-def _durable_record_parent(records: Path) -> None:
-    """Create the record directory chain with every newly created parent durably synced.
+def _naming_levels(store: "RunQualificationStore") -> tuple[Path, Path, Path]:
+    """The three directory levels that name a published record, from the top.
 
-    Each missing directory is created, chmod'd and validated like ``common.safe_directory``,
-    and its parent directory is strictly fsynced before the record is published, so a crash
-    can lose neither the record file nor any directory entry that names it (E5 review,
-    blocking finding 5).
+    The durable barrier covers this whole required chain (re-review, blocking 2): the
+    sandbox directory naming the namespace, the namespace naming ``records``, and
+    ``records`` naming the record file. Every level must be proven synced — the scaffold
+    may have pre-created any of them well before the publication, so "newly created for
+    this publication" is not the criterion; presence with a proven dirent is.
     """
-    missing: list[Path] = []
-    current = records
-    while True:
-        try:
-            current.lstat()
-        except FileNotFoundError:
-            missing.append(current)
-            current = current.parent
-            continue
-        # The nearest existing ancestor is validated before anything is created, so a
-        # planted symlink above the record tree can never receive a new directory.
-        common.safe_directory(current, create=False)
-        break
-    for directory in reversed(missing):
-        try:
-            directory.mkdir(mode=common.MODE_DIR)
-            os.chmod(directory, common.MODE_DIR)
-        except FileExistsError:
-            pass
-        fsio.sync_directory(directory.parent)
-        common.safe_directory(Path(directory), create=False)
+    return (store.sandbox_root, store.root, store.records)
 
 
 class RunQualificationStore:
@@ -451,17 +433,20 @@ class RunQualificationStore:
     def write_record(self, record: Mapping[str, Any]) -> Path:
         """Publish one validated record content-addressed and durably (write-first).
 
-        Publication is strictly durable: the file is fsynced and renamed, the containing
-        directory is strictly fsynced, and every directory newly created for this
-        publication was fsynced into its parent first. A directory-open or fsync error
-        fails the publication, and the identical-bytes retry re-proves durability the
-        same way before returning. Read-back and mode checks alone would not.
+        Publication is strictly durable across the whole naming chain: the file is
+        fsynced and renamed, and each of the three directories that name it — the sandbox
+        directory naming the namespace, the namespace naming ``records``, and ``records``
+        naming the file — is strictly fsynced, whatever created it and however long ago
+        (re-review, blocking 2). A directory-open or fsync error at any level fails the
+        publication, and the identical-bytes retry re-proves the same chain before
+        returning. Read-back and mode checks alone would not.
         """
         checked = validate_run_record(dict(record))
         digest = checked["qualification_record_digest"]
-        _durable_record_parent(self.records)
-        common.safe_directory(self.root, create=False)
-        common.safe_directory(self.records, create=False)
+        # Create and identity-validate every level first: a pre-planted symlink at any
+        # of the three names is refused before a single byte is written.
+        for level in _naming_levels(self):
+            common.safe_directory(level, create=True)
         path = self.records / (digest.removeprefix("sha256:") + ".json")
         payload = fsio.dump_json(checked)
         if len(payload) > MAX_RECORD_BYTES:
@@ -478,14 +463,30 @@ class RunQualificationStore:
             if readback != payload:
                 raise authority.GenericQualificationError(
                     "run qualification record path contains different bytes")
-            # The retry also proves durability: an interrupted writer can leave the renamed
-            # file behind with no synchronized directory entry (E5 review, blocking 5).
-            fsio.sync_directory(self.records)
+            # The retry also proves durability: an interrupted writer can leave the
+            # renamed file (or any of its naming levels) behind with no synchronized
+            # dirent (E5 review, blocking 5; re-review, blocking 2 for the ancestors).
+            for level in reversed(_naming_levels(self)):
+                fsio.sync_directory(level)
             return path
         fsio.atomic_write(path, payload, durable=True)
-        os.chmod(path, common.MODE_FILE)
+        # The mode change goes through a descriptor opened without following symlinks
+        # (re-review, blocking 3: no path-following permission changes on the newly
+        # written publication either).
+        publication = None
+        try:
+            publication = os.open(path, os.O_RDONLY | common.NOFOLLOW | common.CLOEXEC)
+            os.fchmod(publication, common.MODE_FILE)
+        except OSError as exc:
+            raise authority.GenericQualificationError(
+                "run qualification record cannot be sealed safely") from exc
+        finally:
+            if publication is not None:
+                os.close(publication)
         if common.safe_file(path, cap=MAX_RECORD_BYTES) != payload:
             raise authority.GenericQualificationError("run qualification record publication differs")
+        for level in reversed(_naming_levels(self)):
+            fsio.sync_directory(level)
         return path
 
 
@@ -521,8 +522,9 @@ def _observe_authority(runtime_inspector: Callable[..., authority.GenericRuntime
     """Observe the authority once (context, version, info including ``daemon_id``):
     reads only, no admission.
 
-    ``inspect_current_runtime`` resolves the endpoint once and pins its own remaining
-    reads to it; the raw facts are returned unadmitted because recovery precedes the
+    The owner's observation is the non-admitting
+    :func:`authority.inspect_observed_runtime`: it resolves the endpoint once, pins its
+    own remaining reads to it and never admits the facts, because recovery precedes the
     new attempt's admission (E5 review, blocking finding 2): a capability or
     implementation refusal must never skip journal recovery. Admission of these same
     facts happens after recovery.
@@ -675,7 +677,7 @@ def qualify_run_environment(
     profile_id: str,
     docker_cli: Path,
     qualification_seconds: float | None = None,
-    runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_current_runtime,
+    runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_observed_runtime,
     pinned_reobserver: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_pinned_runtime,
     implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
     image_runner: process.Runner | None = None,
@@ -692,10 +694,11 @@ def qualify_run_environment(
     shared runtime lock for its whole duration; a failure or a timeout binds nothing
     and leaves recoverable journals.
 
-    ``runtime_inspector`` performs the one initial discovery (endpoint resolution);
-    ``pinned_reobserver`` performs every later daemon read — the kernel postflights and
-    the final re-observation — at that pinned endpoint, never a fresh context
-    resolution. Expiry anywhere reports the deadline reason: when the budget is gone,
+    ``runtime_inspector`` performs the one initial discovery (endpoint resolution), and
+    it is non-admitting by default — recovery runs on the raw facts before the attempt's
+    capability admission; ``pinned_reobserver`` performs every later daemon read — the
+    kernel postflights and the final re-observation — at that pinned endpoint, never a
+    fresh context resolution. Expiry anywhere reports the deadline reason: when the budget is gone,
     every stage error path is converted to the deadline reason before the outcome is
     built.
     """

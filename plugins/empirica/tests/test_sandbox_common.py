@@ -95,6 +95,38 @@ class ScaffoldingTests(unittest.TestCase):
             with self.assertRaises(common.GenericScaffoldingError):
                 common.ExecutionStore(alias)
 
+    def test_a_create_race_lost_to_a_planted_symlink_is_refused_target_untouched(self):
+        # (re-review, blocking 3) a scaffolding creation that lost the concurrent
+        # first-use race is refused without any permission change first: the planted
+        # link's target keeps its own mode, and the chmod never follows the link.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            target = root / "target"
+            target.mkdir(mode=0o755)
+            planted = root / "runtime"
+            planted.symlink_to(target, target_is_directory=True)
+
+            class RaceLostName:
+                """The missed-lookup/lost-create race, deterministically: the first
+                lookup misses, the concurrent creator (attacker) wins the name with a
+                symlink, and safe_directory must validate - never chmod - first."""
+
+                def __fspath__(self) -> str:
+                    return str(planted)
+
+                def lstat(self):
+                    raise FileNotFoundError(planted)
+
+                def mkdir(self, *args, **kwargs):
+                    raise FileExistsError(planted)
+
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_directory(Path(RaceLostName()), create=True)   # type: ignore[arg-type]
+            # the planted symlink's target was never chmod'ed through the link
+            import stat as stat_module
+            self.assertEqual(stat_module.S_IMODE(target.lstat().st_mode), 0o755,
+                             "the refused entry's link target must keep its own mode")
+
     def test_mount_csv_delimiters_are_rejected_with_actionable_setup_error(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(strict=True)

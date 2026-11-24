@@ -4,15 +4,17 @@
 Workers never run Docker: every Docker answer comes from the existing fake runner and
 FakeDocker patterns. Contract values are read from the owner module under test — never
 restated as literals here; the shape checks (closed record fields, bounds, reason
-strings) belong to the contract conformance harness (E2c, not yet accepted) through the
-closed record definition ``contracts/empirica-docker-spike/v1/qualification-record.schema.json``
-and are listed in the worker report. Every test here covers a transition, a race, a
-recovery or a classification, not a shape matrix.
+strings) belong to the contract conformance harness, which registers the closed record
+definition at the restack through its own discovery and annotation conventions; the
+semantic rules are carried by named owner tests and listed in the worker report. Every
+test here covers a transition, a race, a recovery or a classification, not a shape
+matrix.
 """
 from __future__ import annotations
 
 import copy
 import json
+import os
 import threading
 import time
 import unittest
@@ -71,6 +73,14 @@ class ImageInspects:
         if reference == PIN.reference:
             if self.on_probe is not None:
                 self.on_probe(self)
+            # the projection is verified at the command boundary (re-review,
+            # non-blocking 3): the daemon is asked by the owner's exact constant, so a
+            # mutant that drops the digest membership (or any other member the
+            # admission reads) fails here before any fake answer can mask it
+            assert argv[4] == run_owner.PROBE_IMAGE_INSPECT_FORMAT, argv
+            assert kwargs["env"] == {
+                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime()["endpoint"],
+                "DOCKER_CONFIG": kwargs["env"]["DOCKER_CONFIG"]}, kwargs["env"]
             return process.CommandResult.fake(stdout=json.dumps(self.probe_document))
         if self.on_reference is not None:
             self.on_reference(self, reference)
@@ -665,6 +675,119 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             common.ExecutionStore(harness.root)).scan(), ())
         self.assertNoRecord(fresh)
 
+
+    def test_a_now_refusing_pinned_daemon_recovers_before_it_refuses_production(self):
+        # Re-review blocking 1, through the production inspector: the first attempt
+        # retains a journal; the same pinned daemon then stops admitting (SwapLimit
+        # false); the owner's non-admitting observation still yields facts, recovery
+        # runs at the pinned endpoint, and only then the capability refusal is reported.
+        cell = self._fresh_cell()
+        facts = runtime()
+        runner = DaemonFixtureRunner(facts)
+        arrivals = []
+
+        def discovery(seed, *, deadline, clock=None, **kwargs):
+            return authority.inspect_observed_runtime(
+                seed, deadline=deadline, runner=runner,
+                clock=clock if clock is not None else harness.clock,
+                host_facts=(facts["host_os"], facts["host_raw_architecture"]))
+
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.effects_options["realization"] = {"crash_after": 5}
+        original_effects = harness.effects_factory
+
+        def recording_effects(resolved, operation, name):
+            arrivals.append((name, dict(resolved.environment),
+                             resolved.runtime.get("endpoint")))
+            return original_effects(resolved, operation, name)
+
+        harness.effects_factory = recording_effects
+        harness.runtime_inspector = discovery
+        crashed = harness.call()
+        self.assertIs(type(crashed), run_owner.RunQualificationFailed)
+        self.assertIs(crashed.reason, run_owner.RunQualificationReason.CLEANUP_UNAVAILABLE)
+        self.assertEqual(len(generic_journal.GenericJournalStore(
+            common.ExecutionStore(cell)).scan()), 1)
+
+        # the same pinned daemon now refuses the resource-limit capability
+        runner.facts["swap_limit"] = False
+
+        fresh = OwnerHarness(cell)
+        fresh.manifests = [{"implementation_digest": D0}] * 32
+        fresh.runtime_inspector = discovery
+        fresh_effects = fresh.effects_factory
+
+        def recovery_recording(resolved, operation, name):
+            arrivals.append((name, dict(resolved.environment),
+                             resolved.runtime.get("endpoint")))
+            return fresh_effects(resolved, operation, name)
+
+        fresh.effects_factory = recovery_recording
+        outcome = fresh.call()
+        # the refusal keeps its own kept reason... after recovery ran first
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason,
+                      run_owner.RunQualificationReason.RESOURCE_LIMITS_UNAVAILABLE)
+        self.assertEqual(generic_journal.GenericJournalStore(
+            common.ExecutionStore(cell)).scan(),
+            (), "the retained journal was recovered to the initialized state first")
+        self.assertNoRecord(fresh)
+        # the initialized-state and command-destination assertions: recovery ran at the
+        # endpoint the refusing daemon was observed at, pinned, under the config
+        recovery = [row for row in arrivals if row[0] == "recovery"]
+        self.assertEqual(len(recovery), 2)   # one recovery per attempt, pinned each time
+        for name, environment, endpoint in recovery:
+            self.assertEqual(endpoint, facts["endpoint"])
+            self.assertEqual(environment["DOCKER_HOST"], facts["endpoint"])
+        self.assertEqual({row[1]["DOCKER_CONFIG"] for row in recovery},
+                         {str(cell / run_owner.NAMESPACE / "configs"
+                              / spike_plan.ISOLATED_PROFILE)})
+        # and every daemon read of both observations that resolved an endpoint was
+        # pinned to it in the launched commands
+        for argv, environment in runner.calls:
+            if argv[1:2] == ("version",) or argv[1:2] == ("info",):
+                self.assertEqual(environment["DOCKER_HOST"], facts["endpoint"])
+        self.assertEqual([argv for argv, _ in runner.calls[:2]
+                          if argv[1] == "version"], [])
+
+
+    def test_the_final_reobservation_separates_drift_result_failure_and_launch_failure(self):
+        # Re-review blocking 4 at the owner boundary: a changed capability observed by
+        # the final pinned re-observation is stale-daemon; a failed daemon command
+        # result is unreachable; a command-launch OSError — the hole — is normalized at
+        # the observation boundary and arrives unreachable, never capability.
+        for mode, expected in (
+            ("drift", run_owner.RunQualificationReason.STALE_DAEMON),
+            ("result", run_owner.RunQualificationReason.DOCKER_UNREACHABLE),
+            ("launch", run_owner.RunQualificationReason.DOCKER_UNREACHABLE),
+        ):
+            with self.subTest(final_failure=mode):
+                cell = self._fresh_cell()
+                facts = runtime()
+                # the failure lands on the final re-observation only: the five kernel
+                # postflights pass untouched (PROBE_COUNT observations), then the final
+                # observation changes
+                runner = DaemonFixtureRunner(
+                    facts, fail_mode=mode, fail_observation=PROBE_COUNT + 1)
+
+                def reobserver(recorded, *, deadline, **kwargs):
+                    return authority.inspect_pinned_runtime(
+                        recorded, deadline=deadline, runner=runner, clock=fresh.clock,
+                        host_facts=(facts["host_os"], facts["host_raw_architecture"]))
+
+                fresh = OwnerHarness(cell)
+                fresh.manifests = [{"implementation_digest": D0}] * 32
+                fresh.pinned_reobserver = reobserver
+                outcome = fresh.call()
+                self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                self.assertIs(outcome.reason, expected)
+                self.assertIsNot(outcome.reason,
+                                 run_owner.RunQualificationReason.CAPABILITY_UNAVAILABLE)
+                self.assertIsNone(outcome.probe)
+                self.assertNoRecord(fresh)
+                self.assertEqual(runner.observations_started, PROBE_COUNT + 1)
+
     def test_an_implementation_refusal_still_recovers_prior_journals_first(self):
         harness = OwnerHarness(self._fresh_cell())
         harness.manifests = [{"implementation_digest": D0}] * 32
@@ -739,47 +862,80 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                     records = run_owner.RunQualificationStore(cell).records
                     self.assertFalse(records.exists() and any(records.iterdir()))
 
-    def test_concurrent_first_use_initializes_one_lock_and_never_both_enter(self):
-        # Two attempts race the lock's first publication with barriers around the
-        # initialization and the locked work: the exclusive create keeps a single
-        # inode, so flock serializes them and the locked work never overlaps.
-        for attempt_index in range(4):
-            cell = self._fresh_cell()
-            store = common.ExecutionStore(cell)
-            barrier = threading.Barrier(2)
-            active: list[int] = []
-            overlaps: list[int] = []
-            guard = threading.Lock()
+    def test_the_second_first_use_attempt_never_replaces_the_inode_the_first_holds(self):
+        # The witnessed first-use sequence (re-review, blocking 3): both attempts miss
+        # the initial lock lookup; the second resolves its own initialization while the
+        # first holds the lock; the held inode is never replaced. A replacing writer
+        # (the old atomic-rename lock creator) unlinks the held inode, so the assertions
+        # below fail on that mutant and pass only on the exclusive create.
+        for attempt_index in range(3):
+            with self.subTest(race=attempt_index):
+                cell = self._fresh_cell()
+                store = common.ExecutionStore(cell)
+                lock_path = store.runtime_lock
+                self.assertFalse(lock_path.exists())  # both miss the initial lookup
+                held: dict[str, int] = {}
+                overlaps: list[int] = []
+                guard = threading.Lock()
+                both_missed = threading.Barrier(2)
+                first_holds = threading.Event()
+                second_attempted = threading.Event()
+                errors: list[BaseException] = []
 
-            errors = []
+                def first_attempt():
+                    try:
+                        both_missed.wait(timeout=10.0)
+                        store.prepare_execution_scaffolding()
+                        with common.runtime_lock(store, time.monotonic() + 30.0):
+                            # the held descriptor proves the inode the flock is held on
+                            descriptor = os.open(lock_path, os.O_RDONLY)
+                            try:
+                                held["ino"] = os.fstat(descriptor).st_ino
+                                first_holds.set()
+                                second_attempted.wait(timeout=10.0)
+                                # while the second attempt published, the held inode
+                                # was neither replaced nor unlinked
+                                info = os.fstat(descriptor)
+                                self.assertEqual(info.st_ino, held["ino"])
+                                self.assertEqual(info.st_nlink, 1)
+                                self.assertEqual(lock_path.lstat().st_ino, held["ino"])
+                                with guard:
+                                    overlaps.append(len(overlaps) + 1)
+                            finally:
+                                os.close(descriptor)
+                    except BaseException as exc:
+                        errors.append(exc)
+                        first_holds.set()
 
-            def attempt():
-                try:
-                    barrier.wait(timeout=10.0)   # both observe the absent lock together
-                    store.prepare_execution_scaffolding()
-                    barrier.wait(timeout=10.0)   # both contend the single lock together
-                    with common.runtime_lock(store, time.monotonic() + 30.0):
-                        with guard:
-                            active.append(1)
-                            overlaps.append(len(active))
-                        time.sleep(0.05)
-                        with guard:
-                            active.pop()
-                except BaseException as exc:   # a broken attempt must fail, never hang
-                    errors.append(exc)
-                    barrier.abort()
+                def second_attempt():
+                    try:
+                        both_missed.wait(timeout=10.0)
+                        first_holds.wait(timeout=10.0)
+                        # the second tries to publish its lock while the first holds:
+                        # the exclusive create adopts the held name, never replaces it
+                        store.prepare_execution_scaffolding()
+                        self.assertEqual(lock_path.lstat().st_ino, held["ino"])
+                        second_attempted.set()   # its publication attempt is in flight
+                        with common.runtime_lock(store, time.monotonic() + 30.0):
+                            self.assertEqual(lock_path.lstat().st_ino, held["ino"])
+                            with guard:
+                                overlaps.append(len(overlaps) + 1)
+                    except BaseException as exc:
+                        errors.append(exc)
+                        second_attempted.set()
 
-            workers = [threading.Thread(target=attempt) for _ in range(2)]
-            for worker in workers:
-                worker.start()
-            for worker in workers:
-                worker.join(timeout=30.0)
-            self.assertFalse(any(worker.is_alive() for worker in workers),
-                             "a first-use attempt failed but never ended")
-            self.assertEqual(errors, [])
-            self.assertEqual(overlaps, [1, 1],
-                             "the two first attempts must never both hold the lock")
-            store._check_runtime_lock()
+                workers = [threading.Thread(target=first_attempt),
+                           threading.Thread(target=second_attempt)]
+                for worker in workers:
+                    worker.start()
+                for worker in workers:
+                    worker.join(timeout=30.0)
+                self.assertFalse(any(worker.is_alive() for worker in workers),
+                                 "a first-use attempt failed but never ended")
+                self.assertEqual(errors, [])
+                self.assertEqual(overlaps, [1, 2],
+                                 "the two first attempts serialize; the held inode is kept")
+                store._check_runtime_lock()
 
     # --- effects and resolved-authority wiring -------------------------------
 
@@ -811,6 +967,9 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             self.assertEqual(work, harness.root / run_owner.NAMESPACE / "work")
 
     def test_the_default_effects_wiring_serves_the_pinned_endpoint(self):
+        # (re-review, non-blocking 3) the check is injected below the concrete effects
+        # factory - at the real command-construction boundary - instead of replacing it,
+        # so the environment the produced commands actually launch with is verified.
         harness = OwnerHarness(self._fresh_cell())
         harness.manifests = [{"implementation_digest": D0}] * 32
         harness.kernel_factory = FakeKernelFactory()
@@ -827,16 +986,23 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             def close(self) -> None:
                 pass
 
-        def concrete(resolved):
-            seen.append(dict(resolved.environment))
+        def recording_construction(cli, environment, work):
+            seen.append((dict(environment), Path(work), str(cli)))
             return QuietEffects()
 
-        with mock.patch.object(run_owner, "_concrete_effects", concrete):
+        with mock.patch.object(run_owner.execution, "concrete_effects",
+                               recording_construction):
             outcome = harness.call()
         self.assertIs(type(outcome), run_owner.RunQualificationBound)
         self.assertEqual(len(seen), 1)   # the recovery stage went through the default
         facts = runtime()
-        self.assertEqual(seen[0]["DOCKER_HOST"], facts["endpoint"])
+        environment, work, cli = seen[0]
+        self.assertEqual(environment, {
+            "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": facts["endpoint"],
+            "DOCKER_CONFIG": str(harness.root / run_owner.NAMESPACE / "configs"
+                                 / spike_plan.ISOLATED_PROFILE)})
+        self.assertEqual(work, harness.root / run_owner.NAMESPACE / "work")
+        self.assertEqual(cli, facts["docker_cli"])
 
     # --- legacy /2 namespaces and lineage --------------------------------------
 
@@ -897,6 +1063,47 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertIs(type(second), run_owner.RunQualificationBound)
         self.assertEqual(len(list(self.store.records.iterdir())), 2)
 
+    def test_changed_bodies_and_wrong_digest_paths_in_the_v3_tree_are_refused(self):
+        # (re-review, non-blocking 2) the same load verification witnesses now planted
+        # in the version-three tree: a body changed at its own digest name, and a
+        # valid body planted at a wrong digest path, are both refused by the /3 loader.
+        cell = self._fresh_cell()
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        store = run_owner.RunQualificationStore(cell)
+        digest = outcome.record["qualification_record_digest"]
+        payload = run_owner.fsio.dump_json(outcome.record)
+        path = store.records / (digest.removeprefix("sha256:") + ".json")
+        self.assertEqual(common.safe_file(path, cap=run_owner.MAX_RECORD_BYTES), payload)
+
+        # a changed body at its own digest name: the content no longer names the bytes
+        changed = dict(outcome.record)
+        changed["qualification_elapsed_ms"] = changed["qualification_elapsed_ms"] + 1
+        path.write_bytes(run_owner.fsio.dump_json(changed))
+        path.chmod(common.MODE_FILE)
+        with self.assertRaises(authority.GenericQualificationError):
+            store.load_record(digest, project_id="project-1", run_id="run-1",
+                              generation=1)
+        # restore the original bytes
+        path.write_bytes(payload)
+        path.chmod(common.MODE_FILE)
+        self.assertEqual(store.load_record(digest, project_id="project-1",
+                                          run_id="run-1", generation=1),
+                         outcome.record)
+
+        # a valid body planted at a wrong digest path: the path differs from the content
+        wrong = D1.replace("sha256:", "sha256:")
+        self.assertNotEqual(wrong, digest)
+        wrong_path = store.records / (wrong.removeprefix("sha256:") + ".json")
+        wrong_path.write_bytes(payload)
+        wrong_path.chmod(common.MODE_FILE)
+        with self.assertRaises(authority.GenericQualificationError):
+            store.load_record(wrong, project_id="project-1", run_id="run-1",
+                              generation=1)
+        self.assertEqual(len(list(store.records.iterdir())), 2)
+
     def test_an_interruption_after_the_record_write_leaves_an_inert_orphan(self):
         harness = OwnerHarness(self.root)
         harness.manifests = [{"implementation_digest": D0}] * 32
@@ -934,10 +1141,16 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         first = harness.call()
         store = run_owner.RunQualificationStore(harness.root)
         # a symbolic link planted at the records directory redirects neither a load nor a
-        # write: the directory is validated on load exactly as on write
+        # write: the directory is validated on load exactly as on write. The redirected
+        # directory holds the exact published record, so only the directory guard can
+        # refuse it (re-review, non-blocking 2) - a removed guard would load it.
         foreign = self._fresh_cell() / "foreign-records"
         foreign.mkdir(mode=0o700)
         foreign.chmod(common.MODE_DIR)
+        exact = run_owner.fsio.dump_json(first.record)
+        (foreign / (first.record_digest.removeprefix("sha256:") + ".json")).write_bytes(exact)
+        (foreign / (first.record_digest.removeprefix("sha256:") + ".json")).chmod(
+            common.MODE_FILE)
         for published in store.records.iterdir():
             published.unlink()
         store.records.rmdir()
@@ -1012,23 +1225,38 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
     def setUp(self) -> None:
         super().setUp()
 
-    def test_a_probe_failure_outcome_requires_and_forbids_its_probe_identity(self):
-        from adapters.sandbox.run_qualification import (RunQualificationFailed,
-                                                        RunQualificationReason)
-        legal = RunQualificationFailed(
-            RunQualificationReason.PROBE_FAILED, "d",
-            run_owner.qualification.PROBE_ORDER[0])
-        self.assertEqual(legal.probe, run_owner.qualification.PROBE_ORDER[0])
-        # the name is required with its reason…
-        with self.assertRaises(ValueError):
-            RunQualificationFailed(RunQualificationReason.PROBE_FAILED, "d")
-        # …forbidden with any other, and unknown names are refused
-        with self.assertRaises(ValueError):
-            RunQualificationFailed(RunQualificationReason.CLEANUP_UNAVAILABLE, "d",
-                                   run_owner.qualification.PROBE_ORDER[0])
-        with self.assertRaises(ValueError):
-            RunQualificationFailed(RunQualificationReason.PROBE_FAILED, "d",
-                                   run_owner.qualification.PROBE_ORDER[0] + "-x")
+    def test_a_kernel_failure_before_a_probe_keeps_its_own_reason_and_no_probe_name(self):
+        # (re-review, non-blocking 1) the boundary never relabels a kernel failure that
+        # did not own a probe name as an unnamed probe failure: the owning reason
+        # survives the outcome with no probe identity. The construction-time invariant
+        # (a probe-failed outcome requires its owner-supplied name) is what makes the
+        # relabelling impossible in the first place.
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = (Path(temporary.name) / "sandbox").resolve()
+        root.mkdir(mode=0o700)
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        harness = OwnerHarness(root)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+
+        def wrapper(kernel):
+            def refusing(name, expected, *, deadline):
+                raise run_owner.qualification.GenericQualificationFailure(
+                    run_owner.qualification.QualificationReason.CAPABILITY_UNAVAILABLE,
+                    "the kernel refused before any probe owned a name")
+            kernel.run = refusing
+            return kernel
+
+        harness.kernel_wrapper = wrapper
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.CAPABILITY_UNAVAILABLE)
+        self.assertIsNot(outcome.reason, run_owner.RunQualificationReason.PROBE_FAILED)
+        self.assertIsNone(outcome.probe)
+        # a rejected attempt publishes nothing: the run binds no record
+        self.assertFalse(any(run_owner.RunQualificationStore(root).records.iterdir()))
 
     def test_publishing_the_same_record_twice_re_proves_durability_without_rewriting(self):
         import tempfile
@@ -1044,12 +1272,19 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
         store = run_owner.RunQualificationStore(root)
         first = store.write_record(outcome.record)
         inode = first.stat().st_ino
-        with mock.patch.object(run_owner.fsio, "sync_directory") as sync:
+        with mock.patch.object(run_owner.fsio, "sync_directory",
+                               wraps=run_owner.fsio.sync_directory) as sync:
             second = store.write_record(outcome.record)
         self.assertEqual(first, second)
         self.assertEqual(second.stat().st_ino, inode)   # no replacement on the retry
         self.assertEqual(len(list(store.records.iterdir())), 1)
-        sync.assert_called()   # the identical-bytes retry also proves durability
+        # the retry re-proves the whole naming chain (re-review, blocking 2): the
+        # records directory naming the file, the namespace naming records, and the
+        # sandbox directory naming the namespace - all strictly synced again
+        synced = sorted(Path(call.args[0]) for call in sync.call_args_list)
+        self.assertEqual(synced, sorted([store.records, store.root, store.sandbox_root]))
+        self.assertEqual(len(synced), len(run_owner._naming_levels(store)),
+                         "every naming level was synced exactly once")
 
         # existing bytes that differ are refused without being overwritten
         tampered = b"{\"tampered\": true}"
@@ -1059,34 +1294,66 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
             store.write_record(outcome.record)
         self.assertEqual(common.safe_file(first, cap=run_owner.MAX_RECORD_BYTES), tampered)
 
-    def test_a_directory_sync_failure_withholds_publication(self):
-        import tempfile
-        temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(temporary.cleanup)
-        root = (Path(temporary.name) / "sandbox").resolve()
-        root.mkdir(mode=0o700)
-        common._loaded_release = None
-        common._loaded_release_failed = None
-        harness = OwnerHarness(root)
-        harness.manifests = [{"implementation_digest": D0}] * 32
-        outcome = harness.call()   # publishes one record with strict syncs intact
-        self.assertIs(type(outcome), run_owner.RunQualificationBound)
-        store = run_owner.RunQualificationStore(root)
-        # the identical-bytes retry re-proves durability: a failing directory sync
-        # withholds the publication even for bytes already on disk
-        with mock.patch.object(run_owner.fsio, "sync_directory",
-                               side_effect=OSError("directory sync refused")):
-            with self.assertRaises(OSError):
-                store.write_record(dict(outcome.record))
-        # and a first publication whose directory sync fails is never reported bound
-        second = OwnerHarness(root)
-        second.manifests = [{"implementation_digest": D0}] * 32
-        second.attempt_id = "a-2"
-        with mock.patch.object(run_owner.fsio, "sync_directory",
-                               side_effect=OSError("directory sync refused")):
-            failed = second.call()
-        self.assertIs(type(failed), run_owner.RunQualificationFailed)
-        self.assertIs(failed.reason, run_owner.RunQualificationReason.SANDBOX_UNSAFE)
+    def test_a_sync_failure_at_any_naming_level_withholds_publication(self):
+        # (re-review, blocking 2) the durable barrier covers the required parent chain
+        # pre-created by the scaffold: the sandbox directory naming the namespace, the
+        # namespace naming records, and records naming the record file. An injected
+        # strict-sync failure at any of the three levels fails publication on the retry
+        # and on a first publication alike.
+        for label in ("sandbox_root", "namespace", "records"):
+            with self.subTest(naming_level=label):
+                import tempfile
+                temporary = tempfile.TemporaryDirectory()
+                self.addCleanup(temporary.cleanup)
+                root = (Path(temporary.name) / "sandbox").resolve()
+                root.mkdir(mode=0o700)
+                common._loaded_release = None
+                common._loaded_release_failed = None
+                publisher = OwnerHarness(root)
+                publisher.manifests = [{"implementation_digest": D0}] * 32
+                published = publisher.call()   # one record with strict syncs intact
+                self.assertIs(type(published), run_owner.RunQualificationBound)
+                store = run_owner.RunQualificationStore(root)
+                level = {"sandbox_root": store.sandbox_root,
+                         "namespace": store.root,
+                         "records": store.records}[label]
+
+                def refused(directory, level=level, label=label):
+                    if Path(directory) == level:
+                        raise OSError("directory sync refused at " + label)
+                    return None
+
+                # the identical-bytes retry also re-proves the whole chain: a failing
+                # sync at any level withholds the publication even for bytes on disk
+                with mock.patch.object(run_owner.fsio, "sync_directory",
+                                       side_effect=refused):
+                    with self.assertRaises(OSError):
+                        store.write_record(dict(published.record))
+                # and a first publication whose chain cannot be proven durable is
+                # never reported bound, whatever wrote the bytes first: the intact
+                # record stays, and the unproven one stays an inert orphan
+                second = OwnerHarness(root)
+                second.manifests = [{"implementation_digest": D0}] * 32
+                second.attempt_id = "a-" + label
+                with mock.patch.object(run_owner.fsio, "sync_directory",
+                                       side_effect=refused):
+                    failed = second.call()
+                self.assertIs(type(failed), run_owner.RunQualificationFailed)
+                self.assertIs(failed.reason, run_owner.RunQualificationReason.SANDBOX_UNSAFE)
+                remaining = {item.stem for item in store.records.iterdir()}
+                self.assertIn(published.record_digest.removeprefix("sha256:"), remaining)
+                orphans = remaining - {published.record_digest.removeprefix("sha256:")}
+                self.assertEqual(len(orphans), 1,
+                                 "the unproven publication stays an inert orphan")
+                # the intact record still loads; the orphan is loadable only through its
+                # own exact digest and lineage, so nothing binds on its behalf
+                intact = store.load_record(published.record_digest, project_id="project-1",
+                                          run_id="run-1", generation=1)
+                self.assertEqual(intact["run_binding"]["attempt_id"], "a-1")
+                orphan_digest = "sha256:" + orphans.pop()
+                orphan_record = store.load_record(orphan_digest, project_id="project-1",
+                                                  run_id="run-1", generation=1)
+                self.assertEqual(orphan_record["run_binding"]["attempt_id"], "a-" + label)
 
     def test_authority_read_failure_is_docker_unreachable_and_never_capability(self):
         for message, reason in (
@@ -1261,6 +1528,61 @@ class _ExpiringInspector:  # pragma: no cover - direct message carrier
 
     def __call__(self, recorded, *, deadline, **kwargs):
         raise authority.GenericQualificationError("passive verification deadline expired")
+
+class DaemonFixtureRunner:
+    """A fake Docker CLI mirroring one admitted runtime fixture: two context reads for
+    discovery, then three pinned `version`/`info` reads per re-observation. A designated
+    observation (counted from one) fails by drift, failed command result, or launch
+    OSError."""
+
+    def __init__(self, facts, *, fail_mode=None, fail_observation=None):
+        self.facts = dict(facts)
+        self.fail_mode = fail_mode          # None | "drift" | "result" | "launch"
+        self.fail_observation = fail_observation
+        self.observations_started = 0
+        self.calls = []
+
+    def _answers(self, args):
+        f = self.facts
+        info = {"OSType": f["server_raw_os"], "Architecture": f["server_raw_architecture"],
+                "OperatingSystem": f["operating_system"],
+                "SecurityOptions": f["security_options"],
+                "MemoryLimit": f["memory_limit"], "SwapLimit": f["swap_limit"],
+                "CpuCfsQuota": f["cpu_cfs_quota"], "PidsLimit": f["pids_limit"],
+                "NCPU": f["ncpu"], "MemTotal": f["mem_total"],
+                "CgroupVersion": f["cgroup_version"], "CgroupDriver": f["cgroup_driver"]}
+        if "daemon_id" in f:
+            info["ID"] = f["daemon_id"]
+        server = {"Version": f["server_version"], "Os": f["server_raw_os"],
+                  "Arch": f["server_raw_architecture"], "PlatformName": f["platform_name"]}
+        if args == ("context", "show"):
+            return f["context"]
+        if tuple(args[:2]) == ("context", "inspect"):
+            return json.dumps(f["endpoint"])
+        if args == ("version", "--format", "{{json .Client.Version}}"):
+            return json.dumps(f["client_version"])
+        if tuple(args[:2]) == ("version", "--format"):
+            return json.dumps(server)
+        if args == ("info", "--format", "{{json .}}"):
+            return json.dumps(info)
+        raise AssertionError(f"unexpected docker/cli call {args}")
+
+    def run(self, argv, **kwargs):
+        argv = tuple(argv)
+        args = argv[1:]
+        environment = kwargs.get("env") or {}
+        self.calls.append((argv, environment))
+        if args == ("version", "--format", "{{json .Client.Version}}"):
+            self.observations_started += 1
+            if self.fail_observation == self.observations_started:
+                if self.fail_mode == "drift":
+                    self.facts["swap_limit"] = False
+                elif self.fail_mode == "result":
+                    return process.CommandResult.fake(1, stderr="docker: refused")
+                elif self.fail_mode == "launch":
+                    raise OSError("the Docker CLI could not be launched")
+        answer = self._answers(args)
+        return process.CommandResult.fake(stdout=answer + "\n")
 
 
 if __name__ == "__main__":
