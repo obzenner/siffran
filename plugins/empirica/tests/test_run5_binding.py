@@ -425,7 +425,18 @@ def _environment_member(**changes):
         digest = DIGEST_A
     row = {"revision": 1, "proposal": proposal,
            "digest": digest,
-           "state": "pending", "receipt_id": None}
+           "state": "pending", "receipt_id": None, "receipts": []}
+    row.update(changes)
+    return row
+
+
+def _receipt_row(**changes):
+    """A valid closed environment receipt row: one recorded presentation of the revision the
+    member names (spec §5; the write-first discipline's durable evidence, its fingerprint the
+    canonical digest of its entire reply — an E7 fact, E8 renders the document from it)."""
+    row = {"id": "env-receipt-1", "fingerprint": DIGEST_A, "presentation_fingerprint": DIGEST_A,
+           "outcome": "present", "revision": 1, "proposal_digest": DIGEST_A,
+           "document_digest": DIGEST_A}
     row.update(changes)
     return row
 

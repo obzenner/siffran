@@ -871,6 +871,11 @@ def _submit_environment(snapshot: EvaluationSnapshot, command: Mapping[str, Any]
                                         environment.profile_ceiling(state.invocation)):
         return _decision(snapshot, state, "Block",
                         reason=environment.PROFILE_NOT_ALLOWED)
+    if environment.revisions_exhausted(state):
+        # Spec §4.2: every revision and its receipts stay immutable, so the allowance is a
+        # per-run ceiling — a further submission past it refuses, nothing is ever evicted.
+        return _decision(snapshot, state, "Block",
+                        reason=environment.ENVIRONMENT_REVISIONS_EXHAUSTED)
     revisions = [row["revision"] for row in state.environment_history]
     if state.environment is not None:
         revisions.append(state.environment["revision"])
@@ -1260,79 +1265,6 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
                 hitl.evidence_for(run_id=snapshot.run_id, snapshot=snapshot, key=shown["key"]))):
         return _decision(snapshot, state, "Block", reason="evidence.document_mismatch")
     return _decision(snapshot, state, artifacts=tuple(planned))
-
-
-def _environment_receipt(snapshot: EvaluationSnapshot, kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
-    """The content-addressed receipt artifact body one environment decision records (ADR-0072's
-    write-first discipline, as the configuration machinery models it): the presentation names the
-    revision, its digest and the document the host showed; the finalizing decision names the same
-    presentation id and its outcome. Nothing else is ever recorded — a cancel, timeout, missing
-    surface or stale reply is simply no artifact, and the revision stays pending."""
-    body = {"kind": kind, "receipt_id": payload["receipt_id"], "revision": payload["revision"],
-            "proposal_digest": payload["proposal_digest"], "document_digest": payload["document_digest"],
-            "approval_kind": "host_ui", "route_stamp": snapshot.state.route_stamp,
-            "investigation_stamp": snapshot.state.investigation_stamp}
-    if kind == environment.DECISION_KIND:
-        body["outcome"] = payload["outcome"]
-    return artifact(kind, body)
-
-
-def plan_environment_decision(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
-    """Purely admit one private environment receipt against the pending revision (Empirica 7.2 §5).
-
-    The receipt is host ingress, never a public author action. In a deliberative run ``present``
-    records that the human was shown the pending revision's document; ``approve``/``reject`` name
-    that presentation and finalize the revision. In an auto run nothing reaches here — the core
-    derived the approval at submission and spends no receipt, so any receipt fails closed. Every
-    existing refusal wins before anything is written: an unknown or superseded revision (a stale
-    reply, or an earlier revision's approval replayed at a newer one), a decided revision, and a
-    decision whose digest differs from the one its own presentation recorded; an exact replay is
-    ``Inert``. The member's mutation and the decision artifact commit together in one CAS."""
-    state = snapshot.state
-    if payload.get("run_id") != snapshot.run_id:
-        return _decision(snapshot, state, "Fault", reason="conflict")  # a receipt of another run or generation
-    try:
-        environment.validate_decision(dict(payload))
-    except environment.EnvironmentProposalError:
-        return _decision(snapshot, state, "Fault", reason="invalid_request")
-    member = state.environment
-    if member is None:
-        return _decision(snapshot, state, "Fault", reason="conflict")
-    expected = governance.expected_approval_kind(state.governance,
-                                                 governance.raises(state.governance, state.budgets))
-    if expected != "host_ui":
-        return _decision(snapshot, state, "Fault", reason="conflict")
-    if payload["revision"] != member["revision"] or payload["proposal_digest"] != member["digest"]:
-        return _decision(snapshot, state, "Fault", reason="conflict")  # a receipt of an earlier revision is stale
-    replay = next((a for a in reversed(snapshot.history)
-                   if a.get("kind") in (environment.PRESENTATION_KIND, environment.DECISION_KIND)
-                   and a.get("receipt_id") == payload["receipt_id"]), None)
-    if payload["outcome"] == "present":
-        if member["state"] != environment.PENDING:
-            return _decision(snapshot, state, "Fault", reason="conflict")  # a decided revision shows nothing new
-        if replay is not None:
-            return _decision(snapshot, state, "Inert") if replay["artifact_id"] == digest(
-                _environment_receipt(snapshot, environment.PRESENTATION_KIND, payload)["body"]) else _decision(
-                snapshot, state, "Fault", reason="conflict")
-        return _decision(snapshot, state, artifacts=(
-            _environment_receipt(snapshot, environment.PRESENTATION_KIND, payload),))
-    if member["state"] != environment.PENDING:
-        if member["receipt_id"] == payload["receipt_id"] and replay is not None:
-            return _decision(snapshot, state, "Inert") if replay["artifact_id"] == digest(
-                _environment_receipt(snapshot, environment.DECISION_KIND, payload)["body"]) else _decision(
-                snapshot, state, "Fault", reason="conflict")
-        return _decision(snapshot, state, "Fault", reason="conflict")
-    shown = replay if replay is not None and replay.get("kind") == environment.PRESENTATION_KIND else None
-    if shown is None or shown.get("document_digest") != payload["document_digest"]:
-        # Nothing finalizes a presentation it does not name, or with a document digest its present did not record.
-        return _decision(snapshot, state, "Fault", reason="conflict")
-    decided = {**governance.plain(member),
-               "state": environment.APPROVED if payload["outcome"] == "approve" else environment.REJECTED,
-               "receipt_id": payload["receipt_id"]}
-    return _decision(snapshot, replace(state, environment=decided), artifacts=(
-        _environment_receipt(snapshot, environment.DECISION_KIND, payload),))
-
-
 def approved_claim_ids(snapshot: EvaluationSnapshot) -> list[str]:
     """Ids of the approved gating claims an audit reviews."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
@@ -1915,6 +1847,16 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
                 governed = governance.revise(state.goal, state.governance, proposal=proposed)
             except ValueError as exc:
                 return _decision(snapshot, state, "Block", reason=str(exc))
+            # Spec §5 (mutual exclusion, both ways): a configuration revision while an environment
+            # revision is pending is admitted — configuration stays revisable for the whole run —
+            # and closes that environment presentation as superseded without approval: its member
+            # row, receipts and all, moves to the immutable history, so the agent resubmits one
+            # only after the new configuration is approved, and no reply of the closed revision can
+            # ever approve under an unapproved configuration. A decided revision is untouched, and
+            # a no-op replay that revises nothing closes nothing.
+            if governed["plan_revision"] != state.governance["plan_revision"]:
+                member, history = environment.superseded_member(state)
+                state = replace(state, environment=member, environment_history=history)
             return _decision(snapshot, replace(state, governance=governed))
         if akind == "child_reserve":
             blocked = _investigation_block(snapshot)

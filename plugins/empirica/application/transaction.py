@@ -12,7 +12,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
-                             plan_environment_decision, preflight_spike_request, plan_spike_request,
+                             preflight_spike_request, plan_spike_request,
                              plan_spike_result, valid_attribution)
 from core import confirmation, hitl, spike_plan, spike_plan_draft
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
@@ -408,49 +408,6 @@ class Coordinator:
     def trusted_evidence_presentation(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Record that the host showed the human the pending batch (one interaction) in a single CAS write."""
         return self._human_batch(run_id, payload, plan_evidence_presentation, "trusted-presentation")
-
-    def trusted_environment_decision(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        """Admit one private environment receipt (Empirica 7.2 §5, the deliberative leg of E7) in one
-        CAS write: the presentation artifact alone while the revision stays pending, or the decision
-        artifact and the member's new state together. A replay is Inert; every other refusal wins
-        before anything is written and leaves the revision exactly as it was."""
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert("trusted-environment")
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, "trusted-environment", "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert("trusted-environment")
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert("trusted-environment")
-            try:
-                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                          require_graph=False)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, "trusted-environment", "run.corrupt")
-            decision = plan_environment_decision(snapshot, payload)
-            if decision.result_type == "Fault":
-                return self._fault_with_run("trusted-environment", snapshot)
-            if decision.result_type == "Inert":
-                return self._inert_with_run("trusted-environment", snapshot)
-            if decision.result_type == "Block":
-                return self._response("trusted-environment", snapshot, decision)
-            try:
-                committed, _, _, planned = self._commit(
-                    key, read.revision, snapshot, decision.intent.state,
-                    decision.intent.artifacts)
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault("trusted-environment", "unavailable")
-            self.last_state = committed
-            return self._allow("trusted-environment", planned)
-        return self._fault("trusted-environment", "conflict")
 
     def trusted_human_surface(self, run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         """Record whether the host can show a human a dialog now (``invocation.human_surface``).

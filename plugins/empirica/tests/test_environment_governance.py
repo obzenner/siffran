@@ -2,12 +2,16 @@
 """Empirica 7.2 E7: the environment deliberative receipts and the admission decisions (spec §5).
 
 The behaviour of the private environment receipt (host ingress, never a public author action):
-the write-first presentation of a pending revision, the approve/reject that names it, replay and
-staleness, the document-digest equality with the recorded presentation, the auto mode that derives
-approval and therefore refuses every receipt, and the revision race the transaction's CAS loop
-re-reads. Plus the two pure decisions E7 owns and later nodes build on: ``qualify``'s admission
-(including the attempt ceiling) and the spike prerequisite
-<plugins/../doc/design/specs/empirica-7.2-run-scoped-environment-qualification.md> (§5).
+the write-first presentation of a pending revision recorded as the member's own receipt row, the
+approve/reject that names it by its entire persisted identity (id, document digest, revision and
+proposal digest — one binding, nothing substituted), replay and staleness through the one receipt
+engine the configuration decisions share (``core.governance.replay_verdict``), the document-digest
+equality with the recorded presentation, the auto mode that derives approval and therefore refuses
+every receipt, and the compare-and-swap races the transaction's retry replans (a superseding
+submission committed between the approval's planning and its commit loses the CAS and the replay
+refuses the stale approval) <plugins/../doc/design/specs/empirica-7.2-run-scoped-environment-qualification.md> (§5).
+Plus the two pure decisions E7 owns and later nodes build on: ``qualify``'s admission (including
+the attempt ceiling) and the spike prerequisite.
 
 No contract value is restated as a literal: reason codes are read from ``core.environment``'s own
 constants (the registry rows behind them are compared where a response is rendered), and the
@@ -27,10 +31,14 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from application.location import decode_handle
 from application import protocol
+from application.run_state import classify_and_decode
+from application.transaction import Coordinator
 from core import environment
 from core.canonical import canonical_digest
 from core.evaluation import ENVIRONMENT_NOT_AVAILABLE
-from test_environment_actions import ENVIRONMENT_ACTION, QUALIFY_ACTION, ServiceEnv
+from test_d7_transactions import Runs
+from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, QUALIFY_ACTION, ServiceEnv,
+                                       approve_current)
 
 _V2 = Path(__file__).resolve().parents[3] / "contracts/empirica/v2"
 _RECEIPT_ID_MAX = json.loads((_V2 / "request.schema.json").read_text(encoding="utf-8"))[
@@ -62,6 +70,21 @@ def _revise(action_payload):
 
 def _submit(env, payload):
     return env.observe({**copy.deepcopy(ENVIRONMENT_ACTION), "payload": payload})
+
+
+def _revised_configure_run():
+    """One further author configuration revision, a changed rationale against the contract's
+    own sample action — a real revision, sizes bounded by the sample its owner holds."""
+    action = copy.deepcopy(CONFIGURE_RUN)
+    action["rationale"] = "a further revision two audit retries need the change"
+    return action
+
+
+def _revised_payload():
+    """Yet another distinct environment body for the ceiling test's refused submission."""
+    payload = copy.deepcopy(ENVIRONMENT_ACTION["payload"])
+    payload["rationale"] = f"one more distinct body: {payload['rationale']}"
+    return {**copy.deepcopy(ENVIRONMENT_ACTION), "payload": payload}
 
 
 class DeliberationEnv(ServiceEnv):
@@ -104,22 +127,33 @@ class DeliberationEnv(ServiceEnv):
 class ReceiptTests(unittest.TestCase):
     """The receipt races and replays of a deliberative run (spec §5)."""
 
-    def test_a_presentation_records_and_the_revision_stays_pending(self):
+    def test_a_presentation_records_its_row_and_the_revision_stays_pending(self):
         env = DeliberationEnv()
         result = env.present()
         self.assertEqual(result["type"], "Allow", result)
-        self.assertEqual(env.state().environment["state"], environment.PENDING)
+        member = env.state().environment
+        self.assertEqual(member["state"], environment.PENDING)
+        self.assertIsNone(member["receipt_id"])
+        self.assertEqual(len(member["receipts"]), 1)
+        row = member["receipts"][0]
+        self.assertEqual(row["id"], env.receipt_id)
+        self.assertEqual(row["outcome"], "present")
+        self.assertEqual(row["fingerprint"], row["presentation_fingerprint"])
+        self.assertEqual(row["document_digest"], env.digest)
+        self.assertEqual(row["revision"], member["revision"])
+        self.assertEqual(row["proposal_digest"], member["digest"])
 
     def test_an_exact_presentation_replay_is_inert_and_no_other_content_fits_the_id(self):
         env = DeliberationEnv()
         env.present()
         self.assertEqual(env.present()["type"], "Inert")
         self.assertEqual(env.present(digest=_document_digest("other"))["type"], "Fault")
+        self.assertEqual(len(env.state().environment["receipts"]), 1)
         self.assertEqual(env.state().environment["state"], environment.PENDING)
 
     def test_nothing_finalizes_without_its_presentation_and_its_recorded_digest(self):
         """An approve under an unshown id, or with a digest its present did not record, decides
-        nothing; ADR-0072's write-first word is what the presentation artifact records."""
+        nothing; ADR-0072's write-first word is what the presentation row recorded."""
         env = DeliberationEnv()
         self.assertEqual(env.decide("approve", receipt_id=_new_receipt_id())["type"], "Fault")
         env.present()
@@ -135,10 +169,31 @@ class ReceiptTests(unittest.TestCase):
         member = env.state().environment
         self.assertEqual(member["state"], environment.APPROVED)
         self.assertEqual(member["receipt_id"], env.receipt_id)
+        decided_row = member["receipts"][0]
+        self.assertEqual(decided_row["id"], env.receipt_id)
+        self.assertEqual(decided_row["outcome"], "approve")
+        self.assertNotEqual(decided_row["fingerprint"], decided_row["presentation_fingerprint"])
         self.assertEqual(env.decide("approve")["type"], "Inert")
         self.assertEqual(dict(env.state().environment), dict(member))
         self.assertEqual(env.decide("reject")["type"], "Fault")
         self.assertEqual(env.state().environment["state"], environment.APPROVED)
+
+    def test_an_exact_decided_receipt_replays_inert_after_a_newer_revision(self):
+        """The engine's one replay rule, exactly as configuration governance states it: a replay
+        of an old decided receipt — even after its revision was superseded — decides nothing and
+        mutates nothing, while a stale first reply still refuses."""
+        env = DeliberationEnv()
+        env.present()
+        decided_one = _receipt(env.member, env.run_id, "approve", env.receipt_id, env.digest)
+        self.assertEqual(env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=dict(decided_one))["result"]["type"], "Allow")
+        env.member = env.submit_revision()
+        replay = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=dict(decided_one))["result"]
+        self.assertEqual(replay["type"], "Inert", replay)
+        member = env.state().environment
+        self.assertEqual(member["revision"], env.member["revision"])
+        self.assertEqual(member["state"], environment.PENDING)
 
     def test_a_reject_closes_the_presentation_without_approving(self):
         """Reject ends that presentation's question; a later approve under its id decides nothing."""
@@ -167,17 +222,64 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(member["revision"], member_two["revision"])
         self.assertEqual(member["state"], environment.PENDING)
 
-    def test_a_race_that_supersedes_mid_decision_leaves_the_new_revision_pending(self):
-        """The transaction re-reads against every CAS loss: an approval pitched at revision 1
-        commits nothing once a concurrent author — a second coordinator over the same stores, the
-        production commit path — recorded revision 2. The reply is stale and refused, and the
-        run stays honest: the superseding revision is pending, the history immutable."""
-        from application.run_state import classify_and_decode
-        from application.transaction import Coordinator
+    def test_a_superseded_presentations_identity_cannot_approve_the_new_revision(self):
+        """Review blocking 1's first seed: finalization binds the full persisted presentation
+        identity. Present revision 1, submit revision 2, approve with revision 2's number and
+        proposal digest but revision 1's presentation identifier and document digest — the
+        approval is never a presentation of revision 2, and it decides nothing."""
+        env = DeliberationEnv()
+        env.present()
+        presented_identity = {"receipt_id": env.receipt_id, "document_digest": env.digest}
+        member_two = env.submit_revision()
+        substituted = {"run_id": env.run_id, "revision": member_two["revision"],
+                       "proposal_digest": member_two["digest"], "outcome": "approve",
+                       **presented_identity}
+        result = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=substituted)["result"]
+        self.assertEqual(result["type"], "Fault", result)
+        member = env.state().environment
+        self.assertEqual(member["revision"], member_two["revision"])
+        self.assertEqual(member["state"], environment.PENDING)
+        self.assertIsNone(member["receipt_id"])
+
+    def test_an_a_b_a_revisions_third_is_never_approved_by_the_firsts_presentation(self):
+        """Review blocking 1's second seed: in A → B → A the third revision carries the first's
+        proposal digest, so a digest-only binding would accept it — the persisted presentation
+        identity (id and document digest with it) is what stays bound, and revision 3 has no
+        presentation of its own; the substitution decides nothing."""
+        env = DeliberationEnv()
+        env.present()
+        first_digest = env.member["digest"]
+        presented_identity = {"receipt_id": env.receipt_id, "document_digest": env.digest}
+        original_payload = copy.deepcopy(ENVIRONMENT_ACTION["payload"])
+        _submit(env, _revise(ENVIRONMENT_ACTION["payload"]))  # B: a different body
+        _submit(env, copy.deepcopy(original_payload))  # A again: revision 3
+        member_three = env.state().environment
+        self.assertEqual(member_three["revision"], 3)
+        self.assertEqual(member_three["digest"], first_digest)
+        substituted = {"run_id": env.run_id, "revision": member_three["revision"],
+                       "proposal_digest": member_three["digest"], "outcome": "approve",
+                       **presented_identity}
+        result = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=substituted)["result"]
+        self.assertEqual(result["type"], "Fault", result)
+        self.assertEqual(env.state().environment["state"], environment.PENDING)
+        self.assertIsNone(env.state().environment["receipt_id"])
+
+    def test_a_lost_compare_and_swap_refuses_the_stale_approval_on_the_retry(self):
+        """Review non-blocking 1's interleaving, committed as the regression it is: the approval
+        is planned against revision 1, a superseding submission wins the repository between that
+        planning and the commit — the commit's compare-and-swap is lost — and the real retry
+        replans against the committed revision 2 and refuses the stale approval. The revision's
+        own presentation row stays immutable in the history the peer's commit recorded."""
         env = DeliberationEnv()
         env.present()
         coordinator = env.service._coordinator
-        peer = Coordinator(coordinator.workspace, coordinator.harness, coordinator.runs,
+        runs = coordinator.runs
+        key = decode_handle(env.run_id)
+        peer_runs = Runs()
+        peer_runs.data.update(runs.data)
+        peer = Coordinator(coordinator.workspace, coordinator.harness, peer_runs,
                            coordinator.artifacts, coordinator.profile_id,
                            {}, coordinator.spike_authority_selector, coordinator.image_resolver)
         raced = peer.handle({"type": "ObserveAction", "run_id": env.run_id,
@@ -185,15 +287,24 @@ class ReceiptTests(unittest.TestCase):
                                         "payload": _revise(ENVIRONMENT_ACTION["payload"])}},
                             "peer-submit")
         self.assertEqual(raced["result"]["type"], "Allow", raced)
+        raced_doc = peer_runs.data[key].value
+        baseline = runs.read_calls
+        cas_baseline = runs.cas_calls
+        runs.conflict_on.add(cas_baseline + 1)  # the approval's first compare-and-swap is lost
+        runs.replace_on_read[baseline + 3] = raced_doc
         result = env.decide("approve")
         self.assertEqual(result["type"], "Fault", result)
-        stored = classify_and_decode(coordinator.runs.read(decode_handle(env.run_id)).value).state
+        self.assertTrue(runs.cas_calls - cas_baseline >= 1, "the approval's commit must be attempted")
+        self.assertNotIn(cas_baseline + 1, runs.conflict_on, "the compare-and-swap must be lost once")
+        self.assertTrue(runs.read_calls - baseline >= 3, "the retry must have replanned on a fresh read")
+        stored = classify_and_decode(runs.read(key).value).state
         member = stored.environment
         self.assertEqual(member["revision"], 2)
         self.assertEqual(member["state"], environment.PENDING)
+        self.assertIsNone(member["receipt_id"])
         self.assertEqual([row["revision"] for row in stored.environment_history], [1])
-        observed = env.view()
-        self.assertEqual(observed["status"], "active")
+        self.assertEqual(stored.environment_history[0]["receipts"][0]["id"], env.receipt_id)
+        self.assertEqual(env.view()["status"], "active")
 
     def test_a_receipt_of_another_run_or_generation_decides_nothing(self):
         env = DeliberationEnv()
@@ -218,8 +329,8 @@ class ReceiptTests(unittest.TestCase):
         self.assertIsNone(env.state().environment["receipt_id"])
 
     def test_an_earlier_revisions_decision_receipt_cannot_decide_the_new_revision(self):
-        """A presentation alone finalizes a revision: its approved predecessor's own receipt — or
-        any decision artifact — is not the new revision's presentation, whatever digest it names."""
+        """A presentation alone finalizes a revision: its approved predecessor's own receipt is
+        not the new revision's presentation, whatever revision numbers it swaps in."""
         env = DeliberationEnv()
         env.present()
         old_receipt_id = env.receipt_id
@@ -235,6 +346,52 @@ class ReceiptTests(unittest.TestCase):
         member = env.state().environment
         self.assertEqual(member["state"], environment.PENDING)
         self.assertIsNone(member["receipt_id"])
+
+    def test_a_configuration_revision_closes_a_pending_revision_and_its_reply_decides_nothing(self):
+        """Spec §5's mutual exclusion in both directions: an author's configuration revision is
+        admitted while an environment revision is pending and closes it as superseded without
+        approval — the member row, its recorded presentation inside it, moves to the immutable
+        history — so no reply of the closed revision can approve under the now-unapproved
+        configuration, and the agent resubmits once the new configuration is approved."""
+        env = DeliberationEnv()
+        env.present()
+        closed_before = dict(env.state().environment)
+        revised = _revised_configure_run()
+        self.assertEqual(env.observe(revised)["type"], "Allow")
+        state = env.state()
+        self.assertIsNone(state.environment, "the pending revision is closed, not left pending")
+        self.assertEqual([row["revision"] for row in state.environment_history],
+                         [closed_before["revision"]])
+        self.assertEqual(dict(state.environment_history[0]), closed_before)
+        approve_current(env.service._coordinator, env.run_id)  # the human approves the new configuration
+        decided = env.decide("approve")  # the old reply, now against the approved new configuration
+        self.assertEqual(decided["type"], "Fault", decided)
+        self.assertIsNone(env.state().environment)
+
+    def test_a_reply_of_a_configuration_closed_revision_replays_inert_only_when_exact(self):
+        """The closed revision's own recorded presentation is still its history: an exact replay
+        is the engine's historical Inert, and anything else decides nothing."""
+        env = DeliberationEnv()
+        env.present()
+        exact = _receipt(env.member, env.run_id, "present", env.receipt_id, env.digest)
+        revised = _revised_configure_run()
+        self.assertEqual(env.observe(revised)["type"], "Allow")
+        replay = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=dict(exact))["result"]
+        self.assertEqual(replay["type"], "Inert", replay)
+        self.assertIsNone(env.state().environment)
+
+    def test_a_configuration_revision_never_closes_a_decided_revision(self):
+        """Only a pending revision closes: a decided one (chosen under the configuration it was
+        decided with) keeps its decision across later configuration revisions, its receipt
+        immutable."""
+        env = DeliberationEnv()
+        env.present()
+        self.assertEqual(env.decide("approve")["type"], "Allow")
+        approved_before = dict(env.state().environment)
+        revised = _revised_configure_run()
+        self.assertEqual(env.observe(revised)["type"], "Allow")
+        self.assertEqual(dict(env.state().environment), approved_before)
 
     def test_an_auto_run_derives_its_approval_and_refuses_every_receipt(self):
         env = DeliberationEnv(control_mode="auto")
@@ -272,6 +429,7 @@ class AdmissionDecisionTests(unittest.TestCase):
             environment.PROFILE_NOT_ALLOWED,
             environment.QUALIFICATION_REQUIRED,
             environment.QUALIFICATION_ATTEMPTS_EXHAUSTED,
+            environment.ENVIRONMENT_REVISIONS_EXHAUSTED,
         )}
         for reason in emitted:
             self.assertIn(reason, registry, reason)
@@ -347,20 +505,52 @@ class AdmissionDecisionTests(unittest.TestCase):
         self.assertEqual(environment.spike_prerequisite(approved.state()),
                          environment.QUALIFICATION_REQUIRED)
 
-    def test_the_history_bound_never_corrupts_a_run_that_keeps_revising(self):
-        """The immutable history is bounded: the oldest row drops, the revisions stay monotonic."""
-        env = DeliberationEnv()
+    def test_the_revision_ceiling_refuses_a_further_submission_and_never_drops_a_row(self):
+        """Spec §4.2's retention rule: every revision and its receipts stay immutable, and the
+        bound the state contract carries is the per-run environment revision ceiling — a further
+        submission past it Blocks with its own closed reason, and nothing is ever evicted (a
+        qualification may still refer to an earlier revision)."""
+        env = ServiceEnv().start().fully_approved()
+        member = env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
+        self.assertEqual(member["type"], "Allow", member)
         bound = environment.MAX_ENVIRONMENT_HISTORY
-        for _ in range(bound):
-            _submit(env, _revise(ENVIRONMENT_ACTION["payload"]))
-        history = env.state().environment_history
-        self.assertEqual(len(history), bound)
-        oldest = history[0]["revision"]
-        _submit(env, _revise(ENVIRONMENT_ACTION["payload"]))
-        history = env.state().environment_history
-        self.assertEqual(len(history), bound)
-        self.assertEqual(history[0]["revision"], oldest + 1)
-        self.assertGreater(env.state().environment["revision"], history[-1]["revision"])
+        for revision in range(1, bound):
+            payload = copy.deepcopy(ENVIRONMENT_ACTION["payload"])
+            payload["rationale"] = f"revision {revision + 1}: {payload['rationale']}"
+            further = env.observe({**copy.deepcopy(ENVIRONMENT_ACTION), "payload": payload})
+            self.assertEqual(further["type"], "Allow", further)
+        state = env.state()
+        self.assertEqual(state.environment["revision"], bound)
+        self.assertEqual(len(state.environment_history), bound - 1)
+        self.assertEqual([row["revision"] for row in state.environment_history],
+                         list(range(1, bound)))
+        refused = env.observe(_revised_payload())
+        self.assertTrue(protocol.validate_public_result(refused), refused)
+        self.assertEqual(refused["type"], "Block", refused)
+        self.assertEqual([row["code"] for row in refused["reasons"]],
+                         [environment.ENVIRONMENT_REVISIONS_EXHAUSTED])
+        row = _PUBLIC_CONTRACT["reasons"][environment.ENVIRONMENT_REVISIONS_EXHAUSTED]
+        self.assertIn(row["message"], refused["reasons"][0]["message"])
+        self.assertTrue(environment.revisions_exhausted(env.state()))
+        after = env.state()
+        self.assertEqual([r["revision"] for r in after.environment_history], list(range(1, bound)))
+        self.assertEqual(after.environment["revision"], bound)
+
+    def test_one_revision_short_of_the_ceiling_still_admits_and_the_pure_word_holds(self):
+        """The pure decision, read against the generated bound: one revision short is admitted,
+        at and past the ceiling the word is the exhausted one — the ceiling counts the current
+        member and every immutable row, so a configuration-closed run may also face it."""
+        env = ServiceEnv().start().fully_approved()
+        env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
+        state = env.state()
+        bound = environment.MAX_ENVIRONMENT_HISTORY
+        self.assertFalse(environment.revisions_exhausted(state))
+        rows = tuple(environment.revision_member(ENVIRONMENT_ACTION["payload"], revision, approved=False)
+                     for revision in range(1, bound + 1))
+        at_ceiling = replace(state, environment_history=rows[:-1], environment=rows[-1])
+        self.assertTrue(environment.revisions_exhausted(at_ceiling))
+        closed = replace(state, environment=None, environment_history=rows)
+        self.assertTrue(environment.revisions_exhausted(closed))
 
 
 if __name__ == "__main__":

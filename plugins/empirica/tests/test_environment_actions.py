@@ -21,6 +21,7 @@ import copy
 import json
 import sys
 import unittest
+from uuid import uuid4
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -29,7 +30,7 @@ from application import protocol
 from application.protocol import host_profile_id
 from application.v2 import compose
 from core.evaluation import ENVIRONMENT_NOT_AVAILABLE
-from governance_setup import TEST_INVOCATION, approve_current
+from governance_setup import AUTHOR, TEST_INVOCATION, approve_current
 from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 
 PROFILE = host_profile_id("pi")
@@ -43,6 +44,9 @@ _GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "supplied environment un
 # request schema by scripts/validate_contracts.py), never a second hand-written shape.
 ENVIRONMENT_ACTION = copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["environment"]["example"])
 QUALIFY_ACTION = copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["qualify"]["example"])
+#: The configuration revision sample (spec §5's mutual exclusion tests), and the helper the
+#: governance suites share for approving a run's sized configuration.
+CONFIGURE_RUN = copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["configure_run"]["example"])
 #: The profile ceiling vocabulary is the wire's own enum (StartRun.spike_profile): the other
 #: legal profile of the pair is read from it, never restated as a literal.
 _SPIKE_PROFILES = _REQUEST_SCHEMA["$defs"]["startRun"]["properties"]["spike_profile"]["enum"]
@@ -247,6 +251,100 @@ class EnvironmentAdmissionTests(ReasonRow):
         self.assertEqual(result["type"], "Fault", result)
         self.assertNotIn("reason", result, result)
         self.assertEqual(before, env.view())
+
+
+class ConfigurationExclusionTests(ReasonRow):
+    """The mutual exclusion both ways (spec §5): the environment step waits on configuration
+    approval, and a configuration revision — the author's or the host's own — closes a pending
+    environment revision as superseded without approving it, so the two are never pending at
+    once; a decided environment revision is untouched, and configuration stays revisable."""
+
+    def test_an_author_configuration_revision_closes_a_pending_environment_revision(self):
+        env = ServiceEnv().start().fully_approved()
+        env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
+        closed = dict(env.state().environment)
+        revised = copy.deepcopy(CONFIGURE_RUN)
+        revised["rationale"] = "a revised task size this qualification needs after its proposal"
+        result = env.observe(revised)
+        self.assertTrue(protocol.validate_public_result(result), result)
+        self.assertEqual(result["type"], "Allow", result)
+        state = env.state()
+        self.assertIsNone(state.environment, "a pending revision closes; the two never co-pend")
+        self.assertEqual([row["revision"] for row in state.environment_history],
+                        [closed["revision"]])
+        self.assertEqual(dict(state.environment_history[0]), closed)
+        # The agent resubmits only once the new configuration is approved, and the configuration
+        # stays revisable while the closed revision waits.
+        self._block(env, copy.deepcopy(ENVIRONMENT_ACTION), "governance.revision_required")
+        approve_current(env.service._coordinator, env.run_id)
+        resubmitted = env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
+        self.assertEqual(resubmitted["type"], "Allow", resubmitted)
+        member = env.state().environment
+        self.assertEqual(member["revision"], closed["revision"] + 1)
+        self.assertEqual([row["revision"] for row in env.state().environment_history],
+                        [closed["revision"]])
+
+    def test_a_host_mediated_amendment_closes_and_keeps_closed_a_pending_environment_revision(self):
+        """The host's own configuration-revision path is the mediated human amendment (the dialog's
+        changed-ceilings answer): it revises the configuration the same way, so it closes a pending
+        environment revision — and once the author's revision has closed one, the mediated
+        amendment keeps it closed with its row immutable. A context report alone stores the
+        host's capability fact and revises nothing: it never reopens governance, so it touches
+        no revision."""
+        env = ServiceEnv().start().fully_approved()
+        env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
+        closed = dict(env.state().environment)
+        revised = copy.deepcopy(CONFIGURE_RUN)
+        revised["rationale"] = "a revised task size this qualification needs after its proposal"
+        self.assertEqual(env.observe(revised)["type"], "Allow")
+        self.assertIsNone(env.state().environment)
+        coordinator = env.service._coordinator
+        ingress = protocol.host_profile(coordinator.profile_id)["approval_ingress"]
+        context = {"author": AUTHOR, "ingress": ingress}
+        shown = env.service.trusted_governance_context(run_id=env.run_id, payload=context)
+        self.assertIn(shown["result"]["type"], ("Allow", "Inert"), shown)
+        governance_view = shown["result"]["run"]["governance"]
+        document = (shown["result"].get("presentation") or {}).get("document")
+        self.assertIsNotNone(document, "a host amendment needs its bound document")
+        receipt = {"run_id": env.run_id, "receipt_id": uuid4().hex,
+                   "proposal_digest": governance_view["proposal_digest"],
+                   "plan_revision": governance_view["plan_revision"],
+                   "approval_kind": "host_ui", "document_digest": document["digest"]}
+        presented = env.service.trusted_governance_decision(
+            run_id=env.run_id, payload={**receipt, "outcome": "present"})
+        self.assertEqual(presented["result"]["type"], "Allow", presented)
+        amended_budgets = dict(governance_view["proposal"]["budgets"])
+        amended_budgets[max(k for k in amended_budgets)] -= 1  # the human narrows one ceiling
+        amended = env.service.trusted_governance_decision(
+            run_id=env.run_id,
+            payload={**receipt, "submission": {"action": "approve",
+                                                "configuration": {"budgets": amended_budgets}}})
+        self.assertEqual(amended["result"]["type"], "Allow", amended)
+        state = env.state()
+        self.assertEqual(state.governance["state"], "revision_pending",
+                         "the amendment revised the configuration again, still never co-pending")
+        self.assertIsNone(state.environment)
+        self.assertEqual([row["revision"] for row in state.environment_history],
+                        [closed["revision"]])
+        self.assertEqual(dict(state.environment_history[0]), closed)
+        self._block(env, copy.deepcopy(ENVIRONMENT_ACTION), "governance.revision_required")
+
+    def test_a_context_report_alone_never_closes_a_pending_revision(self):
+        """The host's capability report stores a fact about who may mediate, and revises no
+        configuration: it never reopens governance, so it touches no environment revision —
+        only a real configuration revision (the author's or the mediated amendment) closes one."""
+        env = ServiceEnv().start().fully_approved()
+        env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
+        member_before = dict(env.state().environment)
+        other_author = {**AUTHOR, "identity": "other/model-x", "model_id": "model-x"}
+        reported = env.service.trusted_governance_context(
+            run_id=env.run_id, payload={"author": other_author, "ingress": "unavailable"})
+        self.assertIn(reported["result"]["type"], ("Allow", "Inert"), reported)
+        state = env.state()
+        self.assertIsNotNone(state.environment, "a context report closes nothing")
+        self.assertEqual(dict(state.environment), member_before)
+        self.assertEqual(state.governance["context"]["author"]["identity"], "other/model-x")
+        self.assertEqual(state.governance["state"], "approved")
 
 
 class QualifyAdmissionTests(ReasonRow):

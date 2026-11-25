@@ -1080,7 +1080,8 @@
         "proposal",
         "digest",
         "state",
-        "receipt_id"
+        "receipt_id",
+        "receipts"
       ],
       "properties": {
         "revision": {
@@ -1118,6 +1119,14 @@
           ],
           "minLength": 1,
           "description": "The private environment decision receipt that approved or rejected this revision under ADR-0072's write-first discipline: it names the presentation it answered. Null while pending, and null also where the core derived the approval in auto mode — no human receipt is ever fabricated (Empirica 7.2 §5)."
+        },
+        "receipts": {
+          "type": "array",
+          "maxItems": 128,
+          "items": {
+            "$ref": "#/$defs/environmentReceipt"
+          },
+          "description": "The revision's private receipt rows under ADR-0072's write-first discipline, kept immutable once the revision is superseded: every presentation the human was shown and the approve/reject that named one, with the fingerprints of their entire replies (the binding the receipt engine reuses from core.governance). Never rendered in any public view; E8 renders its document from these rows."
         }
       }
     },
@@ -1312,6 +1321,69 @@
         "network-profile"
       ],
       "description": "The qualification probe names, owned by the Docker spike support contract (contracts/empirica-docker-spike/v1, its only copy): the run's qualification rows, its last failure and a refusal that names a probe reuse this enumeration, never a second spelling."
+    },
+    "environmentReceipt": {
+      "x-core-validator": "core.environment.validate_receipt",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "fingerprint",
+        "presentation_fingerprint",
+        "outcome",
+        "revision",
+        "proposal_digest",
+        "document_digest"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "The receipt's id: a presentation names a fresh id, and the approve/reject that finalizes the revision reuses the id of the presentation it answers."
+        },
+        "fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+          "description": "The canonical digest of this receipt's entire reply as the core last admitted it (core.governance.canonical_digest, the one binding engine): for a present it equals the presentation_fingerprint; for an approve/reject it is the decision reply named against that presentation."
+        },
+        "presentation_fingerprint": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+          "description": "The canonical digest of the presentation reply this row recorded: an exact replay matches it and decides nothing, and a decision is admitted only when its own present-form digest equals it — the full persisted presentation identity."
+        },
+        "outcome": {
+          "enum": [
+            "present",
+            "approve",
+            "reject"
+          ],
+          "description": "present for the row the host recorded when the human was shown the pending revision's document; approve or reject for the decision that named it."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The environment revision the reply was admitted against.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
+        },
+        "proposal_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+          "description": "The revision's canonical proposal digest as the reply named it."
+        },
+        "document_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+          "description": "The document the presentation bound (the pending revision shown to a human); a decision must name the document its own presentation recorded."
+        }
+      },
+      "description": "One closed private environment receipt row (Empirica 7.2 §5): durable evidence of the write-first deliberation a revision went through, mirroring the governance receipts' binding and replay discipline."
     }
   },
   "x-core-ingress": [

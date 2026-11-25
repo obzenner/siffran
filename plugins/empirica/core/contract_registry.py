@@ -32,6 +32,7 @@ REGISTERED_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("response", "/$defs/qualificationView"),
     ("state", "/$defs/environmentMember"),
     ("state", "/$defs/environmentProposal"),
+    ("state", "/$defs/environmentReceipt"),
     ("state", "/$defs/qualificationAttempt"),
     ("state", "/$defs/qualificationProbeName"),
     ("state", "/properties/environment"),

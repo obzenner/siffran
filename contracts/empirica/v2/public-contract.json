@@ -2366,7 +2366,7 @@
       "sections": [
         "environment/actions"
       ],
-      "message": "This step needs a qualified environment and the run has no binding and no approved environment revision: submit an environment proposal."
+      "message": "This step needs a qualified environment and the run has neither a binding nor an approved environment revision: submit a closed environment proposal. A qualify with no revision admits nothing either — its admission is refused with this reason (the way on is a proposal), while a spike on an approved-but-unbound run is refused with qualification-required (the way on is a qualification attempt)."
     },
     "environment-pending": {
       "params": {
@@ -2396,6 +2396,22 @@
       ],
       "message": "The latest environment revision was rejected; submit a revised environment proposal."
     },
+    "environment-revisions-exhausted": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "spike.run",
+        "residual.accept",
+        "run.start_fresh"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "This run's environment revision allowance is spent — the per-run ceiling the state contract owns. Earlier revisions and their receipts stay immutable, so a further environment proposal is refused: continue on the current binding, stop, or start a fresh run."
+    },
     "qualification-attempts-exhausted": {
       "params": {
         "type": "object",
@@ -2424,7 +2440,7 @@
       "sections": [
         "environment/actions"
       ],
-      "message": "This step needs a spike under a qualified environment: the run has an approved environment revision but nothing is bound yet, so request the qualification (the qualify action); the request is refused when its effect has not landed, and retrying changes nothing."
+      "message": "This step needs a spike under a qualified environment: the run has an approved environment revision but nothing is bound yet, so the way on is a qualification attempt — request the qualification (the qualify action). The request is refused when the effect has not landed, and retrying changes nothing. This is the spike-path refusal; a qualify with no approved revision is environment-required, and its way on is a proposal."
     }
   },
   "sections": {

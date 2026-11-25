@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from core import confirmation, governance as policy, hitl
+from core import confirmation, environment, governance as policy, hitl
 from core.evaluation import bootstrap_precondition
 from core.records import Corrupt
 from .location import decode_handle
@@ -153,6 +153,16 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                 else:
                     prior.update(fingerprint=fingerprint, outcome=outcome,
                                  superseded_budgets=superseded_budgets)
+            if governed["plan_revision"] != state.governance["plan_revision"]:
+                # Spec §5 (mutual exclusion, both ways): this transaction's own revision paths — the
+                # human amendment above and the host context report below are the other one — admit
+                # a changed configuration and close a pending environment revision as superseded
+                # without approval, exactly as the author configure_run does: the member row,
+                # receipts and all, moves to the immutable history, so a reply of the closed
+                # revision can never approve under the unapproved configuration that follows.
+                member, history = environment.superseded_member(state)
+                next_state = replace(next_state, environment=member,
+                                     environment_history=history)
             next_state = replace(next_state, governance=governed)
             committed, _, _, planned = c._commit(key, read.revision, snapshot, next_state, domain)
         except ValueError as exc:
@@ -168,4 +178,68 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
         if context:
             return _with_document(response, run_id=run_id, snapshot=planned)
         return response
+    return c._fault(rid, "conflict")
+
+
+def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
+    """The environment's private receipt transaction (Empirica 7.2 §5) — the same write-first
+    verification path as the configuration decisions above, one receipt engine with it: the
+    binding and replay classification are ``core.environment.receipt_error`` over
+    ``core.governance.replay_verdict`` (the entire reply's fingerprint, its own recorded
+    presentation), and this loop is the same read-verify-commit boundary — every existing
+    refusal (replay, staleness, an altered receipt, the decided member) wins before anything is
+    written, then the presentation row or the finalizing member-and-row commit in one CAS. E8
+    completes this same path with the environment document's render: a decision already names the
+    document its own presentation recorded (the entire-reply fingerprint), and E8's renderer E8's renderer verifies that digest against
+    the document the core renders, exactly as the configuration legs above verify theirs, so no
+    second verification path is ever opened.
+
+    As above governance: a corrupt or undecodable run fails closed with a runless Fault, an
+    absent, terminal or otherwise inactive run is read as nobody's answer, and the CAS retry
+    replans against whatever the repository now holds — a superseding revision means the reply
+    is classified (stale, or an exact replay of an earlier revision's stored row) and commits
+    nothing."""
+    c, rid = coordinator, "trusted-environment"
+    key = decode_handle(run_id)
+    if key is None:
+        return c._inert(rid)
+    for _ in range(8):
+        read = c.runs.read(key)
+        if isinstance(read, Corrupt):
+            return c._fault(rid, "corrupt_run")
+        if not c._present(read):
+            return c._inert(rid)
+        classified = classify_and_decode(read.value)
+        if classified.kind != "valid":
+            return c._fault(rid, "corrupt_run")
+        state = classified.state
+        if state.status != "active":
+            return c._inert(rid)
+        try:
+            snapshot = c._assemble(key, state, {"type": "GetRun", "run_id": run_id}, require_graph=False)
+        except HistoryCorrupt:
+            return c._fault(rid, "corrupt_run")
+        try:
+            environment.validate_decision(dict(payload))
+            reason = environment.receipt_error(run_id, state, payload)
+            if reason == "inert":
+                return c._inert_with_run(rid, snapshot)
+            if reason:
+                return c._fault_with_run(rid, snapshot)  # fail closed: nothing decides, nothing written
+            fingerprint = policy.canonical_digest(policy.plain(dict(payload)))
+            member = policy.plain(state.environment)
+            if payload["outcome"] == "present":
+                member = environment.presented_member(member, payload, fingerprint)
+            else:
+                member = environment.decided_member(member, payload, fingerprint)
+            committed, _, _, planned = c._commit(
+                key, read.revision, snapshot, replace(state, environment=member), ())
+        except ValueError:
+            return c._fault(rid, "invalid_request")
+        except Exception as exc:
+            if c._is_conflict(exc):
+                continue
+            return c._fault(rid, "unavailable")
+        c.last_state = committed
+        return c._allow(rid, planned)
     return c._fault(rid, "conflict")

@@ -9,6 +9,7 @@ from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
 from .ports import NullSpikeAuthoritySelector
+from .governance import transact_environment
 from .run_state import classify_and_decode
 from .transaction import Coordinator
 
@@ -157,13 +158,15 @@ class _Service:
         """Admit one private environment receipt for the run's pending revision (Empirica 7.2 §5):
         the write-first presentation of a pending deliberative revision, or the approve/reject
         decision that names it. The receipt shape is the request schema's closed
-        ``environmentDecisionPayload``; an auto run derives its approvals and has none."""
+        ``environmentDecisionPayload``; one receipt engine with the configuration decisions —
+        the same write-first verification transaction, whose replay classification the core
+        shares with governance. An auto run derives its approvals and has none."""
         terminal = self._trusted_terminal(run_id)
         if terminal:
             return terminal
         if not self._valid_trusted("environmentDecisionPayload", payload):
             return Coordinator._fault("trusted-environment", "invalid_request")
-        response = self._coordinator.trusted_environment_decision(run_id, payload)
+        response = transact_environment(self._coordinator, run_id, payload)
         if not _proto.validate_public_result(response["result"]):
             return Coordinator._fault("trusted-environment", "unavailable")
         return response
