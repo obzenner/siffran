@@ -402,6 +402,74 @@ class ReceiptTests(unittest.TestCase):
                 self.assertEqual(env.decide(outcome)["type"], "Fault")
         self.assertEqual(env.state().environment["state"], environment.APPROVED)
 
+    def test_the_presentation_allowance_refuses_a_further_presentation_after_its_bound(self):
+        """Re-review 1 (non-blocking 3): the per-revision presentation allowance is behavioural,
+        not merely a storage bound. Once this revision has recorded its 128 presentations, a
+        further presentation refuses with the closed reason environment-presentations-exhausted
+        (its own registry row, validated on the wire, its recovery named in next_actions:
+        submit a new environment revision) — nothing is failed closed, the run stays active,
+        and the limit stays separate from the run's revision ceiling."""
+        env = DeliberationEnv()
+        member = env.member
+        bound = environment.MAX_MEMBER_RECEIPTS
+        presented = []
+        for index in range(bound):
+            payload = _receipt(member, env.run_id, "present", _new_receipt_id(),
+                               _document_digest(f"limit-{index}"))
+            result = env.service.trusted_environment_decision(
+                run_id=env.run_id, payload=payload)["result"]
+            self.assertEqual(result["type"], "Allow", f"presentation {index}: {result}")
+            presented.append(payload)
+        self.assertEqual(len(env.state().environment["receipts"]), bound)
+        over = _receipt(member, env.run_id, "present", _new_receipt_id(),
+                        _document_digest("over-the-allowance"))
+        refused = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=over)["result"]
+        self.assertTrue(protocol.validate_public_result(refused), refused)
+        self.assertEqual(refused["type"], "Block", refused)
+        self.assertEqual([row["code"] for row in refused["reasons"]],
+                         [environment.ENVIRONMENT_PRESENTATIONS_EXHAUSTED])
+        self.assertIn(_PUBLIC_CONTRACT["reasons"][environment.ENVIRONMENT_PRESENTATIONS_EXHAUSTED][
+            "message"], refused["reasons"][0]["message"])
+        self.assertEqual(refused["reasons"][0]["next_actions"], ["environment.propose"])
+        self.assertEqual(len(env.state().environment["receipts"]), bound, "no row was written")
+        self.assertEqual(env.state().environment["state"], environment.PENDING)
+        self.assertEqual(env.view()["status"], "active")
+
+    def test_a_recorded_presentation_still_finalizes_over_the_allowance(self):
+        """The allowance refuses only a further presentation: a presentation the revision
+        already recorded can still be approved at and past the bound, its replay stays the
+        engine's Inert, and a new environment revision starts a fresh allowance."""
+        env = DeliberationEnv()
+        member = env.member
+        bound = environment.MAX_MEMBER_RECEIPTS
+        first_id = None
+        for index in range(bound):
+            receipt_id = _new_receipt_id()
+            if first_id is None:
+                first_id = receipt_id
+            payload = _receipt(member, env.run_id, "present", receipt_id,
+                               _document_digest(f"final-{index}"))
+            self.assertEqual(env.service.trusted_environment_decision(
+                run_id=env.run_id, payload=payload)["result"]["type"], "Allow")
+        # the approve that names the first recorded presentation, digest and all
+        approve = _receipt(member, env.run_id, "approve", first_id, _document_digest("final-0"))
+        result = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=approve)["result"]
+        self.assertEqual(result["type"], "Allow", result)
+        self.assertEqual(env.state().environment["state"], environment.APPROVED)
+        self.assertEqual(env.state().environment["receipt_id"], first_id)
+        self.assertEqual(env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=approve)["result"]["type"], "Inert")
+        # a new revision starts a fresh presentation allowance
+        env.member = env.submit_revision()
+        fresh = _receipt(env.member, env.run_id, "present", _new_receipt_id(),
+                         _document_digest("fresh-revision"))
+        self.assertEqual(env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=fresh)["result"]["type"], "Allow")
+        self.assertEqual(len(env.state().environment["receipts"]), 1)
+        self.assertFalse(environment.revisions_exhausted(env.state()))
+
     def test_a_malformed_receipt_never_reaches_the_domain_logic(self):
         """An outcome outside the closed receipt set is invalid at the service boundary: a cancel,
         a timeout or a missing surface is never a decision — it leaves the revision pending."""
@@ -430,6 +498,7 @@ class AdmissionDecisionTests(unittest.TestCase):
             environment.QUALIFICATION_REQUIRED,
             environment.QUALIFICATION_ATTEMPTS_EXHAUSTED,
             environment.ENVIRONMENT_REVISIONS_EXHAUSTED,
+            environment.ENVIRONMENT_PRESENTATIONS_EXHAUSTED,
         )}
         for reason in emitted:
             self.assertIn(reason, registry, reason)

@@ -2412,6 +2412,20 @@
       ],
       "message": "This run's environment revision allowance is spent — the per-run ceiling the state contract owns. Earlier revisions and their receipts stay immutable, so a further environment proposal is refused: continue on the current binding, stop, or start a fresh run."
     },
+    "environment-presentations-exhausted": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "environment.propose"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "This environment revision's presentation allowance is spent — the per-revision bound the state contract owns (128 presentations), separate from the run's 64-revision ceiling. A further presentation under this revision is refused, but one it already recorded can still be approved or rejected: submit a new environment revision for a fresh allowance."
+    },
     "qualification-attempts-exhausted": {
       "params": {
         "type": "object",

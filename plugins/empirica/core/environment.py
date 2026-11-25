@@ -55,6 +55,7 @@ ENVIRONMENT_REJECTED = "environment-rejected"
 QUALIFICATION_REQUIRED = "qualification-required"
 QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
 ENVIRONMENT_REVISIONS_EXHAUSTED = "environment-revisions-exhausted"
+ENVIRONMENT_PRESENTATIONS_EXHAUSTED = "environment-presentations-exhausted"
 
 #: The receipt outcomes the environment deliberation records (spec §5, as the state contract's
 #: ``environmentReceipt`` row owns them): one presentation of a pending revision, then the
@@ -414,7 +415,13 @@ def receipt_error(run_id: str, state: object, receipt: Mapping) -> str | None:
         if prior is not None:
             return "receipt_absent"  # the id already named a decision: it can present nothing
         if len(member["receipts"]) >= MAX_MEMBER_RECEIPTS:
-            return "receipt_absent"  # the closed row bound refuses a further presentation
+            # Re-review 1 (non-blocking 3): the per-revision presentation allowance is a
+            # behavioural limit of its own, not merely a storage bound — a further
+            # presentation is refused with its own closed reason (the public reason row names
+            # the recovery: a new environment revision), while a presentation this revision
+            # already recorded can still finalize below, and the limit is separate from the
+            # per-run revision ceiling above.
+            return ENVIRONMENT_PRESENTATIONS_EXHAUSTED
         return None
     if (prior is None or prior["outcome"] != _PRESENT
             or prior["revision"] != member["revision"]

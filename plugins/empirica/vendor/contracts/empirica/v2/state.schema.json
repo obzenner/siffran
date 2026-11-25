@@ -1126,7 +1126,7 @@
           "items": {
             "$ref": "#/$defs/environmentReceipt"
           },
-          "description": "The revision's private receipt rows under ADR-0072's write-first discipline, kept immutable once the revision is superseded: every presentation the human was shown and the approve/reject that named one, with the fingerprints of their entire replies (the binding the receipt engine reuses from core.governance). Never rendered in any public view; E8 renders its document from these rows."
+          "description": "The revision's private receipt rows under ADR-0072's write-first discipline, kept immutable once the revision is superseded: every presentation the human was shown and the approve/reject that named one, with the fingerprints of their entire replies (the binding the receipt engine reuses from core.governance). Never rendered in any public view; E8 renders its document from these rows. The 128-row bound is behavioural, not merely storage: a further presentation past it is refused with the closed reason environment-presentations-exhausted (its recovery is a new environment revision), while a recorded presentation can still finalize — and the bound is per revision, separate from the run's revision ceiling."
         }
       }
     },

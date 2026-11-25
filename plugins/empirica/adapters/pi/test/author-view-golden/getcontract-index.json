@@ -504,6 +504,12 @@
             ]
           },
           {
+            "code": "environment-presentations-exhausted",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
             "code": "qualification-attempts-exhausted",
             "sections": [
               "environment/actions"
