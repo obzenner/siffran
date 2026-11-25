@@ -268,6 +268,29 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                          {"LANG": "C", "LC_ALL": "C", "DOCKER_HOST": facts["endpoint"],
                           "DOCKER_CONFIG": str(config)})
 
+    def test_sealed_spike_rows_carry_no_capability_list_while_the_probe_image_keeps_its_own(self):
+        # (operator decision, drift 4.5) spike images are inspected, never probed: a
+        # sealed /3 spike row carries the requested reference, the full daemon image ID
+        # observed at qualification (a diagnostic), the canonical platform and its
+        # volume facts — and no capability list. The one trusted probe image keeps the
+        # shared qualification helper's own list. (The closed row shape itself is the
+        # contract conformance harness's at the restack; this keeps the behaviour.)
+        harness = OwnerHarness(self.root)
+        harness.spike_images = ["python:3.12-slim", "busybox:latest"]
+        harness.images.spike_documents["busybox:latest"] = spike_document(
+            image_id="sha256:" + "b" * 64, raw_architecture="x86_64")
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        for row in outcome.record["spike_images"]:
+            self.assertNotIn("capabilities", row,
+                             "a sealed spike row never lists capabilities")
+            self.assertEqual(set(row), run_owner.SPIKE_IMAGE_FIELDS)
+        self.assertEqual(outcome.record["qualification_image"]["capabilities"],
+                         list(run_owner.qualification.IMAGE_CAPABILITIES),
+                         "the trusted probe image keeps the shared helper's list")
+        self.assertEqual(len(list(self.store.records.iterdir())), 1)
+
     # --- closed probe-image admission (4.3) ---------------------------------
 
     def test_probe_image_admission_failure_is_probe_image_untrusted_with_the_reference(self):
@@ -324,6 +347,36 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertIs(type(outcome), run_owner.RunQualificationFailed)
         self.assertIs(outcome.reason, run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
 
+    def test_probe_image_admission_matches_the_pinned_digest_under_any_repository_name(self):
+        # (operator decision, drift 4.3) the pinned index digest is the image's content
+        # identity; the repository name is not: a mirror or proxy pull reports the
+        # pinned digest under its own repository name and is admitted, while a locally
+        # built, loaded or retagged image — one whose RepoDigests carry some other
+        # digest, under the pinned name or any other — is still refused.
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        mirror = "registry.mirror.example.com/proxy/alpine@" + PIN.index_digest
+        harness.images.probe_document = probe_document([mirror])
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        # the record seals the pinned reference and its digest, never the mirror's name
+        self.assertEqual(outcome.record["qualification_image"]["repo_digest"], PIN.repo_digest)
+
+        for repo_digests in (
+            [PIN.repository + "@" + D1],
+            [mirror.rsplit("@", 1)[0] + "@sha256:" + "c" * 64],
+        ):
+            with self.subTest(repo_digests=repo_digests):
+                harness = OwnerHarness(self._fresh_cell())
+                harness.manifests = [{"implementation_digest": D0}] * 32
+                harness.images.probe_document = probe_document(repo_digests)
+                outcome = harness.call()
+                self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                self.assertIs(outcome.reason,
+                              run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+                self.assertIsNone(outcome.probe)
+                self.assertNoRecord(harness)
+
     def test_the_probe_image_inspection_timeout_is_the_remaining_budget(self):
         harness = OwnerHarness(self._fresh_cell())
         harness.manifests = [{"implementation_digest": D0}] * 32
@@ -338,15 +391,50 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         call = harness.images.calls[0]
         self.assertEqual(call[1]["timeout_seconds"], 0.5)
 
+    def test_sealed_spike_rows_refuse_every_non_conforming_form_at_load(self):
+        # (the /3 record schema names these cross-field rules as the runtime admission's:
+        # the closed row set, the trusted identity, the server-native platform and the
+        # absence of declared volumes cannot be expressed as plain shapes) the loader's
+        # row rules refuse every non-conforming form with the closed record error — a
+        # shape that names the exact field set by its elements is still not a map, a
+        # canonical platform that is not the bound runtime's is foreign, and each
+        # refusal is the closed one, never a leaked exception.
+        facts = runtime()
+        conforming = {"reference": "python:3.12-slim", "id": D1, "raw_os": "linux",
+                      "os": "linux", "raw_architecture": "x86_64", "architecture": "amd64",
+                      "declared_volumes": []}
+        self.assertEqual(run_owner._spike_image_row(dict(conforming), facts, "spike image"),
+                         conforming)
+        variants = (
+            ("a non-map naming every field", list(run_owner.SPIKE_IMAGE_FIELDS)),
+            ("a foreign key", {**conforming, "capabilities": []}),
+            ("a missing key", {key: value for key, value in conforming.items()
+                               if key != "declared_volumes"}),
+            ("an untrusted daemon image identity", {**conforming, "id": "not-a-digest"}),
+            ("a foreign canonical platform",
+             {**conforming, "raw_architecture": "aarch64", "architecture": "arm64"}),
+            ("declared volumes", {**conforming, "declared_volumes": ["/data"]}),
+        )
+        for label, row in variants:
+            with self.subTest(row=label):
+                with self.assertRaises(authority.GenericQualificationError):
+                    run_owner._spike_image_row(row, facts, "spike image")
+
     # --- stale daemon, version change, implementation drift ------------------
 
     def test_stale_daemon_and_version_change_map_to_the_typed_stale_reason(self):
+        version = runtime()["server_version"]
         drifts = (
             ("endpoint", {}, {"endpoint": "unix:///var/run/other.sock"}),
             ("daemon-id", {"daemon_id": "the-first-daemon-id"},
              {"daemon_id": "a-restarted-daemon-id"}),
             ("capability", {}, {"swap_limit": False}),
             ("version", {}, {"server_version": "99.0.0"}),
+            # within one attempt the exact version must still match: a change that
+            # keeps the major part alone (operator decision, drift "Server version")
+            # is the same daemon drift, never an admitted binding
+            ("same-major version", {},
+             {"server_version": run_owner.server_version_major(version) + ".9"}),
         )
         for label, pinned_overrides, drifted_overrides in drifts:
             with self.subTest(label=label):
@@ -373,6 +461,68 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                 self.assertIs(outcome.reason, run_owner.RunQualificationReason.STALE_DAEMON)
                 self.assertIsNone(outcome.probe)
                 self.assertNoRecord(harness)
+
+    def test_across_the_binding_only_the_server_major_version_is_bounded(self):
+        # (operator decision, drift "Server version") the execution binding carries
+        # only the Docker server version's major part; the full version stays a
+        # diagnostic of the runtime facts, and within one attempt the exact version
+        # must still match (the re-observation rule). The witness holds every other
+        # fact fixed around one real record — the production builder recomputes the
+        # binding from only the varied runtime — so the minor part is observed to
+        # leave the bound facts and the major part to change them, without restating
+        # the binding composition.
+        version = runtime()["server_version"]
+        major = run_owner.server_version_major(version)
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.inspector_facts["server_version"] = major + ".5.1"
+        model = dict(harness.call().record)
+        self.assertEqual(model["runtime"]["server_version"],
+                         harness.inspector_facts["server_version"])
+
+        binding = run_owner.RunBinding(**model["run_binding"])
+        probes = tuple(run_owner.qualification.ProbeObservation(**probe)
+                       for probe in model["probes"])
+
+        def rebuilt(server_version):
+            facts = copy.deepcopy(harness.inspector_facts)
+            facts["server_version"] = server_version
+            return run_owner.build_run_record(
+                binding, model["profile_id"], facts, model["implementation_digest"],
+                model["qualification_image"], model["spike_images"], probes,
+                model["qualification_elapsed_ms"])
+
+        base = rebuilt(major + ".5.1")
+        minor_update = rebuilt(major + ".9")
+        self.assertEqual(base["execution_binding_digest"],
+                         minor_update["execution_binding_digest"],
+                         "a minor daemon update keeps the bound facts")
+        self.assertNotEqual(base["qualification_record_digest"],
+                            minor_update["qualification_record_digest"],
+                            "a changed diagnostic changes the record")
+        self.assertEqual(minor_update["runtime"]["server_version"], major + ".9",
+                         "the full version stays a diagnostic of the runtime")
+        for record in (base, minor_update):
+            self.assertEqual(run_owner.server_version_major(record["runtime"]["server_version"]),
+                             major)
+
+        major_update = rebuilt(str(int(major) + 1) + ".0")
+        self.assertNotEqual(major_update["execution_binding_digest"],
+                            base["execution_binding_digest"],
+                            "a major daemon change is a different execution binding")
+
+    def test_a_server_version_without_a_derivable_major_binds_nothing(self):
+        # fail closed: a daemon whose version carries no numeric major part — a private
+        # build, a garbage answer — can seal no execution binding, and the attempt
+        # ends in a capability refusal with nothing published
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.inspector_facts["server_version"] = "emu-not-a-number"
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.CAPABILITY_UNAVAILABLE)
+        self.assertIsNone(outcome.probe)
+        self.assertNoRecord(harness)
 
     def test_post_probe_version_change_is_stale_daemon_and_not_a_probe_failure(self):
         harness = OwnerHarness(self.root)
@@ -1480,7 +1630,9 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
             target.symlink_to(victim, target_is_directory=True)
 
         with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
-            with self.assertRaises(authority.GenericQualificationError):
+            # an unsafe publication is the scaffolding refusal (re-review 4,
+            # non-blocking 2), never a capability one
+            with self.assertRaises(common.GenericScaffoldingError):
                 store.write_record(different)
         import stat as stat_module
         self.assertEqual(
@@ -1534,7 +1686,9 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
             os.link(unrelated, target)
 
         with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
-            with self.assertRaises(authority.GenericQualificationError):
+            # an unsafe publication is the scaffolding refusal (re-review 4,
+            # non-blocking 2), never a capability one
+            with self.assertRaises(common.GenericScaffoldingError):
                 store.write_record(different)
         self.assertEqual(stat_module.S_IMODE(unrelated.stat().st_mode), 0o644,
                          "the publication validates without mutating: an unrelated "
@@ -1544,6 +1698,62 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
                                 common.GenericScaffoldingError)):
             store.load_record(different["qualification_record_digest"],
                               project_id="project-1", run_id="run-1", generation=1)
+
+    def test_an_unsafe_publication_is_reported_as_sandbox_scaffolding_unsafe(self):
+        # (re-review 4, non-blocking 2) a substituted publication is a scaffolding
+        # refusal, never a capability one: the content-addressed name was never
+        # proven to hold this attempt's record, so nothing binds, the attempt's only
+        # outcome is the unsafe-publication reason, and the impostor is left exactly
+        # as the attacker placed it.
+        import shutil
+        import stat as stat_module
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        cell = (Path(temporary.name) / "sandbox").resolve()
+        cell.mkdir(mode=0o700)
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        records = run_owner.RunQualificationStore(cell).records
+        neighbor = Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, neighbor, ignore_errors=True)
+        unrelated = neighbor / "impostor-0644"
+        unrelated.write_bytes(b"someone else's publication")
+        unrelated.chmod(0o644)
+        original_write = run_owner.fsio.atomic_write
+
+        def swapped_write(target, data, *, durable=False):
+            original_write(target, data, durable=durable)
+            if Path(target).parent == records:
+                # the attacker wins the race after the durable write, with a hard
+                # link to an unrelated file: the publication name holds other bytes
+                Path(target).unlink()
+                os.link(unrelated, target)
+
+        with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
+            outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.SANDBOX_UNSAFE)
+        self.assertIsNot(outcome.reason,
+                         run_owner.RunQualificationReason.CAPABILITY_UNAVAILABLE)
+        self.assertIsNone(outcome.probe)
+        # nothing was published for this attempt: every entry at a record name is the
+        # attacker's own hard link, unmutated, and no record resolves to it
+        published = list(records.iterdir())
+        self.assertTrue(published)
+        for entry in published:
+            self.assertEqual(entry.stat().st_ino, unrelated.stat().st_ino)
+        self.assertEqual(stat_module.S_IMODE(unrelated.stat().st_mode), 0o644,
+                         "the impostor keeps its own mode: nothing is ever written "
+                         "through the unsafe name")
+        for entry in published:
+            with self.assertRaises((authority.GenericQualificationError,
+                                    common.GenericScaffoldingError)):
+                run_owner.RunQualificationStore(cell).load_record(
+                    "sha256:" + entry.stem, project_id="project-1", run_id="run-1",
+                    generation=1)
 
     def test_authority_read_failure_is_docker_unreachable_and_never_capability(self):
         for message, reason in (

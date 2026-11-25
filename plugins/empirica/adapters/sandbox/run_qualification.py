@@ -61,9 +61,11 @@ MAX_SPIKE_IMAGE_REFERENCES = 16
 MAX_IDENTIFIER_CHARS = 128
 _IDENTIFIER = re.compile(r"^[^\x00-\x20\x2f\x5c\x7f-\x9f][^\x00-\x20\x2f\x5c\x7f-\x9f]{0,127}$")
 _REPO_DIGEST = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/:-]{0,253}@sha256:[0-9a-f]{64}$")
+_MAJOR_VERSION = re.compile(r"^[0-9]+$")
 #: `docker image inspect` of the pinned probe image: admission (spec section 4.3) keys
-#: on the ``RepoDigests`` member (never on the daemon-local ``Id``), and the record
-#: stores both.
+#: on a ``RepoDigests`` entry carrying the pinned index digest under any repository
+#: name (the digest is the image's content identity, the repository name is not),
+#: never on the daemon-local ``Id``; the record stores both.
 PROBE_IMAGE_INSPECT_FORMAT = (
     '{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}},'
     '"RepoDigests":{{json .RepoDigests}},"Volumes":{{json (index .Config "Volumes")}}}'
@@ -74,8 +76,33 @@ _RECORD_BODY_FIELDS = frozenset({
     "qualification_image", "spike_images", "probes", "cleanup",
     "qualification_elapsed_ms", "execution_binding_digest",
 })
+#: The sealed spike-image row shape (spec section 4.5): the requested reference, the
+#: full daemon image ID observed at qualification (a diagnostic), the canonical
+#: platform, and the volume facts — no capability list, because spike images are
+#: inspected, never probed; the shared qualification-image helper keeps its own list
+#: for the trusted probe image. (The closed shape itself is the contract conformance
+#: harness's at the restack.)
+SPIKE_IMAGE_FIELDS = frozenset({
+    "reference", "id", "raw_os", "os", "raw_architecture", "architecture",
+    "declared_volumes",
+})
 _CLEANUP_PROOF = {"container_ids_absent": True, "network_ids_absent": True,
                   "staging_empty": True, "journals_empty": True}
+
+
+def server_version_major(value: object) -> str:
+    """The Docker server version's major part: the only piece bound across the binding
+    (operator decision, drift "Server version"). A patch or minor daemon update keeps
+    a bound qualification; a major change is a stale daemon. The full version string
+    stays a diagnostic in the record's runtime facts; within one attempt the exact
+    version must still match (the after-probe re-observation), which this derivation
+    never relaxes. A version with no numeric major part — a private build, a garbage
+    answer — can seal no binding and fails closed."""
+    major = value.partition(".")[0] if type(value) is str else None
+    if major is None or _MAJOR_VERSION.fullmatch(major) is None:
+        raise authority.GenericQualificationError(
+            "Docker server major version is unavailable: " + repr(value))
+    return major
 
 
 class RunQualificationReason(str, Enum):
@@ -229,16 +256,40 @@ RunQualificationOutcome = RunQualificationBound | RunQualificationFailed
 
 
 def _image_row(value: object, runtime: Mapping[str, Any], where: str) -> dict[str, Any]:
-    """Validate one sealed image row through the `/2` admission (native platform, no
-    declared volumes, closed capabilities)."""
-    fields = {"reference", "id", "raw_os", "os", "raw_architecture", "architecture",
-              "declared_volumes", "capabilities"}
+    """Validate one sealed probe-image row through the `/2` admission (native platform,
+    no declared volumes, closed capabilities: the trusted probe image is probed, so it
+    keeps the shared qualification helper's own list)."""
+    fields = SPIKE_IMAGE_FIELDS | {"capabilities"}
     if type(value) is not dict or set(value) != fields:
         raise authority.GenericQualificationError(where + " shape is unknown")
     try:
         return qualification._validate_image(value, runtime)
     except qualification.GenericQualificationFailure as exc:
         raise authority.GenericQualificationError(str(exc)) from exc
+
+
+def _spike_image_row(value: object, runtime: Mapping[str, Any], where: str) -> dict[str, Any]:
+    """Validate one sealed spike-image row (spec section 4.5): the requested reference,
+    the full image ID observed at qualification (a diagnostic), the canonical
+    server-native platform, and no declared volumes. Spike images are inspected, never
+    probed, so the row carries no capability list; the shared qualification-image
+    helper keeps its own list for the trusted probe image. Per-spike resolution itself
+    is E10's, not this node's."""
+    if type(value) is not dict or set(value) != SPIKE_IMAGE_FIELDS:
+        raise authority.GenericQualificationError(where + " shape is unknown")
+    row = dict(value)
+    try:
+        image = qualification.QualificationImage(
+            row["reference"], row["id"], row["raw_os"], row["os"],
+            row["raw_architecture"], row["architecture"], tuple(row["declared_volumes"]))
+    except (qualification.GenericQualificationFailure, TypeError, ValueError) as exc:
+        raise authority.GenericQualificationError(where + " identity is malformed: " + str(exc)) from exc
+    if (image.os != "linux" or image.os != runtime["server_os"]
+            or image.architecture != runtime["server_architecture"]):
+        raise authority.GenericQualificationError(where + " platform is not server-native Linux")
+    if image.declared_volumes:
+        raise authority.GenericQualificationError(where + " image declares volumes")
+    return {key: row[key] for key in SPIKE_IMAGE_FIELDS}
 
 
 def _repo_digest(value: object, where: str) -> str:
@@ -303,7 +354,7 @@ def validate_run_record(value: object) -> dict[str, Any]:
     if type(row["spike_images"]) is not list or not 1 <= len(row["spike_images"]) \
             <= MAX_SPIKE_IMAGE_REFERENCES:
         raise authority.GenericQualificationError("run qualification record spike images differ")
-    row["spike_images"] = [_image_row(item, runtime, "spike image")
+    row["spike_images"] = [_spike_image_row(item, runtime, "spike image")
                            for item in row["spike_images"]]
     if type(row["probes"]) is not list or len(row["probes"]) != len(qualification.PROBE_ORDER):
         raise authority.GenericQualificationError("run qualification record must contain five probes")
@@ -324,7 +375,10 @@ def validate_run_record(value: object) -> dict[str, Any]:
         "schema": row["schema"], "run_binding": row["run_binding"],
         "profile_id": row["profile_id"], "authority_digest": row["authority_digest"],
         "policy_digest": row["policy_digest"], "implementation_digest": row["implementation_digest"],
-        "server_version": runtime["server_version"],
+        # across the binding only the server's major version is bound (operator
+        # decision, drift "Server version"); the full version stays a diagnostic in
+        # the runtime facts and must still match exactly within one attempt
+        "server_major": server_version_major(runtime["server_version"]),
         "daemon_id": row.get("daemon_id"), "probe_image_id": row["probe_image_id"],
         "qualification_image_digest": canonical_digest(probe_image_row),
         "spike_images_digest": canonical_digest(row["spike_images"]),
@@ -352,7 +406,17 @@ def build_run_record(
     checked = authority.validate_runtime(dict(runtime))
     semantic = authority.authority_facts(checked)
     probes_data = [probe.to_data() for probe in probes]
-    spike_data = [dict(item) for item in spike_rows]
+    spike_data = []
+    for item in spike_rows:
+        # the builder seals spike rows without a capability list: the sealed rows the
+        # shared qualification-image helper produces (which carry its own list for the
+        # probe image) are reduced to the spike-row fields here, and a caller's row is
+        # admitted only when those fields are present
+        try:
+            spike_data.append({key: item[key] for key in SPIKE_IMAGE_FIELDS})
+        except (TypeError, KeyError) as exc:
+            raise authority.GenericQualificationError(
+                "run qualification spike image row cannot be sealed") from exc
     body: dict[str, Any] = {
         "schema": QUALIFICATION_RECORD_SCHEMA, "run_binding": binding.to_data(),
         "profile_id": profile_id, "runtime": checked,
@@ -371,7 +435,8 @@ def build_run_record(
         "schema": body["schema"], "run_binding": body["run_binding"],
         "profile_id": profile_id, "authority_digest": body["authority_digest"],
         "policy_digest": body["policy_digest"], "implementation_digest": implementation_digest,
-        "server_version": checked["server_version"], "daemon_id": body.get("daemon_id"),
+        "server_major": server_version_major(checked["server_version"]),
+        "daemon_id": body.get("daemon_id"),
         "probe_image_id": body["probe_image_id"],
         "qualification_image_digest": canonical_digest(dict(probe_image_row)),
         "spike_images_digest": canonical_digest(spike_data),
@@ -456,7 +521,10 @@ class RunQualificationStore:
             readback = common.safe_file(path, cap=MAX_RECORD_BYTES)
         except common.GenericScaffoldingError as exc:
             if path.exists() or path.is_symlink():
-                raise authority.GenericQualificationError(
+                # an impostor occupies the publication name: unsafe, and the owner
+                # boundary reports it as the scaffolding reason (re-review 4,
+                # non-blocking 2), never a capability one
+                raise common.GenericScaffoldingError(
                     "run qualification record path is unsafe") from exc
         if readback is not None:
             if readback != payload:
@@ -483,8 +551,10 @@ class RunQualificationStore:
                     "run qualification record publication differs")
         except common.GenericScaffoldingError as exc:
             if path.exists() or path.is_symlink():
-                # a swapped-in impostor occupies the publication name: unsafe, refused
-                raise authority.GenericQualificationError(
+                # a swapped-in impostor occupies the publication name: unsafe, refused,
+                # and reported at the owner boundary as the scaffolding reason
+                # (re-review 4, non-blocking 2), never a capability one
+                raise common.GenericScaffoldingError(
                     "run qualification record path is unsafe") from exc
             raise
         for level in reversed(_naming_levels(self)):
@@ -599,9 +669,12 @@ def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: proce
     """Verify the trusted probe image per spec section 4.3, under the pinned endpoint.
 
     One ``docker image inspect`` of the exact pinned reference must show the pinned
-    index digest in ``RepoDigests`` (member presence, never Id equality), the
-    server-native platform, and no declared volumes; anything else — including a
-    locally built, loaded or retagged image — is ``probe-image-untrusted``.
+    index digest in some ``RepoDigests`` entry — under any repository name, because
+    the digest is the image's content identity and the repository name is not (a
+    mirror or proxy pull reports the digest under its own name), never on the
+    daemon-local ``Id`` — plus the server-native platform and no declared volumes;
+    anything else — including a locally built, loaded or retagged image, which carries
+    no ``RepoDigests`` entry with the pinned digest — is ``probe-image-untrusted``.
     """
     _remain(deadline, clock, "the trusted probe image inspection")
     pin = probe_image.pinned_probe_image()
@@ -640,13 +713,17 @@ def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: proce
             raise ValueError("the platform is not server-native")
     except Exception as exc:
         raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail) from exc
-    if pin.repo_digest not in digests:
+    if not any(_REPO_DIGEST.fullmatch(entry) is not None
+               and entry.rsplit("@", 1)[1] == pin.index_digest for entry in digests):
+        # content identity, not repository identity: no entry of any repository name
+        # carries the pinned index digest, so the local image is not the pinned one
         raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail)
     try:
-        # The sealed reference is the exact ``RepoDigests`` form (the canonical
-        # repo@index-digest name Docker reports); the full pinned ``name:tag@digest``
-        # reference is a pull hint rendered in the failure detail, and the pinned
-        # contract itself is bound through the implementation digest.
+        # The sealed reference is the pinned ``repo@index-digest`` form (the canonical
+        # name, never a mirror's own repository name, since the pin is the contract's
+        # content identity); the full pinned ``name:tag@digest`` reference is a pull
+        # hint rendered in the failure detail, and the pinned contract itself is
+        # bound through the implementation digest.
         image = qualification.QualificationImage(
             pin.repo_digest, image_id, raw_os, canonical_os, raw_architecture,
             canonical_architecture, ())

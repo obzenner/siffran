@@ -354,11 +354,13 @@ def safe_file(path: Path, *, cap: int = MAX_CONTROL_FILE_BYTES) -> bytes:
 
     ``fstat`` on that one descriptor owns the checks: type regular, owner, closed
     mode, exactly one link, size inside the cap. The bounded bytes are read from the
-    same descriptor, the read is confirmed to have watched a stable inode and size,
-    and only when the name still identifies that validated inode does the call
-    return: anything substituted between the checks and the read — Sol's hard link
-    carrying the very same bytes — is neither read nor reported, and the substitute
-    keeps its own metadata untouched (re-review 3, blocking 2).
+    same descriptor, the read is confirmed to have watched a stable inode, link count
+    and size, and only when the name still identifies that validated inode does the
+    call return: anything substituted between the checks and the read — Sol's hard
+    link carrying the very same bytes — is neither read nor reported, and a second
+    name linked to the same inode during the read is refused by its changed link
+    count (re-review 4, non-blocking 1), with the substitute keeping its own metadata
+    untouched (re-review 3, blocking 2).
     """
     try:
         descriptor = os.open(path, os.O_RDONLY | NOFOLLOW | NONBLOCK | CLOEXEC)
@@ -380,8 +382,10 @@ def safe_file(path: Path, *, cap: int = MAX_CONTROL_FILE_BYTES) -> bytes:
                 break
             data += chunk
         after = os.fstat(descriptor)
-        if ((after.st_dev, after.st_ino, after.st_size)
-                != (opened.st_dev, opened.st_ino, opened.st_size)):
+        # the link count joins the comparison: a second name linked to the same inode
+        # between the checks and the end of the read changes nothing else about it
+        if ((after.st_dev, after.st_ino, after.st_nlink, after.st_size)
+                != (opened.st_dev, opened.st_ino, opened.st_nlink, opened.st_size)):
             raise GenericScaffoldingError("sandbox file changed while read")
         named = path.lstat()
         if (stat.S_ISLNK(named.st_mode)

@@ -422,6 +422,40 @@ class ScaffoldingTests(unittest.TestCase):
             with self.assertRaises(common.GenericScaffoldingError):
                 common.safe_file(large, cap=len(big) - 1)
 
+    def test_a_second_name_linked_to_the_validated_inode_during_the_read_is_refused(self):
+        # (re-review 4, non-blocking 1) a hard link added to the very inode being
+        # validated and read keeps the bytes, the device, the inode and the size —
+        # only the link count changes. The stable-identity confirmation after the
+        # read must compare it: the bytes at a double-named record are refused
+        # before they are reported, nothing on disk is changed, and the next checked
+        # read refuses the double-named inode by its own identity.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            record = root / "record.json"
+            payload = b'{\n  "exact": "bytes"\n}\n'
+            record.write_bytes(payload)
+            record.chmod(common.MODE_FILE)
+            linked_name = root / "record-linked.json"
+            added: list[int] = []
+            real_read = os.read
+
+            def read_then_link(descriptor, size):
+                # during the read: a second name is linked to the validated inode
+                if not added:
+                    added.append(descriptor)
+                    os.link(record, linked_name)
+                return real_read(descriptor, size)
+
+            with patch("os.read", read_then_link):
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_file(record, cap=len(payload))
+            self.assertEqual(linked_name.stat().st_ino, record.stat().st_ino,
+                             "the refusal changed nothing: both names address one inode")
+            self.assertEqual(record.read_bytes(), payload)
+            # the next checked read refuses the now double-named inode on its own
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_file(record, cap=len(payload))
+
     def test_a_named_pipe_at_a_scaffold_name_is_refused_without_blocking(self):
         # (re-review 2, blocking 3) a named pipe parked at the scaffold name must be
         # refused promptly: the directory-only open rejects a non-directory kernel-side

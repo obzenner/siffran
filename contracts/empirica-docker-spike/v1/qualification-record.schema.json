@@ -29,7 +29,7 @@
     "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
     "runtime": {
       "type": "object",
-      "description": "The observed Docker runtime facts of the pinned daemon, exactly the /2 runtime shape (docker_cli, endpoint, context, versions, platforms, security options, resource-limit capability flags, capacity, host facts, discovery_reads, optional daemon_id). The closed field set and the capability admission are the /2 authority contract's; they are not restated here."
+      "description": "The observed Docker runtime facts of the pinned daemon, exactly the /2 runtime shape (docker_cli, endpoint, context, versions, platforms, security options, resource-limit capability flags, capacity, host facts, discovery_reads, optional daemon_id). The closed field set and the capability admission are the /2 authority contract's; they are not restated here. The full server_version stays a diagnostic of these facts: the execution binding (recomputed by the runtime admission) binds only its major part, and within one qualification attempt the exact version must still match."
     },
     "semantic_authority": {
       "type": "object",
@@ -96,24 +96,21 @@
         "proposal_digest": {"$ref": "#/$defs/digest"}
       }
     },
-    "imageRow": {
+    "spikeImageRow": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["reference", "id", "raw_os", "os", "raw_architecture", "architecture", "declared_volumes", "capabilities"],
+      "required": ["reference", "id", "raw_os", "os", "raw_architecture", "architecture", "declared_volumes"],
       "properties": {
         "reference": {"type": "string", "minLength": 1, "maxLength": 255},
-        "id": {"$ref": "#/$defs/digest"},
+        "id": {
+          "$ref": "#/$defs/digest",
+          "description": "The full daemon image ID observed at qualification: a diagnostic. The row is inspected, never probed, and carries no capability list."
+        },
         "raw_os": {"type": "string", "minLength": 1},
         "os": {"enum": ["linux"]},
         "raw_architecture": {"type": "string", "minLength": 1},
         "architecture": {"type": "string", "minLength": 1},
-        "declared_volumes": {"type": "array", "maxItems": 0, "items": {"type": "string"}},
-        "capabilities": {
-          "type": "array",
-          "minItems": 12,
-          "maxItems": 12,
-          "items": {"type": "string", "minLength": 1}
-        }
+        "declared_volumes": {"type": "array", "maxItems": 0, "items": {"type": "string"}}
       }
     },
     "probeImage": {
@@ -145,8 +142,8 @@
       "type": "array",
       "minItems": 1,
       "maxItems": 16,
-      "items": {"$ref": "#/$defs/imageRow"},
-      "description": "The environment proposal's 1..16 approved local references, each sealed to its daemon image ID and canonical server-native platform with no declared volumes (Empirica 7.2 section 4.1)."
+      "items": {"$ref": "#/$defs/spikeImageRow"},
+      "description": "The environment proposal's 1..16 approved local references, each sealed to its daemon image ID and canonical server-native platform with no declared volumes (Empirica 7.2 section 4.1). The rows carry no capability list, because spike images are inspected, never probed (Empirica 7.2 section 4.5); the shared qualification-image helper keeps its own list for the one trusted probe image. Per-spike resolution — and the platform re-verification it repeats under the pinned endpoint — is E10's, not this record's."
     },
     "probe": {
       "type": "object",
