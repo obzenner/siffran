@@ -24,7 +24,10 @@ blocking 2); a composition entry with no ``if`` key at all is not conditional an
   (``required: [<member>]``) or forbid it (``not: {required: [<member>]``) — opposite sides, one
   member, no other shape (the run view's last failure and the public fault; a side that only
   re-declares the member with its schema is unmodelled: jsonschema never makes it required, so a
-  drawing cannot be derived from it).
+  drawing cannot be derived from it);
+* the one-way guard's paired member and any presence pairing's paired member differ from their
+  own driver — a member guarding itself is unmodelled (E6c re-review 2, blocking 2) and refuses
+  at parse exactly as the two-way form's same shape refusal does.
 """
 from __future__ import annotations
 
@@ -173,6 +176,10 @@ def _presence(node: dict, doc_id: str, pointer: str) -> Pairing:
     if not isinstance(then, dict) or not isinstance(otherwise, dict):
         raise ValueError(f"{doc_id}#{pointer}: a presence pairing must name both its sides")
     then_side, else_side = _side(then, "then"), _side(otherwise, "else")
+    if then_side[1] == driver:
+        raise ValueError(f"{doc_id}#{pointer}: a presence pairing names a paired member other than "
+                         "its own driver — a member guarding itself is unmodelled, exactly as the "
+                         "two-way value form refuses it")
     if then_side[1] != else_side[1] or then_side[0] == else_side[0]:
         raise ValueError(f"{doc_id}#{pointer}: a presence pairing holds one paired member present "
                          "on exactly one of its two sides")

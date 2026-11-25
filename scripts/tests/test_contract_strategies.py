@@ -943,6 +943,24 @@ class PresenceFormTests(unittest.TestCase):
     its own breaches, and a gated member's own challenges must still fire against a base that drew
     the complementary side (the guard is placed for them, never guessed away)."""
 
+    def test_a_presence_conditional_pairing_a_member_with_itself_stays_refused(self):
+        """Sol's seed (E6c re-review 2, blocking 2): leaving the optional-reason fixture's guard
+        on ``reason`` but pointing both branches at ``reason`` too yields a schema-valid
+        conditional the old parse accepted — and the drawing then drew ``{'reason':
+        'docker-unreachable'}`` the schema itself refuses, while the first pairing flip derived
+        ``{}``, which the schema accepts. A member guarding itself is unmodelled (the two-way
+        value parse already refuses it): both engines refuse the seed at parse."""
+        document = copy.deepcopy(PRESENCE)
+        which = "wire"
+        node = document["$defs"][which]
+        node["then"] = {"required": ["reason"]}
+        node["else"] = {"not": {"required": ["reason"]}}
+        mutant = Contract({"presence": document})
+        with self.assertRaises(ValueError):
+            mutant.drawn(f"presence#/$defs/{which}")
+        with self.assertRaises(ValueError):
+            mutant.cases(f"presence#/$defs/{which}")
+
     def test_a_boolean_if_at_the_node_level_stays_refused(self):
         """Sol's seed (E6c re-review 1, blocking 2): replacing a presence guard's ``if`` with a
         boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies
