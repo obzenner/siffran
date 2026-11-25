@@ -23,6 +23,7 @@ Why this is a rule and not a preference: a command that lives only in a chat mes
 | a hand-written gate script, or `release-check` plus the UI and smoke checks one by one | `make verify` (hermetic; `UI=0` skips the browser steps) |
 | `pip install hypothesis` or any ad-hoc dev tool install | `make dev-install` (pinned, hashed `requirements-dev.txt` into `.venv`; `make ui-install` for the UI's) |
 | hand-mutating code to see whether a test notices | `make mutate` (the changed lines; each survivor printed as `file:line original → mutant`; `FILES=`/`LINES=` to choose; Stryker incremental on Vitest, mutmut in a scratch copy, never in the worktree) |
+| eyeballing a diff for copy-paste, or a bare `npx jscpd` | `make dup-check [BASE=<ref>]` (jscpd over `plugins/` and `scripts/`: fails on a new production clone between BASE and HEAD, warns on a new one in test code; `TOKENS=` the least size, default 60; committed content, so commit first; not in `make check`; `make dup-install` first, the detector is pinned in `tools/dup-check`) |
 | running a UI test file by hand, or guessing which tests a change touches | `make ui-test` (the tests related to the changed UI files, from the imports; `FILES=app/geometry.js` to name them) |
 | a hand-driven Chrome or a screenshot script to see the UI | `make ui-look URL=<page> [OUT=x.png] [SIZE=1440x900]` (one PNG within 30 s; open it with the read tool) |
 | starting a second demo server, or one in the foreground | `make ui-dev` (one demo per worktree, N=1000, reused while it runs; prints the URL; `STOP=1` stops it) |
@@ -47,6 +48,7 @@ Rules that follow from this:
 
 - `Makefile` — the project lifecycle; `make help` is the entry point
 - `scripts/` — validators the Makefile calls (manifest checks, doc-drift check, version bump)
+- `tools/dup-check/` — the pinned clone detector (jscpd: `package.json`, `package-lock.json`) behind `make dup-check`
 - `.claude-plugin/marketplace.json` — marketplace catalog listing all available plugins
 - `.agents/plugins/marketplace.json` — Codex marketplace catalog for Methodologist (Empirica is withheld from it, ADR-0069 G10-R1)
 - `plugins/<name>/.claude-plugin/plugin.json` — plugin manifest (name, version, description)

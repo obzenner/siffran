@@ -670,11 +670,12 @@ skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Clau
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_skills.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_native_qualification_census.py
 
-suites-check: ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner and make mutate's plan, and docs-check's README image check
+suites-check: ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner, make mutate's plan and make dup-check's clone pairs (its scenarios need make dup-install), and docs-check's README image check
 	@$(PYTHON) $(SCRIPTS)/tests/test_run_suites.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_suite_ownership.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_verify.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_mutate.py
+	@$(PYTHON) $(SCRIPTS)/tests/test_dup_check.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_doc_review.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_check_generated_docs.py
 
@@ -890,6 +891,15 @@ ui-browser: ## Headless-Chrome journeys, each once at fixture size (what needs m
 .PHONY: mutate
 mutate: ## Mutation testing of the changed lines (git diff HEAD, and untracked files whole), each survivor printed as file:line original → mutant: Stryker (Vitest runner, perTest, incremental) for the UI, mutmut (patch-scoped, in a scratch copy) for Python; FILES=a.py,b.js[:10-20] and LINES=10-20 override, RUNNER= replaces the tests per Python mutant; Stryker runs at most min(4, cores/2) workers (JOBS= to choose), each heap capped at 768 MB, mutmut one at a time; never edits the worktree (needs make ui-install, make dev-install)
 	@$(PYTHON) $(SCRIPTS)/mutate.py
+
+# The clone detector (jscpd) is a dev-only toolchain pinned in tools/dup-check (package.json + package-lock.json, exact version, the
+# platform binaries' integrity hashes), installed by npm ci like the UI's; dup-check never downloads anything.
+.PHONY: dup-install dup-check
+dup-install: ## Install the pinned clone detector (npm ci in tools/dup-check; jscpd 5.4.3, lockfile)
+	cd tools/dup-check && npm ci --ignore-scripts --no-audit --no-fund
+
+dup-check: ## New code clones: fail on a new production clone between BASE and HEAD (default BASE: merge base with main; TOKENS=60 least size), warn on a new one in test code; jscpd over plugins/ and scripts/, committed content, generated and vendored files left out; not in make check (needs make dup-install)
+	@$(PYTHON) $(SCRIPTS)/dup_check.py $(if $(BASE),--base "$(BASE)") $(if $(TOKENS),--tokens "$(TOKENS)")
 
 .PHONY: ui-smoke ui-shots
 ui-smoke: ## One headless-Chrome smoke run at 1,000 generated runs: first render, DOM bounds, a zoom's frames (needs Chrome; in make verify)

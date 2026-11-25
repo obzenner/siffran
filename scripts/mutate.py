@@ -48,7 +48,7 @@ TEST_ROOTS = ("plugins/empirica/tests", "scripts/tests", "lib")
 # What every plugins/empirica Make suite puts on the path (the plugin's packages and the tests' own helpers).
 EMPIRICA_TEST_PATH = "plugins/empirica:plugins/empirica/tests"
 STRYKER_REPORT = "reports/mutation.json"  # relative to the UI, as stryker.config.json writes it
-_TEST = re.compile(r"(^|/)(tests?/|test_[^/]*\.py$)|\.test\.mjs$")
+TEST_PATH = re.compile(r"(^|/)(tests?/|test_[^/]*\.py$)|\.test\.(mjs|ts)$")
 _NEVER = re.compile(r"(^|/)(vendor|node_modules|\.venv|dist|reports)/")
 _HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
 
@@ -130,7 +130,7 @@ def plan(scope: dict, exists=lambda p: (ROOT / p).is_file()) -> Plan:
     for path, ranges in scope.items():
         if not exists(path) and exists(UI + path):
             path = UI + path
-        if _TEST.search(path) or _NEVER.search(path) or not exists(path):
+        if TEST_PATH.search(path) or _NEVER.search(path) or not exists(path):
             continue
         if path.endswith(".py"):
             work.python[path] = ranges
