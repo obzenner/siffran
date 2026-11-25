@@ -23,7 +23,7 @@ from adapters.governance import (Approve, Dismiss, HostEnvironment, HostGovernan
                                 Reject, _duration, _is_document_mismatch, confirm_form,
                                 governance_timeout,
                                  decision, expected_approval_kind, review_form)
-from adapters.mcp_server import McpSession
+from adapters.mcp_server import INGRESS, McpSession, profile_from_environment
 from adapters.public_tools import PublicTools
 from adapters.state.hitl import DocumentMismatch, HitlDocuments
 from application import protocol as _proto
@@ -53,7 +53,8 @@ TEST_DOCUMENT = {"digest": "sha256:" + "a" * 64,
 class GovernanceHostTests(unittest.TestCase):
     def setUp(self):
         self.profile = CLAUDE_PROFILE
-        self.service = compose(Workspace(), Harness(), Runs(), Artifacts(), None, self.profile, {}, None)
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, self.profile, {}, None)
         self.sequence = 0
         response = self.dispatch({"type": "StartRun", "control_mode": "deliberative", "goal": "supplied task",
                                   "invocation": dict(TEST_INVOCATION),
@@ -798,6 +799,31 @@ class GovernanceHostTests(unittest.TestCase):
         self.assertIn("passes 8 (was 7)", raise_message)
         self.assertTrue(calls[0][0].startswith("Empirica · approve run configuration (epoch "), "the first approval is unchanged")
 
+    def test_a_reduction_through_a_profile_without_ingress_reports_the_registry_wire_value(self):
+        """An automatic reduction of an approved run needs no human, so a profile that cannot ask
+        one still mediates it: its context submission carries the registry's own value for "no
+        approval ingress" — the wire the configuration flow always used — and the reduction is
+        approved without a form."""
+        auto = self.dispatch({"type": "StartRun", "control_mode": "auto", "goal": "auto task",
+                              "invocation": {**TEST_INVOCATION, "delegation": True},
+                              "selector": {"project": "p", "session": "auto-no-ingress"}})["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {"kind": "graph", "payload": GRAPH}})
+        approve_current(self.service._coordinator, auto)
+        lower = self.dispatch({"type": "ObserveAction", "run_id": auto, "action": {"kind": "configure_run", "budgets": {
+            "max_passes": 7, "max_spawns": 1, "max_audit_spawns": 2}, "rationale": "same graph, lower pass allowance"}})["result"]
+        other = next(p for p in _proto.profile_ids() if _proto.approval_ingress(p) is None)
+        service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, other, {}, None)
+        contexts = []
+        mediator = HostGovernance(other, elicit=None, documents=self.documents,
+            context_ingress=lambda _p, r, v: contexts.append(v) or service.trusted_governance_context(run_id=r, payload=v),
+            decision_ingress=lambda _p, r, v: service.trusted_governance_decision(run_id=r, payload=v))
+        lowered = mediator(lower)
+        self.assertEqual([context["ingress"] for context in contexts],
+                         [_proto.host_profile(other)["approval_ingress"]])
+        self.assertEqual((lowered["type"], lowered["run"]["governance"]["state"],
+                          lowered["run"]["governance"]["approval_kind"]), ("Allow", "approved", "auto"))
+        self.assertEqual(lowered["run"]["governance"]["budgets"]["max_passes"], 7)
+
     def test_F2_a_raise_nobody_can_approve_names_the_proposal_within_the_ceilings_and_the_stop(self):
         """Onto-S F2: after the first approval a pending raise needs a human; with none to ask and a revision left, the reason
         and the run's Next agree on "propose within the approved ceilings, or stop" (not the stop alone)."""
@@ -1195,22 +1221,24 @@ class EnvironmentHostTests(unittest.TestCase):
         environment.documents = self.documents
         return PublicTools(profile, dispatch=lambda r, _p: service.dispatch(r), environment=environment)
 
-    def start_run(self, name, goal="Qualify the run's environment from supplied context.", **extra):
+    def start_run(self, name, goal="Qualify the run's environment from supplied context.", service=None, **extra):
+        """A deliberative run ready for its environment action, on ``service`` (the fixture's own by default)."""
+        service = self.service if service is None else service
         response = self.dispatch({"type": "StartRun", "control_mode": "deliberative", "goal": goal,
                                   "invocation": dict(TEST_INVOCATION),
-                                  "selector": {"project": "p", "session": name}, **extra})
+                                  "selector": {"project": "p", "session": name}, **extra}, service)
         run = response["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "graph", "payload": GRAPH}}, service)
+        approve_current(service._coordinator, run)
         self.dispatch({"type": "ObserveAction", "run_id": run,
-                       "action": {"kind": "graph", "payload": GRAPH}})
-        approve_current(self.service._coordinator, run)
-        self.dispatch({"type": "ObserveAction", "run_id": run,
-                       "action": {"kind": "route", "reason": "primary environment qualification route"}})
-        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "investigate"}})
+                       "action": {"kind": "route", "reason": "primary environment qualification route"}}, service)
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "investigate"}}, service)
         return run
 
-    def dispatch(self, command):
+    def dispatch(self, command, service=None):
         self.sequence += 1
-        return self.service.dispatch({"protocol": "empirica/v2", "request_id": str(self.sequence), "command": command})
+        return (self.service if service is None else service).dispatch(
+            {"protocol": "empirica/v2", "request_id": str(self.sequence), "command": command})
 
     def initialize(self, capabilities):
         return self.session.process({"jsonrpc": "2.0", "id": "init", "method": "initialize",
@@ -1611,6 +1639,29 @@ class EnvironmentHostTests(unittest.TestCase):
                     "params": {"protocolVersion": "2025-11-25", "capabilities": {"elicitation": {"form": {}}}}})
                 self.assertIn("result", response)
                 self.assertIsNone(session.tools._environment)
+
+    def test_a_profile_with_another_ingress_gets_no_form_and_no_approval_on_its_own_run(self):
+        """The explicit host-profile setting may select any registry profile: one whose approval
+        ingress is not this transport's own composes no form even for a run that belongs to it
+        (its recorded ingress is that profile's), and a form-capable client's accept approves nothing."""
+        self.assertIn(INGRESS, _proto.APPROVAL_CAPABILITY)  # the transport's ingress is a registry value
+        for other in (p for p in _proto.profile_ids() if _proto.approval_ingress(p) not in (None, INGRESS)):
+            with self.subTest(profile=other):
+                profile = profile_from_environment({"EMPIRICA_HOST_PROFILE_ID": other})
+                service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, profile, {}, None)
+                run = self.start_run(f"own-{other[:5]}", service=service)
+                recorded = service.dispatch({"protocol": "empirica/v2", "request_id": "read", "command": {
+                    "type": "GetRun", "run_id": run}})["result"]["run"]["governance"]["context"]["ingress"]
+                self.assertEqual(recorded, _proto.host_profile(profile)["approval_ingress"])
+                self.session = McpSession(profile, self.incoming, self.send, timeout=0.05)
+                self.assertIsNone(self.session.environment)
+                self.initialize({"elicitation": {"form": {}}})
+                files = self.sidecar_files()
+                with patch("adapters.bridge.build_service", return_value=service):
+                    self.observe_environment(run=run)
+                row = self._stored_environment_row(run)
+                self.assertEqual((row["state"], tuple(row["receipts"])), ("pending", ()))
+                self.assertEqual((self.forms(), self.sidecar_files()), ([], files))
 
     def test_a_host_whose_ingress_is_not_the_runs_cannot_approve_it(self):
         """Profiles whose approval ingress differs from the run's (none, or another host's) share

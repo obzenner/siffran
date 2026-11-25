@@ -158,11 +158,9 @@ class _Service:
     def environment_admission(self, *, request_id) -> dict | None:
         """The run (its handle names the generation) and revision the environment action of this
         request id admitted, as the committing transaction recorded them; private, never part of
-        any response. ``None`` when that request admitted nothing."""
-        admitted = self._coordinator.environment_admission
-        if admitted is None or admitted[0] != request_id:
-            return None
-        return {"run_id": admitted[1], "revision": admitted[2]}
+        any response, and handed out once. ``None`` when that dispatch admitted nothing."""
+        admitted = self._coordinator.take_environment_admission(request_id)
+        return None if admitted is None else {"run_id": admitted[0], "revision": admitted[1]}
 
     def trusted_environment_document(self, *, run_id, payload=None) -> dict:
         """The write-first fetch half of the environment's private path (E8, ADR-0072): the

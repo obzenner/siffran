@@ -42,8 +42,8 @@ visible lines, then the goal and the image count (never a decision link while th
 environment decision, E11); the agent's plan, rationale, image references and the installed binding live in the
 document under their unverified labels. Accept approves, Decline is an explicit rejection (spec §5), and Esc,
 cancel or a timeout leave the revision pending; a digest the host cannot recompute refuses with its own closed
-reason and the host re-presents the same revision once. The mediation is composed only for a profile with an
-approval ingress, and the private fetch and decision read nothing and record nothing for a host whose ingress is
+reason and the host re-presents the same revision once. The mediation is composed only for a profile whose
+approval ingress is the transport's own (MCP elicitation), and the private fetch and decision read nothing and record nothing for a host whose ingress is
 not the one the run recorded.
 Pi's environment dialog is E12's and nothing is claimed for it yet.
 

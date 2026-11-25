@@ -586,22 +586,31 @@ class ReceiptTests(unittest.TestCase):
 
 class AdmissionRecordTests(unittest.TestCase):
     """The admitting transaction records the run (its handle names the generation) and the
-    revision it admitted for its own request, privately: never in a response, and nothing for a
-    request that admitted no revision."""
+    revision it admitted for its own dispatch, privately: never in a response, handed out once,
+    and nothing for a dispatch that admitted no revision — also on a service that is reused."""
 
-    def test_the_admission_names_the_run_and_revision_of_its_own_request_only(self):
+    def admission(self, env):
+        return env.service.environment_admission(request_id=_request({})["request_id"])
+
+    def test_the_admission_names_the_run_and_revision_of_its_own_dispatch_once(self):
         env = DeliberationEnv()
-        request_id = _request({})["request_id"]
-        self.assertIsNone(ServiceEnv().start().service.environment_admission(request_id=request_id))
-        self.assertEqual(env.service.environment_admission(request_id=request_id),
-                         {"run_id": env.run_id, "revision": 1})
-        self.assertIsNone(env.service.environment_admission(request_id="another-request"))
+        self.assertIsNone(self.admission(ServiceEnv().start()))
+        self.assertEqual(self.admission(env), {"run_id": env.run_id, "revision": 1})
+        self.assertIsNone(self.admission(env), "a read consumes the fact")
         env.submit_revision()
-        self.assertEqual(env.service.environment_admission(request_id=request_id),
-                         {"run_id": env.run_id, "revision": 2})
-        refused = _submit(env, _networked_payload())
-        self.assertEqual(refused["type"], "Block")
-        self.assertIsNone(env.service.environment_admission(request_id=request_id))
+        self.assertEqual(self.admission(env), {"run_id": env.run_id, "revision": 2})
+        self.assertEqual(_submit(env, _networked_payload())["type"], "Block")
+        self.assertIsNone(self.admission(env))
+
+    def test_a_later_dispatch_with_the_same_request_id_never_returns_an_earlier_admission(self):
+        env = DeliberationEnv()  # revision one admitted; its fact never read
+        self.assertEqual(env.request({"type": "GetRun", "run_id": env.run_id})["type"], "Allow")
+        self.assertIsNone(self.admission(env))
+
+    def test_another_request_id_is_handed_nothing_and_consumes_nothing_of_its_own(self):
+        env = DeliberationEnv()
+        self.assertIsNone(env.service.environment_admission(request_id="another-request"))
+        self.assertIsNone(self.admission(env), "the read of a foreign id consumed the fact")
 
     def test_the_public_response_of_an_admission_names_no_revision(self):
         env = DeliberationEnv()

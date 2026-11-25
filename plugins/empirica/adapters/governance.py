@@ -169,8 +169,9 @@ def _document_lines(document: Mapping[str, Any], *, linked: bool = True) -> tupl
     observer projects no row for (``linked=False``) is named by its ``File:`` line alone, then
     its short digest."""
     short = f"Document {document['digest'][:7 + _SHORT_BODY]}"
+    path = f"File: {document['path']}"
     if not linked:
-        return (f"File: {document['path']}", short)
+        return (path, short)
     url = document.get("url")
     if isinstance(url, str) and url:
         return (f"Details: {url}", short)
@@ -182,7 +183,7 @@ def _document_lines(document: Mapping[str, Any], *, linked: bool = True) -> tupl
              if run12 else f"{_UI_COMMAND} → Human decisions")
     return (*textwrap.wrap(f"Details: {where}", width=72, break_long_words=False,
                            break_on_hyphens=False),
-            short, f"File: {document['path']}")
+            short, path)
 
 def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float, *,
                 approved: Mapping[str, Any] | None = None) -> tuple[str, dict]:
@@ -521,8 +522,8 @@ class HostGovernance:
         if run["status"] != "active" or g["state"] == "approved":
             return result
         approval_kind = expected_approval_kind(g, g["raises"])
-        approval_ingress = protocol.approval_ingress(self.profile)
-        if approval_kind == "host_ui" and (approval_ingress is None or self.elicit is None):
+        approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
+        if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
             # Report what this host can do NOW, so the run's own facts (and its Next) say nobody can be asked,
             # whatever an earlier context said; then the view names the stop alone.
             reported = self.context_ingress(self.profile, run["id"],

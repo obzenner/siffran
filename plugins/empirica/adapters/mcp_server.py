@@ -21,6 +21,8 @@ from adapters.governance import HostEnvironment, HostGovernance, governance_time
 from application.protocol import approval_ingress, host_profile_id  # noqa: E402
 
 PROTOCOL_VERSION = "2025-11-25"
+#: The one approval ingress this transport carries: the registry's own value for a human asked through MCP elicitation.
+INGRESS = "mcp_elicitation"
 
 
 def profile_from_environment(environ: dict[str, str] | None = None) -> str:
@@ -95,8 +97,9 @@ class McpSession:
         self.timeout = governance_timeout() if timeout is None else timeout
         self.active_call_id = None
         self.mediator = HostGovernance(profile)
-        # a profile without an approval ingress gets no environment mediation, whatever form support its client claims
-        self.environment = HostEnvironment(profile) if approval_ingress(profile) else None
+        # only a profile whose approval ingress is this transport's own gets the environment form, whatever form support
+        # its client claims
+        self.environment = HostEnvironment(profile) if approval_ingress(profile) == INGRESS else None
         # Codex has no human ingress: its route is `unavailable`, which `HostConfirmation` never presents.
         self.confirmer = HostConfirmation(profile, timeout=lambda: self.timeout)
         self.tools = tools or PublicTools(profile, govern=self.mediator, confirm=self.confirmer,
