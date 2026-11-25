@@ -235,7 +235,7 @@ route → graph → configure_run (approval) → investigate → … research �
      prior binding. If the CAS loses (stop, newer revision, concurrent attempt), the record is orphaned and nothing
      binds.
   - Deadline: one host bound covering the lock wait, recovery, up to 16 inspections, probes, cleanup and publication
-    (proposal: 150 s). The Pi and Claude transport budgets add `qualify` to the long-operation class (R6). A
+    (90 s, from the timing evidence in this section). The Pi and Claude transport budgets add `qualify` to the long-operation class (R6). A
     killed or timed-out attempt binds nothing and leaves recoverable journals.
   - Failure never changes the active binding.
 - **Spikes.** Admissible only with an active binding. The plan's image reference must be one of the approved
