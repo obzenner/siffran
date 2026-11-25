@@ -185,12 +185,10 @@ class OwnerHarness:
             return self.kernel_wrapper(kernel)
         return kernel
 
-    def call(self, **overrides):
-        arguments = {
-            "project_id": "project-1", "run_id": "run-1", "generation": 1,
-            "attempt_id": self.attempt_id, "revision": 1, "proposal_digest": D0,
-            "spike_images": list(self.spike_images), "profile_id": self.profile_id,
-            "docker_cli": self.docker_cli,
+    def options(self):
+        """The owner's own injection seams — every Docker answer a fake — as the keyword set a
+        host port passes through unchanged (the bridge's ``_RunQualificationPort``)."""
+        return {
             "runtime_inspector": self.runtime_inspector,
             "pinned_reobserver": self.pinned_reobserver or self._runtime_inspector,
             "implementation_inspector": self.implementation_inspector,
@@ -198,6 +196,15 @@ class OwnerHarness:
             "kernel_factory": self.kernel_factory,
             "sandbox_root": self.root,
             "clock": self.clock,
+        }
+
+    def call(self, **overrides):
+        arguments = {
+            "project_id": "project-1", "run_id": "run-1", "generation": 1,
+            "attempt_id": self.attempt_id, "revision": 1, "proposal_digest": D0,
+            "spike_images": list(self.spike_images), "profile_id": self.profile_id,
+            "docker_cli": self.docker_cli,
+            **self.options(),
         }
         arguments.update(overrides)
         return run_owner.qualify_run_environment(**arguments)
@@ -1920,6 +1927,93 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         outcome = harness.call()
         self.assertIs(outcome.reason,
                       run_owner.RunQualificationReason.IMAGE_DECLARES_VOLUMES)
+
+
+class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
+    """Settling the open row of a dead attempt (spec §5, E9 fix round): the shared runtime lock
+    is taken without waiting, prior journals are recovered by the attempt's own recovery owner
+    under it, and the transaction's closing runs still under it."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = (Path(self.temporary.name) / "sandbox").resolve()
+        self.root.mkdir(mode=0o700, parents=True)
+        self.root.chmod(0o700)
+        self.harness = OwnerHarness(self.root)
+        self.recoveries = []
+        original = self.harness.effects_factory
+
+        def recording(resolved, operation, name):
+            self.recoveries.append(name)
+            return original(resolved, operation, name)
+
+        self.harness.effects_factory = recording
+
+    def settle(self, on_settled, **overrides):
+        options = self.harness.options()
+        arguments = {
+            "project_id": "project-1", "run_id": "run-1", "generation": 1,
+            "attempt_id": self.harness.attempt_id, "profile_id": self.harness.profile_id,
+            "docker_cli": self.harness.docker_cli, "on_settled": on_settled,
+            "runtime_inspector": options["runtime_inspector"],
+            "effects_factory": options["effects_factory"],
+            "sandbox_root": self.root, "clock": options["clock"],
+        }
+        arguments.update(overrides)
+        return run_owner.settle_interrupted_attempt(**arguments)
+
+    def test_a_free_lock_recovers_journals_and_runs_the_closing_under_the_lock(self):
+        held_during = []
+
+        def closing():
+            store = common.ExecutionStore(self.root)
+            try:
+                with common.runtime_lock(store, time.monotonic() + 1.0, blocking=False):
+                    held_during.append(False)
+            except common.RuntimeLockBusy:
+                held_during.append(True)
+
+        outcome = self.settle(closing)
+        self.assertIs(outcome, True)
+        self.assertEqual(held_during, [True], "the closing runs while the settle holds the lock")
+        self.assertEqual(self.recoveries, ["recovery"], "prior journals are recovered first")
+        self.assertEqual(self.harness.inspector_calls, 1)
+        self.assertNoRecordPublished()
+
+    def test_a_held_lock_answers_busy_without_recovering_or_closing(self):
+        store = common.ExecutionStore(self.root)
+        store.prepare_execution_scaffolding()
+        closed = []
+        with common.runtime_lock(store, time.monotonic() + 5.0):
+            outcome = self.settle(lambda: closed.append(True))
+        self.assertIs(outcome, False)
+        self.assertEqual((closed, self.recoveries, self.harness.inspector_calls), ([], [], 0))
+
+    def test_a_recovery_that_cannot_run_returns_its_closed_failure_and_never_closes(self):
+        closed = []
+
+        def unreachable(recorded, *, deadline, **kwargs):
+            raise authority.GenericQualificationError("the daemon cannot be reached")
+
+        outcome = self.settle(lambda: closed.append(True), runtime_inspector=unreachable)
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIsNot(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual(closed, [])
+
+    def test_an_unclosed_binding_is_refused_as_invalid_input_before_any_lock(self):
+        closed = []
+        outcome = self.settle(lambda: closed.append(True), attempt_id="")
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual((closed, self.recoveries), ([], []))
+
+    def assertNoRecordPublished(self):
+        records = run_owner.RunQualificationStore(self.root).records
+        self.assertFalse(records.exists() and any(records.iterdir()),
+                         "settling a dead attempt publishes no record")
 
 
 class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):

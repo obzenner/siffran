@@ -70,8 +70,10 @@ REASON_HINTS = {
     "image-inspect-failed": "the image inspection command could not be executed or answered an error; check the local image and the Docker tooling, then request qualification again",
     "image-inspect-timeout": "the image inspection timed out; ask the operator to steady the daemon, then request qualification again",
     "image-inspect-output-limit": "the image inspection exceeded its output bound; ask the operator to inspect the daemon, then request qualification again",
-    "image-tool-missing": "the qualification image is missing a tool the probes need (including /bin/sh); choose an image that carries them, then request qualification again",
-    "image-uid65534-unusable": "the qualification image is not readable and executable as uid 65534 (nobody); choose one that is, then request qualification again",
+    "image-tool-missing": "an inspected image is missing a tool the probes need (including /bin/sh): for an image of your approved environment revision, propose a revision with an image that carries them; for the host-pinned probe image, ask the operator to repair the pinned probe path (no proposal replaces it); then request qualification again",
+    "image-uid65534-unusable": "an inspected image is not readable and executable as uid 65534 (nobody): for an image of your approved environment revision, propose a revision with one that is; for the host-pinned probe image, ask the operator to repair the pinned probe path (no proposal replaces it); then request qualification again",
+    "qualification-in-progress": "another qualification attempt holds the shared runtime: nothing was reserved or charged; wait for it, then read the run and request qualification again only if nothing is bound",
+    "qualification-interrupted": "an earlier attempt of this run died before it recorded an outcome: it stays charged, bound nothing and orphaned any record it published; request qualification again",
 }
 
 
@@ -153,12 +155,17 @@ def render_limits() -> str:
         "prepare, qualify binds); StartRun binds the run alone (the unqualified reference, never "
         "machine-wide authority, with the attempt ceiling the run view's own); an admissible qualify "
         "reserves one charged attempt durably before any host effect (charged even when the attempt "
-        "then fails or is interrupted; invalid ingress and an exact replay of the still-open "
-        "attempt charge nothing), runs the host attempt only where the composition binds a generic "
-        "Docker backend (otherwise it refuses as the unsupported host fact, charging nothing), and "
-        "records the outcome by compare-and-set against the run generation, approved revision and "
-        "prior binding: a lost race (a stop, a superseded revision, a concurrent attempt) orphans "
-        "the published record and binds nothing",
+        "then fails or is interrupted; invalid ingress and an exact replay of a delivery whose "
+        "attempt resolved charge nothing and return the recorded outcome), under the run's "
+        "current configuration approval; while another attempt holds the shared runtime a qualify "
+        "refuses with qualification-in-progress, and an open row whose attempt died is closed by "
+        "the next qualify as qualification-interrupted (charged, binding nothing, any record it "
+        "published orphaned) before the request is evaluated as a fresh attempt; the host attempt "
+        "runs only where the composition binds a generic Docker backend (otherwise it refuses as "
+        "the unsupported host fact, charging nothing), and its outcome is recorded by "
+        "compare-and-set against the run generation, approved revision, proposal digest and prior "
+        "binding the reservation captured: a lost race (a stop, a superseded revision, a "
+        "concurrent attempt) orphans the published record and binds nothing",
         "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
         "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
         "it, and admission is the observable inspection of that pinned reference: some "

@@ -189,17 +189,34 @@ def GenericDockerHarness(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
+#: The one host whose profile never composes the qualification port: Codex stays the documented
+#: refusal host (observational tier), so the port — an execution path — is withheld for it exactly
+#: as the marketplace withholds the plugin. ``host-profiles.json`` is the owner of the identity.
+_QUALIFICATION_WITHHELD_PROFILE = _proto.host_profile_id("codex-cli")
+
+
+#: The owner injection seams a settle of an interrupted attempt takes: recovery needs the
+#: discovery, the effects, the sandbox root and the clock — never the attempt's probes.
+_SETTLE_SEAMS = frozenset({"runtime_inspector", "effects_factory", "sandbox_root", "clock"})
+
+
 class _RunQualificationPort:
     """The host qualification port (Empirica 7.2 §5, E9), bound only where the guarded generic
-    Docker composition succeeded: every call runs E5's owner
-    (``adapters.sandbox.run_qualification.qualify_run_environment``) under the run binding the
-    transaction reserved, with the approved revision's profile and spike-image references, the
-    one 90-second host deadline the owner owns, and the process's frozen loaded release. The
-    port holds no state of its own, and its closed failure mapping is the identity over every
-    registered attempt failure; the one non-failure spelling — the low-level invalid-input — is
-    an internal impossible-after-validation breach and refuses closed without an attempt
-    failure word (the transaction treats it as an internal host failure: the open reservation
-    stays charged and unresolved)."""
+    Docker composition succeeded and the host's profile is not withheld: every call runs E5's
+    owner (``adapters.sandbox.run_qualification``) under the run binding the transaction
+    reserved, with the approved revision's profile and spike-image references, the one 90-second
+    host deadline the owner owns, and the process's frozen loaded release. The port holds no
+    state of its own, and its closed failure mapping is the identity over every registered
+    attempt failure; the one non-failure spelling — the low-level invalid-input — is an internal
+    impossible-after-validation breach and refuses closed without an attempt failure word (the
+    transaction treats it as an internal host failure: the open reservation stays charged and
+    the next qualify closes it as interrupted).
+
+    ``owner_options`` are the owner's own injection seams (its runtime inspector, effects, sandbox
+    root and clock), empty in production; the port passes them through unchanged."""
+
+    def __init__(self, **owner_options):
+        self._owner_options = dict(owner_options)
 
     def run_qualification_attempt(self, request):
         from application.ports import (QualificationAttemptBound,
@@ -212,11 +229,28 @@ class _RunQualificationPort:
             proposal_digest=request.proposal_digest,
             spike_images=list(request.spike_images),
             profile_id=request.profile_id,
-            docker_cli=Path("docker"))
+            docker_cli=Path("docker"), **self._owner_options)
         if type(outcome) is run_qualification.RunQualificationBound:
             return QualificationAttemptBound(
                 outcome.record_digest,
                 outcome.record["execution_binding_digest"])
+        if outcome.reason is run_qualification.RunQualificationReason.INVALID_INPUT:
+            raise RuntimeError(
+                "the run qualification owner refused the transaction's validated binding")
+        return QualificationAttemptFailed(outcome.reason.value, outcome.probe)
+
+    def settle_interrupted_attempt(self, request, close):
+        from application.ports import QualificationAttemptFailed
+        from adapters.sandbox import run_qualification
+        outcome = run_qualification.settle_interrupted_attempt(
+            project_id=request.project_id, run_id=request.run_id,
+            generation=request.generation, attempt_id=request.attempt_id,
+            profile_id=request.profile_id, docker_cli=Path("docker"),
+            on_settled=close,
+            **{name: value for name, value in self._owner_options.items()
+               if name in _SETTLE_SEAMS})
+        if type(outcome) is bool:
+            return outcome
         if outcome.reason is run_qualification.RunQualificationReason.INVALID_INPUT:
             raise RuntimeError(
                 "the run qualification owner refused the transaction's validated binding")
@@ -267,7 +301,8 @@ def build_service(profile_id: str, *, clock=time.time):
         host=None, profile_id=profile_id, limits={}, clock=None,
         spike_authority_selector=spike_authority,
         image_resolver=image_resolver,
-        qualification_port=_RunQualificationPort() if spike_harness is not None else None,
+        qualification_port=(_RunQualificationPort() if spike_harness is not None
+                            and profile_id != _QUALIFICATION_WITHHELD_PROFILE else None),
     )
 
 

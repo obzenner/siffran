@@ -1239,6 +1239,136 @@ def qualify_run_environment(
                                       "run qualification failed: " + str(exc))
 
 
+def _recover_prior_journals(
+    store: "common.ExecutionStore", root: Path, *, binding_seed: Mapping[str, Any],
+    profile_id: str, docker_cli: Path,
+    runtime_inspector: Callable[..., authority.GenericRuntimeInspection],
+    effects_factory: EffectsStage | None, deadline: float, clock: Callable[[], float],
+    stage: list[str],
+) -> tuple[Mapping[str, Any], Path, Path, str, EffectsStage]:
+    """Under the already-held shared runtime lock: observe the authority once, create the
+    run-scoped scaffolding directories, and recover every prior journal on the pinned daemon.
+    Shared by the attempt (which then admits and probes) and by the settling of an interrupted
+    attempt, so recovery has one owner. Returns the observed facts, the profile's private config
+    directory, the work directory, the seed digest and the effects selector."""
+    # Initial discovery: one observation (context, version, info including
+    # ``daemon_id``) that resolves the endpoint once — reads only, no admission.
+    # Recovery precedes the new attempt's admission, so a capability or
+    # implementation refusal must never skip journal recovery (E5 review, 2).
+    stage[0] = "the authority observation"
+    observed = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
+                                 deadline=deadline, clock=clock, stage=stage[0])
+    # The minimum pinned daemon observation journal recovery needs: the canonical
+    # endpoint and platform only (never capability facts, never the daemon
+    # identifier), so a daemon that now refuses capability still gets recovered.
+    try:
+        identity = authority.pinned_daemon_identity(observed)
+    except authority.GenericQualificationError as exc:
+        raise _RunFailure(RunQualificationReason.DOCKER_UNREACHABLE,
+                          "the Docker authority cannot be identified for recovery") from exc
+    # Private per-attempt authority scaffolding under the run-scoped namespace —
+    # directories only. The config-emptiness admission runs after recovery.
+    namespace = root / NAMESPACE
+    config = namespace / "configs" / profile_id
+    work = namespace / "work"
+    for directory in (namespace, config, work, namespace / "records"):
+        common.safe_directory(directory, create=True)
+    seed = canonical_digest({"schema": QUALIFICATION_RECORD_SCHEMA,
+                             "attempt": binding_seed})
+    recovery_cli = Path(observed.get("docker_cli", str(docker_cli)))
+    recovery = authority.ResolvedGenericAuthority(
+        application.GenericQualifiedBackend("docker", profile_id, seed, seed),
+        recovery_cli, tuple(sorted({
+            "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": identity["endpoint"],
+            "DOCKER_CONFIG": str(config),
+        }.items())), work, identity["server_os"], identity["server_architecture"],
+        observed.get("ncpu", 0), observed.get("mem_total", 0), dict(observed))
+    selected_effects = effects_factory or (lambda current, operation, name:
+                                           _concrete_effects(current))
+    # Recover every prior journal under the shared runtime lock, on the pinned
+    # daemon, before any part of the new attempt's admission.
+    stage[0] = "the prior journal recovery"
+    effects = selected_effects(recovery, None, "recovery")
+    try:
+        execution.recover_generic_operations(
+            store, effects, authority=identity, deadline=deadline, clock=clock)
+    finally:
+        effects.close()
+    return observed, config, work, seed, selected_effects
+
+
+def settle_interrupted_attempt(
+    *,
+    project_id: str,
+    run_id: str,
+    generation: int,
+    attempt_id: str,
+    profile_id: str,
+    docker_cli: Path,
+    on_settled: Callable[[], None],
+    qualification_seconds: float | None = None,
+    runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_observed_runtime,
+    effects_factory: EffectsStage | None = None,
+    sandbox_root: Path | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool | RunQualificationFailed:
+    """Settle one open attempt row no live attempt drives (Empirica 7.2 §5, E9 fix round).
+
+    Takes the shared runtime lock **without waiting**: a held lock answers ``False`` (an attempt
+    may be live; nothing was recovered and ``on_settled`` did not run). Under the lock it recovers
+    every prior journal exactly as an attempt does — the same owner, the same pinned daemon — and
+    runs ``on_settled`` (the transaction's durable closing of the row) still under the lock, so no
+    new attempt can start between the recovery and the closing. Returns ``True`` once settled, or
+    one closed failure when recovery could not run (the row then stays open for a later settle).
+    It never resumes or reuses the dead attempt's effect, and never publishes a record."""
+    try:
+        for name, value in (("project_id", project_id), ("run_id", run_id),
+                            ("attempt_id", attempt_id)):
+            RunBinding._identifier(value, name)
+        if type(generation) is not int or isinstance(generation, bool) or not 1 <= generation < 2 ** 31:
+            raise ValueError("run qualification counter is not closed: generation")
+        if type(profile_id) is not str or profile_id not in spike_plan.NETWORK_PROFILES:
+            raise ValueError("run qualification profile is unknown")
+        if qualification_seconds is None:
+            qualification_seconds = DEFAULT_QUALIFICATION_SECONDS
+        if (type(qualification_seconds) not in (int, float)
+                or not 0 < qualification_seconds <= DEFAULT_QUALIFICATION_SECONDS):
+            raise ValueError("run qualification budget is outside its bound")
+        docker_cli = Path(docker_cli)
+    except (ValueError, TypeError, OSError) as exc:
+        return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
+    deadline = clock() + float(qualification_seconds)
+    stage: list[str] = ["the runtime lock"]
+    try:
+        root = (common.sandbox_home() if sandbox_root is None
+                else common.canonical_authority_path(Path(sandbox_root)))
+        store = common.ExecutionStore(root)
+        store.prepare_execution_scaffolding()
+        generic_journal.GenericJournalStore(store).prepare()
+        try:
+            with common.runtime_lock(store, deadline, clock=clock, blocking=False):
+                _recover_prior_journals(
+                    store, root, binding_seed={
+                        "project_id": project_id, "run_id": run_id, "generation": generation,
+                        "attempt_id": attempt_id},
+                    profile_id=profile_id, docker_cli=docker_cli,
+                    runtime_inspector=runtime_inspector, effects_factory=effects_factory,
+                    deadline=deadline, clock=clock, stage=stage)
+                on_settled()
+        except common.RuntimeLockBusy:
+            return False
+        return True
+    except _RunFailure as exc:
+        return RunQualificationFailed(exc.reason, exc.detail, exc.probe)
+    except Exception as exc:
+        if clock() >= deadline:
+            return RunQualificationFailed(
+                RunQualificationReason.DEADLINE_EXCEEDED,
+                "run qualification deadline expired at: " + stage[0])
+        return RunQualificationFailed(RunQualificationReason.CAPABILITY_UNAVAILABLE,
+                                      "run qualification recovery failed: " + str(exc))
+
+
 def _qualify_locked(
     binding: RunBinding,
     spike_images: Sequence[str],
@@ -1263,49 +1393,10 @@ def _qualify_locked(
     store.prepare_execution_scaffolding()
     generic_journal.GenericJournalStore(store).prepare()
     with common.runtime_lock(store, deadline, clock=clock):
-        # Initial discovery: one observation (context, version, info including
-        # ``daemon_id``) that resolves the endpoint once — reads only, no admission.
-        # Recovery precedes the new attempt's admission, so a capability or
-        # implementation refusal must never skip journal recovery (E5 review, 2).
-        stage[0] = "the authority observation"
-        observed = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
-                                     deadline=deadline, clock=clock, stage=stage[0])
-        # The minimum pinned daemon observation journal recovery needs: the canonical
-        # endpoint and platform only (never capability facts, never the daemon
-        # identifier), so a daemon that now refuses capability still gets recovered.
-        try:
-            identity = authority.pinned_daemon_identity(observed)
-        except authority.GenericQualificationError as exc:
-            raise _RunFailure(RunQualificationReason.DOCKER_UNREACHABLE,
-                              "the Docker authority cannot be identified for recovery") from exc
-        # Private per-attempt authority scaffolding under the run-scoped namespace —
-        # directories only. The config-emptiness admission runs after recovery.
-        namespace = root / NAMESPACE
-        config = namespace / "configs" / profile_id
-        work = namespace / "work"
-        for directory in (namespace, config, work, namespace / "records"):
-            common.safe_directory(directory, create=True)
-        seed = canonical_digest({"schema": QUALIFICATION_RECORD_SCHEMA,
-                                 "attempt": binding.to_data()})
-        recovery_cli = Path(observed.get("docker_cli", str(docker_cli)))
-        recovery = authority.ResolvedGenericAuthority(
-            application.GenericQualifiedBackend("docker", profile_id, seed, seed),
-            recovery_cli, tuple(sorted({
-                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": identity["endpoint"],
-                "DOCKER_CONFIG": str(config),
-            }.items())), work, identity["server_os"], identity["server_architecture"],
-            observed.get("ncpu", 0), observed.get("mem_total", 0), dict(observed))
-        selected_effects = effects_factory or (lambda current, operation, name:
-                                               _concrete_effects(current))
-        # Recover every prior journal under the shared runtime lock, on the pinned
-        # daemon, before any part of the new attempt's admission.
-        stage[0] = "the prior journal recovery"
-        effects = selected_effects(recovery, None, "recovery")
-        try:
-            execution.recover_generic_operations(
-                store, effects, authority=identity, deadline=deadline, clock=clock)
-        finally:
-            effects.close()
+        observed, config, work, seed, selected_effects = _recover_prior_journals(
+            store, root, binding_seed=binding.to_data(), profile_id=profile_id,
+            docker_cli=docker_cli, runtime_inspector=runtime_inspector,
+            effects_factory=effects_factory, deadline=deadline, clock=clock, stage=stage)
         # --- admission of the new attempt, strictly after recovery -------------------
         # Capability admission of the same observed facts: a refusal here keeps its own
         # kept reason and has already recovered its prior journals.

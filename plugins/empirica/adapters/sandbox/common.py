@@ -534,11 +534,18 @@ def _remaining(deadline: float, *, clock: Callable[[], float]) -> float:
     return value
 
 
+class RuntimeLockBusy(GenericScaffoldingError):
+    """The shared runtime lock is held by another attempt and the caller chose not to wait
+    (``runtime_lock(..., blocking=False)``): not a scaffolding fault, a fact about the lock."""
+
+
 @contextmanager
 def runtime_lock(
     store: ExecutionStore, deadline: float, *, clock: Callable[[], float] = time.monotonic,
+    blocking: bool = True,
 ) -> Iterator[None]:
-    """Acquire the operator-created generic process lock within one monotonic deadline."""
+    """Acquire the operator-created generic process lock within one monotonic deadline; with
+    ``blocking=False`` a lock another holder has raises :class:`RuntimeLockBusy` at once."""
     if type(store) is not ExecutionStore:
         raise GenericScaffoldingError("runtime lock requires an exact generic execution store")
     store.check_execution_scaffolding()
@@ -558,6 +565,8 @@ def runtime_lock(
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
             except BlockingIOError:
+                if not blocking:
+                    raise RuntimeLockBusy("runtime lock is held by another attempt") from None
                 time.sleep(min(0.01, _remaining(deadline, clock=clock)))
         yield
     finally:

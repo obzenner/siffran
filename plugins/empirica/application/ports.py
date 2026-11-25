@@ -2,6 +2,7 @@
 """D5 application transport facts and ports (empirica 2.0)."""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -60,6 +61,19 @@ class QualificationAttemptFailed:
     probe: str | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class QualificationSettleRequest:
+    """The facts a host needs to settle an open attempt row that no live attempt drives
+    (Empirica 7.2 §5, E9 fix round): the run binding and the open row's identity, plus the
+    profile whose scaffolding journal recovery runs on. Built from committed state only."""
+
+    project_id: str
+    run_id: str
+    generation: int
+    attempt_id: str
+    profile_id: str
+
+
 class QualificationAttemptPort(Protocol):
     """One host qualification attempt under the run's sandbox authority (the bridge binds this
     to E5's sandbox owner; no Docker in the host-neutral layer). Runs only after the
@@ -68,6 +82,16 @@ class QualificationAttemptPort(Protocol):
     def run_qualification_attempt(
         self, request: QualificationAttemptRequest,
     ) -> QualificationAttemptBound | QualificationAttemptFailed: ...
+
+    def settle_interrupted_attempt(
+        self, request: QualificationSettleRequest, close: Callable[[], None],
+    ) -> bool | QualificationAttemptFailed:
+        """Settle the open row of an attempt that is no longer driven: take the shared runtime
+        lock without waiting, recover prior journals under it, and run ``close`` (the
+        transaction's durable closing of the row) still under it. ``False`` — the lock is held,
+        so an attempt may be live and nothing was closed; a failure — recovery could not run, the
+        row stays open; ``True`` — recovered and closed."""
+        ...
 
 
 @dataclass(frozen=True)

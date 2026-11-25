@@ -523,5 +523,50 @@ class BridgeV2Tests(unittest.TestCase):
         _assert_inert_no_run(resp)
 
 
+class QualificationPortCompositionTests(unittest.TestCase):
+    """The qualification port is an execution path: it is composed where the generic Docker
+    composition succeeded, and never for the Codex profile — Codex stays the documented refusal
+    host, exactly as the marketplace withholds the plugin."""
+
+    def _compose(self, profile_id):
+        store = type("Store", (), {"execution_store": object()})()
+        with (patch.object(bridge, "GenericQualificationStore", return_value=store),
+              patch.object(bridge, "GenericBackendSelector", return_value=object()),
+              patch.object(bridge, "freeze_loaded_release", return_value="sha256:" + "0" * 64),
+              patch.object(bridge, "GenericAuthorityResolver", return_value=object()),
+              patch.object(bridge, "DockerLocalImageResolver", return_value=object()),
+              patch.object(bridge, "GenericDockerHarness", return_value=object())):
+            return bridge.build_service(profile_id)
+
+    def test_the_port_is_composed_for_every_profile_but_codex(self):
+        codex = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if p["host_id"] == "codex-cli")
+        for profile_id in _PROFILE_IDS:
+            with self.subTest(profile=profile_id):
+                port = self._compose(profile_id)._coordinator.qualification_port
+                if profile_id == codex:
+                    self.assertIsNone(port)
+                else:
+                    self.assertIsInstance(port, bridge._RunQualificationPort)
+
+    def test_a_codex_service_pointed_at_an_approved_run_refuses_unsupported_and_reserves_nothing(self):
+        from test_d7_transactions import Workspace
+        from test_environment_actions import QUALIFY_ACTION
+        from test_qualification_transaction import FakeQualificationPort, QualificationEnv
+        env = QualificationEnv(FakeQualificationPort())
+        codex = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if p["host_id"] == "codex-cli")
+        coordinator = self._compose(codex)._coordinator
+        coordinator.runs, coordinator.artifacts, coordinator.workspace = (
+            env.runs, env.artifacts_repo, Workspace())
+        before = env.runs.data[env.key]
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": env.run_id,
+             "action": json.loads(json.dumps(QUALIFY_ACTION))}, "codex-qualify")["result"]
+        jsonschema.validate(instance={"protocol": _PROTOCOL, "request_id": "codex-qualify",
+                                      "result": response}, schema=_RESPONSE_SCHEMA)
+        self.assertEqual((response["type"], response["code"]), ("Fault", "unsupported"), response)
+        self.assertEqual(env.runs.data[env.key], before, "nothing was reserved or committed")
+        self.assertEqual((env.rows(), env.port.calls), ([], 0))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Empirica 7.2 E9: the ``qualify`` attempt transaction — reserve, effect, binding CAS (spec §5).
+"""Empirica 7.2 E9: the ``qualify`` attempt transaction — settle, reserve, effect, binding CAS (spec §5).
 
 Behaviour only, over the real composed service with a fake port and no Docker: the reservation is
 durable before the host attempt starts (charged even when the attempt then fails or is
 interrupted), the outcome is recorded with the closed reason of its own family (and the failed
 probe exactly with the probe-failure reason), a bound outcome installs the qualified binding by
-compare-and-set against the exact run generation, approved revision and prior binding, and a lost
-compare-and-set — a stop, a superseding revision, a concurrent delivery resolving the open
-attempt — orphans the already-published record, closes the open row with the conflict cause and
-binds nothing. An exact replay (the same payload-free action re-entering its still-open attempt of
-the same approved revision) charges nothing and re-enters that attempt's identity. A host that
-composed no port refuses an admitted qualify as the unsupported host fact before reserving
-anything (the admission family itself stays with ``test_environment_actions.py`` and the pure
-decisions with ``test_environment_governance.py``).
+compare-and-set against the exact facts the reservation captured, and a lost compare-and-set — a
+stop, a superseding revision — orphans the already-published record, closes the open row with the
+conflict cause and binds nothing.
+
+The delivery is the request: an exact replay of a delivery whose attempt resolved returns its
+recorded outcome with no charge and no effect. A qualify that finds an open row refuses with the
+closed in-progress reason while the attempt is live (this process drives it, or the shared runtime
+lock is held), and closes it as interrupted — charged, binding nothing, any record it published an
+orphan — when the attempt is dead, before evaluating the request as a fresh attempt. The
+qualification passes the current configuration approval before any reservation or effect, and a
+host that composed no port (a degraded composition, Codex) refuses an admitted qualify as the
+unsupported host fact before reserving anything (the admission family itself stays with
+``test_environment_actions.py`` and the pure decisions with ``test_environment_governance.py``).
 
 No contract value is restated as a literal: every reason's spelling, the reserved outcome and the
 probe name are read from the vocabulary owners (``application.generic_spike``'s registry members,
@@ -36,9 +41,10 @@ from core import environment
 from core import run as core_run
 from core.canonical import canonical_digest
 from governance_setup import TEST_INVOCATION, approve_current
-from test_environment_actions import ENVIRONMENT_ACTION, QUALIFY_ACTION
+from test_environment_actions import CONFIGURE_RUN, ENVIRONMENT_ACTION, QUALIFY_ACTION
 from test_d7_transactions import Artifacts, Harness, QualifiedSelector, Runs, Workspace
 from dataclasses import replace
+from unittest.mock import patch
 
 PROFILE = host_profile_id("pi")
 GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "one claim of supplied context",
@@ -53,14 +59,24 @@ def _binding_digest(request) -> str:
     return canonical_digest({"qualification record": request.attempt_id, "kind": "binding"})
 
 
+class ProcessDied(BaseException):
+    """The host process died mid-attempt: unlike an ``Exception`` it is not an answer the
+    transaction can catch, so nothing after the raise point runs — exactly a crash."""
+
+
 class FakeQualificationPort:
     """The composed port's fake: every outcome is closed and deterministic. ``before_result``
     runs once per attempt, inside the host effect exactly where the E9 transaction called it (its
     nested observations see the run's committed state mid-attempt). A bound outcome is derived
     from the delivered request, so two deliveries read two distinct publishings of their own
-    attempt; ``overrides`` pins specific attempts' outcomes for the race tests."""
+    attempt; ``overrides`` pins specific attempts' outcomes for the race tests. ``published``
+    records every record the fake published, ``publish_then`` makes the attempt die only after
+    publishing (the crash between record publication and the outcome commit). The settle half
+    answers as the lock would: free (recovers and closes the row) unless ``settle_busy``."""
 
-    def __init__(self, *, reason=None, probe=None, raiser=None, before_result=None, overrides=None):
+    def __init__(self, *, reason=None, probe=None, raiser=None, before_result=None, overrides=None,
+                 publish_then=None, settle_busy=False, settle_failure=None,
+                 before_close=None, settle_raises=None, settle_skips_close=False):
         self.requests = []
         self.calls = 0
         self.reason = reason
@@ -68,12 +84,23 @@ class FakeQualificationPort:
         self.raiser = raiser
         self.before_result = before_result
         self.overrides = dict(overrides or {})
+        self.publish_then = publish_then
+        self.published = []
+        self.settle_busy = settle_busy
+        self.settle_failure = settle_failure
+        self.settles = []
+        self.before_close = before_close
+        self.settle_raises = settle_raises
+        self.settle_skips_close = settle_skips_close
 
     def run_qualification_attempt(self, request):
         self.calls += 1
         self.requests.append(request)
         if self.before_result is not None:
             self.before_result(request)
+        if self.publish_then is not None:
+            self.published.append(_record_digest(request))
+            raise self.publish_then
         if self.raiser is not None:
             raise self.raiser
         if request.attempt_id in self.overrides:
@@ -81,23 +108,44 @@ class FakeQualificationPort:
         if self.reason is not None:
             return QualificationAttemptFailed(
                 self.reason.value if hasattr(self.reason, "value") else self.reason, self.probe)
+        self.published.append(_record_digest(request))
         return QualificationAttemptBound(_record_digest(request), _binding_digest(request))
+
+    def settle_interrupted_attempt(self, request, close):
+        self.settles.append(request)
+        if self.settle_raises is not None:
+            raise self.settle_raises
+        if self.settle_busy:
+            return False
+        if self.settle_failure is not None:
+            return QualificationAttemptFailed(self.settle_failure)
+        if self.before_close is not None:
+            self.before_close(request)
+        if not self.settle_skips_close:
+            close()
+        return True
 
 
 class QualificationEnv:
     """One auto run — the environment approval derives itself (Empirica 7.2 §5) — with one
-    approved revision and a composed fake port: the state the transaction's own tests start from."""
+    approved revision and a composed fake port: the state the transaction's own tests start from.
+    Every observation is its own delivery (a distinct request identity) unless a test names one."""
 
     def __init__(self, port, **start):
         self.runs, self.artifacts_repo = Runs(), Artifacts()
         self.port = port
+        self.deliveries = 0
         self.coordinator = ProductionCoordinator(
             Workspace(), Harness(), self.runs, self.artifacts_repo, PROFILE, {},
             QualifiedSelector(), None, port)
+        self.start = start
+        self._start_and_approve()
+
+    def _start_and_approve(self):
         command = {"type": "StartRun", "control_mode": "auto",
                    "goal": "Qualify the run's environment from supplied context.",
                    "invocation": dict(TEST_INVOCATION),
-                   "selector": {"project": "p", "session": "q"}, **start}
+                   "selector": {"project": "p", "session": "q"}, **self.start}
         result = self.coordinator.handle(command, "start")
         assert result["result"]["type"] == "Allow", result
         self.run_id = result["result"]["run"]["id"]
@@ -111,10 +159,22 @@ class QualificationEnv:
         member = self.state().environment
         assert member["state"] == environment.APPROVED, member
 
-    def observe(self, action: dict):
+    def restart(self):
+        """Stop the run and start the same selector again: the next generation of the same run,
+        taken through the same environment cycle to its approved revision."""
+        stopped = self.coordinator.handle(
+            {"type": "EvaluateRun", "run_id": self.run_id, "intent": "stop"}, "restart-stop")
+        assert stopped["result"]["type"] == "Allow", stopped
+        self._start_and_approve()
+
+    def observe(self, action: dict, request_id: str | None = None):
+        self.deliveries += 1
         return self.coordinator.handle(
             {"type": "ObserveAction", "run_id": self.run_id, "action": action},
-            "transaction-observe")["result"]
+            request_id or f"transaction-observe-{self.deliveries}")["result"]
+
+    def qualify(self, request_id: str | None = None):
+        return self.observe(copy.deepcopy(QUALIFY_ACTION), request_id)
 
     def state(self):
         return self.coordinator.last_state
@@ -125,13 +185,22 @@ class QualificationEnv:
     def rows(self):
         return [dict(row) for row in self.persisted().qualification_attempts]
 
+    def binding(self):
+        return dict(self.persisted().spike_backend)
+
+
+CONFLICT = generic_spike.GenericUnavailableReason.QUALIFICATION_CONFLICT.value
+IN_PROGRESS = generic_spike.GenericUnavailableReason.QUALIFICATION_IN_PROGRESS.value
+INTERRUPTED = generic_spike.GenericUnavailableReason.QUALIFICATION_INTERRUPTED.value
+RESERVED, SUCCEEDED, FAILED, SUPERSEDED = core_run.ATTEMPT_OUTCOMES
+
 
 class QualificationTransactionTests(unittest.TestCase):
     """The transaction's behaviour cases (spec §5 steps 1 and 6): charged reservations, closed
     outcomes, the binding compare-and-set, orphaned records."""
 
-    def _qualify(self, env: QualificationEnv):
-        return env.observe(copy.deepcopy(QUALIFY_ACTION))
+    def _qualify(self, env: QualificationEnv, request_id: str | None = None):
+        return env.qualify(request_id)
 
     def test_the_reservation_is_durable_before_the_host_attempt_starts(self):
         """The port runs only on its own attempt's committed reserved row (spec §5 step 1): the
@@ -154,11 +223,22 @@ class QualificationTransactionTests(unittest.TestCase):
         result = self._qualify(env)
         self.assertEqual(result["type"], "Allow", result)
         self.assertEqual(env.port.calls, 1)
-        self.assertEqual(seen["row"]["outcome"], core_run.ATTEMPT_OUTCOMES[0])
+        self.assertEqual(seen["row"]["outcome"], RESERVED)
         self.assertEqual(seen["row"]["started_stamp"], seen["stamp_seq"])
         self.assertEqual(seen["row"]["attempt_id"], env.port.requests[0].attempt_id)
         self.assertEqual(seen["binding"], {"kind": "unqualified"},
                          "the attempt starts against the unqualified StartRun binding")
+
+    def test_the_attempt_binds_the_storage_run_identity_never_the_public_handle(self):
+        """The host attempt is handed the bounded storage run identifier beside the separate
+        project and generation fields (the owner admits an identifier of at most the bound the
+        record contract owns); the encoded public handle is a different, longer string."""
+        env = QualificationEnv(FakeQualificationPort())
+        self._qualify(env)
+        request = env.port.requests[0]
+        self.assertEqual((request.project_id, request.run_id, request.generation),
+                         (env.key.project_id, env.key.run_id, env.key.generation))
+        self.assertNotEqual(request.run_id, env.run_id)
 
     def test_a_bound_outcome_installs_the_binding_by_compare_and_set(self):
         env = QualificationEnv(FakeQualificationPort())
@@ -172,7 +252,7 @@ class QualificationTransactionTests(unittest.TestCase):
         state = env.persisted()
         self.assertEqual(dict(state.spike_backend), expected)
         row = env.rows()[0]
-        self.assertEqual(row["outcome"], "succeeded")
+        self.assertEqual(row["outcome"], SUCCEEDED)
         self.assertEqual(row["record_digest"], _record_digest(request))
         self.assertIsNone(row["reason"], "a succeeded attempt carries no cause")
         self.assertIsNone(row["probe"])
@@ -189,10 +269,25 @@ class QualificationTransactionTests(unittest.TestCase):
         self.assertEqual(result["reason"], reason.value, result)
         self.assertNotIn("probe", result)
         row = env.rows()[0]
-        self.assertEqual(row["outcome"], "failed")
+        self.assertEqual(row["outcome"], FAILED)
         self.assertIsNone(row["record_digest"])
         self.assertEqual(row["reason"], reason.value)
-        self.assertEqual(dict(env.persisted().spike_backend), {"kind": "unqualified"})
+        self.assertEqual(env.binding(), {"kind": "unqualified"})
+
+    def test_a_failed_requalification_keeps_the_existing_qualified_binding(self):
+        """Failure never changes the active binding (spec §5 step 6): a run qualified once, asked
+        to qualify again, keeps its first binding when the second attempt fails — the outcome
+        compare-and-set holds the binding the reservation captured."""
+        port = FakeQualificationPort()
+        env = QualificationEnv(port)
+        self.assertEqual(self._qualify(env)["type"], "Allow")
+        first = env.binding()
+        self.assertEqual(first["kind"], "qualified")
+        port.reason = generic_spike.GenericUnavailableReason.DOCKER_UNREACHABLE
+        result = self._qualify(env)
+        self.assertEqual(result["type"], "Fault", result)
+        self.assertEqual(env.binding(), first)
+        self.assertEqual([row["outcome"] for row in env.rows()], [SUCCEEDED, FAILED])
 
     def test_a_probe_failure_records_its_probe_and_the_fault_names_it(self):
         reason = generic_spike.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED
@@ -203,10 +298,10 @@ class QualificationTransactionTests(unittest.TestCase):
         self.assertEqual(result["reason"], reason.value, result)
         self.assertEqual(result["probe"], probe, result)
         row = env.rows()[0]
-        self.assertEqual(row["outcome"], "failed")
+        self.assertEqual(row["outcome"], FAILED)
         self.assertEqual(row["reason"], reason.value)
         self.assertEqual(row["probe"], probe)
-        self.assertEqual(dict(env.persisted().spike_backend), {"kind": "unqualified"})
+        self.assertEqual(env.binding(), {"kind": "unqualified"})
 
     def test_an_interrupted_attempt_leaves_an_open_charged_reservation_and_no_binding(self):
         env = QualificationEnv(
@@ -218,39 +313,288 @@ class QualificationTransactionTests(unittest.TestCase):
                          "an internal host failure carries no closed reason: retry once")
         rows = env.rows()
         self.assertEqual(len(rows), 1, "the interrupted attempt is charged by its open row")
-        self.assertEqual(rows[0]["outcome"], core_run.ATTEMPT_OUTCOMES[0])
+        self.assertEqual(rows[0]["outcome"], RESERVED)
         self.assertEqual(rows[0]["attempt_id"], env.port.requests[0].attempt_id)
-        self.assertEqual(dict(env.persisted().spike_backend), {"kind": "unqualified"})
+        self.assertEqual(env.binding(), {"kind": "unqualified"})
 
-    def test_an_exact_replay_reenters_the_open_attempt_without_a_new_charge(self):
-        """The same payload-free action, re-issued while its own attempt of this same approved
-        revision is still open (the interrupted attempt above): the replay reserves nothing,
-        re-enters the open row's identity, and its outcome resolves that one row."""
-        port = FakeQualificationPort(raiser=RuntimeError("first delivery died"))
+    def test_a_malformed_port_outcome_is_an_unreasoned_failure_that_records_and_binds_nothing(self):
+        good = "sha256:" + "a" * 64
+        probe_failed = core_run.QUALIFICATION_PROBE_FAILED_REASON
+        registered = generic_spike.GenericUnavailableReason.DOCKER_UNREACHABLE.value
+        malformed = {
+            "a malformed record digest": QualificationAttemptBound("sha256:xyz", good),
+            "a malformed binding digest": QualificationAttemptBound(good, "sha256:xyz"),
+            "an unregistered reason": QualificationAttemptFailed("not-a-registered-reason"),
+            "an admission reason": QualificationAttemptFailed(environment.ENVIRONMENT_REQUIRED),
+            "a probe without the probe reason": QualificationAttemptFailed(
+                registered, core_run.QUALIFICATION_PROBE_NAMES[0]),
+            "the probe reason without a probe": QualificationAttemptFailed(probe_failed),
+            "an unknown probe name": QualificationAttemptFailed(probe_failed, "not-a-probe"),
+            "a stray object": object(),
+        }
+        for label, outcome in malformed.items():
+            with self.subTest(label):
+                port = FakeQualificationPort()
+                env = QualificationEnv(port)
+                port.overrides = {
+                    request_id: outcome for request_id in [
+                        environment.qualification_attempt_id(1, "transaction-observe-9")]}
+                result = self._qualify(env, "transaction-observe-9")
+                self.assertEqual(result, {"type": "Fault", "code": "unavailable",
+                                         "fail_direction": "closed"}, result)
+                self.assertEqual([row["outcome"] for row in env.rows()], [RESERVED])
+                self.assertEqual(env.binding(), {"kind": "unqualified"})
+
+    # --- exact replay of a delivery --------------------------------------------------------
+
+    def test_an_exact_replay_of_a_completed_delivery_returns_its_outcome_without_a_charge(self):
+        """The recorded outcome of a bound attempt returns to the same delivery again: no new row,
+        no effect — also the recovery of a response lost after the outcome commit."""
+        env = QualificationEnv(FakeQualificationPort())
+        first = self._qualify(env, "delivery-1")
+        again = self._qualify(env, "delivery-1")
+        self.assertEqual(first["type"], "Allow", first)
+        self.assertEqual(again["type"], "Allow", again)
+        self.assertEqual(again["run"]["spike_backend"], first["run"]["spike_backend"])
+        self.assertEqual(len(env.rows()), 1, "a replay never charges")
+        self.assertEqual(env.port.calls, 1, "a replay never repeats the effect")
+
+    def test_an_exact_replay_of_a_failed_delivery_returns_the_same_closed_fault(self):
+        reason = generic_spike.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED
+        probe = core_run.QUALIFICATION_PROBE_NAMES[0]
+        env = QualificationEnv(FakeQualificationPort(reason=reason, probe=probe))
+        first = self._qualify(env, "delivery-1")
+        again = self._qualify(env, "delivery-1")
+        self.assertEqual(again, first)
+        self.assertEqual((len(env.rows()), env.port.calls), (1, 1))
+
+    def test_an_exact_replay_of_a_lost_compare_and_set_returns_the_conflict(self):
+        env = None
+
+        def supersede(request):
+            revised = copy.deepcopy(ENVIRONMENT_ACTION)
+            revised["payload"]["rationale"] = "a second revision the agent needs mid-attempt"
+            assert env.observe(revised)["type"] == "Allow"
+
+        env = QualificationEnv(FakeQualificationPort(before_result=supersede))
+        first = self._qualify(env, "delivery-1")
+        again = self._qualify(env, "delivery-1")
+        self.assertEqual(first["reason"], CONFLICT)
+        self.assertEqual(again, first)
+        self.assertEqual((len(env.rows()), env.port.calls), (1, 1))
+
+    def test_a_new_delivery_after_a_resolved_attempt_is_charged_afresh(self):
+        """A failed attempt is resolved, so a further qualify — a different delivery — on the same
+        approved revision is a new charged attempt (the recovery 'request qualification again')."""
+        reason = generic_spike.GenericUnavailableReason.DOCKER_UNREACHABLE
+        env = QualificationEnv(FakeQualificationPort(reason=reason))
+        self._qualify(env, "delivery-1")
+        self._qualify(env, "delivery-2")
+        self.assertEqual(len(env.rows()), 2,
+                         "a resolved row never absorbs the next delivery; the run pays again")
+        self.assertEqual([row["outcome"] for row in env.rows()], [FAILED, FAILED])
+        self.assertEqual({row["attempt_id"] for row in env.rows()},
+                         {request.attempt_id for request in env.port.requests})
+
+    # --- live and interrupted attempts -----------------------------------------------------
+
+    def test_a_live_attempt_refuses_a_concurrent_delivery_without_a_charge_or_an_effect(self):
+        """While one attempt is mid-effect, another delivery on the run — here a second
+        coordinator of the same process, a different request — refuses with the closed
+        in-progress reason: nothing reserved, charged or attempted, the live attempt unharmed and
+        later binding once."""
+        nested_port = FakeQualificationPort()
+        nested_result = {}
+
+        def run_the_second_coordinator(request):
+            second = ProductionCoordinator(
+                Workspace(), Harness(), env.runs, env.artifacts_repo, PROFILE, {},
+                QualifiedSelector(), None, nested_port)
+            nested_result.update(second.handle(
+                {"type": "ObserveAction", "run_id": env.run_id,
+                 "action": copy.deepcopy(QUALIFY_ACTION)}, "concurrent"))
+
+        env = QualificationEnv(FakeQualificationPort(before_result=run_the_second_coordinator))
+        result = self._qualify(env)
+        self.assertEqual(result["type"], "Allow", result)
+        refusal = nested_result["result"]
+        self.assertTrue(protocol.validate_public_result(refusal), refusal)
+        self.assertEqual((refusal["type"], refusal["code"]), ("Fault", "unavailable"), refusal)
+        self.assertEqual(refusal["reason"], IN_PROGRESS, refusal)
+        self.assertEqual((nested_port.calls, nested_port.settles), (0, []),
+                         "a live attempt is never settled and never repeated")
+        rows = env.rows()
+        self.assertEqual([row["outcome"] for row in rows], [SUCCEEDED],
+                         "the refusal reserved nothing: one charge for one attempt")
+        self.assertEqual(env.binding()["kind"], "qualified")
+
+    def test_a_held_runtime_lock_refuses_with_in_progress_and_closes_nothing(self):
+        """An open row whose attempt this process does not drive, with the shared lock held
+        (another attempt of the runtime): the port answers busy, so the next qualify refuses as in
+        progress — nothing closed, reserved or attempted."""
+        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
         env = QualificationEnv(port)
         self._qualify(env)
+        port.settle_busy = True
+        before = env.rows()
+        result = self._qualify(env)
+        self.assertEqual((result["type"], result["code"]), ("Fault", "unavailable"), result)
+        self.assertEqual(result["reason"], IN_PROGRESS, result)
+        self.assertEqual(env.rows(), before)
+        self.assertEqual(port.calls, 1, "no further effect while the lock is held")
+        self.assertEqual(len(port.settles), 1)
+
+    def test_an_interrupted_attempt_is_closed_by_the_next_qualify_and_a_fresh_one_runs(self):
+        """The attempt died before publishing anything (a plain host failure): the next delivery
+        finds an open row with no live attempt and a free lock, settles it — recovery under the
+        lock, then the row closes failed-interrupted (charged, no record, no binding) — and only
+        then is its own request a fresh charged attempt that binds."""
+        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
+        env = QualificationEnv(port)
+        self._qualify(env)
+        dead = env.rows()[0]["attempt_id"]
         port.raiser = None
         result = self._qualify(env)
         self.assertEqual(result["type"], "Allow", result)
         rows = env.rows()
-        self.assertEqual(len(rows), 1, "an exact replay adds no row: the open one is resolved")
-        self.assertEqual(rows[0]["outcome"], "succeeded")
-        self.assertEqual(rows[0]["attempt_id"], env.port.requests[0].attempt_id)
-        self.assertLessEqual(len(env.persisted().qualification_attempts),
-                             environment.MAX_QUALIFICATION_ATTEMPTS)
+        self.assertEqual([row["outcome"] for row in rows], [FAILED, SUCCEEDED])
+        self.assertEqual(rows[0]["attempt_id"], dead)
+        self.assertEqual(rows[0]["reason"], INTERRUPTED)
+        self.assertIsNone(rows[0]["record_digest"])
+        self.assertIsNone(rows[0]["probe"])
+        self.assertNotEqual(rows[1]["attempt_id"], dead, "a dead attempt is never reused or resumed")
+        self.assertEqual([request.attempt_id for request in port.requests], [dead, rows[1]["attempt_id"]])
+        settle = port.settles[0]
+        self.assertEqual((settle.project_id, settle.run_id, settle.generation, settle.attempt_id),
+                         (env.key.project_id, env.key.run_id, env.key.generation, dead))
+        self.assertEqual(settle.profile_id, port.requests[0].profile_id,
+                         "recovery runs on the profile the dead attempt's revision proposed")
+        self.assertEqual(env.binding()["qualification_record_digest"],
+                         _record_digest(port.requests[1]))
 
-    def test_a_new_request_after_a_resolved_attempt_is_charged_afresh(self):
-        """A failed attempt is resolved, so a further qualify on the same approved revision is a
-        new charged attempt (the recovery 'request qualification again'), never a replay."""
-        reason = generic_spike.GenericUnavailableReason.DOCKER_UNREACHABLE
-        env = QualificationEnv(FakeQualificationPort(reason=reason))
+    def test_a_crash_after_the_record_was_published_orphans_it(self):
+        """The process died after its record was durably published and before the outcome commit:
+        nothing was recorded, so the next qualify closes the row interrupted with no digest, and
+        the published record names no row and no binding."""
+        port = FakeQualificationPort(publish_then=ProcessDied())
+        env = QualificationEnv(port)
+        with self.assertRaises(ProcessDied):
+            self._qualify(env)
+        orphan = port.published[0]
+        self.assertEqual([row["outcome"] for row in env.rows()], [RESERVED])
+        self.assertEqual(env.binding(), {"kind": "unqualified"})
+        port.publish_then = None
+        result = self._qualify(env)
+        self.assertEqual(result["type"], "Allow", result)
+        rows = env.rows()
+        self.assertEqual([(row["outcome"], row["reason"]) for row in rows],
+                         [(FAILED, INTERRUPTED), (SUCCEEDED, None)])
+        self.assertIsNone(rows[0]["record_digest"])
+        installed = env.binding()["qualification_record_digest"]
+        self.assertNotEqual(installed, orphan)
+        self.assertNotIn(orphan, [row["record_digest"] for row in rows])
+
+    def test_a_crash_after_the_outcome_commit_is_settled_by_replay_not_by_a_second_attempt(self):
+        """The other side of the outcome commit: the outcome was committed and the process died
+        before answering, so the delivery's retry finds its resolved row and gets the recorded
+        outcome — the dead-attempt path never runs."""
+        env = QualificationEnv(FakeQualificationPort())
+        committed = self._qualify(env, "delivery-1")
+        self.assertEqual(committed["type"], "Allow")
+        again = self._qualify(env, "delivery-1")
+        self.assertEqual(again["type"], "Allow", again)
+        self.assertEqual(env.port.settles, [])
+        self.assertEqual((len(env.rows()), env.port.calls), (1, 1))
+
+    def test_a_retried_delivery_of_the_dead_attempt_runs_fresh_and_its_replay_finds_the_new_row(self):
+        """A delivery whose own attempt died, retried with the same request identity: the open row
+        is closed interrupted, the request runs as a fresh attempt (a later ordinal, so a new
+        row), and a further replay of that delivery returns the fresh attempt's recorded outcome."""
+        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
+        env = QualificationEnv(port)
+        self._qualify(env, "delivery-1")
+        port.raiser = None
+        retried = self._qualify(env, "delivery-1")
+        self.assertEqual(retried["type"], "Allow", retried)
+        replay = self._qualify(env, "delivery-1")
+        self.assertEqual(replay["type"], "Allow", replay)
+        self.assertEqual([row["outcome"] for row in env.rows()], [FAILED, SUCCEEDED])
+        self.assertEqual(port.calls, 2)
+
+    def test_an_interrupted_final_reservation_closes_and_the_ceiling_refuses_honestly(self):
+        """The ceiling's last attempt died: the next qualify closes that row interrupted first,
+        then the ceiling refuses it with the exhausted reason — no row stays reserved forever."""
+        env = QualificationEnv(FakeQualificationPort())
+        self._seed_attempts(env, resolved=environment.MAX_QUALIFICATION_ATTEMPTS - 1, open_last=True)
+        result = self._qualify(env)
+        self.assertEqual(result["type"], "Block", result)
+        self.assertEqual([reason["code"] for reason in result["reasons"]],
+                         [environment.QUALIFICATION_ATTEMPTS_EXHAUSTED])
+        rows = env.rows()
+        self.assertEqual(len(rows), environment.MAX_QUALIFICATION_ATTEMPTS)
+        self.assertNotIn(RESERVED, [row["outcome"] for row in rows])
+        self.assertEqual((rows[-1]["outcome"], rows[-1]["reason"]), (FAILED, INTERRUPTED))
+        self.assertEqual(env.port.calls, 0)
+
+    def test_a_settle_that_cannot_recover_leaves_the_row_open_with_its_closed_reason(self):
+        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
+        env = QualificationEnv(port)
         self._qualify(env)
+        reason = generic_spike.GenericUnavailableReason.DOCKER_UNREACHABLE.value
+        port.settle_failure = reason
+        result = self._qualify(env)
+        self.assertEqual((result["type"], result["code"]), ("Fault", "unavailable"), result)
+        self.assertEqual(result["reason"], reason, result)
+        self.assertEqual([row["outcome"] for row in env.rows()], [RESERVED])
+
+    def test_a_settle_that_raises_or_never_closes_is_an_unreasoned_failure_with_the_row_open(self):
+        for label, options in (("raises", {"settle_raises": RuntimeError("recovery blew up")}),
+                               ("never closes", {"settle_skips_close": True})):
+            with self.subTest(label):
+                port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
+                env = QualificationEnv(port)
+                self._qualify(env)
+                for name, value in options.items():
+                    setattr(port, name, value)
+                result = self._qualify(env)
+                self.assertEqual(result, {"type": "Fault", "code": "unavailable",
+                                         "fail_direction": "closed"})
+                self.assertEqual([row["outcome"] for row in env.rows()], [RESERVED])
+                self.assertEqual(port.calls, 1, "no fresh attempt runs on an unsettled row")
+
+    def test_a_closing_that_cannot_commit_leaves_the_row_open(self):
+        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
+        env = QualificationEnv(port)
         self._qualify(env)
-        self.assertEqual(len(env.rows()), 2,
-                         "a resolved row never absorbs the next request; the run pays again")
-        self.assertEqual([row["outcome"] for row in env.rows()], ["failed", "failed"])
-        self.assertEqual({row["attempt_id"] for row in env.rows()},
-                         {request.attempt_id for request in env.port.requests})
+        with patch.object(env.coordinator, "_commit", side_effect=RuntimeError("store down")):
+            result = self._qualify(env)
+        self.assertEqual(result, {"type": "Fault", "code": "unavailable",
+                                 "fail_direction": "closed"})
+        self.assertEqual([row["outcome"] for row in env.rows()], [RESERVED])
+
+    def test_a_closing_that_loses_its_compare_and_set_is_reread_not_forced(self):
+        """The run moved between the settle's read and its closing (here a newer approved
+        revision committed under the lock): the closing's compare-and-set loses, nothing is
+        forced, and the request re-reads and settles again on what is now committed."""
+        def revise_the_run(request):
+            revised = copy.deepcopy(ENVIRONMENT_ACTION)
+            revised["payload"]["rationale"] = "a newer revision committed while the row was settled"
+            assert env.observe(revised)["type"] == "Allow"
+
+        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
+        env = QualificationEnv(port)
+        self._qualify(env)
+        port.raiser = None
+        port.before_close = lambda request: (revise_the_run(request),
+                                             setattr(port, "before_close", None))
+        result = self._qualify(env)
+        self.assertEqual(result["type"], "Allow", result)
+        self.assertEqual(len(port.settles), 2, "the lost closing is settled again, never forced")
+        self.assertEqual([(row["outcome"], row["reason"]) for row in env.rows()],
+                         [(FAILED, INTERRUPTED), (SUCCEEDED, None)])
+        self.assertEqual(env.rows()[1]["revision"], 2)
+
+    # --- compare-and-set losers ------------------------------------------------------------
 
     def test_a_lost_cas_on_a_superseded_revision_orphans_the_record(self):
         """A newer approved revision committed mid-attempt is a compare-and-set loser (spec §5
@@ -269,16 +613,13 @@ class QualificationTransactionTests(unittest.TestCase):
         result = self._qualify(env)
         self.assertEqual(seen["revision"], 2)
         self.assertEqual(result["type"], "Fault", result)
-        self.assertEqual(
-            result["reason"],
-            generic_spike.GenericUnavailableReason.QUALIFICATION_CONFLICT.value, result)
+        self.assertEqual(result["reason"], CONFLICT, result)
         rows = env.rows()
         self.assertEqual(len(rows), 1, "the superseding revision never reserved: it is approved")
-        self.assertEqual(rows[0]["outcome"], "superseded")
+        self.assertEqual(rows[0]["outcome"], SUPERSEDED)
         self.assertIsNone(rows[0]["record_digest"], "the published record is orphaned")
-        self.assertEqual(rows[0]["reason"],
-                         generic_spike.GenericUnavailableReason.QUALIFICATION_CONFLICT.value)
-        self.assertEqual(dict(env.persisted().spike_backend), {"kind": "unqualified"},
+        self.assertEqual(rows[0]["reason"], CONFLICT)
+        self.assertEqual(env.binding(), {"kind": "unqualified"},
                          "the orphaned record binds nothing")
 
     def test_a_stop_during_the_attempt_is_a_cas_loser_that_records_its_charge(self):
@@ -290,72 +631,39 @@ class QualificationTransactionTests(unittest.TestCase):
         env = QualificationEnv(FakeQualificationPort(before_result=stop_mid_attempt))
         result = self._qualify(env)
         self.assertEqual(result["type"], "Fault", result)
-        self.assertEqual(
-            result["reason"],
-            generic_spike.GenericUnavailableReason.QUALIFICATION_CONFLICT.value, result)
+        self.assertEqual(result["reason"], CONFLICT, result)
         rows = env.rows()
-        self.assertEqual(rows[0]["outcome"], "superseded")
+        self.assertEqual(rows[0]["outcome"], SUPERSEDED)
         self.assertIsNone(rows[0]["record_digest"], "a stopped run never adopts the record")
         self.assertEqual(env.persisted().status, "stopped_residual")
-        self.assertEqual(dict(env.persisted().spike_backend), {"kind": "unqualified"},
+        self.assertEqual(env.binding(), {"kind": "unqualified"},
                          "a stop during the attempt changes no binding")
 
-    def test_concurrent_deliveries_bind_once_and_orphan_the_loser(self):
-        """Two coordinators, one run, both mid-attempt: both deliver the run's single open attempt
-        (the reservation absorbs the concurrent delivery; one charge is ever paid per open
-        attempt), the nested delivery binds, and the outer one's already-published record loses
-        the compare-and-set and stays an inert orphan — one binding, one resolved row."""
-        nested_port = FakeQualificationPort()
-        nested_result = {}
+    # --- admission -------------------------------------------------------------------------
 
-        def run_the_second_coordinator(request):
-            second = ProductionCoordinator(
-                Workspace(), Harness(), env.runs, env.artifacts_repo, PROFILE, {},
-                QualifiedSelector(), None, nested_port)
-            response = second.handle(
-                {"type": "ObserveAction", "run_id": env.run_id,
-                 "action": copy.deepcopy(QUALIFY_ACTION)}, "concurrent")
-            nested_result.clear()
-            nested_result.update(response)
-
-        env = QualificationEnv(FakeQualificationPort(before_result=run_the_second_coordinator))
+    def test_a_pending_configuration_revision_refuses_before_any_reservation_or_effect(self):
+        """The qualification passes the run's current configuration approval first (spec §5): a
+        raised configuration waiting for consent refuses with the existing governance reason,
+        reserving, charging and attempting nothing, until the configuration is approved again."""
+        env = QualificationEnv(FakeQualificationPort())
+        revised = copy.deepcopy(CONFIGURE_RUN)
+        revised["rationale"] = "a revised task size the run asks consent for after its approval"
+        self.assertEqual(env.observe(revised)["type"], "Allow")
+        before = env.rows()
         result = self._qualify(env)
-        self.assertEqual(result["type"], "Fault", result)
-        self.assertEqual(
-            result["reason"],
-            generic_spike.GenericUnavailableReason.QUALIFICATION_CONFLICT.value, result)
-        self.assertEqual(nested_result["result"]["type"], "Allow", nested_result)
-        rows = env.rows()
-        self.assertEqual(len(rows), 1, "the in-flight attempt absorbs the concurrent delivery")
-        self.assertEqual(rows[0]["outcome"], "succeeded")
-        installed = dict(env.persisted().spike_backend)
-        self.assertEqual(installed["kind"], "qualified")
-        self.assertEqual(installed["qualification_record_digest"],
-                         _record_digest(nested_port.requests[0]))
-        self.assertEqual(env.port.calls, 1)
-        self.assertEqual(nested_port.calls, 1)
+        self.assertEqual(result["type"], "Block", result)
+        self.assertEqual([reason["code"] for reason in result["reasons"]],
+                         ["governance.revision_required"])
+        self.assertEqual((env.rows(), env.port.calls), (before, 0))
+        approve_current(env.coordinator, env.run_id)
+        self.assertEqual(self._qualify(env)["type"], "Allow")
 
     def test_at_the_attempt_ceiling_the_admission_refuses_before_any_effect(self):
         """Once the run's attempt ceiling is spent the admission refuses with its own closed
         reason (now against live rows, where ``test_environment_governance`` derives it from the
         pure decision): nothing reserved, the port never called."""
         env = QualificationEnv(FakeQualificationPort())
-
-        def seed_attempts():
-            read = env.runs.data[env.key]
-            state = decode_state(read.value)
-            revision = state.environment["revision"]
-            rows = tuple(
-                {"attempt_id": f"qualification-{index}", "revision": revision,
-                 "started_stamp": index, "outcome": core_run.ATTEMPT_OUTCOMES[3],
-                 "record_digest": None, "reason": None, "probe": None}
-                for index in range(1, environment.MAX_QUALIFICATION_ATTEMPTS + 1))
-            snapshot = env.coordinator._assemble(
-                env.key, state, {"type": "GetRun", "run_id": env.run_id}, require_graph=False)
-            env.coordinator._commit(env.key, read.revision, snapshot,
-                                    replace(state, qualification_attempts=rows), ())
-
-        seed_attempts()
+        self._seed_attempts(env, resolved=environment.MAX_QUALIFICATION_ATTEMPTS, open_last=False)
         before = env.rows()
         result = self._qualify(env)
         self.assertEqual(result["type"], "Block", result)
@@ -363,6 +671,26 @@ class QualificationTransactionTests(unittest.TestCase):
                          [environment.QUALIFICATION_ATTEMPTS_EXHAUSTED])
         self.assertEqual(env.port.calls, 0)
         self.assertEqual(env.rows(), before)
+
+    def _seed_attempts(self, env: QualificationEnv, *, resolved: int, open_last: bool):
+        read = env.runs.data[env.key]
+        state = decode_state(read.value)
+        revision = state.environment["revision"]
+        total = resolved + (1 if open_last else 0)
+        rows = tuple(
+            {"attempt_id": environment.qualification_attempt_id(index, f"seeded-{index}"),
+             "revision": revision, "started_stamp": index,
+             "outcome": RESERVED if open_last and index == total else SUCCEEDED,
+             "record_digest": None, "reason": None, "probe": None}
+            for index in range(1, total + 1))
+        # a resolved seeded row stands for an earlier attempt that carried its own record
+        rows = tuple(
+            {**row, "record_digest": canonical_digest({"seeded": row["attempt_id"]})}
+            if row["outcome"] == SUCCEEDED else row for row in rows)
+        snapshot = env.coordinator._assemble(
+            env.key, state, {"type": "GetRun", "run_id": env.run_id}, require_graph=False)
+        env.coordinator._commit(env.key, read.revision, snapshot,
+                                replace(state, qualification_attempts=rows), ())
 
 
 if __name__ == "__main__":

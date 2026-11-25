@@ -28,6 +28,10 @@ from .ports import (QualificationAttemptBound,
 #: The closed cause a lost binding compare-and-set records (spec §5.1): the CAS itself owns it;
 #: the host attempt owner never emits it.
 QUALIFICATION_CONFLICT = generic_spike.GenericUnavailableReason.QUALIFICATION_CONFLICT.value
+#: The closed cause an interrupted attempt's row closes with, and the refusal reason while another
+#: attempt is live: the application owns both, the host attempt owner never emits them.
+QUALIFICATION_INTERRUPTED = generic_spike.GenericUnavailableReason.QUALIFICATION_INTERRUPTED.value
+QUALIFICATION_IN_PROGRESS = generic_spike.GenericUnavailableReason.QUALIFICATION_IN_PROGRESS.value
 
 
 def validate_attempt_outcome(value: Any) -> QualificationAttemptBound | QualificationAttemptFailed:
@@ -78,6 +82,14 @@ def superseded_attempt_row(row: Mapping[str, Any]) -> dict[str, Any]:
     binds, and the row closes with the conflict cause, never a fabricated probe."""
     return {**dict(row), "outcome": "superseded", "record_digest": None,
             "reason": QUALIFICATION_CONFLICT, "probe": None}
+
+
+def interrupted_attempt_row(row: Mapping[str, Any]) -> dict[str, Any]:
+    """The attempt row's resolved form once the next qualify finds its attempt dead (spec §5,
+    E9): it stays charged, closes failed with the interrupted cause, binds nothing, and records no
+    record digest — a record the dead attempt may have published is an orphan no row names."""
+    return {**dict(row), "outcome": "failed", "record_digest": None,
+            "reason": QUALIFICATION_INTERRUPTED, "probe": None}
 
 
 def qualified_binding(profile_id: str, record_digest: str,

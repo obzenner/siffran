@@ -283,6 +283,30 @@ def qualify_admission(state: object) -> str | None:
     return None
 
 
+def qualification_attempt_id(ordinal: int, delivery: object) -> str:
+    """The identity of the run's ``ordinal``-th qualification attempt, asked for by one delivery
+    (spec §5 step 1): the append-only row sequence makes the ordinal unique within the run, and the
+    delivery — the request identity the transport carries, or ``None`` where a caller has none —
+    is what lets an exact replay of a delivery find its own row again. The same delivery
+    re-arriving after its attempt resolved derives the same identity and so is recognised, never
+    charged again; a different delivery, or the same one asking afresh at a later ordinal, derives
+    a different one."""
+    return "qualification-" + canonical_digest(
+        {"attempt": ordinal, "delivery": delivery}).removeprefix("sha256:")
+
+
+def delivery_attempt_index(rows: object, delivery: object) -> int | None:
+    """The index of the latest row this delivery's own request opened — the row whose identity is
+    ``qualification_attempt_id`` of its ordinal and the delivery — or ``None`` when the delivery
+    has none. Rows are an append-only sequence, so the latest match is the delivery's current
+    attempt (an interrupted one closed and asked for again appends a later row)."""
+    found = None
+    for index, row in enumerate(rows):
+        if row["attempt_id"] == qualification_attempt_id(index + 1, delivery):
+            found = index
+    return found
+
+
 def spike_prerequisite(state: object) -> str | None:
     """The pure spike prerequisite (spec §5.1, decision only; per-spike image resolution is E10):
     on a run with no active qualified binding, ``environment-required`` when no approved

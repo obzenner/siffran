@@ -426,6 +426,13 @@ class GenericUnavailableReason(str, Enum):
     IMAGE_INSPECT_OUTPUT_LIMIT = "image-inspect-output-limit"
     IMAGE_TOOL_MISSING = "image-tool-missing"
     IMAGE_UID_UNUSABLE = "image-uid65534-unusable"
+    # Empirica 7.2 §5 (E9 fix round): the two causes of an attempt that is not one delivery's own.
+    # ``qualification-in-progress`` refuses a qualify while another attempt of the shared runtime
+    # holds the lock (nothing reserved, nothing charged); ``qualification-interrupted`` is the
+    # cause the next qualify records on an open row whose attempt died, which stays charged and
+    # binds nothing.
+    QUALIFICATION_IN_PROGRESS = "qualification-in-progress"
+    QUALIFICATION_INTERRUPTED = "qualification-interrupted"
 
 
 # The closed agent-visible spike Fault `reason` vocabulary (public-contract `evidence/spike/limits`).
@@ -466,6 +473,7 @@ QUALIFICATION_FAILURE_REASONS = tuple(member.value for member in (
     GenericPreparationReason.IMAGE_DECLARES_VOLUMES,
     GenericUnavailableReason.IMAGE_TOOL_MISSING,
     GenericUnavailableReason.IMAGE_UID_UNUSABLE,
+    GenericUnavailableReason.QUALIFICATION_INTERRUPTED,
 ))
 
 

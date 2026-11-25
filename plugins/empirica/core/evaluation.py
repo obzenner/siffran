@@ -893,34 +893,27 @@ def _submit_environment(snapshot: EvaluationSnapshot, command: Mapping[str, Any]
         state, environment=member, environment_history=environment.superseded_history(state)))
 
 
-def _reserve_qualification_attempt(snapshot: EvaluationSnapshot) -> Decision:
+def _reserve_qualification_attempt(snapshot: EvaluationSnapshot, delivery: object) -> Decision:
     """Reserve one charged host qualification attempt for the latest approved revision
     (Empirica 7.2 §5 step 1, the pure half of E9's transaction).
 
     The reservation is itself the state write planned here, so charging is durable before any
     host effect: the application commits it first, then runs the host attempt under its row's
     binding and performs the binding compare-and-set (losing orphans the record and binds
-    nothing). The row names the approved revision, one monotonic started stamp and the derived
-    attempt sequence identity; the state contract keeps its shape, and the state's row bound
-    (the one generated ``core.environment.MAX_QUALIFICATION_ATTEMPTS`` the admission already
-    spent) is the ceiling's only owner.
+    nothing). The row names the approved revision, one monotonic started stamp and the identity
+    ``environment.qualification_attempt_id`` derives from its ordinal and the delivery that asked
+    for it; the state contract keeps its shape, and the state's row bound (the one generated
+    ``core.environment.MAX_QUALIFICATION_ATTEMPTS`` the admission already spent) is the ceiling's
+    only owner.
 
-    An exact replay — the same payload-free author action, arrived while the previous attempt
-    for this same approved revision is still unresolved (reserved: an interrupted host effect)
-    — reserves nothing and charges nothing: the decision returns the state unchanged and the
-    open attempt's identity stays the one the transaction re-enters through."""
+    Every decision here is a fresh attempt: the application settles an exact delivery replay
+    (a resolved row of this very delivery) and an unresolved earlier row (live, or interrupted
+    and closed) before it asks this decision, so a row is never reused and never resumed."""
     state = snapshot.state
     member = state.environment
     rows = tuple(state.qualification_attempts)
-    last = rows[-1] if rows else None
-    if (last is not None and last["outcome"] == ATTEMPT_RESERVED
-            and last["revision"] == member["revision"]):
-        # An exact replay through the still-open attempt of this same approved revision.
-        return _decision(snapshot, state)
     row = {
-        "attempt_id": "qualification-" + digest(
-            {"attempt": len(rows) + 1, "revision": member["revision"],
-             "proposal_digest": member["digest"]}).removeprefix("sha256:"),
+        "attempt_id": environment.qualification_attempt_id(len(rows) + 1, delivery),
         "revision": member["revision"],
         "started_stamp": state.stamp_seq + 1,
         "outcome": ATTEMPT_RESERVED,
@@ -1795,7 +1788,12 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
             reason = environment.qualify_admission(state)
             if reason:
                 return _decision(snapshot, state, "Block", reason=reason)
-            return _reserve_qualification_attempt(snapshot)
+            # The host effect starts only under the run's current configuration approval
+            # (spec §5, order R1): a raised configuration waiting for consent refuses with the
+            # existing governance reason before anything is reserved or attempted.
+            if reason := governance.admission(state.governance):
+                return _decision(snapshot, state, "Block", reason=reason)
+            return _reserve_qualification_attempt(snapshot, command.get("delivery_id"))
     operation = (command["action"]["kind"] if kind == "ObserveAction"
                  and command["action"]["kind"] in {"route", "graph", "configure_run", "investigate"}
                  else "report_convergence" if kind == "EvaluateRun"

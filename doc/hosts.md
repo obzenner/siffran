@@ -54,17 +54,20 @@ Empirica **7.0.0** is the plugin major; its public wire remains `empirica/v2`, c
 [upgrade guide](upgrading-empirica-7.md) (and [the 6 guide](upgrading-empirica-6.md)), [ADR-0071](adr/0071-bind-spikes-to-qualified-docker-authority-per-run.md), and the
 [normative Docker support contract](../contracts/empirica-docker-spike/v1/README.md). The support contract's internal `/1` does not add a legacy runtime surface.
 
-An operator separately qualifies one exact local Unix Docker authority after the final tree is clean and
-committed, and the host composition builds the spike harness and the run qualification port on that installed
-authority. `StartRun` binds the run's own unqualified reference and never machine-wide authority: a run binds its
-exact qualified `docker-isolated-v1` or `docker-networked-v1` qualification and execution digest pair only through
-its own approved environment revision and `qualify` attempt (Empirica 7.2), and a run whose host composition did
-not bind reads `spikes_unavailable`; existing runs never adopt a later
-current record. Qualified means bound, not live health. At host
+Two paths coexist until spike admission moves to the run-scoped one (Empirica 7.2, node E10).
+The **legacy spike execution path** is operator-installed: an operator separately qualifies one exact local Unix
+Docker authority after the final tree is clean and committed, and the spike harness reads that installed `/2`
+record and pointer. The **run qualification path** is the run's own: `StartRun` binds the run's own `unqualified`
+reference and never reads machine-wide authority, and a run binds its exact qualified `docker-isolated-v1` or
+`docker-networked-v1` qualification and execution digest pair only through its own approved environment revision and
+`qualify` attempt (a charged attempt, compare-and-set into the run). The host composes the run qualification port
+wherever the guarded generic Docker composition succeeded, never for Codex, and a run whose host composition did not
+bind reads `spikes_unavailable`; existing runs never adopt a later current record. Qualified means bound, not live
+health. At host
 session launch, `EMPIRICA_SPIKE_PROFILE` may be omitted (the core selects isolated) or set exactly to
 `docker-isolated-v1` or `docker-networked-v1`; malformed configured values refuse before `StartRun`. This is
 host-process launch authority only: author actions, prompts, tool payloads, plans, and children cannot select or
-change it, and the chosen profile is retained in the immutable run binding. Pi's `GetArgument` author view and the
+change it, and the chosen profile is retained in the run's start binding as a ceiling: the run's environment revisions may propose that profile or a lower one, never a higher one. Pi's `GetArgument` author view and the
 loopback observer expose the committed generic request/result evidence as explicitly read-only data: sealed plan and
 input identities, bounded flat process/resource facts, model attribution, one natural exit and independent stream digests,
 uppercase verdict, cleanup and postflight binding, but never raw output, credentials, host/staging paths, endpoints or

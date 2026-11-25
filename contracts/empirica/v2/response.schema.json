@@ -229,7 +229,8 @@
                     "image-platform-mismatch",
                     "image-declares-volumes",
                     "image-tool-missing",
-                    "image-uid65534-unusable"
+                    "image-uid65534-unusable",
+                    "qualification-interrupted"
                   ],
                   "description": "The closed cause the attempt ended with (Empirica 7.2 §5.1): every attempt failure plus the kept deadline, egress and cleanup reasons, never an admission reason."
                 },
@@ -4303,7 +4304,9 @@
             "image-inspect-timeout",
             "image-inspect-output-limit",
             "image-tool-missing",
-            "image-uid65534-unusable"
+            "image-uid65534-unusable",
+            "qualification-in-progress",
+            "qualification-interrupted"
           ]
         },
         "probe": {
