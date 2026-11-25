@@ -23,7 +23,8 @@ test("schemaPattern reads the vendored digest pattern exactly", () => {
 test("schemaPattern accepts the absolute-lookahead anchor and its end is absolute", () => {
   const pattern = schemaPattern({ type: "string", pattern: "^sha256:[0-9a-f]{64}(?![\\s\\S])" });
   assert.equal(pattern.test(`sha256:${"a".repeat(64)}`), true);
-  // the escaped `$` would match before a final newline in JavaScript's RegExp; the word refuses it
+  // a trailing newline is the one byte Python's `re.search` `$` would admit before — JavaScript's
+  // `$` (no `m` flag) already refuses it; the absolute lookahead refuses it in both engines.
   assert.equal(pattern.test(`sha256:${"a".repeat(64)}\n`), false);
   assert.equal(pattern.test(`xsha256:${"a".repeat(64)}`), false);
 });
@@ -34,6 +35,22 @@ test("schemaPattern treats x- extension members as nonsemantic (ADR-0075 annotat
     "x-core-validator": "core.freshness.validate_digest256",
   });
   assert.equal(pattern.test(`sha256:${"a".repeat(64)}`), true);
+});
+
+test("schemaPattern refuses the class escapes the engines read differently", () => {
+  // The seed from the E6c review (blocking 2): `^sha256:[0-9a-f]{63}[^\d](?![\s\S])` admits
+  // `sha256:` + 63 `a` + the Arabic-Indic digit U+0661 in JavaScript (`\d` is ASCII-only there)
+  // and refuses it in Python (`\d` is Unicode-wide), so the pattern is wider than the shared word
+  // this loader may serve — the subset this page accepts never includes the class escapes.
+  for (const [label, pattern] of [
+    ["a complemented digit class", "^sha256:[0-9a-f]{63}[^\\d](?![\\s\\S])"],
+    ["a digit class", "^x[\\d]$"],
+    ["a word class", "^x\\w+$"],
+    ["a space class", "^x\\s+$"],
+    ["a negated space class", "^x\\S+$"],
+    ["a word boundary", "^x\\b$"],
+  ])
+    assert.throws(() => schemaPattern({ type: "string", pattern }), /not a closed anchored string pattern/, label);
 });
 
 test("schemaPattern refuses every shape it cannot read as one anchored pattern", () => {

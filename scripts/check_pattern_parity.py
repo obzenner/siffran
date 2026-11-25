@@ -45,6 +45,13 @@ FAMILIES = ["", "a", "A", "0", " ", "\t", "\n", "\r", "\x0b", "\x0c", "\u00a0", 
             "a\ud800", "\ud800a"]
 #: The witness-seeded suffix probes: the line-terminator family plus an astral and a blank character.
 SUFFIX_PROBES = ["\n", "\r", "\u2028", "\u2029", "\u00a0", "\U0001F600", "\ud800"]
+#: The witness-seeded end-substitution probes: the same complement families the prefix
+#: substitutions carry, plus the digit whose `\\d` class the engines read differently — the
+#: Arabic-Indic digit U+0661 (E6c review, blocking 2): Python's `\\d` is Unicode-wide and
+#: refuses it in `[^\\d]`, JavaScript's is ASCII-only and admits it, so any registered pattern
+#: resting a class escape on its last character shows the split here (`\\w`, `\\s` and their
+#: negations included; the digits stand for the whole Nd family).
+END_SUBSTITUTION_PROBES = ["\n", "\r", "\x00", "\x7f", "\u0661", "\ud800", "\t", " ", "\ufeff"]
 #: The only suffixes a ``$`` anchor may read differently — the declared open-disagreement family.
 LINE_TERMINATORS = ("\n", "\r", "\u2028", "\u2029")
 
@@ -67,6 +74,12 @@ def corpus_for(pattern: str) -> list[str]:
                 substituted = probe + witness[1:] if len(witness) > 1 else probe
                 if substituted not in cases:
                     cases.append(substituted)
+        for probe in END_SUBSTITUTION_PROBES:
+            # the witness's last character replaced: reaches a class escape resting on the
+            # anchored end, where the whole-string corpus cannot (the boundary family the
+            # line-terminator anchor quirk made necessary has its end-side sibling here).
+            if len(witness) > 1 and witness[:-1] + probe not in cases:
+                cases.append(witness[:-1] + probe)
     for probe in FAMILIES:
         if probe not in cases:
             cases.append(probe)

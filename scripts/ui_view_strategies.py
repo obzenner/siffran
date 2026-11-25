@@ -14,6 +14,7 @@ from typing import Any
 
 from hypothesis import strategies as st
 
+from conditional_forms import parse as parse_conditional
 from validate_ui_view import view_schemas
 
 KNOWN = {"$schema", "$id", "$defs", "$ref", "title", "description", "type", "enum", "const", "oneOf",
@@ -185,103 +186,36 @@ class Strategies:
         return drawn
 
     def _implications(self, node: dict, doc: dict, pointer: str) -> list[tuple[str, str, Any, str, dict]]:
-        """The member-to-member couplings this node's ``allOf`` states, as one derivation rule set.
-        Each entry must be a conditional form this engine fully models, exactly one of:
-
-        * the one-way form: ``if`` a ``{const}`` or a ``{not: {const}}`` on one required member,
-          ``then`` a schema for exactly one other member. The contract uses it for the coupling the
-          served document must never break (PR 15, A7): ``status == verified`` carries a parsed
-          ``empirica.hitl/1`` body, every other status a null one.
-        * the two-way form: one entry whose ``if`` carries a ``{const}`` on one member (its
-          ``required`` key may stay absent - the row itself requires the driver, so absence never
-          happens), with one paired member's schema for ``then`` and the same member's schema for
-          ``else``: the paired value is named exactly on the guard's word, and the ``else`` schema
-          holds otherwise (the run/5 attempt row's probe presentation, Empirica 7.2 §5.1). The pair
-          is derived as two rules sharing one driver - the const rule for the ``then`` side, its
-          complement for the ``else`` side - so the coupled drawing covers both directions.
-
-        Any other ``if``/``then`` shape is refused, never guessed: the guards cover every value the
-        guarded member's own keywords can draw, or a drawing would be unsatisfiable.
-        """
-        rules: list[tuple[str, str, Any, str, dict]] = []
-        for entry in node.get("allOf", ()):
-            if set(entry) == {"if", "then", "else"} and set(entry["if"]) in (
-                    {"properties"}, {"properties", "required"}):
-                cond, then, otherwise = entry["if"], entry["then"], entry["else"]
-                if (len(cond.get("properties", {})) != 1
-                        or set(then) != {"properties"} or len(then["properties"]) != 1
-                        or set(otherwise) != {"properties"} or len(otherwise["properties"]) != 1):
-                    raise ValueError(f"{doc['$id']}#{pointer}: a two-way conditional names one guarded "
-                                     "member and one paired member per side, exactly")
-                (driver, guard), = cond["properties"].items()
-                (named, when_schema), = then["properties"].items()
-                (unquoted, else_schema), = otherwise["properties"].items()
-                if set(guard) != {"const"} or named != unquoted or named == driver:
-                    raise ValueError(f"{doc['$id']}#{pointer}: a two-way guard is a const on one member "
-                                     "naming the same paired member on both of its sides")
-                rules.append((driver, "const", guard["const"], named, when_schema))
-                rules.append((driver, "not", guard["const"], named, else_schema))
-                continue
-            if set(entry) != {"if", "then"}:
-                raise ValueError(f"{doc['$id']}#{pointer}: an allOf entry that is not this contract's conditional")
-            cond, then = entry["if"], entry["then"]
-            if set(cond) != {"properties", "required"} or set(then) != {"properties"}:
-                raise ValueError(f"{doc['$id']}#{pointer}: an allOf guard must name its own member, then one member")
-            (member, guard), = cond["properties"].items()
-            if cond["required"] != [member]:
-                raise ValueError(f"{doc['$id']}#{pointer}: an allOf guard without its own member required")
-            if set(guard) == {"const"}:
-                mode, value = "const", guard["const"]
-            elif set(guard) == {"not"} and set(guard["not"]) == {"const"}:
-                mode, value = "not", guard["not"]["const"]
-            else:
-                raise ValueError(f"{doc['$id']}#{pointer}: an allOf guard is a const or a not-const only")
-            (target, schema), = then["properties"].items()
-            rules.append((member, mode, value, target, schema))
+        """The member-to-member couplings this node's ``allOf`` states, as one derivation rule set —
+        parsed once by the shared conditional parse (conditional_forms), the same parse the
+        challenge derivation consumes, so a form neither engine models refuses here exactly as it
+        refuses there: the one-way guard (``if`` a const on one required member, ``then`` one paired
+        member's schema), and the two-way pairing (``if`` one guarded member's const, then/else the
+        same paired member's two value schemas — const rule beside its complement)."""
+        guards, pairings = parse_conditional(node, doc["$id"], pointer)
+        rules = [(guard.driver, guard.mode, guard.value, guard.target, guard.schema)
+                 for guard in guards]
+        for pairing in pairings:
+            if not pairing.at_allOf:
+                raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing carries no allOf value "
+                                 "rule — the drawing of it goes through _presence_object alone")
+            rules.append((pairing.driver, "const", pairing.word, pairing.target,
+                          pairing.then_side[1]))
+            rules.append((pairing.driver, "not", pairing.word, pairing.target,
+                          pairing.else_side[1]))
         return rules
 
-    def _presence_pairing(self, node: dict, doc: dict, pointer: str) -> dict | None:
-        """The node-level ``if``/``then``/``else`` presence pairing, exactly as these contracts write
-        it (the run view's last failure and the public fault, Empirica 7.2 §5.1): ``if`` one guarded
-        member carries one ``{const}`` word — with ``required: [<driver>]`` naming it, so an absent
-        driver fails the guard and falls to ``else`` — then the one paired member is present,
-        ``else`` it is forbidden. Every other shape is refused, never guessed."""
-        if "if" not in node:
-            return None
-        cond, then, otherwise = node["if"], node.get("then"), node.get("else")
-        if set(cond) not in ({"properties"}, {"properties", "required"}):
-            raise ValueError(f"{doc['$id']}#{pointer}: a presence guard must name exactly one member")
-        (driver, guard), = cond["properties"].items()
-        if set(guard) != {"const"}:
-            raise ValueError(f"{doc['$id']}#{pointer}: a presence guard is a const, exactly")
-        demanded = "required" in cond
-        if demanded and cond["required"] != [driver]:
-            raise ValueError(f"{doc['$id']}#{pointer}: a presence guard requires only its own member")
-
-        def _side(branch: object, where: str) -> tuple[str, dict, dict | None]:
-            if not isinstance(branch, dict):
-                raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing must name both its sides")
-            if set(branch) == {"required"} and len(branch["required"]) == 1:
-                return "present", {"required": branch["required"]}, None
-            if (set(branch) == {"not"} and set(branch["not"]) == {"required"}
-                    and len(branch["not"]["required"]) == 1):
-                return "absent", {"not": branch["not"]}, None
-            if set(branch) == {"properties"} and len(branch["properties"]) == 1:
-                (member, schema) = next(iter(branch["properties"].items()))
-                return "present", {"required": [member]}, schema
-            raise ValueError(f"{doc['$id']}#{pointer}: a presence side ({where}) demands or forbids "
-                             "one member, exactly")
-
-        then_side, else_side = _side(then, "then"), _side(otherwise, "else")
-        both = []
-        for kind, shape, schema in (then_side, else_side):
-            member = (shape["required"] if kind == "present" else shape["not"]["required"])[0]
-            both.append((member, kind))
-        if both[0][0] != both[1][0] or both[0][1] == both[1][1]:
-            raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing holds one paired member "
-                             "present on exactly one of its two sides")
-        return {"driver": driver, "word": guard["const"], "demanded": demanded,
-                "target": both[0][0], "then": then_side, "else": else_side}
+    def _presence_pairing(self, node: dict, doc: dict, pointer: str):
+        """The node-level ``if``/``then``/``else`` presence pairing (the run view's last failure and
+        the public fault), parsed once by the shared conditional parse — the same parse the
+        challenge derivation consumes. Only the presence form returns a pairing; the two-way value
+        form returns None here (its rules go through _implications), and anything unmodelled
+        refuses at parse on both engines identically."""
+        _, pairings = parse_conditional(node, doc["$id"], pointer)
+        for pairing in pairings:
+            if not pairing.at_allOf:
+                return pairing
+        return None
 
     def _presence_object(self, node: dict, doc: dict, pointer: str,
                          pairing: dict) -> st.SearchStrategy:
@@ -290,9 +224,10 @@ class Strategies:
         draw never takes an absent driver an optional member allows), and the paired member follows
         the branch that driver value satisfies — present and drawn from the side's schema (or its
         own property node) on ``then``, absent on ``else``."""
-        (driver, word, demanded) = (pairing["driver"], pairing["word"], pairing["demanded"])
-        paired_side = pairing["then"] if pairing["then"][0] == "present" else pairing["else"]
-        target, side_schema = pairing["target"], paired_side[2]
+        (driver, word, demanded) = (pairing.driver, pairing.word, pairing.demanded)
+        then_side = pairing.then_side
+        paired_side = then_side if then_side[0] == "present" else pairing.else_side
+        target, side_schema = pairing.target, paired_side[1]
         props, required = node.get("properties", {}), set(node.get("required", []))
         if driver not in props:
             raise ValueError(f"{doc['$id']}#{pointer}: a presence pairing over a member its own "
@@ -313,7 +248,6 @@ class Strategies:
             driven = st.one_of(driven, st.just(word))
         if driver not in required and not self.full:
             driven = st.one_of(driven, st.none())  # an absent driver: falls per the guard's demand
-        then_side = pairing["then"]
         drawn_from = self.node(side_schema if side_schema is not None else props[target],
                                doc, f"{pointer}/properties/{target}")
 
@@ -343,6 +277,10 @@ class Strategies:
         props = {key: value for key, value in node.get("properties", {}).items() if key not in forbidden}
         presence = self._presence_pairing(node, doc, pointer)
         if presence is not None:
+            guards, pairings = parse_conditional(node, doc["$id"], pointer)
+            if guards or any(other.at_allOf for other in pairings) or len(pairings) != 1:
+                raise ValueError(f"{doc['$id']}#{pointer}: a presence-paired object carrying allOf "
+                                 "value rules is unmodelled")
             return self._presence_object(node, doc, pointer, presence)
         rules = self._implications(node, doc, pointer)
         if rules and len({(rule[0], rule[3]) for rule in rules}) == 1:

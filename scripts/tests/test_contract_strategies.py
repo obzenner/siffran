@@ -899,12 +899,47 @@ class TwoWayFormTests(unittest.TestCase):
                 mutant.drawn("two-way#/$defs/attempt")
 
 
+    def test_a_multi_key_if_required_with_an_optional_member_stays_refused(self):
+        """Sol's seed (E6c review, blocking 3): a two-way conditional whose ``if`` demands the
+        guarded member *and* an optional sibling loads today and draws a document the schema itself
+        refuses — the drawing honors only the driver's const, and the sibling may legally stay
+        absent, so ``if.required`` fires. The form is unmodelled: both engines refuse it at parse."""
+        document = copy.deepcopy(TWO_WAY)
+        attempt = document["$defs"]["attempt"]
+        attempt["properties"]["other"] = {"type": "string", "maxLength": 16}
+        attempt["allOf"] = [{
+            "if": {"properties": {"reason": {"const": "qualification-probe-failed"}},
+                   "required": ["reason", "other"]},
+            "then": {"properties": {"probe": {"$ref": "#/$defs/probeName"}}},
+            "else": {"properties": {"probe": {"type": "null"}}}}]
+        mutant = Contract({"two-way": document})
+        with self.assertRaises(ValueError):
+            mutant.drawn("two-way#/$defs/attempt")
+        with self.assertRaises(ValueError):
+            mutant.cases("two-way#/$defs/attempt")
+
+
 class PresenceFormTests(unittest.TestCase):
     """The node-level ``if``/``then``/``else`` presence pairing the views declare (E6c):
     the guarded word carries the paired member, every other word - and, on the wire form, an absent
     driver too - forbids it. The drawing engine must draw every direction, the pairing must derive
     its own breaches, and a gated member's own challenges must still fire against a base that drew
     the complementary side (the guard is placed for them, never guessed away)."""
+
+    def test_a_presence_side_that_only_redeclares_properties_stays_refused(self):
+        """Sol's seed (E6c review, blocking 3): a ``then`` that only re-declares the paired member
+        with its schema does not make it required to jsonschema, but the old presence parser read
+        that as a presence demand — every draw supplied the member and the schema-valid member-free
+        branch was silently unreachable. Unmodelled: both engines refuse it at parse."""
+        for which in ("looking", "wire"):
+            document = copy.deepcopy(PRESENCE)
+            document["$defs"][which]["then"] = {"properties": {
+                "probe": {"$ref": "#/$defs/probeName"}}}
+            mutant = Contract({"presence": document})
+            with self.assertRaises(ValueError):
+                mutant.drawn(f"presence#/$defs/{which}")
+            with self.assertRaises(ValueError):
+                mutant.cases(f"presence#/$defs/{which}")
 
     def setUp(self):
         _install_fixture_validator()

@@ -47,6 +47,7 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field, replace
+from conditional_forms import Pairing as _Pairing, parse as parse_conditional
 from pathlib import Path
 from typing import Any
 
@@ -416,20 +417,6 @@ class Case:
                                   # member: placed for a challenge whose own base drew the other side
 
 
-@dataclass
-class _Pairing:
-    """One conditional the registered closures carry, read from the keywords alone: ``driver`` holds
-    ``word`` (a const read from the schema, never restated), and ``target`` follows the branch that
-    word satisfies — a value schema per side on the ``allOf`` form (the run/5 attempt row), presence
-    and absence on the node-level form (the run view's last failure and the public fault)."""
-
-    driver: str
-    word: Any
-    target: str
-    demanded: bool               # the guard's ``if`` requires the driver, so absence falls to else
-    then_side: tuple             # ("value", schema) | ("present", schema | None) | ("absent", None)
-    else_side: tuple
-    at_allOf: bool
 
 
 @dataclass
@@ -1071,64 +1058,12 @@ class Contract:
             return list(sub["enum"])
         return None
 
-    def _pairings_of(self, node: dict, name: str) -> list[_Pairing]:
-        """Every conditional form these registered contracts carry, read from the keywords alone: the
-        two-way ``allOf`` ``{if, then, else}`` value pairing of the run/5 attempt row (the probe named
-        exactly on the probe-failure word, null otherwise) and the node-level presence pairing of the
-        run view's last failure (the probe present on the guarded word, forbidden on every other —
-        an absent driver falls per the guard's ``if.required``, the public fault's mirror). A form
-        the drawing engine refuses stays unparsed here too: never a silent record."""
-        out: list[_Pairing] = []
-        for entry in node.get("allOf", ()):
-            if not (isinstance(entry, dict) and set(entry) == {"if", "then", "else"}):
-                continue
-            cond = entry["if"]
-            if set(cond) not in ({"properties"}, {"properties", "required"}):
-                continue
-            if len(cond.get("properties", {})) != 1:
-                continue
-            (driver, guard), = cond["properties"].items()
-            then, otherwise = entry["then"], entry["else"]
-            if (set(guard) != {"const"} or set(then) != {"properties"}
-                    or set(otherwise) != {"properties"}
-                    or len(then["properties"]) != 1 or len(otherwise["properties"]) != 1
-                    or set(then["properties"]) != set(otherwise["properties"])):
-                continue
-            (target, then_schema), = then["properties"].items()
-            (_, else_schema), = otherwise["properties"].items()
-            out.append(_Pairing(driver, guard["const"], target, "required" in cond,
-                                ("value", then_schema), ("value", else_schema), True))
-        if isinstance(node.get("if"), dict):
-            cond = node["if"]
-            if set(cond) in ({"properties"}, {"properties", "required"}) \
-                    and len(cond.get("properties", {})) == 1:
-                (driver, guard), = cond["properties"].items()
-
-                def _side(branch: object, where: str) -> tuple[str, dict | None, str] | None:
-                    """A presence side: the one paired member demanded (``required``, with its value
-                    schema when the side writes one), forbidden (``not.required``), or None when the
-                    pairing needs the member's own property node."""
-                    if not isinstance(branch, dict):
-                        raise ValueError(f"(at the presence pairing): missing {where} side")
-                    if set(branch) == {"required"} and len(branch["required"]) == 1:
-                        return ("present", None, branch["required"][0])
-                    if (set(branch) == {"not"} and set(branch["not"]) == {"required"}
-                            and len(branch["not"]["required"]) == 1):
-                        return ("absent", None, branch["not"]["required"][0])
-                    if set(branch) == {"properties"} and len(branch["properties"]) == 1:
-                        (member, schema) = next(iter(branch["properties"].items()))
-                        return ("present", schema, member)
-                    return None
-
-                if set(guard) == {"const"}:
-                    then_side = _side(node.get("then"), "then")
-                    else_side = _side(node.get("else"), "else")
-                    if (then_side is not None and else_side is not None
-                            and then_side[2] == else_side[2]
-                            and {then_side[0], else_side[0]} == {"present", "absent"}):
-                        out.append(_Pairing(driver, guard["const"], then_side[2], "required" in cond,
-                                            then_side[:2], else_side[:2], False))
-        return out
+    def _pairings_of(self, node: object, name: str) -> list[_Pairing]:
+        """Every conditional pairing a node carries, read once by the shared parse
+        (conditional_forms) — the same parse the drawing engine consumes, so the supported forms
+        cannot drift and anything unmodelled refuses here exactly as it refuses there."""
+        _, pairings = parse_conditional(node, name, "")
+        return pairings
 
     def _side_ops(self, side: tuple, target: str, props: dict, name: str) -> list[tuple]:
         """The placements one branch of a pairing demands of its paired member, as derive-time
@@ -1204,12 +1139,13 @@ class Contract:
                 name = key.partition("#")[0]
                 holder = self._node_at(key, path)
                 found_here = list(self._pairings_of(holder, name))
-                for word in ("oneOf", "anyOf", "allOf"):
+                for word in ("oneOf", "anyOf"):
+                    # the paired member's own object may live inside a branch the placement path
+                    # cannot see (the last failure's failure row), so the pairing lookup walks into
+                    # oneOf/anyOf branches just as the target table does — never into allOf, whose
+                    # entries are the conditional attributes the holder's own parse already read.
                     for branch in holder.get(word, ()) if isinstance(holder, dict) else ():
                         if isinstance(branch, dict):
-                            # the paired member's own object may live inside a branch the placement
-                            # path cannot see (the last failure's failure row), so the pairing
-                            # lookup walks into the branches just as the target table does.
                             found_here += self._pairings_of(self.dereferenced(branch, name), name)
                 cache[path] = found_here
             return cache[path]

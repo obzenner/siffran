@@ -175,14 +175,11 @@ def check_limits() -> None:
     require(set(generic_spike.QUALIFICATION_FAILURE_REASONS)
             <= set(generic_spike.SPIKE_FAULT_REASONS),
             "the closed qualification failure set must stay a subset of the Fault reasons")
-    last_failure = schema["$defs"]["qualificationView"]["properties"]["last_failure"]
-    failed = next(branch for branch in last_failure["oneOf"]
-                  if branch.get("properties") and "reason" in branch["properties"])
-    require(failed["properties"]["reason"]["enum"]
-            == list(generic_spike.QUALIFICATION_FAILURE_REASONS),
-            "response.schema.json qualification.last_failure.reason differs from the closed "
-            "attempt-failure set (Empirica 7.2 §5.1: every attempt failure plus the kept deadline, "
-            "egress and cleanup reasons, never an admission reason)")
+    # The qualificationView last-failure reason enumeration belongs to the registered ADR-0075
+    # harness alone (E6c): the application's view validator reads it from its owner and the
+    # differential holds both sides, so this script keeps no shape mirror of it (E6c review
+    # blocking 4). Fault stays here by design: it is deferred to migration node T1, and the code
+    # vocabulary/subset checks below are its only cross-facet pin.
 
 
 def check_stale_text(root_dir: Path = ROOT) -> None:
