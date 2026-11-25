@@ -13,7 +13,7 @@ DAEMON_ID_MAX_LENGTH = 128
 
 DAEMON_ID_MIN_LENGTH = 1
 
-DAEMON_ID_PATTERNS = ('^[^\\u0000-\\u0020\\u007f-\\u009f]*[^\\u0000-\\u0020\\u007f-\\u009f\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff][^\\u0000-\\u0020\\u007f-\\u009f]*(?![\\s\\S])',)
+DAEMON_ID_PATTERNS = ('^[^\\u0000-\\u001f\\u007f-\\u009f]*[^\\u0000-\\u0020\\u007f-\\u009f\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000][^\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])',)
 
 DIGEST256_PATTERNS = ('^sha256:[0-9a-f]{64}(?![\\s\\S])',)
 

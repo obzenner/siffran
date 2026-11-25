@@ -395,8 +395,12 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         harness.images.probe_document = probe_document([mirror])
         outcome = harness.call()
         self.assertIs(type(outcome), run_owner.RunQualificationBound)
-        # the record seals the pinned reference and its digest, never the mirror's name
-        self.assertEqual(outcome.record["qualification_image"]["repo_digest"], PIN.repo_digest)
+        # (registration review, blocking) the digest proof is the entry the daemon
+        # itself reported — the mirror's own name pinned to the observed digest,
+        # never the canonical synthetic form it never observed — while the sealed
+        # reference stays the pinned canonical one, the contract's requested identity
+        self.assertEqual(outcome.record["qualification_image"]["repo_digest"], mirror)
+        self.assertEqual(outcome.record["qualification_image"]["reference"], PIN.repo_digest)
 
         for repo_digests in (
             [PIN.repository + "@" + D1],
@@ -467,9 +471,12 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                                            planner.IMAGE_INSPECT_FORMAT,
                                            harness.spike_images[0]))
         self.assertEqual(len(commands), 3 + len(harness.spike_images))
-        # the record seals the pinned canonical reference and the exact inspected ID
+        # the record seals the pinned canonical reference and the exact inspected ID;
+        # the digest proof is the entry the daemon reported for the located mirror
+        # (registration review, blocking), so both names are observations
         self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
-                         PIN.repo_digest)
+                         mirror_reference)
+        self.assertEqual(outcome.record["qualification_image"]["reference"], PIN.repo_digest)
         self.assertEqual(outcome.record["probe_image_id"], mirror_id)
         self.assertEqual(outcome.record["qualification_image"]["id"], mirror_id)
 
@@ -537,7 +544,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             outcome = harness.call()
             self.assertIs(type(outcome), run_owner.RunQualificationBound)
             self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
-                             PIN.repo_digest)
+                             "mirror.example/alpine@" + PIN.index_digest)
         with self.subTest(answer="output-limited"):
             harness = OwnerHarness(self._fresh_cell())
             harness.manifests = [{"implementation_digest": D0}] * 32
@@ -572,7 +579,28 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         outcome = harness.call()
         self.assertIs(type(outcome), run_owner.RunQualificationBound)
         self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
-                         PIN.repo_digest)
+                         mirror_reference)
+        self.assertEqual(outcome.record["qualification_image"]["reference"], PIN.repo_digest)
+
+    def test_the_sealed_digest_proof_is_the_sorted_first_entry_the_daemon_reported(self):
+        # (registration review, blocking) the digest proof member is the sorted-first
+        # matching RepoDigests entry — one observation, chosen deterministically —
+        # whatever order the daemon reported the entries in, while the reference
+        # member stays the canonical pinned form
+        later = "mirror-b.example/proxy/alpine@" + PIN.index_digest
+        first = "mirror-a.example/proxy/alpine@" + PIN.index_digest
+        for entries in ((later, first), (first, later)):
+            with self.subTest(entries=list(entries)):
+                harness = OwnerHarness(self._fresh_cell())
+                harness.manifests = [{"implementation_digest": D0}] * 32
+                harness.images.probe_document = probe_document(list(entries))
+                outcome = harness.call()
+                self.assertIs(type(outcome), run_owner.RunQualificationBound)
+                self.assertEqual(
+                    outcome.record["qualification_image"]["repo_digest"], first,
+                    "the proof is the sorted-first reported entry, never the first listed")
+                self.assertEqual(outcome.record["qualification_image"]["reference"],
+                                 PIN.repo_digest)
 
     def test_a_timed_out_probe_inspection_is_never_admitted_even_when_its_output_parses(self):
         # the read ends the attempt on its timeout flag alone: a killed inspection
@@ -650,6 +678,46 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                          "the sorted-first repository is re-inspected")
         self.assertEqual(outcome.record["qualification_image"]["id"], mirror_id,
                          "the re-inspected mirror's own daemon ID is the sealed one")
+        self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
+                         "mirror-a.example/alpine@" + PIN.index_digest,
+                         "the proof is the entry the re-inspected mirror reported")
+
+    def test_a_listing_row_with_a_none_repository_is_screened_out_by_the_reference_lexeme(self):
+        # (registration review, non-blocking 1) a `<none>` repository sorts before
+        # every real name, so a dangling row carrying the pin would otherwise end the
+        # attempt on a reference no daemon can answer; the repo-digest lexeme on the
+        # combined reference screens unusable names out before the sorted-first
+        # choice — while a list whose only matching row is `<none>` keeps the pull
+        # hint (a `<none>` digest can never match the pin by equality)
+        mirror_id = "sha256:" + "d" * 64
+        mirror_reference = "mirror.example/alpine@" + PIN.index_digest
+        for rows, admitted in (
+            ([{"Repository": "<none>", "Tag": "3.22", "Digest": PIN.index_digest,
+               "ID": "sha256:" + "c" * 64},
+              {"Repository": "mirror.example/alpine", "Tag": "3.22",
+               "Digest": PIN.index_digest, "ID": mirror_id}], True),
+            ([{"Repository": "<none>", "Tag": "3.22", "Digest": PIN.index_digest,
+               "ID": "sha256:" + "c" * 64}], False),
+        ):
+            with self.subTest(rows=rows, admitted=admitted):
+                harness = OwnerHarness(self._fresh_cell())
+                harness.manifests = [{"implementation_digest": D0}] * 32
+                harness.images.probe_absent = True
+                harness.images.list_rows = rows
+                harness.images.spike_documents[mirror_reference] = probe_document(
+                    ["mirror.example/alpine@" + PIN.index_digest], image_id=mirror_id)
+                outcome = harness.call()
+                if admitted:
+                    self.assertIs(type(outcome), run_owner.RunQualificationBound)
+                    self.assertEqual(
+                        outcome.record["qualification_image"]["repo_digest"],
+                        "mirror.example/alpine@" + PIN.index_digest)
+                else:
+                    self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                    self.assertIs(outcome.reason,
+                                  run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+                    self.assertIn("pull " + PIN.reference, outcome.detail)
+                    self.assertNoRecord(harness)
 
     def test_the_probe_image_inspection_timeout_is_the_remaining_budget(self):
         harness = OwnerHarness(self._fresh_cell())
@@ -703,6 +771,110 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                 self.assertEqual(store.load_record(digest, project_id="project-1",
                                                   run_id="run-1", generation=1),
                                  outcome.record)
+
+    def test_a_record_whose_digest_proof_names_another_digest_refuses_at_load(self):
+        # (registration review, blocking) the proof member may name any repository
+        # the daemon observed carrying the pinned content, but its digest part must
+        # be the pinned index digest. Two refusals must hold: a plainly tampered
+        # record is refused from its own published state with the closed record
+        # error (the untouched record still loads), and a *recomputed* record —
+        # one rebuilt through the production builder so every content digest
+        # agrees with the forged proof — is refused by validate_run_record itself,
+        # so the check is the proof's own rule, never only tamper detection
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        store = run_owner.RunQualificationStore(harness.root)
+        digest = outcome.record["qualification_record_digest"]
+        path = store.records / (digest.removeprefix("sha256:") + ".json")
+        payload = run_owner.fsio.dump_json(outcome.record)
+        model = dict(outcome.record)
+        tampered = dict(model["qualification_image"])
+        tampered["repo_digest"] = "mirror.example/alpine@" + "sha256:" + "e" * 64
+        body = dict(model)
+        body["qualification_image"] = tampered
+        path.write_bytes(run_owner.fsio.dump_json(body))
+        path.chmod(common.MODE_FILE)
+        with self.assertRaises(authority.GenericQualificationError):
+            store.load_record(digest, project_id="project-1", run_id="run-1",
+                              generation=1)
+        path.write_bytes(payload)
+        path.chmod(common.MODE_FILE)
+        self.assertEqual(store.load_record(digest, project_id="project-1",
+                                            run_id="run-1", generation=1),
+                         outcome.record)
+        # the recomputed forgery: every digest agrees with the wrong proof, and the
+        # record is still refused by its own rule
+        binding = run_owner.RunBinding(**model["run_binding"])
+        probes = tuple(run_owner.qualification.ProbeObservation(**probe)
+                       for probe in model["probes"])
+
+        def rebuilt(proof):
+            row = dict(model["qualification_image"])
+            row["repo_digest"] = proof
+            return run_owner.validate_run_record(run_owner.build_run_record(
+                binding, model["profile_id"], model["runtime"],
+                model["implementation_digest"], row, model["spike_images"], probes,
+                model["qualification_elapsed_ms"]))
+
+        for label, proof in (
+            ("another digest under the same name",
+             "mirror.example/alpine@" + "sha256:" + "e" * 64),
+            ("a digest of another length",
+             "mirror.example/alpine@" + "e" * 64),
+        ):
+            with self.subTest(proof=label):
+                with self.assertRaises(authority.GenericQualificationError):
+                    rebuilt(proof)
+        # the pinned proof loads: the observation the builder itself makes
+        self.assertEqual(rebuilt(model["qualification_image"]["repo_digest"])[
+            "qualification_record_digest"], model["qualification_record_digest"])
+
+    def test_a_daemon_identity_the_authority_admits_is_still_sealed_and_bound(self):
+        # (registration review, non-blocking 2) the record's daemon-identifier lexeme
+        # is the /2 authority's own rule — no C0/C1 control, at most 128 characters,
+        # not all whitespace, interior, leading and trailing spaces included — so a
+        # daemon the authority admits is never refused at sealing after five probes;
+        # the supervisor cases rest at the authority's own boundary tests (its owner)
+        for daemon_id in ("abc def", " leading", "trailing ", "a\u00a0b",
+                          "one\ufefftwo", "x" * 128):
+            with self.subTest(daemon_id=daemon_id):
+                harness = OwnerHarness(self._fresh_cell())
+                harness.manifests = [{"implementation_digest": D0}] * 32
+                harness.inspector_facts["daemon_id"] = daemon_id
+                outcome = harness.call()
+                self.assertIs(type(outcome), run_owner.RunQualificationBound,
+                              "the authority's admission is the record's admission")
+                self.assertEqual(outcome.record["daemon_id"], daemon_id)
+                loaded = run_owner.RunQualificationStore(harness.root).load_record(
+                    outcome.record["qualification_record_digest"],
+                    project_id="project-1", run_id="run-1", generation=1)
+                self.assertEqual(loaded["daemon_id"], daemon_id)
+
+    def test_the_record_daemon_lexeme_admits_exactly_the_authoritys_daemon_identity(self):
+        # (registration review, non-blocking 2) the two owners admit one rule on one
+        # member, so a corpus covers their agreement — every boundary class either
+        # names — and no restatement of the rule itself: both owners answer for
+        # themselves, and the test holds only the equality of their verdicts
+        corpus = ("abc def", " leading", "trailing ", "a\u00a0b", "one\ufefftwo",
+                  "\ufeff", "\ufeff ", "x" * 128, "", " ", "  \u00a0  ", "x" * 129,
+                  "bad\nidentity", "bad\x1fidentity", "bad\x7fidentity",
+                  "bad\x85identity", "bad\x9fidentity", 123, True, None, ["a"])
+        for identity in corpus:
+            with self.subTest(identity=identity):
+                admission_failed = False
+                try:
+                    authority.validate_runtime({**runtime(), "daemon_id": identity})
+                except authority.GenericQualificationError:
+                    admission_failed = True
+                shape_failed = False
+                try:
+                    run_owner.validate_daemon_identity_shape(identity)
+                except ValueError:
+                    shape_failed = True
+                self.assertEqual(admission_failed, shape_failed,
+                                 "the record's lexeme is the authority's own rule")
 
     # --- stale daemon, version change, implementation drift ------------------
 

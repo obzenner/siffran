@@ -348,9 +348,19 @@ def _elapsed_ms(value: object, where: str) -> int:
 PROBE_DURATION_CEILING_MS = 59_999
 QUALIFICATION_ELAPSED_CEILING_MS = int(DEFAULT_QUALIFICATION_SECONDS * 1000) - 1
 _DAEMON_IDENTIFIER = re.compile(
-    r"^[^\u0000-\u0020\u007f-\u009f]*"
-    r"[^\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
-    r"[^\u0000-\u0020\u007f-\u009f]*(?![\s\S])")
+    # exactly the rule the /2 authority's ``_daemon_id`` applies (registration
+    # review, non-blocking 2, aligned so a daemon the authority observes is never
+    # refused at sealing after all five probes): no C0/C1 control anywhere, at
+    # most 128 characters (checked beside the pattern), and not all whitespace —
+    # interior, leading and trailing ASCII spaces stay admissible everywhere.
+    # The required middle character excludes the cross-language blank set —
+    # Python ``str.strip``'s whitespace minus the controls the outer class already
+    # refuses (Python and JavaScript RegExp/u disagree on U+FEFF, so the set is
+    # spelled, never ``\S``) — and therefore admits a lone U+FEFF exactly like
+    # the authority's ``strip``, which does not treat it as whitespace either.
+    r"^[^\u0000-\u001f\u007f-\u009f]*"
+    r"[^\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]"
+    r"[^\u0000-\u001f\u007f-\u009f]*(?![\s\S])")
 _PROBE_ROW_FIELDS = frozenset({
     "name", "expected", "observed", "operation_digest", "cleanup_proven",
     "duration_ms", "running_network_membership", "realization_digest",
@@ -402,9 +412,12 @@ def validate_run_binding_shape(value: object) -> dict[str, Any]:
 
 
 def validate_daemon_identity_shape(value: object) -> str:
-    """The record's optional ``daemon_id`` member's own lexeme (self-describing, at least one
-    non-whitespace character); everything beyond the lexeme — when the identity may appear at
-    all and which daemon it names — is the runtime admission's."""
+    """The record's optional ``daemon_id`` member's own lexeme — exactly what the /2
+    authority's ``_daemon_id`` admits (registration review, non-blocking 2): no C0/C1
+    control, at most 128 characters, not all whitespace, interior, leading and trailing
+    spaces included, so a daemon the authority observes is never refused at sealing.
+    Everything beyond the lexeme — when the identity may appear at all and which daemon
+    it names — is the runtime admission's."""
     if (type(value) is not str or not 1 <= len(value) <= 128
             or _DAEMON_IDENTIFIER.fullmatch(value) is None):
         _refuse("daemon identity lexeme is malformed")
@@ -585,6 +598,12 @@ def validate_run_record(value: object) -> dict[str, Any]:
     if type(image_body) is not dict or "repo_digest" not in image_body:
         raise authority.GenericQualificationError("run qualification record probe image digest proof is absent")
     probe_digest_proof = _repo_digest(image_body["repo_digest"], "probe image")
+    if probe_digest_proof.rsplit("@", 1)[1] != probe_image.pinned_probe_image().index_digest:
+        # (registration review, blocking) the proof may name any repository the daemon
+        # observed carrying the pinned content, but its digest part must be the
+        # pinned index digest — never another digest, however well-formed the record
+        raise authority.GenericQualificationError(
+            "run qualification record probe image digest proof differs")
     probe_image_row = _image_row(
         {key: item for key, item in image_body.items() if key != "repo_digest"},
         runtime, "probe image")
@@ -941,14 +960,16 @@ def _locate_probe_image_by_repository_digest(runtime: Mapping[str, Any], pin: An
     repository - a proxy's own pull name - whose reported repository digest is the
     pin's. Returns the located row's digest-sealed reference to inspect -
     ``<repository>@<pinned index digest>`` - or ``None`` when no row carries the
-    pinned digest or the list is unusable (truncated, oversized, or unparsable:
-    never a partial admission). The row's reported image ID is never trusted or
-    returned: the classic store's ID is the config digest, not the index digest
-    (the digest-sealed reference is the one form both image stores answer — the
-    coordinator's real mirror pull on Docker Desktop 29.7.2/containerd witnessed
-    it). More than one matching repository is fine (same content): the choice is
-    deterministic, the sorted-first repository. The located reference is
-    re-inspected by the ordinary admission rules, which alone decide."""
+    pinned digest, every candidate name is unusable (a lexeme-screened ``<none>``
+    row, registration review non-blocking 1), or the list is unusable (truncated,
+    oversized, or unparsable: never a partial admission). The row's reported image
+    ID is never trusted or returned: the classic store's ID is the config digest,
+    not the index digest (the digest-sealed reference is the one form both image
+    stores answer — the coordinator's real mirror pull on Docker Desktop 29.7.2/
+    containerd witnessed it). More than one matching repository is fine (same
+    content): only repositories the repo-digest lexeme admits stay, and the choice
+    is deterministic, the sorted-first. The located reference is re-inspected by the
+    ordinary admission rules, which alone decide."""
     _remain(deadline, clock, "the trusted probe image digest listing")
     argv = (runtime["docker_cli"], "image", "list", "--digests", "--no-trunc", "--format",
             PROBE_IMAGE_LIST_FORMAT)
@@ -982,10 +1003,19 @@ def _locate_probe_image_by_repository_digest(runtime: Mapping[str, Any], pin: An
                     or row.get("Digest") != pin.index_digest):
                 continue
             repositories.add(row["Repository"])
-        if not repositories:
+        # (registration review, non-blocking 1) a row whose repository name is
+        # unusable — a `<none>` dangling name, which sorts before every real one —
+        # cannot name a reference any daemon would answer, so the repo-digest lexeme
+        # on the combined reference screens it out before the sorted-first choice,
+        # never leaving the attempt to die on a name that cannot be re-inspected
+        # while a real mirror row exists
+        usable = sorted(
+            repository for repository in repositories
+            if _REPO_DIGEST.fullmatch(repository + "@" + pin.index_digest) is not None)
+        if not usable:
             return None
-        # deterministic among equal-density mirror names: the sorted-first repository
-        return min(repositories) + "@" + pin.index_digest
+        # deterministic among equal-content mirror names: the sorted-first
+        return usable[0] + "@" + pin.index_digest
     except Exception:
         return None
     return None
@@ -1049,10 +1079,14 @@ def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: proce
             raise ValueError("the platform is not server-native")
     except Exception as exc:
         raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail) from exc
-    if not any(_REPO_DIGEST.fullmatch(entry) is not None
-               and entry.rsplit("@", 1)[1] == pin.index_digest for entry in digests):
-        # content identity, not repository identity: no entry of any repository name
-        # carries the pinned index digest, so the local image is not the pinned one
+    matching = sorted(
+        entry for entry in digests
+        if _REPO_DIGEST.fullmatch(entry) is not None
+        and entry.rsplit("@", 1)[1] == pin.index_digest)
+    if not matching:
+        # content identity, not repository identity: no entry of any repository
+        # name carries the pinned index digest, so the local image is not the pinned
+        # one
         raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail)
     try:
         # The sealed reference is the pinned ``repo@index-digest`` form (the canonical
@@ -1066,7 +1100,13 @@ def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: proce
     except Exception as exc:
         raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail) from exc
     row = image.to_data()
-    row["repo_digest"] = pin.repo_digest
+    # (registration review, blocking) the digest proof member is the observation
+    # the daemon itself made for the admitted image — the sorted-first
+    # ``RepoDigests`` entry carrying the pinned digest, whatever repository name it
+    # was reported under, and already shape-checked by the matching screen — never
+    # a synthetic value the daemon never observed; the loader checks its digest part
+    # against the pin
+    row["repo_digest"] = matching[0]
     return row, image
 
 
