@@ -35,7 +35,7 @@ Spec: `doc/design/specs/empirica-7.2-run-scoped-environment-qualification.md` (r
 | E7 | Governance: proposal admission, deliberative receipts (approve, reject, cancel, stale, supersede, A→B→A), auto derivation, profile ceiling, attempt ceiling | core | E2, E6 | M | `check-core`, mutate |
 | E8 | HITL kind `environment` + shared builder (escaping, write-first) | core/hitl, adapters/governance | E7 | S | `check-core check-claude` |
 | E9 | Transaction 1: `qualify` attempt reservation, effect via port, binding CAS, orphan handling, StartRun binds null | application, bridge | E2, E5, E7 | M | `empirica-transaction-check`, `bridge-composition-check` |
-| E10 | Transaction 2: spike admission against the active binding, sealed image membership, pre/post re-observation, spike/rebind serialization, `superseded-binding` | application | E9 | M | `empirica-transaction-check`, `-harness-check` |
+| E10 | Transaction 2: spike admission against the active binding, approved-reference membership with per-spike image resolution (7.1 checks), pre/post re-observation, spike/rebind serialization, `superseded-binding` | application | E9 | M | `empirica-transaction-check`, `-harness-check` |
 | E11 | Audit and reads: environment in `argument_digest` and `progress_basis`, per-spike lineage, turn-end obligations, author-view next calls, redaction | core, adapters/author_view, audit | E10 | M | `check-core check-evidence` |
 | E12 | Pi: environment dialog + `qualify` long-operation transport budget | Pi (TS) | E8, E9 | S | `check-pi` |
 | E13 | Claude: environment elicitation + transport budget; Codex refusal test | Claude, Codex | E8, E9 | S | `check-claude check-codex` |
