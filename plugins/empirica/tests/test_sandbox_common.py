@@ -127,6 +127,58 @@ class ScaffoldingTests(unittest.TestCase):
             self.assertEqual(stat_module.S_IMODE(target.lstat().st_mode), 0o755,
                              "the refused entry's link target must keep its own mode")
 
+    def test_a_permissive_preexisting_scaffold_directory_is_refused_not_healed(self):
+        # (mutation survivor from the parked run: `own_creation` defaulting True) a
+        # pre-existing but permissive scaffolding directory is refused by the identity
+        # admission, never fchmod'ed back to the closed mode first: the mutant heals
+        # 0755 to 0700 and accepts, this witness refuses and leaves the mode untouched.
+        import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            permissive = root / "work"
+            permissive.mkdir(mode=0o755)
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_directory(permissive, create=True)
+            self.assertEqual(
+                stat_module.S_IMODE(permissive.lstat().st_mode), 0o755,
+                "a refused scaffold keeps its own mode; it is never healed")
+
+    def test_a_regular_file_at_a_scaffold_directory_name_is_refused(self):
+        # (mutation survivor: the `or` in the identity admission) a descriptor opened at
+        # the scaffold name is a plain file, not a directory: the admission refuses it,
+        # whatever mode it carries - never treats a closed-mode file as the scaffold.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            impersonator = root / "runtime"
+            impersonator.write_text("not a directory")
+            impersonator.chmod(0o600)
+            for create in (True, False):
+                with self.subTest(mode="<closed-mode too>", create=create):
+                    impersonator.chmod(0o700)   # the kill witness: closed mode, still a file
+                    with self.assertRaises(common.GenericScaffoldingError):
+                        common.safe_directory(impersonator, create=create)
+                    impersonator.chmod(0o600)
+                with self.subTest(mode="read-only", create=create), self.assertRaises(
+                        common.GenericScaffoldingError):
+                    common.safe_directory(impersonator, create=create)
+
+    def test_a_restrictive_umask_lets_the_created_scaffold_gain_its_closed_mode(self):
+        # (mutation survivor: `own_creation = True` after a successful mkdir) with umask
+        # 0777 the mkdir cannot carry the closed mode itself; only the validated
+        # descriptor's fchmod completes it - the mutant refuses the fresh scaffold.
+        import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            previous = None
+            try:
+                previous = os.umask(0o777)
+                fresh = root / "runtime"
+                common.safe_directory(fresh, create=True)
+            finally:
+                os.umask(previous)
+            self.assertEqual(
+                stat_module.S_IMODE(fresh.lstat().st_mode), common.MODE_DIR)
+
     def test_mount_csv_delimiters_are_rejected_with_actionable_setup_error(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(strict=True)

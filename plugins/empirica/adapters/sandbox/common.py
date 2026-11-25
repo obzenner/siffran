@@ -225,28 +225,34 @@ def sandbox_home(env: Mapping[str, str] | None = None) -> Path:
 
 
 def safe_directory(path: Path, *, create: bool) -> None:
-    """Validate a scaffolding directory's identity and apply our mode to it.
+    """Validate a scaffolding directory's identity without ever chmod'ing through a path.
 
-    Identity is validated first through a descriptor opened without following symlinks
-    (re-review, blocking 3), and permissions are only ever changed through that already
-    validated descriptor — never through the path: a directory that lost a concurrent
-    first-use race to a planted symlink is refused with its target's permissions
-    untouched, and the inode whose identity was validated is exactly the inode chmod'ed.
+    Identity is validated through a descriptor opened without following symlinks
+    (re-review, blocking 3), and no permission is ever changed through the path: a
+    directory that lost a concurrent first-use race to a planted link is refused with
+    its target's permissions untouched. A fresh creation gains its closed mode at
+    creation time itself, inside a zero-umask window, so a restrictive umask can neither
+    mask the closed mode (which would need a healing chmod) nor smuggle it in past the
+    identity admission.
     """
-    own_creation = False  # whether this call is the one that created the directory
     try:
         path.lstat()
     except FileNotFoundError:
         if not create:
             raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}")
         try:
-            path.mkdir(parents=True, mode=MODE_DIR)
-            own_creation = True
+            # the closed mode belongs at creation, under a zero umask: nothing chmod's
+            # the fresh scaffold afterwards, and no umask can mask its ownership bits
+            saved = os.umask(0)
+            try:
+                path.mkdir(parents=True, mode=MODE_DIR)
+            finally:
+                os.umask(saved)
         except FileExistsError:
             # a concurrent first initializer (E5 review, finding 3) won the create: its
             # directory (or, under attack, a planted entry) is validated below and is
             # never changed before the validation accepts it (re-review, blocking 3)
-            own_creation = False
+            pass
         except OSError as exc:
             raise GenericScaffoldingError(
                 f"sandbox directory cannot be created safely: {path.name}") from exc
@@ -262,17 +268,8 @@ def safe_directory(path: Path, *, create: bool) -> None:
     try:
         info = os.fstat(descriptor)
         if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid != os.getuid()):
-            raise GenericScaffoldingError(
-                f"sandbox directory has unsafe ownership/mode: {path.name}")
-        if own_creation:
-            # our directory just created by this call: the mode is applied through the
-            # validated descriptor (a restrictive umask could have masked it in mkdir)
-            os.fchmod(descriptor, MODE_DIR)
-            if stat.S_IMODE(os.fstat(descriptor).st_mode) != MODE_DIR:
-                raise GenericScaffoldingError(
-                    f"sandbox directory has unsafe ownership/mode: {path.name}")
-        elif stat.S_IMODE(info.st_mode) != MODE_DIR:
+                or info.st_uid != os.getuid()
+                or stat.S_IMODE(info.st_mode) != MODE_DIR):
             raise GenericScaffoldingError(
                 f"sandbox directory has unsafe ownership/mode: {path.name}")
     except OSError as exc:

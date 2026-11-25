@@ -1355,6 +1355,87 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
                                                   run_id="run-1", generation=1)
                 self.assertEqual(orphan_record["run_binding"]["attempt_id"], "a-" + label)
 
+    def test_the_store_creates_missing_naming_levels_to_publish(self):
+        # (mutation survivor: `create=True` on the write path's level pre-check) an
+        # unscaffolded store creates and strictly syncs every missing level of its own
+        # naming chain for a publication; a create=False mutant only worked because the
+        # owner's scaffolding had pre-created the levels for every other test.
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        cell = (Path(temporary.name) / "sandbox").resolve()
+        cell.mkdir(mode=0o700)
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        bare = (Path(temporary.name) / "sandbox").resolve()
+        store = run_owner.RunQualificationStore(bare)
+        for level in run_owner._naming_levels(store):
+            self.assertFalse(level.exists(),
+                             "the bare store starts without any naming level")
+        store.write_record(dict(outcome.record))
+        for level in run_owner._naming_levels(store):
+            self.assertTrue(level.exists(), "publication created " + level.name)
+        self.assertEqual(store.load_record(outcome.record_digest, project_id="project-1",
+                                           run_id="run-1", generation=1),
+                         outcome.record)
+
+    def test_the_publication_seal_never_follows_a_replaced_symbolic_link(self):
+        # (mutation survivors: the seal's O_NOFOLLOW, and the `publication` default) the
+        # mode change of a fresh publication opens the renamed file without following a
+        # link swapped in after the durable write: it is refused, and the swapped link's
+        # target keeps its own mode and is never chmod'ed through the link.
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        cell = (Path(temporary.name) / "sandbox").resolve()
+        cell.mkdir(mode=0o700)
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        store = run_owner.RunQualificationStore(harness.root)
+
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        victim = (Path(temporary.name) / "victim").resolve()
+        victim.mkdir(mode=0o755)
+        victim.chmod(0o755)
+        different = dict(outcome.record)
+        different["qualification_elapsed_ms"] = different["qualification_elapsed_ms"] + 7
+        body = {key: item for key, item in different.items()
+                if key != "qualification_record_digest"}
+        different["qualification_record_digest"] = run_owner.canonical_digest(body)
+        path = store.records / (different["qualification_record_digest"]
+                                .removeprefix("sha256:") + ".json")
+        self.assertFalse(path.exists())
+        original_write = run_owner.fsio.atomic_write
+
+        def swapped_write(target, data, *, durable=False):
+            original_write(target, data, durable=durable)
+            # the attacker wins the race window after the durable write
+            target.unlink()
+            target.symlink_to(victim, target_is_directory=True)
+
+        with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
+            with self.assertRaises(authority.GenericQualificationError):
+                store.write_record(different)
+        import stat as stat_module
+        self.assertEqual(
+            stat_module.S_IMODE(victim.lstat().st_mode), 0o755,
+            "the link target was never chmod'ed through the swapped name")
+        self.assertTrue(path.is_symlink(), "the attacker's swap is still in place")
+        with self.assertRaises((authority.GenericQualificationError,
+                                common.GenericScaffoldingError)):
+            store.load_record(different["qualification_record_digest"],
+                              project_id="project-1", run_id="run-1", generation=1)
+
     def test_authority_read_failure_is_docker_unreachable_and_never_capability(self):
         for message, reason in (
             ("Docker context read failed", run_owner.RunQualificationReason.DOCKER_UNREACHABLE),
