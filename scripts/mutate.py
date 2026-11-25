@@ -73,8 +73,14 @@ class Finding:
         return f"{self.file}:{self.line}  {self.original} → {self.mutant}  {said}"
 
 
+def git_output(root: Path, *args: str) -> str:
+    """What ``git`` prints in ``root``, decoded from its bytes only here: no newline translation, so a carriage return
+    inside a patch line stays inside it."""
+    return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True).stdout.decode("utf-8", "surrogateescape")
+
+
 def _git(*args: str) -> str:
-    return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
+    return git_output(ROOT, *args)
 
 
 _ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11}

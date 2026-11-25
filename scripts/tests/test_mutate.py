@@ -5,8 +5,11 @@ import contextlib
 import io
 import os
 import sys
+import subprocess
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
@@ -69,6 +72,22 @@ class ScopeTests(unittest.TestCase):
         diff = "diff --git a/dir/a b.js b/dir/a b.js\n--- a/dir/a b.js\t\n+++ b/dir/a b.js\t\n@@ -1 +1 @@\n-x\n+++ y\n"
         scope = mutate.changed(lambda *args: diff if args[0] == "diff" else "new file.py\0odd\nname.py\0")
         self.assertEqual(scope, {"dir/a b.js": [(1, 1)], "new file.py": None, "odd\nname.py": None})
+
+    def test_a_real_patch_with_a_carriage_return_before_a_header_look_alike_keeps_its_second_hunk(self):
+        env = {**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t",
+               "GIT_COMMITTER_EMAIL": "t@t", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_SYSTEM": os.devnull}
+        with tempfile.TemporaryDirectory() as folder:
+            def git(*args):
+                subprocess.run(["git", *args], cwd=folder, env=env, capture_output=True, check=True)
+            name = Path(folder) / "scripts" / "caf\u00e9.js"
+            git("init", "-q")
+            name.parent.mkdir()
+            name.write_bytes(b"one\ntwo\nthree\nfour\nfive\nsix\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "c")
+            name.write_bytes(b"// payload\r+++ false.js\none\ntwo\nTHREE\nfour\nfive\nsix\n")
+            with mock.patch.object(mutate, "ROOT", Path(folder)):
+                self.assertEqual(mutate.changed(), {"scripts/caf\u00e9.js": [(1, 1), (4, 4)]})
 
     def test_the_default_scope_is_the_diff_s_lines_and_every_line_of_an_untracked_file(self):
         calls = []

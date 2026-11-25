@@ -76,8 +76,7 @@ class Clone:
         return f"{a}:{a1}-{a2} == {b}:{b1}-{b2} ({self.lines} lines)"
 
 
-def _git(root: Path, *args: str) -> str:
-    return subprocess.run(["git", *args], cwd=root, capture_output=True, check=True).stdout.decode("utf-8", "surrogateescape")
+_git = mutate.git_output
 
 
 def _records(root: Path, *args: str) -> list[str]:
@@ -169,7 +168,7 @@ def clones(report: dict, scanned: Path, read=lambda path: path.read_text(encodin
     return [Clone(a, b) for members in groups.values() for a, b in itertools.combinations(members, 2)]
 
 
-def jscpd_report(scanned: Path, tokens: int, jscpd: Path = JSCPD) -> dict:
+def jscpd_report(scanned: Path, tokens: int, jscpd: Path) -> dict:
     """jscpd's JSON report of the clones of at least ``tokens`` tokens in ``scanned``."""
     with tempfile.TemporaryDirectory() as out:
         subprocess.run([str(jscpd), str(scanned), "-k", str(tokens), "-f", "python,typescript,javascript", "-r", "json", "-o", out,
@@ -195,7 +194,7 @@ def verdict(found: list[Clone]) -> tuple[list[Clone], list[Clone]]:
     return failures, [c for c in found if c not in failures]
 
 
-def check(root: Path, base: str, tokens: int, generated: frozenset[str], report_of: Callable[[Path, int], dict] = jscpd_report):
+def check(root: Path, base: str, tokens: int, generated: frozenset[str], report_of: Callable[[Path, int], dict]):
     """The failures and the warnings of BASE..HEAD in ``root``, the detector's report of a scanned folder being ``report_of``."""
     require_ancestor(root, base)
     with tempfile.TemporaryDirectory() as tmp:
@@ -208,19 +207,23 @@ def check(root: Path, base: str, tokens: int, generated: frozenset[str], report_
         return verdict(new_clones(found["head"], found["base"], changed_lines(root, base), renames(root, base)))
 
 
-def main(argv: list[str]) -> int:
+def main(argv: list[str], *, root: Path = ROOT, report_of: Callable[[Path, int], dict] | None = None,
+         generated: frozenset[str] | None = None) -> int:
+    """The command; ``report_of`` is the detector (jscpd, pinned, unless a caller gives its own), ``generated`` the declared outputs."""
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--base", default=os.environ.get("BASE") or None)
     parser.add_argument("--tokens", type=int, default=int(os.environ.get("TOKENS") or DEFAULT_TOKENS))
     args = parser.parse_args(argv)
     if args.tokens < 1:
         parser.error("TOKENS must be a positive number")
-    if not JSCPD.is_file():
-        print("dup-check: the pinned clone detector is missing: run make dup-install", file=sys.stderr)
-        return 2
-    base = _git(ROOT, "rev-parse", args.base).strip() if args.base else default_base()
-    failures, warnings = check(ROOT, base, args.tokens, generated_outputs())
-    print(f"dup-check: {base[:8]}..{_git(ROOT, 'rev-parse', 'HEAD')[:8]}, clones of at least {args.tokens} tokens")
+    if report_of is None:
+        if not JSCPD.is_file():
+            print("dup-check: the pinned clone detector is missing: run make dup-install", file=sys.stderr)
+            return 2
+        report_of = lambda scanned, tokens: jscpd_report(scanned, tokens, JSCPD)  # noqa: E731
+    base = _git(root, "rev-parse", args.base).strip() if args.base else default_base(root)
+    failures, warnings = check(root, base, args.tokens, generated_outputs() if generated is None else generated, report_of)
+    print(f"dup-check: {base[:8]}..{_git(root, 'rev-parse', 'HEAD')[:8]}, clones of at least {args.tokens} tokens")
     for title, group in (("FAIL new production clones", failures), ("WARN new clones involving test code", warnings)):
         if group:
             print(f"{title}:")
