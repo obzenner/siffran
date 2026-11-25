@@ -1915,6 +1915,25 @@ def check_hitl_bytes(raw: bytes, doc: Any, where: str, errors: list[str]) -> Non
                       f"indent=2, ensure_ascii=False) + one trailing newline, UTF-8)")
 
 
+def check_hitl_environment_bounds(hitl_schema: dict, request_schema: dict, errors: list[str]) -> None:
+    """The environment document's escaped free-text bounds are derived, never restated (E8
+    re-review, blocking 4): each is the request schema's proposal bound times the longest
+    expansion the core's one escaper gives one character — measured over every character it
+    can rewrite, not assumed — so every admitted proposal renders inside the document schema
+    without the proposal being tightened or truncated. Both sides are read from the schemas."""
+    from core.projection import safe_text
+    expansion = max(len(safe_text(chr(code))) for code in range(0x10000))
+    proposal = request_schema["$defs"]["environmentProposal"]["properties"]
+    document = hitl_schema["$defs"]["environmentDocument"]["properties"]
+    for name, owner, rendered in (
+            ("preparation", proposal["preparation"]["items"], document["preparation"]["items"]),
+            ("rationale", proposal["rationale"], document["rationale"])):
+        if rendered.get("maxLength") != owner["maxLength"] * expansion:
+            errors.append(f"hitl.schema.json environmentDocument {name}: maxLength {rendered.get('maxLength')} "
+                          f"is not the proposal's {owner['maxLength']} times the escaper's longest "
+                          f"expansion {expansion}")
+
+
 def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: list[str]) -> None:
     """One mutation per hitl rule, each with the diagnostic it must produce, so a fixture that
     silently became valid (or a byte check that stopped checking) cannot pass quietly.
@@ -3077,6 +3096,9 @@ def main() -> int:
                 errors.append(f"{where}: rejected but no diagnostic contains "
                               f"{expected_sub!r}; got {produced}")
     run_hitl_negatives(hitl_schema, hitl_docs, errors)
+    if hitl_schema:
+        check_hitl_environment_bounds(
+            hitl_schema, schemas.get(("empirica/v2", "request"), {}), errors)
 
     # --- v2 fixtures ---
     REQUIRED_V2_FIXTURES = {

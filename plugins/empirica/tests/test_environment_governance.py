@@ -31,13 +31,16 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from application.location import decode_handle
 from application import protocol
+from application.governance import host_ingress_admitted
 from application.run_state import classify_and_decode
 from application.transaction import Coordinator
 from core import environment
 from core.canonical import canonical_digest
 from core.evaluation import ENVIRONMENT_NOT_AVAILABLE
-from test_d7_transactions import Runs
-from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, QUALIFY_ACTION, ServiceEnv,
+from core.governance import plain
+from application.v2 import compose
+from test_d7_transactions import Harness, Runs, Workspace
+from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, PROFILE, QUALIFY_ACTION, ServiceEnv,
                                        approve_current)
 
 _V2 = Path(__file__).resolve().parents[3] / "contracts/empirica/v2"
@@ -579,6 +582,54 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(env.service.trusted_environment_decision(
             run_id=env.run_id, payload=bad)["result"]["type"], "Fault")
         self.assertEqual(dict(env.state().environment), dict(env.member))
+
+
+class HostIngressTests(unittest.TestCase):
+    """E8 re-review (blocking 6): the environment's private legs stand for the human only for the
+    host whose approval ingress opened the run's human episode. Another host's profile sharing
+    the run repository — Codex (no ingress at all, withheld) or a host with a different
+    ingress — reads no document and records no receipt, whatever digest and receipt it names."""
+
+    def _other_host(self, env, profile_id):
+        coordinator = env.service._coordinator
+        return compose(Workspace(), Harness(), coordinator.runs, coordinator.artifacts, None,
+                       profile_id, {}, None)
+
+    def _hosts_that_are_not_the_runs(self):
+        own = protocol.host_profile(PROFILE)["approval_ingress"]
+        return [row["profile_id"] for row in protocol._HOST_PROFILES["profiles"]
+                if row["approval_ingress"] != own]
+
+    def test_a_host_that_is_not_the_runs_reads_no_document_and_records_no_receipt(self):
+        env = DeliberationEnv()
+        hosts = self._hosts_that_are_not_the_runs()
+        self.assertGreaterEqual(len(hosts), 2, "the codex-less profile and a different ingress")
+        before = plain(env.state().environment)
+        for profile_id in hosts:
+            with self.subTest(profile=profile_id):
+                other = self._other_host(env, profile_id)
+                self.assertEqual(other.trusted_environment_document(run_id=env.run_id)["result"]["type"],
+                                 "Inert")
+                for outcome in ("present", "approve", "reject"):
+                    result = other.trusted_environment_decision(
+                        run_id=env.run_id,
+                        payload=_receipt(env.member, env.run_id, outcome, env.receipt_id,
+                                         env.digest))["result"]
+                    self.assertEqual(result["type"], "Fault", result)
+                self.assertEqual(plain(env.state().environment), before)
+
+    def test_a_host_without_any_ingress_never_matches_a_run_that_recorded_none(self):
+        """A run no host has reported on records ``unavailable``, and the Codex profile declares
+        ``unavailable``: equality alone would admit it, so the profile's own ingress must also
+        be one that can ask a human. No profile is admitted for a run that recorded none."""
+        state = ServiceEnv().start().state()
+        self.assertEqual(state.governance["context"]["ingress"], "unavailable")
+        for row in protocol._HOST_PROFILES["profiles"]:
+            with self.subTest(host=row["host_id"]):
+                self.assertFalse(host_ingress_admitted(row["profile_id"], state))
+
+    def test_the_runs_own_host_is_admitted(self):
+        self.assertTrue(host_ingress_admitted(PROFILE, DeliberationEnv().state()))
 
 
 class AdmissionDecisionTests(unittest.TestCase):

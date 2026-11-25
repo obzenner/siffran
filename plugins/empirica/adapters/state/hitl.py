@@ -133,7 +133,8 @@ class Published:
     parsed: Mapping[str, Any]
 
 
-def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published | None:
+def publish(store: "HitlDocuments", run_id: object, pair: object, *,
+            expect: Mapping[str, object] | None = None) -> Published | None:
     """Verify one core-rendered ``{text, digest}`` pair, publish its bytes exactly once through
     the write-once store, and give the bound document back (review-2 m1, 7d — the one helper
     Claude's governance and evidence flows and Pi's bridge leg all bind through).
@@ -150,7 +151,15 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     :class:`fsio.SymlinkRefused`, :class:`HardLinkUnsupported`, any :class:`OSError` — are the
     caller's to translate: the flows differ in what their host must answer (``None``, an
     ``unavailable`` result, a typed fault). The published digest equals the pair's own identity,
-    answered and never assumed."""
+    answered and never assumed.
+
+    Identity before the write (re-review of E8, blocking 3): when the caller names ``expect``,
+    every named member of the document — its embedded ``run_id``, its ``kind``, the admitted
+    revision's ``proposal_digest`` — must equal the document's own. A valid document of another
+    run, revision or kind is refused as ``None`` with nothing written, so a stale or substituted
+    fetch never leaves a sidecar for a form that will not be shown. A caller that names nothing
+    (the configuration and evidence flows, whose pairs the core derives from the one request)
+    publishes exactly as before."""
     from application.location import decode_handle  # lazy: the caller keeps its import-chain cost
     if not isinstance(pair, Mapping):
         return None
@@ -179,6 +188,8 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     # never presents a form chosen from an unverifiable discrimination: the mediation answers
     # ``governance.approval_unavailable`` before any present, nothing spent, nothing written.
     # An evidence document carries no ``question`` and keeps publishing unchanged.
+    if any(parsed.get(name) != value for name, value in (expect or {}).items()):
+        return None
     kind = parsed.get("kind")
     if kind not in (core_hitl.CONFIGURATION, core_hitl.EVIDENCE, core_hitl.ENVIRONMENT):
         return None

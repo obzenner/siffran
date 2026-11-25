@@ -547,10 +547,67 @@ class EnvironmentGoldenTests(unittest.TestCase):
         ):
             with self.assertRaises((ValueError, Exception)):
                 hitl.environment_document(**payload)
-        with self.assertRaises(ValueError):  # a revision never names the proposal it is approving
-            environment_document(previous_binding={"record_digest": member["digest"], "revision": 1})
         with self.assertRaises(ValueError):
             environment_document(previous_binding={"record_digest": "sha256:" + "1" * 64})
+
+    def test_a_previous_binding_is_never_compared_with_the_proposal_digest(self):
+        """A qualification record and a proposal are different objects: sharing a digest value
+        is no reason to refuse the document (E8 re-review, non-blocking 3), so it is carried."""
+        member = environment_member()
+        document = environment_document(
+            member, previous_binding={"record_digest": member["digest"], "revision": 1})
+        self.assertEqual(document["previous_active_binding"]["record_digest"], member["digest"])
+
+    def test_maximum_size_proposals_that_expand_under_escaping_stay_schema_valid(self):
+        """The document's escaped free text is bounded by the proposal's own bound times the
+        escaper's longest expansion — read here from the request schema's owner and measured from
+        the escaper, never restated: a maximum-size proposal whose every character expands
+        (backslashes, the zero-width and bidi characters the escaper rewrites) renders to more
+        characters than the proposal admits and must still be a valid document, while the
+        proposal itself is accepted whole — never tightened, never truncated. Controls in the
+        goal expand too, and the goal carries no bound."""
+        request = json.loads((ROOT / "contracts" / "empirica" / "v2" / "request.schema.json"
+                              ).read_text("utf-8"))["$defs"]["environmentProposal"]["properties"]
+        step_max = request["preparation"]["items"]["maxLength"]
+        steps_max = request["preparation"]["maxItems"]
+        rationale_max = request["rationale"]["maxLength"]
+        widest = max((chr(code) for code in range(0x10000)), key=lambda c: len(safe_text(c)))
+        for expanding in ("\\", widest):
+            with self.subTest(character=ascii(expanding)):
+                step = "a" + expanding * (step_max - 1)
+                rationale = "a" + expanding * (rationale_max - 1)
+                member = environment_member(proposal_overrides={
+                    "preparation": [step] * steps_max, "rationale": rationale})
+                self.assertEqual(member["proposal"]["rationale"], rationale)  # accepted whole
+                document = environment_document(member, goal="goal\n\u202e\x07" * 50)
+                self.assertGreater(len(document["rationale"]), rationale_max)
+                self.assertGreater(len(document["preparation"][0]), step_max)
+                assert_schema(document, "environment/expanded")
+        self.assertGreater(len(safe_text(widest)), len(safe_text("\\")))  # the widest really is wider
+
+
+class SharedPairTests(unittest.TestCase):
+    """One pair construction and one write-first verification for every kind (E8 re-review,
+    blocking 5): the pair is the document's exact rendered bytes and their digest, and the
+    verification admits exactly that digest — and, where a recorded row exists, its own."""
+
+    def test_the_pair_is_the_rendered_bytes_and_their_digest(self):
+        document = environment_document()
+        pair = hitl.rendered_pair(document)
+        self.assertEqual(pair["text"].encode("utf-8"), hitl.render(document))
+        self.assertEqual(pair["digest"], hitl.document_digest(document))
+        self.assertEqual(set(pair), {"text", "digest"})
+
+    def test_the_verification_binds_the_rendered_digest_and_the_recorded_row(self):
+        document = environment_document()
+        given = hitl.document_digest(document)
+        self.assertTrue(hitl.document_bound(given, document))
+        self.assertFalse(hitl.document_bound(given, {**document, "goal": "another"}))
+        self.assertFalse(hitl.document_bound("sha256:" + "0" * 64, document))
+        self.assertFalse(hitl.document_bound(None, document))
+        self.assertTrue(hitl.document_bound(given, document, recorded={"document_digest": given}))
+        self.assertFalse(hitl.document_bound(given, document, recorded={"document_digest": "sha256:" + "0" * 64}))
+        self.assertFalse(hitl.document_bound(given, document, recorded={"document_digest": None}))
 
 
 class QuestionTests(unittest.TestCase):

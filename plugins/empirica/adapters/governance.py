@@ -16,7 +16,7 @@ from adapters.confirmation import CLAUDE_VISIBLE_LINES
 from adapters.state.fsio import SymlinkRefused
 from adapters.state.hitl import (DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish)
 from application import protocol
-from core import hitl as core_hitl
+from core import environment as core_environment, hitl as core_hitl
 from core.governance import expected_approval_kind
 
 #: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's
@@ -28,6 +28,8 @@ _SHORT_BODY = 12
 #: dialog sources, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``) holds
 #: the words both sides.
 _UI_COMMAND = "/empirica:ui"
+#: The one refusal of the environment legs whose recovery is a same-revision re-present.
+_ENVIRONMENT_MISMATCH = "environment.document_mismatch"
 
 
 @dataclass(frozen=True)
@@ -308,40 +310,28 @@ def _strip_presentation(result: dict) -> dict:
 def environment_form(document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
     """Map the published environment document to Claude's buttons-only approval form (E8,
     ADR-0072): the decision is take-it-or-leave-it — there is nothing to edit, so no fields ride
-    the schema and the form keeps exactly what the human judges. The opening follows
-    ``_visible``'s discipline: the heading with its countdown, the document's ``Details:`` line,
-    the goal — then the revision's own facts stay below, whole, under plain-worded labels that
-    say what is unverified: the profile with the networked container profile called out on its
-    own line, the spike image references, the preparation under "the agent's plan — not
-    verified", the rationale under the core's unverified label, and the installed binding this
-    revision would replace."""
+    the schema — and the native form stays short: it keeps only what the human must see to
+    decide whether to open the document, while every full text (the agent's plan, the rationale,
+    the image references, the previous binding) lives in the bound document the ``File:`` line
+    names, each under its own unverified label there. The opening follows ``_visible``'s
+    discipline — Claude Code shows only its first ``CLAUDE_VISIBLE_LINES`` lines — so the
+    heading, the profile with the network-egress call-out and the goal are what the window
+    shows: the egress call-out can never fold away. Re-review of E8 (blocking 1, 2): the
+    document's path is always carried, because the observer does not project environment
+    decisions yet, so no ``Details:`` link is ever built for them (E11 adds the row and the
+    link then replaces nothing here but this line)."""
     doc = document["parsed"]
-    details, *document_tail = _document_lines(document)
-    shown = []
-    for row in doc["spike_images"]:
-        reference = row["reference"]
-        shown.append(f"  · {reference}" if row.get("image_id") is None
-                     else f"  · {reference} (observed {row['image_id']})")
-    binding = doc["previous_active_binding"]
-    previous = ("Previous active binding: none"
-                if binding is None
-                else f"Previous active binding: record {binding['record_digest'][:7 + _SHORT_BODY]}"
-                     f" · environment revision {binding['revision']}")
+    profile = (f"Profile: {doc['profile_id']} · NETWORK EGRESS ENABLED" if doc["networked"]
+               else f"Profile: {doc['profile_id']} · no network")
     message = "\n".join((
         *_visible(
             _line(f"Empirica · approve environment revision {doc['revision']}"
                   f" · {_duration(timeout)}"),
-            details,
+            _line(profile),
             _line(f'Goal: "{doc["goal"]}"', closing='"')),
-        _line(f"Profile: {doc['profile_id']} · "
-              + ("network egress enabled" if doc["networked"] else "no network")),
-        "Spike images:", *shown,
-        "The agent's plan (unverified — the document labels it — \"the agent's plan — not verified\"):",
-        *(f"  {index}. {step}" for index, step in enumerate(doc["preparation"], start=1)),
-        "Rationale (author's own, unverified):",
-        *textwrap.wrap(doc["rationale"], width=72, break_long_words=True, break_on_hyphens=False),
-        previous,
-        *document_tail,
+        f"Spike images: {len(doc['spike_images'])} · the agent's plan and rationale: in the document",
+        f"Document {document['digest'][:7 + _SHORT_BODY]}",
+        f"File: {document['path']}",
         "Accept = approve this revision for qualification",
         "Decline = reject · Esc = decide later",
     ))
@@ -378,14 +368,16 @@ class HostEnvironment:
         # published once under the real $EMPIRICA_HOME before any form is shown
         self.documents = documents if documents is not None else HitlDocuments()
 
-    def __call__(self, result: dict) -> dict:
-        """Mediate one admitted environment action; no failure may change a typed result."""
+    def __call__(self, result: dict, proposal: object = None) -> dict:
+        """Mediate one admitted environment action; no failure may change a typed result.
+        ``proposal`` is the action's own payload: the revision the action admitted is the one
+        whose canonical proposal digest it names, and nothing else is ever mediated."""
         try:
-            return _strip_presentation(self._mediate(result))
+            return _strip_presentation(self._mediate(result, proposal))
         except Exception:
             return _strip_presentation(result)
 
-    def _mediate(self, result: dict) -> dict:
+    def _mediate(self, result: dict, proposal: object) -> dict:
         run = result.get("run") if isinstance(result, dict) else None
         if result.get("type") != "Allow" or not isinstance(run, dict):
             return result
@@ -393,46 +385,78 @@ class HostEnvironment:
         # the admitted action's own run view keeps saying the revision is pending
         if self.elicit is None:
             return result
-        fetched = (self.fetch(self.profile, run["id"], {}) or {}).get("result")
+        # the identity the fetched document must carry before anything is written (re-review of
+        # E8, blocking 3): this run, the kind, and the admitted revision's own canonical
+        # proposal digest
+        expect = {"run_id": run["id"], "kind": core_hitl.ENVIRONMENT,
+                  "proposal_digest": core_environment.proposal_digest(proposal)}
+        for _ in range(2):  # the present, and one re-presentation of the same revision
+            shown, response = self._present(run["id"], expect, result)
+            if shown is not None:
+                break
+            if not _is_document_mismatch(response):
+                return response
+        else:
+            return response
+        published, receipt_id = shown
+        # the observer projects no environment decision yet (E11 owns that row), so no decision
+        # link is ever built for this kind: the document's own path is the one way to it
+        document = {"digest": published.digest, "path": str(published.path), "parsed": published.parsed}
+        message, schema = environment_form(document, governance_timeout())
+        outcome = environment_decision(self.elicit(message, schema))
+        if outcome is None:
+            return response  # nobody decided: the revision stays pending, its allowance
+            # untouched (a dismissed form spends no presentation row)
+        decided = (self.decide(self.profile, run["id"], {
+            "run_id": run["id"], "receipt_id": receipt_id,
+            "revision": published.parsed["revision"],
+            "proposal_digest": published.parsed["proposal_digest"],
+            "outcome": "approve" if outcome else "reject",
+            "document_digest": published.digest}) or {}).get("result")
+        return decided if isinstance(decided, dict) else response
+
+    def _present(self, run_id: str, expect: Mapping[str, object], fallback: dict):
+        """One write-first present: fetch the pair, publish it once under the expected identity,
+        present one receipt. ``((published, receipt_id), presented)`` when the form may be shown,
+        else ``(None, the response to return)`` — every refusal of a private leg unchanged."""
+        fetched = (self.fetch(self.profile, run_id, {}) or {}).get("result")
         if (not isinstance(fetched, dict) or fetched.get("type") != "Allow"
                 or not isinstance(fetched.get("presentation"), Mapping)
                 or not isinstance(fetched.get("run"), dict)):
-            return fetched if isinstance(fetched, dict) else result
-        # write-first: publish the fetched pair once, through the one bound helper; a document
-        # this state cannot bind (or a storage refusal) is never a fabricated form
+            return None, fetched if isinstance(fetched, dict) else fallback
+        # the fetch, the action and the document all name one run — before any write
+        if fetched["run"]["id"] != run_id:
+            return None, fallback
+        # write-first: publish the fetched pair once, through the one bound helper, under the
+        # expected run, kind and admitted revision; a document this state cannot bind (or a
+        # storage refusal) is never a fabricated form
         try:
-            published = publish(self.documents, run["id"], fetched["presentation"].get("document"))
+            published = publish(self.documents, run_id, fetched["presentation"].get("document"),
+                                expect=expect)
         except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
-            return result
-        if published is None or published.parsed.get("kind") != core_hitl.ENVIRONMENT:
-            return result
-        from adapters.observer.discovery import document_details  # lazy, the configuration path's own
-        document = {"digest": published.digest, "path": str(published.path), "parsed": published.parsed,
-                    **document_details(getattr(self.documents, "home", None), run["id"],
-                                       {"digest": published.digest, "path": str(published.path)})}
+            return None, fallback
+        if published is None:
+            return None, fallback
         receipt_id = uuid4().hex
         # the full receipt shape the member validates (E7): its revision and proposal digest come
         # from the bound document itself — the very bytes just written whose digest the receipt
         # names — so the mediation never carries state facts from anywhere but the write it owns
-        envelope = {"run_id": fetched["run"]["id"], "receipt_id": receipt_id,
-                    "revision": published.parsed["revision"],
-                    "proposal_digest": published.parsed["proposal_digest"],
-                    "outcome": "present", "document_digest": published.digest}
-        presented = (self.decide(self.profile, fetched["run"]["id"], envelope) or {}).get("result")
+        presented = (self.decide(self.profile, run_id, {
+            "run_id": run_id, "receipt_id": receipt_id,
+            "revision": published.parsed["revision"],
+            "proposal_digest": published.parsed["proposal_digest"],
+            "outcome": "present", "document_digest": published.digest}) or {}).get("result")
         if not isinstance(presented, dict) or presented.get("type") != "Allow":
-            return presented if isinstance(presented, dict) else result
-        message, schema = environment_form(document, governance_timeout())
-        outcome = environment_decision(self.elicit(message, schema))
-        if outcome is None:
-            return presented  # nobody decided: the revision stays pending, its allowance
-            # untouched (a dismissed form spends no presentation row)
-        decision_envelope = {"run_id": fetched["run"]["id"], "receipt_id": receipt_id,
-                             "revision": published.parsed["revision"],
-                             "proposal_digest": published.parsed["proposal_digest"],
-                             "outcome": "approve" if outcome else "reject",
-                             "document_digest": published.digest}
-        decided = (self.decide(self.profile, fetched["run"]["id"], decision_envelope) or {}).get("result")
-        return decided if isinstance(decided, dict) else presented
+            return None, presented if isinstance(presented, dict) else fallback
+        return (published, receipt_id), presented
+
+
+def _is_document_mismatch(response: object) -> bool:
+    """Whether a private leg refused with the closed document-mismatch reason: the one refusal
+    whose recovery is a same-revision re-present (fetch the document again, present again)."""
+    return (isinstance(response, dict) and response.get("type") == "Block"
+            and any(isinstance(row, dict) and row.get("code") == _ENVIRONMENT_MISMATCH
+                    for row in response.get("reasons", ())))
 
 
 class HostGovernance:

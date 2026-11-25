@@ -9,7 +9,7 @@ from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
 from .ports import NullSpikeAuthoritySelector
-from .governance import transact_environment
+from .governance import host_ingress_admitted, transact_environment
 from .run_state import classify_and_decode
 from .snapshot import HistoryCorrupt
 from .transaction import Coordinator
@@ -162,7 +162,9 @@ class _Service:
         names. A plain read (the derivation is a pure function of run state, so nothing races
         and nothing is spent): an absent, corrupt-unreadable or terminal run, or one whose
         revision is not pending on a human (an auto run derives its approvals; a decided
-        revision has no form), has no document to show and reads as Inert."""
+        revision has no form), or whose recorded human ingress is not this executing host
+        profile's own (Codex has none, and a host sharing another host's run repository
+        stands for nobody), has no document to show and reads as Inert."""
         terminal = self._trusted_terminal(run_id)
         if terminal:
             return terminal
@@ -177,6 +179,8 @@ class _Service:
         if state.status != "active":
             return Coordinator._inert("trusted-environment")
         c = self._coordinator
+        if not host_ingress_admitted(c.profile_id, state):
+            return Coordinator._inert("trusted-environment")  # this host asks no human here
         try:
             snapshot = c._assemble(key, state, {"type": "GetRun", "run_id": run_id},
                                   require_graph=False)

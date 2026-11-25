@@ -80,6 +80,30 @@ def _transaction(c, rid, run_id, body, value_error):
     return c._fault(rid, "conflict")
 
 
+def _document_gate(c, snapshot, rid, derive, given, reason, *, recorded=None, presentation=False):
+    """The one write-first digest verification of every governance receipt (ADR-0072 Q3; re-review
+    of E8, blocking 5): ``derive`` is the kind-specific derivation of the document the core
+    renders now (configuration or environment), ``given`` the digest the reply names, and
+    ``recorded`` the receipt row the reply continues, if any. A reply that does not name exactly
+    that document is the human's stale fetch: a Block with the kind's own closed ``reason``,
+    spending nothing. ``None`` admits."""
+    if hitl.document_bound(given, derive(), recorded=recorded):
+        return None
+    return c._block_from_snapshot(snapshot, rid, reason, presentation=presentation)
+
+
+def host_ingress_admitted(profile_id: str, state) -> bool:
+    """Whether the executing host profile may stand for the human on this run's environment
+    (re-review of E8, blocking 6): its profile declares an approval ingress that can ask a
+    human at all, and the run's own governance recorded that very ingress when its host
+    reported — the host that opened the human episode is the host that completes it. A profile
+    with no ingress (Codex, withheld) or a different host's profile sharing the run repository
+    admits nothing: the environment receipt of a host that cannot show the form never decides
+    or presents, and the private fetch has no document for it."""
+    ingress = _proto.host_profile(profile_id)["approval_ingress"]
+    return ingress != "unavailable" and state.governance["context"]["ingress"] == ingress
+
+
 def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) -> dict:
     c, rid = coordinator, "trusted-governance"
 
@@ -166,16 +190,14 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
                           if r["id"] == payload["receipt_id"]), None)
             if decision["approval_kind"] == "host_ui":
                 given = decision["document_digest"]
-                expected = hitl.document_digest(
-                    hitl.configuration_for(run_id=run_id, snapshot=snapshot))
-                if (expected != given
-                        # defense in depth: the decision gate refuses a digest that
-                        # differs from its present's recorded one first as
-                        # governance.receipt_replay; this clause keeps the recorded binding
-                        # refuse-closed even for an unvalidated direct transact caller
-                        or (prior is not None and prior.get("document_digest") != given)):
-                    return c._block_from_snapshot(
-                        snapshot, rid, "governance.document_mismatch", presentation=True)
+                # defense in depth: the decision gate refuses a digest that differs from its
+                # present's recorded one first as governance.receipt_replay; the recorded
+                # binding stays refuse-closed even for an unvalidated direct transact caller
+                if refused := _document_gate(
+                        c, snapshot, rid,
+                        lambda: hitl.configuration_for(run_id=run_id, snapshot=snapshot),
+                        given, "governance.document_mismatch", recorded=prior, presentation=True):
+                    return refused
             else:
                 given = None
             fingerprint = policy.canonical_digest(payload)
@@ -240,6 +262,8 @@ def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
 
     def body(state, snapshot):
         environment.validate_decision(dict(payload))
+        if not host_ingress_admitted(c.profile_id, state):
+            return c._fault_with_run(rid, snapshot)  # this host cannot stand for the human: nothing decides
         reason = environment.receipt_error(run_id, state, payload)
         if reason == "inert":
             return c._inert_with_run(rid, snapshot)
@@ -254,14 +278,17 @@ def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
             return c._fault_with_run(rid, snapshot)  # fail closed: nothing decides, nothing written
         # ADR-0072, E8 — the one write-first path completed, not a second one: the reply must
         # name the document the core renders for this pending revision (the pair the private
-        # fetch returned, which the host wrote once before it presented). The recompute is the
-        # exact gate the configuration decisions share, checked last so every existing refusal
-        # wins first and spends nothing; a mismatch is the human's stale fetch, a Block with
-        # its own closed reason, not a fail-closed protocol fault. A defence-in-depth twin of
-        # the binding the entire-reply fingerprint already holds in the receipt engine.
-        expected = hitl.document_digest(hitl.environment_for(run_id=run_id, snapshot=snapshot))
-        if payload["document_digest"] != expected:
-            return c._block_from_snapshot(snapshot, rid, "environment.document_mismatch")
+        # fetch returned, which the host wrote once before it presented), verified by the very
+        # function the configuration decisions use, checked last so every existing refusal wins
+        # first and spends nothing. A mismatch is the human's stale fetch, a Block with its own
+        # closed reason, not a fail-closed protocol fault. The recorded-presentation clause the
+        # configuration passes is already the receipt engine's entire-reply fingerprint here
+        # (a decision names its own presentation's document, or it never reaches this line).
+        if refused := _document_gate(
+                c, snapshot, rid,
+                lambda: hitl.environment_for(run_id=run_id, snapshot=snapshot),
+                payload["document_digest"], "environment.document_mismatch"):
+            return refused
         fingerprint = policy.canonical_digest(policy.plain(dict(payload)))
         member = policy.plain(state.environment)
         if payload["outcome"] == "present":

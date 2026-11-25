@@ -122,6 +122,25 @@ def document_digest(document: Any) -> str:
     return digest(render(document))
 
 
+def rendered_pair(document: Any) -> dict[str, str]:
+    """The one ``document: {text, digest}`` pair construction (ADR-0072 Q1) every kind's private
+    fetch shares: the exact rendered UTF-8 string plus the digest of exactly those bytes, so no
+    adapter ever re-renders a dict."""
+    data = render(document)
+    return {"text": data.decode("utf-8"), "digest": digest(data)}
+
+
+def document_bound(given: Any, document: Any, *, recorded: Mapping[str, Any] | None = None) -> bool:
+    """The one write-first digest verification (ADR-0072 Q3) every kind's receipt shares: whether
+    ``given`` is the digest of exactly the bytes the core renders for ``document`` — the
+    kind-specific derivation the caller owns — and, when ``recorded`` names the receipt row this
+    reply continues, the digest that row's own presentation recorded (defence in depth beside
+    the receipt engine's entire-reply fingerprint, so the recorded binding stays refuse-closed
+    even for an unvalidated direct caller)."""
+    return given == document_digest(document) and (
+        recorded is None or recorded.get("document_digest") == given)
+
+
 def question_of(governance: Mapping[str, Any]) -> str:
     """Which configuration question the run's governance asks now (ADR-0072's discriminator).
 
@@ -202,9 +221,7 @@ def configuration_pair(*, run_id: str, snapshot: Any) -> dict[str, str] | None:
         raise ValueError(f"the snapshot lacks its governance: {missing!r}") from missing
     if name not in HUMAN_WAIT_STATES or not _proposal_sized(governed):
         return None
-    document = configuration_for(run_id=run_id, snapshot=snapshot)
-    data = render(document)
-    return {"text": data.decode("utf-8"), "digest": digest(data)}
+    return rendered_pair(configuration_for(run_id=run_id, snapshot=snapshot))
 
 
 def _escaped(name: str, value: Any, where: str) -> str:
@@ -408,8 +425,6 @@ def environment_document(*, run_id: str, revision: int, proposal_digest: str, go
         if bound_revision < 1:
             raise ValueError("the previous binding names a revision from one")
         previous_binding = {"record_digest": record_digest, "revision": bound_revision}
-        if previous_binding["record_digest"] == proposal_digest:
-            raise ValueError("the previous binding names the very proposal being approved")
     if not isinstance(invocation, Mapping) or any(key not in invocation for key in _INVOCATION_KEYS):
         raise ValueError("the environment document's run-fixed invocation facts are missing")
     return {
@@ -488,9 +503,7 @@ def environment_pair(*, run_id: str, snapshot: Any) -> dict[str, str] | None:
     if (not isinstance(member, Mapping) or member.get("state") != environment.PENDING
             or expected_approval_kind(governed, raises(governed, state.budgets)) != "host_ui"):
         return None
-    document = environment_for(run_id=run_id, snapshot=snapshot)
-    data = render(document)
-    return {"text": data.decode("utf-8"), "digest": digest(data)}
+    return rendered_pair(environment_for(run_id=run_id, snapshot=snapshot))
 
 
 def evidence_document(*, run_id: str, batch: Mapping[str, Any],
@@ -703,6 +716,4 @@ def evidence_pair(*, run_id: str, snapshot: Any, key: Any) -> dict[str, str] | N
         batch["key"] for batch in batch_candidates(snapshot, derive_claims(snapshot))
     }:
         return None
-    document = evidence_for(run_id=run_id, snapshot=snapshot, key=key)
-    data = render(document)
-    return {"text": data.decode("utf-8"), "digest": digest(data)}
+    return rendered_pair(evidence_for(run_id=run_id, snapshot=snapshot, key=key))

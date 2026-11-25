@@ -633,13 +633,13 @@
         "preparation": {
           "description": "The agent's own plan, each step display-escaped (the environment proposal's preparation): the document labels the whole list unverified through `preparation_source`, the label the form renders as \"the agent's plan — not verified\".",
           "items": {
-            "description": "One preparation step exactly as the proposal body carries it (the empirica/v2 request schema's environmentProposal.preparation item).",
+            "description": "One preparation step as the proposal body carries it (the empirica/v2 request schema's environmentProposal.preparation item), display-escaped: its length bound is the proposal's own bound times the longest expansion the core's one escaper gives a single character (a `\\uXXXX` escape), so every admitted step renders within it — the accepted proposal is neither tightened nor truncated (scripts/validate_contracts.py derives and checks the product).",
             "allOf": [
               {
                 "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
               }
             ],
-            "maxLength": 200,
+            "maxLength": 1200,
             "minLength": 1,
             "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
             "type": "string"
@@ -697,8 +697,8 @@
           "description": "The environment form's one question: approve this revision for qualification. A reject is the decline of the same form; the member's receipts — never this document — witness the decision."
         },
         "rationale": {
-          "description": "The proposal's sizing rationale, display-escaped (the schema's top note) — unverified author wording, labelled so by `rationale_source` exactly as the configuration document reads its own.",
-          "maxLength": 600,
+          "description": "The proposal's sizing rationale, display-escaped (the schema's top note) — unverified author wording, labelled so by `rationale_source` exactly as the configuration document reads its own. Its length bound is the proposal's own bound times the longest expansion the core's one escaper gives a single character, so every admitted rationale renders within it (scripts/validate_contracts.py derives and checks the product).",
+          "maxLength": 3600,
           "minLength": 1,
           "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
           "type": "string"

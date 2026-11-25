@@ -17,7 +17,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from sandbox_isolation import force_absent_sandbox_home  # noqa: E402
 
 from adapters.governance import (Approve, Dismiss, HostEnvironment, HostGovernance,
-                                Reject, confirm_form,
+                                Reject, _duration, _is_document_mismatch, confirm_form,
+                                governance_timeout,
                                  decision, expected_approval_kind, review_form)
 from adapters.mcp_server import McpSession
 from adapters.public_tools import PublicTools
@@ -1154,23 +1155,16 @@ class EnvironmentHostTests(unittest.TestCase):
     the session's own public tool admits the revision, then the host completes the human
     approval the core waits on — the document written first through the one bound sidecar
     helper, its digest binding the present and the decision, the elicit form keeping exactly
-    what the human judges with the unverified sources labelled."""
+    what the human decides by. Re-review: the session's REAL elicitation path carries every
+    answer (initialize, matching wire replies, cancel, the session's own ``None`` on timeout);
+    only the private legs reach the in-process service, as the governance tests do."""
 
     def setUp(self):
-        self.profile = host_profile_id("claude-code")
-        self.service = compose(Workspace(), Harness(), Runs(), Artifacts(), None, self.profile, {}, None)
+        self.profile = CLAUDE_PROFILE
+        self.runs, self.artifacts = Runs(), Artifacts()
+        self.service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, self.profile, {}, None)
         self.sequence = 0
-        response = self.dispatch({"type": "StartRun", "control_mode": "deliberative",
-                                  "goal": "Qualify the run's environment from supplied context.",
-                                  "invocation": dict(TEST_INVOCATION),
-                                  "selector": {"project": "p", "session": "ui"}})
-        self.run = response["result"]["run"]["id"]
-        self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                       "action": {"kind": "graph", "payload": GRAPH}})
-        approve_current(self.service._coordinator, self.run)
-        self.dispatch({"type": "ObserveAction", "run_id": self.run,
-                       "action": {"kind": "route", "reason": "primary environment qualification route"}})
-        self.dispatch({"type":"ObserveAction", "run_id": self.run, "action": {"kind": "investigate"}})
+        self.run = self.start_run("ui")
         self.incoming = queue.Queue()
         self.sent = []
         self.session = McpSession(self.profile, self.incoming, self.send, timeout=0.05)
@@ -1181,56 +1175,81 @@ class EnvironmentHostTests(unittest.TestCase):
         self.document_home = tempfile.mkdtemp(prefix="hitl-home-")
         self.addCleanup(shutil.rmtree, self.document_home, ignore_errors=True)
         self.documents = HitlDocuments(home=Path(self.document_home))
-        self.mediator = HostEnvironment(self.profile,
-            fetch=lambda _p, r, v: self.service.trusted_environment_document(run_id=r, payload=v or {}),
-            decide=lambda _p, r, v: self.service.trusted_environment_decision(run_id=r, payload=v),
-            documents=self.documents)
-        self.mediator.elicit = lambda message, schema: self.reply(message, schema)
-        self.session.environment = self.mediator
+        self.mediator = self.session.environment
+        self.mediator.fetch = lambda _p, r, v: self.service.trusted_environment_document(run_id=r, payload=v or {})
+        self.mediator.decide = lambda _p, r, v: self.service.trusted_environment_decision(run_id=r, payload=v)
+        self.mediator.documents = self.documents
         self.session.tools = PublicTools(self.profile,
                                          dispatch=lambda r, _p: self.service.dispatch(r),
                                          environment=self.mediator)
         self.reply_action = "accept"
+        self.initialize({"elicitation": {"form": {}}})
+
+    def start_run(self, name, **extra):
+        response = self.dispatch({"type": "StartRun", "control_mode": "deliberative",
+                                  "goal": "Qualify the run's environment from supplied context.",
+                                  "invocation": dict(TEST_INVOCATION),
+                                  "selector": {"project": "p", "session": name}, **extra})
+        run = response["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": run,
+                       "action": {"kind": "graph", "payload": GRAPH}})
+        approve_current(self.service._coordinator, run)
+        self.dispatch({"type": "ObserveAction", "run_id": run,
+                       "action": {"kind": "route", "reason": "primary environment qualification route"}})
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "investigate"}})
+        return run
 
     def dispatch(self, command):
         self.sequence += 1
         return self.service.dispatch({"protocol": "empirica/v2", "request_id": str(self.sequence), "command": command})
 
+    def initialize(self, capabilities):
+        return self.session.process({"jsonrpc": "2.0", "id": "init", "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": capabilities}})
+
     def send(self, message):
+        """The wire out of the session: an elicitation request is answered the way the client
+        would — a reply carrying the request's own id — or not at all (``timeout``), or only
+        under a foreign id (``stranger``), which the session must never take for its answer."""
         self.sent.append(message)
-        if message.get("method") != "elicitation/create":
+        if message.get("method") != "elicitation/create" or self.reply_action == "timeout":
             return
-        if self.reply_action == "timeout":
-            return
-        self.incoming.put({"jsonrpc": "2.0", "id": message["id"],
-                           "result": {"action": self.reply_action, "content": {}}})
+        reply_id = "somebody-elses" if self.reply_action == "stranger" else message["id"]
+        self.incoming.put({"jsonrpc": "2.0", "id": reply_id,
+                           "result": {"action": "accept" if self.reply_action == "stranger"
+                                      else self.reply_action, "content": {}}})
 
-    def reply(self, message, schema):
-        self.incoming.put({"jsonrpc": "2.0", "id": "elicit-1",
-                           "result": {"action": self.reply_action, "content": {}}})
-        return {"action": self.reply_action, "content": {}}
+    def forms(self):
+        return [message["params"]["message"] for message in self.sent
+                if message.get("method") == "elicitation/create"]
 
-    def observe_environment(self, proposal_overrides=None):
+    def observe_environment(self, proposal_overrides=None, run=None):
         action = copy.deepcopy(self.environment_action)
         action["payload"].update(proposal_overrides or {})
         return self.session.process_internal({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
             "params": {"name": "empirica_observe",
-                       "arguments": {"run_id": self.run, "action": action}}})
+                       "arguments": {"run_id": self.run if run is None else run, "action": action}}})
 
-    def _view(self) -> dict:
-        view = self.dispatch({"type": "GetRun", "run_id": self.run})["result"]["run"]
-        return view
+    def sidecar_files(self):
+        return sorted(str(path) for path in Path(self.document_home).rglob("*") if path.is_file())
 
     def test_a_surface_without_a_form_support_asks_nobody_and_decides_nothing(self):
         """The initialize handshake is the one that arms a host's form: a client that declares
-        no elicitation form leaves the session's mediators unarmed, so the environment action's
-        own run view keeps saying the revision is pending — nothing fetched harder, no form
-        shown, no receipt of any outcome."""
-        self.mediator.elicit = None  # what initialize leaves for a form-less client
+        no elicitation form leaves the session unarmed, so the environment action's own run view
+        keeps saying the revision is pending — nothing fetched, no form shown, no receipt."""
+        self.session = McpSession(self.profile, self.incoming, self.send, timeout=0.05)
+        self.session.environment.fetch = self.mediator.fetch
+        self.session.environment.decide = self.mediator.decide
+        self.session.environment.documents = self.documents
+        self.session.tools = PublicTools(self.profile, dispatch=lambda r, _p: self.service.dispatch(r),
+                                         environment=self.session.environment)
+        self.initialize({})  # no elicitation capability at all
         self.observe_environment()
         row = self._stored_environment_row()
         self.assertEqual(row["state"], "pending")
         self.assertEqual(tuple(row["receipts"]), ())
+        self.assertEqual(self.forms(), [])
+        self.assertEqual(self.sidecar_files(), [])
 
     def test_the_document_is_written_before_the_present_and_binds_the_receipt(self):
         """Write-first order (ADR-0072, the configuration path's own discipline): the sidecar
@@ -1260,69 +1279,307 @@ class EnvironmentHostTests(unittest.TestCase):
         self.assertEqual(self._stored_environment_row()["state"], "approved")
 
     def test_a_decline_decides_reject_and_the_next_revision_starts_pending(self):
+        """Decline is an explicit rejection (spec §5: reject is not cancel); the next revision
+        asks again with a fresh member and a fresh form."""
         self.reply_action = "decline"
         self.observe_environment()
         self.assertEqual(self._stored_environment_row()["state"], "rejected")
-        # a new revision under the same mediation asks again: fresh member, fresh form
         self.reply_action = "accept"
         self.observe_environment({"rationale": self.environment_action["payload"]["rationale"] + " once more"})
         self.assertEqual(self._stored_environment_row()["state"], "approved")
+        self.assertEqual(len(self.forms()), 2)
 
     def test_a_dismissed_form_leaves_the_revision_pending_and_spends_no_decision(self):
-        self.reply_action = "timeout"
+        """Cancel, the session's own ``None`` on timeout and an answer under a foreign id are
+        all non-decisions: one presentation row, the revision pending, nobody decided — through
+        the session's real elicitation path, never a replaced callback."""
+        for reply in ("cancel", "timeout", "stranger"):
+            with self.subTest(reply=reply):
+                run = self.start_run(f"dismissed-{reply}")
+                self.reply_action = reply
+                self.observe_environment(run=run)
+                row = self._stored_environment_row()
+                self.assertEqual(row["state"], "pending")
+                receipts = [_plain_receipt(receipt) for receipt in row["receipts"]]
+                self.assertEqual([receipt.get("outcome") for receipt in receipts], ["present"])
+                self.assertEqual(row["receipt_id"], None)
+
+    def test_the_native_form_shows_the_egress_call_out_inside_the_visible_lines(self):
+        """Claude Code shows only the first ``CLAUDE_VISIBLE_LINES`` lines of a form: the
+        networked profile's egress call-out — and the isolated profile's own plain word — must
+        sit inside that slice, not merely inside the message."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        networked = self.start_run("net", spike_profile="docker-networked-v1")
+        for run, profile_id, called_out in ((networked, "docker-networked-v1", True),
+                                            (self.run, "docker-isolated-v1", False)):
+            with self.subTest(profile=profile_id):
+                before = len(self.forms())
+                self.observe_environment({"profile_id": profile_id}, run=run)
+                form = self.forms()[before]
+                window = form.splitlines()[:CLAUDE_VISIBLE_LINES]
+                profile_lines = [line for line in window if line.startswith("Profile:")]
+                self.assertEqual(len(profile_lines), 1, window)
+                self.assertIn(profile_id, profile_lines[0])
+                self.assertEqual("NETWORK EGRESS ENABLED" in profile_lines[0], called_out, window)
+                self.assertEqual("no network" in profile_lines[0], not called_out, window)
+                self.assertTrue(window[0].startswith("Empirica · approve environment revision"))
+                self.assertTrue(window[2].startswith('Goal: "'))
+
+    def test_the_native_form_has_exactly_its_documented_lines_and_no_fields(self):
+        """The whole native form, line by line: heading with its countdown, the profile, the
+        quoted goal, the image count, the short document identity, the exact path and the
+        two-button legend; it asks for no fields — a take-it-or-leave-it decision."""
+        self.reply_action = "cancel"
         self.observe_environment()
-        row = self._stored_environment_row()
-        self.assertEqual(row["state"], "pending")
-        receipts = [_plain_receipt(receipt) for receipt in row["receipts"]]
-        # only the presentation exists: nobody decided, so exactly one present receipt and no
-        # decision among the rows the member recorded
-        self.assertEqual({receipt.get("outcome") for receipt in receipts}, {"present"})
-        self.assertEqual(row["receipt_id"], None)
+        request = next(m for m in self.sent if m.get("method") == "elicitation/create")
+        self.assertEqual(request["params"]["requestedSchema"],
+                         {"type": "object", "properties": {}, "required": []})
+        path = Path(self.sidecar_files()[0])
+        proposal = self.environment_action["payload"]
+        self.assertEqual(request["params"]["message"].splitlines(), [
+            f"Empirica · approve environment revision 1 · {_duration(governance_timeout())}",
+            f"Profile: {proposal['profile_id']} · no network",
+            'Goal: "Qualify the run\'s environment from supplied context."',
+            f"Spike images: {len(proposal['spike_images'])} · the agent's plan and rationale: in the document",
+            f"Document sha256:{path.stem[:12]}",
+            f"File: {path}",
+            "Accept = approve this revision for qualification",
+            "Decline = reject · Esc = decide later"])
 
-    def test_the_form_calls_out_the_networked_profile_and_labels_the_unverified_parts(self):
-        """The form keeps what the human judges (ADR-0072): the goal, the networked container
-        profile called out on its own line, the spike image reference, the agent's plan under
-        the unverified label, the author's unverified rationale — and the document's path."""
-        message_box = []
-        self.mediator.elicit = lambda message, schema: message_box.append(message) or {"action": "accept"}
-        # the networked profile rides the run's own StartRun ceiling (spec §4.4: the host's
-        # one wire word), so its run starts with the networked spike profile
-        response = self.dispatch({"type": "StartRun", "control_mode": "deliberative",
-                                  "goal": "Qualify the run's environment from supplied context.",
-                                  "invocation": dict(TEST_INVOCATION),
-                                  "spike_profile": "docker-networked-v1",
-                                  "selector": {"project": "p", "session": "net"}})
-        networked_run = response["result"]["run"]["id"]
-        self.dispatch({"type": "ObserveAction", "run_id": networked_run,
-                       "action": {"kind": "graph", "payload": GRAPH}})
-        approve_current(self.service._coordinator, networked_run)
-        self.dispatch({"type": "ObserveAction", "run_id": networked_run,
-                       "action": {"kind": "route", "reason": "qualify the networked environment"}})
-        self.dispatch({"type": "ObserveAction", "run_id": networked_run,
-                       "action": {"kind": "investigate"}})
-        action = copy.deepcopy(self.environment_action)
-        action["payload"]["profile_id"] = "docker-networked-v1"
-        self.session.process_internal({"jsonrpc": "2.0", "id": "call", "method": "tools/call",
-            "params": {"name": "empirica_observe",
-                       "arguments": {"run_id": networked_run, "action": action}}})
-        form = message_box[0]
-        self.assertIn("Goal:", form)
-        self.assertIn("docker-networked-v1 · network egress enabled", form)
-        self.assertIn("The agent's plan (unverified", form)
-        self.assertIn("Rationale (author's own, unverified):", form)
-        self.assertIn("Previous active binding: none", form)
-        self.assertIn(self.environment_action["payload"]["spike_images"][0], form)
-        self.assertIn(str(Path(self.document_home)), form)
-        # the same document names the profile exactly once, in its own projection
-        document = json.loads([p for p in (Path(self.document_home)).rglob("*.json")
-                               if json.loads(p.read_text("utf-8"))["kind"] == "environment"][0]
-                              .read_text("utf-8"))
-        self.assertTrue(document["networked"])
+    def test_a_long_goal_is_cut_to_one_line_that_keeps_its_closing_quote(self):
+        run = self.dispatch({"type": "StartRun", "control_mode": "deliberative", "goal": "long " * 80,
+                             "invocation": dict(TEST_INVOCATION),
+                             "selector": {"project": "p", "session": "long"}})["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "graph", "payload": GRAPH}})
+        approve_current(self.service._coordinator, run)
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "route", "reason": "long"}})
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "investigate"}})
+        self.reply_action = "cancel"
+        self.observe_environment(run=run)
+        goal = self.forms()[0].splitlines()[2]
+        self.assertLessEqual(len(goal), 72)
+        self.assertTrue(goal.startswith('Goal: "long long') and goal.endswith('…"'), goal)
 
-    def _stored_environment_row(self) -> dict:
-        """The member row as E7 committed it (the run view does not project the member)."""
+    def test_a_result_that_admits_nothing_or_a_leg_that_refuses_is_returned_unchanged(self):
+        """Nothing is mediated for a refused admission, and every refusal of the private legs
+        reaches the caller exactly as the service said it: no fetch for a Block, the Inert or
+        Block of the fetch returned as it is, a fetch answer that is no document returned as the
+        admitted result — and nothing is written in any of them."""
+        run = {"id": self.run}
+        admitted = {"type": "Allow", "run": run}
+        calls = []
+        self.mediator.fetch = lambda _p, r, v: calls.append(r) or {"result": fetched}
+        for result in ({"type": "Block", "run": run}, {"type": "Allow"}, {"type": "Allow", "run": "no"}):
+            with self.subTest(result=result):
+                self.assertEqual(self.mediator(result, self.environment_action["payload"]), result)
+        self.assertEqual(calls, [])
+        for fetched, expected in (({"type": "Inert", "run": run}, {"type": "Inert", "run": run}),
+                                  ({"type": "Block", "run": run, "reasons": []}, {"type": "Block", "run": run, "reasons": []}),
+                                  ({"type": "Allow", "run": run}, admitted),
+                                  ({"type": "Allow", "run": run, "presentation": []}, admitted),
+                                  ({"type": "Allow", "run": {"id": "other"}, "presentation": {"document": {}}}, admitted)):
+            with self.subTest(fetched=fetched):
+                self.assertEqual(self.mediator(admitted, self.environment_action["payload"]), expected)
+        self.assertEqual(self.sidecar_files(), [])
+        self.assertEqual(self.forms(), [])
+
+    def test_the_caller_gets_the_decisions_own_answer_and_a_dismissal_gets_the_presents(self):
+        """The mediation returns what the last private leg answered, never an earlier answer:
+        the decision's result after an accept, the presentation's after a form nobody decided."""
+        self.reply_action = "timeout"
+        self.observe_environment()  # admitted, presented, left pending
+        answers = []
+        real = self.mediator.decide
+        self.mediator.decide = lambda p, r, v: answers.append(real(p, r, v)["result"]) or {"result": answers[-1]}
+        admitted = {"type": "Allow", "run": {"id": self.run}}
+        payload = self.environment_action["payload"]
+        self.assertEqual(self.mediator(admitted, payload), _without_presentation(answers[-1]))  # the present's
+        self.assertEqual(len(answers), 1)
+        self.reply_action = "accept"
+        decided = self.mediator(admitted, payload)
+        self.assertEqual(len(answers), 3)
+        self.assertEqual(decided, _without_presentation(answers[-1]))
+        self.assertEqual(self._stored_environment_row()["state"], "approved")
+
+    def test_only_the_closed_mismatch_block_earns_a_re_present(self):
+        block = {"type": "Block", "reasons": [{"code": "environment.document_mismatch"}]}
+        self.assertTrue(_is_document_mismatch(block))
+        for other in (None, "Block", {"type": "Allow", "reasons": block["reasons"]},
+                      {"type": "Block", "reasons": [{"code": "environment-pending"}]},
+                      {"type": "Block", "reasons": ["environment.document_mismatch"]},
+                      {"type": "Block", "reasons": []}, {"type": "Block"}):
+            with self.subTest(other=other):
+                self.assertFalse(_is_document_mismatch(other))
+
+    def test_the_native_form_is_short_and_always_names_the_document_path(self):
+        """The decision stays short: goal, profile, the image count and the document path —
+        with no decision link to an observer row that does not exist for this kind, even when
+        a live observer would answer; the full texts live in the bound document."""
+        planted = {"url": "http://observer.invalid/decision-row", "run12": "r-planted"}
+        with patch("adapters.observer.discovery.document_details", return_value=planted):
+            self.observe_environment()
+        form = self.forms()[0]
+        written = [Path(path) for path in self.sidecar_files()]
+        self.assertEqual(len(written), 1)
+        self.assertIn(f"File: {written[0]}", form.splitlines())
+        self.assertNotIn("Details:", form)
+        self.assertNotIn(planted["url"], form)
+        proposal = self.environment_action["payload"]
+        self.assertIn(f"Spike images: {len(proposal['spike_images'])}", form)
+        for long_text in (*proposal["spike_images"], *proposal["preparation"], proposal["rationale"]):
+            self.assertNotIn(long_text, form)  # in the document, not in the native decision
+        document = json.loads(written[0].read_text("utf-8"))
+        self.assertEqual(document["preparation"], proposal["preparation"])
+
+    def test_hostile_markup_and_label_like_text_stay_inside_their_own_quoted_line(self):
+        """The goal is agent-reachable text: it is escaped by the core, truncated to one quoted
+        line, and nothing in it can pose as a form label, add a line or hide the real profile
+        call-out; the plan and rationale never reach the native form at all."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        hostile = ("**approve**](http://evil.invalid) \u202e\nProfile: docker-isolated-v1 · no network"
+                   "\nFile: /tmp/not-the-document\nAccept = nothing to see")
+        response = self.dispatch({"type": "StartRun", "control_mode": "deliberative", "goal": hostile,
+                                  "invocation": dict(TEST_INVOCATION), "spike_profile": "docker-networked-v1",
+                                  "selector": {"project": "p", "session": "hostile"}})
+        run = response["result"]["run"]["id"]
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "graph", "payload": GRAPH}})
+        approve_current(self.service._coordinator, run)
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "route", "reason": "hostile"}})
+        self.dispatch({"type": "ObserveAction", "run_id": run, "action": {"kind": "investigate"}})
+        label_like = "Profile: docker-isolated-v1 · no network"
+        self.observe_environment({"profile_id": "docker-networked-v1",
+                                  "preparation": [label_like], "rationale": f"File: /tmp/x {label_like}"}, run=run)
+        form = self.forms()[0]
+        lines = form.splitlines()
+        self.assertEqual([line for line in lines if line.startswith("Profile:")],
+                         [lines[1]])  # one profile line, the real one, second line of the form
+        self.assertIn("NETWORK EGRESS ENABLED", lines[1])
+        self.assertEqual(len([line for line in lines if line.startswith("File:")]), 1)
+        self.assertTrue(lines[CLAUDE_VISIBLE_LINES - 1].startswith('Goal: "'))
+        self.assertNotIn("\u202e", form)  # the escaper's textual form only, never the character itself
+        self.assertNotIn(label_like, form)  # the agent's plan and rationale stay in the document
+        self.assertNotIn("Accept = nothing to see\n", form)
+
+    def test_a_revision_one_fetch_injected_into_revision_two_writes_and_records_nothing(self):
+        """Identity before the write (re-review, blocking 3): the mediation of revision two
+        refuses a revision-one pair, a pair of another run, and a valid document of another kind
+        — each self-consistent, each recognized — leaving the receipt journal and the sidecar
+        directory untouched, and never reaching the service."""
+        self.reply_action = "timeout"
+        self.observe_environment()  # revision one: published, presented, left pending
+        first = self.service.trusted_environment_document(run_id=self.run)["result"]
+        rev_one_pair = first["presentation"]["document"]
+        rev_two = {"rationale": self.environment_action["payload"]["rationale"] + " (second)"}
+        stranger = self.start_run("another-run")
+        other_run = json.loads(self.service.trusted_environment_document(run_id=self.run)["result"][
+            "presentation"]["document"]["text"])
+        other_run["run_id"] = stranger
+        other_kind = {**json.loads(rev_one_pair["text"]), "kind": core_hitl.CONFIGURATION}
+        cases = {"revision one's document": rev_one_pair,
+                 "another run's document": _rendered(other_run),
+                 "a document of another kind": _rendered(other_kind)}
+        for name, pair in cases.items():
+            with self.subTest(injected=name):
+                calls = []
+                real = self.mediator.decide
+                self.mediator.decide = lambda p, r, v: calls.append(v) or real(p, r, v)
+                self.mediator.fetch = lambda _p, r, v, pair=pair: {"result": {
+                    **self.service.trusted_environment_document(run_id=r)["result"],
+                    "presentation": {"document": pair}}}
+                files = self.sidecar_files()
+                self.observe_environment({"rationale": rev_two["rationale"] + name})
+                self.assertEqual(self.sidecar_files(), files)
+                self.assertEqual(calls, [])  # not a single receipt reached the service
+                row = self._stored_environment_row()
+                self.assertEqual((row["state"], tuple(row["receipts"])), ("pending", ()))
+                self.assertGreater(row["revision"], 1)
+                self.mediator.decide = real
+                self.mediator.fetch = lambda _p, r, v: self.service.trusted_environment_document(run_id=r, payload=v or {})
+
+    def test_a_present_under_a_stale_document_is_re_presented_once_for_the_same_revision(self):
+        """The recovery the ``environment.document_mismatch`` row names is executable here: a
+        document of this very revision that the core no longer renders (self-consistent, the
+        right run, kind and proposal) is refused at the present with nothing spent, and the
+        host fetches again and presents once more — the revision is the same, the form shows
+        once, and one presentation row exists. If the second fetch is stale too the host stops
+        there: pending, no loop."""
+        real_fetch = self.mediator.fetch
+        def stale(_p, run_id, payload):
+            result = real_fetch(_p, run_id, payload)["result"]
+            document = json.loads(result["presentation"]["document"]["text"])
+            document["rationale"] = "a rationale this run no longer holds"
+            return {"result": {**result, "presentation": {"document": _rendered(document)}}}
+        for fetches, outcome in (([stale, real_fetch], "approved"), ([stale, stale], "pending")):
+            with self.subTest(second=outcome):
+                run = self.start_run(f"retry-{outcome}")
+                queue_of = list(fetches)
+                calls = []
+                self.mediator.fetch = lambda p, r, v: calls.append(r) or queue_of.pop(0)(p, r, v)
+                before = len(self.forms())
+                self.observe_environment(run=run)
+                self.assertEqual(len(calls), 2)  # one re-presentation, never a loop
+                self.assertEqual(len(self.forms()) - before, 1 if outcome == "approved" else 0)
+                row = self._stored_environment_row()
+                self.assertEqual(row["state"], outcome)
+                self.assertEqual(len(row["receipts"]), 1 if outcome == "approved" else 0)
+                self.mediator.fetch = real_fetch
+
+    def test_the_codex_profile_composes_no_environment_mediation_whatever_the_client_claims(self):
+        """The shared transport serves Codex too, which is withheld: its session holds no
+        environment mediation and arms none, even when its client declares form support."""
+        codex = host_profile_id("codex-cli")
+        session = McpSession(codex, self.incoming, self.send, timeout=0.05)
+        self.assertIsNone(session.environment)
+        response = session.process({"jsonrpc": "2.0", "id": "init", "method": "initialize",
+            "params": {"protocolVersion": "2025-11-25", "capabilities": {"elicitation": {"form": {}}}}})
+        self.assertIn("result", response)
+        self.assertIsNone(session.tools._environment)
+
+    def test_a_non_claude_host_sharing_the_run_repository_cannot_approve_it(self):
+        """The scratch scenario of the review: a Codex-profile session and service share an
+        existing Claude run's repository, a public proposal arrives and a matching form answer
+        follows. Even with the mediation hand-wired onto the Codex service, the private legs
+        read no document and record no receipt: the run stays pending, nothing is written."""
+        for other in (host_profile_id("codex-cli"), host_profile_id("pi")):
+            with self.subTest(profile=other):
+                run = self.start_run(f"shared-{other[:5]}")
+                service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, other, {}, None)
+                session = McpSession(other, self.incoming, self.send, timeout=0.05)
+                environment = HostEnvironment(
+                    other, elicit=session.elicit,
+                    fetch=lambda _p, r, v, service=service: service.trusted_environment_document(run_id=r, payload=v or {}),
+                    decide=lambda _p, r, v, service=service: service.trusted_environment_decision(run_id=r, payload=v),
+                    documents=self.documents)
+                tools = PublicTools(other, dispatch=lambda r, _p, service=service: service.dispatch(r),
+                                    environment=environment)
+                self.reply_action = "accept"
+                files = self.sidecar_files()
+                tools.call_internal("empirica_observe", {"run_id": run, "action": copy.deepcopy(self.environment_action)})
+                row = self._stored_environment_row(run)
+                self.assertEqual(row["state"], "pending")
+                self.assertEqual(tuple(row["receipts"]), ())
+                self.assertEqual(self.forms(), [])
+                self.assertEqual(self.sidecar_files(), files)
+
+    def _stored_environment_row(self, run=None) -> dict:
+        """The member row as E7 committed it (the run view does not project the member), read
+        from the repository for the named run — the run last mediated when none is named."""
+        from application.run_state import classify_and_decode
         from core.governance import plain
-        return plain(self.service._coordinator.last_state.environment)
+        if run is None:
+            return plain(self.service._coordinator.last_state.environment)
+        state = classify_and_decode(self.runs.read(decode_handle(run)).value).state
+        return plain(state.environment)
+
+
+def _without_presentation(result: dict) -> dict:
+    return {key: value for key, value in result.items() if key != "presentation"}
+
+
+def _rendered(document: dict) -> dict:
+    """One self-consistent ``{text, digest}`` pair of an arbitrary document, through the core's
+    own renderer — what a stale or substituted private fetch would hand a host."""
+    return core_hitl.rendered_pair(document)
 
 
 def _plain_receipt(receipt) -> dict:

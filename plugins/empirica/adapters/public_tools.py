@@ -298,7 +298,7 @@ class PublicTools:
             elif self._environment and name == OBSERVE_TOOL and arguments["action"]["kind"] == "environment":
                 # E8: the admitted revision waits on one human approval — the host completes
                 # it (write-first document, one present, one elicit, one decision)
-                result = self._environment(result)
+                result = self._environment(result, arguments["action"].get("payload"))
             elif mediated:
                 # The end of a pass: a block that waits on the human is presented once, then re-evaluated; a batch the
                 # host could not present is evaluated again with that failure, so the response says nobody was asked.
