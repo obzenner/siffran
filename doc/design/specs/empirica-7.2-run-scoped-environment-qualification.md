@@ -280,6 +280,7 @@ route → graph → configure_run (approval) → investigate → … research �
 | `qualification-probe-failed` | carries `probe` ∈ the five names | prepare, then `qualify` |
 | `docker-unreachable` | no daemon at the endpoint | prepare, then `qualify` |
 | `profile-not-allowed` | profile above the host ceiling | `environment` |
+| `environment-revisions-exhausted` | the run's environment revision ceiling (64, contract-owned; history is never evicted) is reached | continue on the current binding, stop, or start fresh |
 | `qualification-attempts-exhausted` | 32 attempts used | continue on the current binding, stop, or start fresh |
 | `qualification-conflict` | lost CAS or concurrent attempt | `qualify` |
 | `superseded-binding` | spike request outlived its binding | resubmit the `spike_request` |
