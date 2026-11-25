@@ -94,7 +94,7 @@
     },
     "qualify": {
       "operation": "qualify",
-      "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
+      "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. One charged attempt is reserved durably before any host effect (only invalid ingress and an exact replay of the still-open attempt charge nothing), and the outcome is recorded by compare-and-set against the run generation, approved revision and prior binding: a lost race orphans the published record and binds nothing; where the host composed no qualification port (no generic Docker backend bound), an admissible qualify refuses as the unsupported host fact and nothing is attempted, charged or bound.",
       "example": {
         "kind": "qualify"
       }
@@ -960,7 +960,7 @@
                 ]
               },
               {
-                "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
+                "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. One charged attempt is reserved durably before any host effect (only invalid ingress and an exact replay of the still-open attempt charge nothing), and the outcome is recorded by compare-and-set against the run generation, approved revision and prior binding: a lost race orphans the published record and binds nothing; where the host composed no qualification port (no generic Docker backend bound), an admissible qualify refuses as the unsupported host fact and nothing is attempted, charged or bound.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -1565,7 +1565,7 @@
                 ]
               },
               {
-                "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
+                "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. One charged attempt is reserved durably before any host effect (only invalid ingress and an exact replay of the still-open attempt charge nothing), and the outcome is recorded by compare-and-set against the run generation, approved revision and prior binding: a lost race orphans the published record and binds nothing; where the host composed no qualification port (no generic Docker backend bound), an admissible qualify refuses as the unsupported host fact and nothing is attempted, charged or bound.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [

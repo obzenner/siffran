@@ -77,10 +77,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790602140.0,
+    "started": 1790602320.0,
     "state": "active",
-    "updated": 1790603100.0,
-    "version": "sha256:9af842c5e952adb1fc3ee29f2098f273510e7b46f8cc9d163c172c7d1db0a806"
+    "updated": 1790603280.0,
+    "version": "sha256:980356e152dca89a6d1c0cca1af94101eebc33abcc4c78f23be3e0f7d1e3f081"
    }
   ],
   "audit": {
@@ -89,7 +89,7 @@
   "auditor": "anthropic/claude-opus-4-6",
   "audits": [
    {
-    "at": 1790603100.0,
+    "at": 1790603280.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
      "The frozen claim is cited."
@@ -135,7 +135,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790602500.0,
+    "at": 1790602680.0,
     "claim": null,
     "document": {
      "body": null,
@@ -268,10 +268,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790602140.0,
+   "started": 1790602320.0,
    "state": "active",
-   "updated": 1790603100.0,
-   "version": "sha256:9af842c5e952adb1fc3ee29f2098f273510e7b46f8cc9d163c172c7d1db0a806"
+   "updated": 1790603280.0,
+   "version": "sha256:980356e152dca89a6d1c0cca1af94101eebc33abcc4c78f23be3e0f7d1e3f081"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -279,7 +279,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790602140.0,
+    "at": 1790602320.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -291,7 +291,7 @@
     "terminal": false
    },
    {
-    "at": 1790602320.0,
+    "at": 1790602500.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -303,7 +303,7 @@
     "terminal": false
    },
    {
-    "at": 1790602680.0,
+    "at": 1790602860.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -315,7 +315,7 @@
     "terminal": false
    },
    {
-    "at": 1790602800.0,
+    "at": 1790602980.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -327,7 +327,7 @@
     "terminal": false
    },
    {
-    "at": 1790603040.0,
+    "at": 1790603220.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -339,7 +339,7 @@
     "terminal": false
    },
    {
-    "at": 1790603100.0,
+    "at": 1790603280.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -352,13 +352,13 @@
    }
   ],
   "stop": null,
-  "version": "sha256:9af842c5e952adb1fc3ee29f2098f273510e7b46f8cc9d163c172c7d1db0a806"
+  "version": "sha256:980356e152dca89a6d1c0cca1af94101eebc33abcc4c78f23be3e0f7d1e3f081"
  },
  "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1": {
   "attempts": [
    {
     "ask": "approve_configuration",
-    "asked_at": 1790601960.0,
+    "asked_at": 1790602140.0,
     "attention": "needs_you",
     "audit": {
      "current": null,
@@ -415,10 +415,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790601720.0,
+    "started": 1790601900.0,
     "state": "active",
-    "updated": 1790602080.0,
-    "version": "sha256:2ea1afe0a94fa4329f1f45b79fde7231bed17b9c5688185c5ddd06e3ba952345"
+    "updated": 1790602260.0,
+    "version": "sha256:cb22b0dd3912f5cc2c1be2488051e2d3c776796c352aed29f9a7943b97ba059b"
    }
   ],
   "audit": {
@@ -442,7 +442,7 @@
    {
     "answer": "later",
     "asked": "approve_configuration",
-    "at": 1790602080.0,
+    "at": 1790602260.0,
     "claim": null,
     "document": {
      "body": {
@@ -571,7 +571,7 @@
   "residuals": [],
   "row": {
    "ask": "approve_configuration",
-   "asked_at": 1790601960.0,
+   "asked_at": 1790602140.0,
    "attention": "needs_you",
    "audit": {
     "current": null,
@@ -628,10 +628,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790601720.0,
+   "started": 1790601900.0,
    "state": "active",
-   "updated": 1790602080.0,
-   "version": "sha256:2ea1afe0a94fa4329f1f45b79fde7231bed17b9c5688185c5ddd06e3ba952345"
+   "updated": 1790602260.0,
+   "version": "sha256:cb22b0dd3912f5cc2c1be2488051e2d3c776796c352aed29f9a7943b97ba059b"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -639,7 +639,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790601720.0,
+    "at": 1790601900.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -651,7 +651,7 @@
     "terminal": false
    },
    {
-    "at": 1790601900.0,
+    "at": 1790602080.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -664,7 +664,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:2ea1afe0a94fa4329f1f45b79fde7231bed17b9c5688185c5ddd06e3ba952345"
+  "version": "sha256:cb22b0dd3912f5cc2c1be2488051e2d3c776796c352aed29f9a7943b97ba059b"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1": {
   "attempts": [
@@ -760,10 +760,10 @@
      "locator": null
     },
     "standing": "not_ended",
-    "started": 1790595900.0,
+    "started": 1790596080.0,
     "state": "active",
-    "updated": 1790596380.0,
-    "version": "sha256:6468eea0e4e2a36443fb8d6fdec722b6572a4d4168d30f0b7217c1d282a0f8a8"
+    "updated": 1790596560.0,
+    "version": "sha256:99efe394f75626b3eaa7d2a7c0a214028d41a1ac70e0146a90754aa39c54987c"
    }
   ],
   "audit": {
@@ -838,7 +838,7 @@
   "decisions": [],
   "dropped": [
    {
-    "at": 1790596380.0,
+    "at": 1790596560.0,
     "citation": "docs/support.md states this directly.",
     "claim": "C2",
     "command": null,
@@ -996,10 +996,10 @@
     "locator": null
    },
    "standing": "not_ended",
-   "started": 1790595900.0,
+   "started": 1790596080.0,
    "state": "active",
-   "updated": 1790596380.0,
-   "version": "sha256:6468eea0e4e2a36443fb8d6fdec722b6572a4d4168d30f0b7217c1d282a0f8a8"
+   "updated": 1790596560.0,
+   "version": "sha256:99efe394f75626b3eaa7d2a7c0a214028d41a1ac70e0146a90754aa39c54987c"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1007,7 +1007,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790595900.0,
+    "at": 1790596080.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -1019,7 +1019,7 @@
     "terminal": false
    },
    {
-    "at": 1790596020.0,
+    "at": 1790596200.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -1031,7 +1031,7 @@
     "terminal": false
    },
    {
-    "at": 1790596320.0,
+    "at": 1790596500.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -1043,7 +1043,7 @@
     "terminal": false
    },
    {
-    "at": 1790596380.0,
+    "at": 1790596560.0,
     "bookkeeping": false,
     "claim": "C2",
     "command": null,
@@ -1056,13 +1056,13 @@
    }
   ],
   "stop": null,
-  "version": "sha256:6468eea0e4e2a36443fb8d6fdec722b6572a4d4168d30f0b7217c1d282a0f8a8"
+  "version": "sha256:99efe394f75626b3eaa7d2a7c0a214028d41a1ac70e0146a90754aa39c54987c"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
   "attempts": [
    {
     "ask": "approve_revision",
-    "asked_at": 1790595840.0,
+    "asked_at": 1790596020.0,
     "attention": "needs_you",
     "audit": {
      "current": null,
@@ -1119,10 +1119,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790595240.0,
+    "started": 1790595420.0,
     "state": "active",
-    "updated": 1790595840.0,
-    "version": "sha256:43a5dcc7585c7a83b24a33e2cd1c262ba92a9fcaa73910547af17dbdbd425bee"
+    "updated": 1790596020.0,
+    "version": "sha256:a4cce8f105008320116dc750d2141ebe8de9b68b890dff71cbd59dbeab91381c"
    }
   ],
   "audit": {
@@ -1159,7 +1159,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790595600.0,
+    "at": 1790595780.0,
     "claim": null,
     "document": {
      "body": null,
@@ -1223,7 +1223,7 @@
   "residuals": [],
   "row": {
    "ask": "approve_revision",
-   "asked_at": 1790595840.0,
+   "asked_at": 1790596020.0,
    "attention": "needs_you",
    "audit": {
     "current": null,
@@ -1280,10 +1280,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790595240.0,
+   "started": 1790595420.0,
    "state": "active",
-   "updated": 1790595840.0,
-   "version": "sha256:43a5dcc7585c7a83b24a33e2cd1c262ba92a9fcaa73910547af17dbdbd425bee"
+   "updated": 1790596020.0,
+   "version": "sha256:a4cce8f105008320116dc750d2141ebe8de9b68b890dff71cbd59dbeab91381c"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1291,7 +1291,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790595240.0,
+    "at": 1790595420.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -1303,7 +1303,7 @@
     "terminal": false
    },
    {
-    "at": 1790595420.0,
+    "at": 1790595600.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -1315,7 +1315,7 @@
     "terminal": false
    },
    {
-    "at": 1790595780.0,
+    "at": 1790595960.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -1328,7 +1328,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:43a5dcc7585c7a83b24a33e2cd1c262ba92a9fcaa73910547af17dbdbd425bee"
+  "version": "sha256:a4cce8f105008320116dc750d2141ebe8de9b68b890dff71cbd59dbeab91381c"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
   "attempts": [
@@ -1375,7 +1375,7 @@
       "to": "C1"
      }
     ],
-    "ended": 1790591760.0,
+    "ended": 1790591880.0,
     "flags": {
      "changed_since_audit": false,
      "decided": true,
@@ -1404,10 +1404,10 @@
      "locator": null
     },
     "standing": "stopped_residual",
-    "started": 1790591040.0,
+    "started": 1790591160.0,
     "state": "stopped_residual",
-    "updated": 1790591760.0,
-    "version": "sha256:aef26c877c3a130a807a142e2a740a6acb7f126e641f36e252ac45453480e15b"
+    "updated": 1790591880.0,
+    "version": "sha256:1a21978a67c3e17089c5d0929b00097c4fb2935eb381ba9b7d7849bcedca0f38"
    },
    {
     "ask": null,
@@ -1485,10 +1485,10 @@
      "locator": null
     },
     "standing": "not_ended",
-    "started": 1790591820.0,
+    "started": 1790591940.0,
     "state": "active",
-    "updated": 1790592900.0,
-    "version": "sha256:d4c3c81938eff794109e79cefe8c5800bb04f1f35254fa8cbf21b2681e8b34d3"
+    "updated": 1790593080.0,
+    "version": "sha256:003233de83524637ffd5582384122b0a0ca349c2388650c9ca383681bb8caadd"
    }
   ],
   "audit": {
@@ -1538,7 +1538,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790591400.0,
+    "at": 1790591520.0,
     "claim": null,
     "document": {
      "body": null,
@@ -1553,7 +1553,7 @@
    {
     "answer": "approve",
     "asked": "consent_stop",
-    "at": 1790591700.0,
+    "at": 1790591820.0,
     "claim": null,
     "document": {
      "body": null,
@@ -1648,7 +1648,7 @@
      "to": "C1"
     }
    ],
-   "ended": 1790591760.0,
+   "ended": 1790591880.0,
    "flags": {
     "changed_since_audit": false,
     "decided": true,
@@ -1677,10 +1677,10 @@
     "locator": null
    },
    "standing": "stopped_residual",
-   "started": 1790591040.0,
+   "started": 1790591160.0,
    "state": "stopped_residual",
-   "updated": 1790591760.0,
-   "version": "sha256:aef26c877c3a130a807a142e2a740a6acb7f126e641f36e252ac45453480e15b"
+   "updated": 1790591880.0,
+   "version": "sha256:1a21978a67c3e17089c5d0929b00097c4fb2935eb381ba9b7d7849bcedca0f38"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1688,7 +1688,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790591040.0,
+    "at": 1790591160.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -1700,7 +1700,7 @@
     "terminal": false
    },
    {
-    "at": 1790591220.0,
+    "at": 1790591340.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -1712,7 +1712,7 @@
     "terminal": false
    },
    {
-    "at": 1790591580.0,
+    "at": 1790591700.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -1724,7 +1724,7 @@
     "terminal": false
    },
    {
-    "at": 1790591640.0,
+    "at": 1790591760.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -1736,7 +1736,7 @@
     "terminal": false
    },
    {
-    "at": 1790591700.0,
+    "at": 1790591820.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -1758,7 +1758,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:aef26c877c3a130a807a142e2a740a6acb7f126e641f36e252ac45453480e15b"
+  "version": "sha256:1a21978a67c3e17089c5d0929b00097c4fb2935eb381ba9b7d7849bcedca0f38"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
   "attempts": [
@@ -1805,7 +1805,7 @@
       "to": "C1"
      }
     ],
-    "ended": 1790591760.0,
+    "ended": 1790591880.0,
     "flags": {
      "changed_since_audit": false,
      "decided": true,
@@ -1834,10 +1834,10 @@
      "locator": null
     },
     "standing": "stopped_residual",
-    "started": 1790591040.0,
+    "started": 1790591160.0,
     "state": "stopped_residual",
-    "updated": 1790591760.0,
-    "version": "sha256:aef26c877c3a130a807a142e2a740a6acb7f126e641f36e252ac45453480e15b"
+    "updated": 1790591880.0,
+    "version": "sha256:1a21978a67c3e17089c5d0929b00097c4fb2935eb381ba9b7d7849bcedca0f38"
    },
    {
     "ask": null,
@@ -1915,10 +1915,10 @@
      "locator": null
     },
     "standing": "not_ended",
-    "started": 1790591820.0,
+    "started": 1790591940.0,
     "state": "active",
-    "updated": 1790592900.0,
-    "version": "sha256:d4c3c81938eff794109e79cefe8c5800bb04f1f35254fa8cbf21b2681e8b34d3"
+    "updated": 1790593080.0,
+    "version": "sha256:003233de83524637ffd5582384122b0a0ca349c2388650c9ca383681bb8caadd"
    }
   ],
   "audit": {
@@ -1929,7 +1929,7 @@
   "auditor": "anthropic/claude-opus-4-6",
   "audits": [
    {
-    "at": 1790592900.0,
+    "at": 1790593080.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
      "The tolerance test never checks the wide-gamut swatches: research artifact sha256:8db61ff4da9b90192441e9833d4306964aeb94e1bf64248638f124bca4268e21 cites tests/colour/tolerance/wide_gamut_swatches_display_p3_rec2020_regression_cases.py:3,5,16."
@@ -2100,7 +2100,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790592180.0,
+    "at": 1790592360.0,
     "claim": null,
     "document": {
      "body": null,
@@ -2227,10 +2227,10 @@
     "locator": null
    },
    "standing": "not_ended",
-   "started": 1790591820.0,
+   "started": 1790591940.0,
    "state": "active",
-   "updated": 1790592900.0,
-   "version": "sha256:d4c3c81938eff794109e79cefe8c5800bb04f1f35254fa8cbf21b2681e8b34d3"
+   "updated": 1790593080.0,
+   "version": "sha256:003233de83524637ffd5582384122b0a0ca349c2388650c9ca383681bb8caadd"
   },
   "spike_backend": {
    "backend": "docker",
@@ -2242,7 +2242,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790591820.0,
+    "at": 1790591940.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -2254,7 +2254,7 @@
     "terminal": false
    },
    {
-    "at": 1790592000.0,
+    "at": 1790592180.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -2266,7 +2266,7 @@
     "terminal": false
    },
    {
-    "at": 1790592360.0,
+    "at": 1790592540.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -2278,7 +2278,7 @@
     "terminal": false
    },
    {
-    "at": 1790592420.0,
+    "at": 1790592600.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -2290,7 +2290,7 @@
     "terminal": false
    },
    {
-    "at": 1790592480.0,
+    "at": 1790592660.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -2302,7 +2302,7 @@
     "terminal": false
    },
    {
-    "at": 1790592540.0,
+    "at": 1790592720.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -2314,7 +2314,7 @@
     "terminal": false
    },
    {
-    "at": 1790592600.0,
+    "at": 1790592780.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -2326,7 +2326,7 @@
     "terminal": false
    },
    {
-    "at": 1790592840.0,
+    "at": 1790593020.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -2338,7 +2338,7 @@
     "terminal": false
    },
    {
-    "at": 1790592900.0,
+    "at": 1790593080.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -2351,13 +2351,13 @@
    }
   ],
   "stop": null,
-  "version": "sha256:d4c3c81938eff794109e79cefe8c5800bb04f1f35254fa8cbf21b2681e8b34d3"
+  "version": "sha256:003233de83524637ffd5582384122b0a0ca349c2388650c9ca383681bb8caadd"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
   "attempts": [
    {
     "ask": "confirm_source",
-    "asked_at": 1790596980.0,
+    "asked_at": 1790597160.0,
     "attention": "needs_you",
     "audit": {
      "current": null,
@@ -2431,10 +2431,10 @@
      "locator": null
     },
     "standing": "needs_human",
-    "started": 1790596440.0,
+    "started": 1790596620.0,
     "state": "active",
-    "updated": 1790596980.0,
-    "version": "sha256:7b9fc95d10ac8f0204af143978ee853ddc4825eebd375287d9d352ef192334f1"
+    "updated": 1790597160.0,
+    "version": "sha256:832bd4a4d5d838033a2b65fc709fc67d1b4e10353e403c3a413330dbcb870f93"
    }
   ],
   "audit": {
@@ -2482,7 +2482,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790596800.0,
+    "at": 1790596980.0,
     "claim": null,
     "document": {
      "body": null,
@@ -2553,7 +2553,7 @@
   "residuals": [],
   "row": {
    "ask": "confirm_source",
-   "asked_at": 1790596980.0,
+   "asked_at": 1790597160.0,
    "attention": "needs_you",
    "audit": {
     "current": null,
@@ -2627,10 +2627,10 @@
     "locator": null
    },
    "standing": "needs_human",
-   "started": 1790596440.0,
+   "started": 1790596620.0,
    "state": "active",
-   "updated": 1790596980.0,
-   "version": "sha256:7b9fc95d10ac8f0204af143978ee853ddc4825eebd375287d9d352ef192334f1"
+   "updated": 1790597160.0,
+   "version": "sha256:832bd4a4d5d838033a2b65fc709fc67d1b4e10353e403c3a413330dbcb870f93"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -2638,7 +2638,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790596440.0,
+    "at": 1790596620.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -2650,7 +2650,7 @@
     "terminal": false
    },
    {
-    "at": 1790596620.0,
+    "at": 1790596800.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -2662,7 +2662,7 @@
     "terminal": false
    },
    {
-    "at": 1790596980.0,
+    "at": 1790597160.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -2675,7 +2675,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:7b9fc95d10ac8f0204af143978ee853ddc4825eebd375287d9d352ef192334f1"
+  "version": "sha256:832bd4a4d5d838033a2b65fc709fc67d1b4e10353e403c3a413330dbcb870f93"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "attempts": [
@@ -2738,7 +2738,7 @@
       "to": "C2"
      }
     ],
-    "ended": 1790587980.0,
+    "ended": 1790588040.0,
     "flags": {
      "changed_since_audit": false,
      "decided": true,
@@ -2767,10 +2767,10 @@
      "locator": null
     },
     "standing": "stopped_residual",
-    "started": 1790587260.0,
+    "started": 1790587320.0,
     "state": "stopped_residual",
-    "updated": 1790587980.0,
-    "version": "sha256:e0ebce43a2da8f888a4255ad25ba0579d8dfbaff7962f6b8431107cada0dc72b"
+    "updated": 1790588040.0,
+    "version": "sha256:438e5c73a22e85f832faf75edaa55bf1c66a2f09f8b83541304d755472cdc173"
    }
   ],
   "audit": {
@@ -2823,7 +2823,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790587620.0,
+    "at": 1790587680.0,
     "claim": null,
     "document": {
      "body": null,
@@ -2838,7 +2838,7 @@
    {
     "answer": "approve",
     "asked": "consent_stop",
-    "at": 1790587920.0,
+    "at": 1790587980.0,
     "claim": null,
     "document": {
      "body": null,
@@ -2853,7 +2853,7 @@
   ],
   "dropped": [
    {
-    "at": 1790587800.0,
+    "at": 1790587860.0,
     "citation": "jobs/export.py states this directly.",
     "claim": "C1",
     "command": null,
@@ -2974,7 +2974,7 @@
      "to": "C2"
     }
    ],
-   "ended": 1790587980.0,
+   "ended": 1790588040.0,
    "flags": {
     "changed_since_audit": false,
     "decided": true,
@@ -3003,10 +3003,10 @@
     "locator": null
    },
    "standing": "stopped_residual",
-   "started": 1790587260.0,
+   "started": 1790587320.0,
    "state": "stopped_residual",
-   "updated": 1790587980.0,
-   "version": "sha256:e0ebce43a2da8f888a4255ad25ba0579d8dfbaff7962f6b8431107cada0dc72b"
+   "updated": 1790588040.0,
+   "version": "sha256:438e5c73a22e85f832faf75edaa55bf1c66a2f09f8b83541304d755472cdc173"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -3014,7 +3014,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790587260.0,
+    "at": 1790587320.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -3026,7 +3026,7 @@
     "terminal": false
    },
    {
-    "at": 1790587440.0,
+    "at": 1790587500.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -3038,7 +3038,7 @@
     "terminal": false
    },
    {
-    "at": 1790587800.0,
+    "at": 1790587860.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -3050,7 +3050,7 @@
     "terminal": false
    },
    {
-    "at": 1790587860.0,
+    "at": 1790587920.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -3062,7 +3062,7 @@
     "terminal": false
    },
    {
-    "at": 1790587920.0,
+    "at": 1790587980.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -3085,7 +3085,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:e0ebce43a2da8f888a4255ad25ba0579d8dfbaff7962f6b8431107cada0dc72b"
+  "version": "sha256:438e5c73a22e85f832faf75edaa55bf1c66a2f09f8b83541304d755472cdc173"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
   "attempts": [
@@ -3148,7 +3148,7 @@
       "to": "C2"
      }
     ],
-    "ended": 1790587200.0,
+    "ended": 1790587260.0,
     "flags": {
      "changed_since_audit": false,
      "decided": true,
@@ -3179,8 +3179,8 @@
     "standing": "proven",
     "started": 1790586000.0,
     "state": "converged",
-    "updated": 1790587200.0,
-    "version": "sha256:0710b506f4972ec5ddbaffc15f9e77e7159c536a763bf235991952844ba218e7"
+    "updated": 1790587260.0,
+    "version": "sha256:0f1c0872ce4e34255d41b123c6be554503126894bf079fe050404830cba6f309"
    }
   ],
   "audit": {
@@ -3189,7 +3189,7 @@
   "auditor": "anthropic/claude-opus-4-6",
   "audits": [
    {
-    "at": 1790587140.0,
+    "at": 1790587200.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
      "The round-trip spike covers every entry kind."
@@ -3381,7 +3381,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790586360.0,
+    "at": 1790586420.0,
     "claim": null,
     "document": {
      "body": null,
@@ -3483,7 +3483,7 @@
      "to": "C2"
     }
    ],
-   "ended": 1790587200.0,
+   "ended": 1790587260.0,
    "flags": {
     "changed_since_audit": false,
     "decided": true,
@@ -3514,8 +3514,8 @@
    "standing": "proven",
    "started": 1790586000.0,
    "state": "converged",
-   "updated": 1790587200.0,
-   "version": "sha256:0710b506f4972ec5ddbaffc15f9e77e7159c536a763bf235991952844ba218e7"
+   "updated": 1790587260.0,
+   "version": "sha256:0f1c0872ce4e34255d41b123c6be554503126894bf079fe050404830cba6f309"
   },
   "spike_backend": {
    "backend": "docker",
@@ -3539,7 +3539,7 @@
     "terminal": false
    },
    {
-    "at": 1790586180.0,
+    "at": 1790586240.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -3551,7 +3551,7 @@
     "terminal": false
    },
    {
-    "at": 1790586540.0,
+    "at": 1790586600.0,
     "bookkeeping": false,
     "claim": "C2",
     "command": null,
@@ -3563,7 +3563,7 @@
     "terminal": false
    },
    {
-    "at": 1790586600.0,
+    "at": 1790586660.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -3575,7 +3575,7 @@
     "terminal": false
    },
    {
-    "at": 1790586660.0,
+    "at": 1790586720.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -3587,7 +3587,7 @@
     "terminal": false
    },
    {
-    "at": 1790586720.0,
+    "at": 1790586780.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -3599,7 +3599,7 @@
     "terminal": false
    },
    {
-    "at": 1790586780.0,
+    "at": 1790586840.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -3611,7 +3611,7 @@
     "terminal": false
    },
    {
-    "at": 1790586780.0,
+    "at": 1790586840.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -3623,7 +3623,7 @@
     "terminal": false
    },
    {
-    "at": 1790587080.0,
+    "at": 1790587140.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -3635,7 +3635,7 @@
     "terminal": false
    },
    {
-    "at": 1790587140.0,
+    "at": 1790587200.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -3658,7 +3658,7 @@
    ],
    "status": "converged"
   },
-  "version": "sha256:0710b506f4972ec5ddbaffc15f9e77e7159c536a763bf235991952844ba218e7"
+  "version": "sha256:0f1c0872ce4e34255d41b123c6be554503126894bf079fe050404830cba6f309"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1": {
   "attempts": [
@@ -3738,10 +3738,10 @@
      "locator": "/home/dev/.pi/sessions/atlas-writer.jsonl"
     },
     "standing": "audit_pending",
-    "started": 1790594100.0,
+    "started": 1790594280.0,
     "state": "active",
-    "updated": 1790595180.0,
-    "version": "sha256:a7ce402549eba1a0527f3788d372091d1cf6d59c9f121c943dbc110adade275f"
+    "updated": 1790595360.0,
+    "version": "sha256:fde55159c279f4e419a7056c85f39bbeffed2c044a9fd7bab29eb313795da02e"
    }
   ],
   "audit": {
@@ -3750,7 +3750,7 @@
   "auditor": "anthropic/claude-opus-4-6",
   "audits": [
    {
-    "at": 1790595000.0,
+    "at": 1790595180.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
      "Every approved claim is cited."
@@ -3809,7 +3809,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790594460.0,
+    "at": 1790594640.0,
     "claim": null,
     "document": {
      "body": null,
@@ -3936,10 +3936,10 @@
     "locator": "/home/dev/.pi/sessions/atlas-writer.jsonl"
    },
    "standing": "audit_pending",
-   "started": 1790594100.0,
+   "started": 1790594280.0,
    "state": "active",
-   "updated": 1790595180.0,
-   "version": "sha256:a7ce402549eba1a0527f3788d372091d1cf6d59c9f121c943dbc110adade275f"
+   "updated": 1790595360.0,
+   "version": "sha256:fde55159c279f4e419a7056c85f39bbeffed2c044a9fd7bab29eb313795da02e"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -3947,7 +3947,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790594100.0,
+    "at": 1790594280.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -3959,7 +3959,7 @@
     "terminal": false
    },
    {
-    "at": 1790594280.0,
+    "at": 1790594460.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -3971,7 +3971,7 @@
     "terminal": false
    },
    {
-    "at": 1790594640.0,
+    "at": 1790594820.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -3983,7 +3983,7 @@
     "terminal": false
    },
    {
-    "at": 1790594700.0,
+    "at": 1790594880.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -3995,7 +3995,7 @@
     "terminal": false
    },
    {
-    "at": 1790594940.0,
+    "at": 1790595120.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -4007,7 +4007,7 @@
     "terminal": false
    },
    {
-    "at": 1790595000.0,
+    "at": 1790595180.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -4020,13 +4020,13 @@
    }
   ],
   "stop": null,
-  "version": "sha256:a7ce402549eba1a0527f3788d372091d1cf6d59c9f121c943dbc110adade275f"
+  "version": "sha256:fde55159c279f4e419a7056c85f39bbeffed2c044a9fd7bab29eb313795da02e"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
   "attempts": [
    {
     "ask": "decide_claim",
-    "asked_at": 1790593140.0,
+    "asked_at": 1790593320.0,
     "attention": "needs_you",
     "audit": {
      "current": null,
@@ -4196,10 +4196,10 @@
      "locator": "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"
     },
     "standing": "needs_human",
-    "started": 1790592960.0,
+    "started": 1790593140.0,
     "state": "active",
-    "updated": 1790594040.0,
-    "version": "sha256:5e997007a2fea0a119bb05faa7eeeef2c8a4d9fc61d5390265f8bfd4d516f76e"
+    "updated": 1790594220.0,
+    "version": "sha256:7de843cf3ee99840e33251a362ee95a613fbab6b0c33fa216050e3c30fd3d665"
    }
   ],
   "audit": {
@@ -4396,7 +4396,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790593320.0,
+    "at": 1790593500.0,
     "claim": null,
     "document": {
      "body": null,
@@ -4411,7 +4411,7 @@
    {
     "answer": "later",
     "asked": "decide_claim",
-    "at": 1790593920.0,
+    "at": 1790594100.0,
     "claim": "C7",
     "document": {
      "body": {
@@ -4486,7 +4486,7 @@
    {
     "answer": "later",
     "asked": "confirm_source",
-    "at": 1790593920.0,
+    "at": 1790594100.0,
     "claim": "C5",
     "document": {
      "body": {
@@ -4561,7 +4561,7 @@
    {
     "answer": "later",
     "asked": "confirm_source",
-    "at": 1790593920.0,
+    "at": 1790594100.0,
     "claim": "C6",
     "document": {
      "body": {
@@ -4636,7 +4636,7 @@
    {
     "answer": "approve",
     "asked": "confirm_source",
-    "at": 1790593980.0,
+    "at": 1790594160.0,
     "claim": "C3",
     "document": {
      "body": {
@@ -4711,7 +4711,7 @@
    {
     "answer": "reject",
     "asked": "confirm_source",
-    "at": 1790593980.0,
+    "at": 1790594160.0,
     "claim": "C4",
     "document": {
      "body": {
@@ -4835,7 +4835,7 @@
   "residuals": [],
   "row": {
    "ask": "decide_claim",
-   "asked_at": 1790593140.0,
+   "asked_at": 1790593320.0,
    "attention": "needs_you",
    "audit": {
     "current": null,
@@ -5005,10 +5005,10 @@
     "locator": "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"
    },
    "standing": "needs_human",
-   "started": 1790592960.0,
+   "started": 1790593140.0,
    "state": "active",
-   "updated": 1790594040.0,
-   "version": "sha256:5e997007a2fea0a119bb05faa7eeeef2c8a4d9fc61d5390265f8bfd4d516f76e"
+   "updated": 1790594220.0,
+   "version": "sha256:7de843cf3ee99840e33251a362ee95a613fbab6b0c33fa216050e3c30fd3d665"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5016,7 +5016,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790592960.0,
+    "at": 1790593140.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -5028,7 +5028,7 @@
     "terminal": false
    },
    {
-    "at": 1790593140.0,
+    "at": 1790593320.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -5040,7 +5040,7 @@
     "terminal": false
    },
    {
-    "at": 1790593500.0,
+    "at": 1790593680.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -5052,7 +5052,7 @@
     "terminal": false
    },
    {
-    "at": 1790593560.0,
+    "at": 1790593740.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -5064,7 +5064,7 @@
     "terminal": false
    },
    {
-    "at": 1790593620.0,
+    "at": 1790593800.0,
     "bookkeeping": false,
     "claim": "C2",
     "command": null,
@@ -5076,7 +5076,7 @@
     "terminal": false
    },
    {
-    "at": 1790593680.0,
+    "at": 1790593860.0,
     "bookkeeping": false,
     "claim": "C3",
     "command": null,
@@ -5088,7 +5088,7 @@
     "terminal": false
    },
    {
-    "at": 1790593740.0,
+    "at": 1790593920.0,
     "bookkeeping": false,
     "claim": "C4",
     "command": null,
@@ -5100,7 +5100,7 @@
     "terminal": false
    },
    {
-    "at": 1790593800.0,
+    "at": 1790593980.0,
     "bookkeeping": false,
     "claim": "C5",
     "command": null,
@@ -5112,7 +5112,7 @@
     "terminal": false
    },
    {
-    "at": 1790593860.0,
+    "at": 1790594040.0,
     "bookkeeping": false,
     "claim": "C6",
     "command": null,
@@ -5124,7 +5124,7 @@
     "terminal": false
    },
    {
-    "at": 1790593920.0,
+    "at": 1790594100.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -5136,7 +5136,7 @@
     "terminal": false
    },
    {
-    "at": 1790593980.0,
+    "at": 1790594160.0,
     "bookkeeping": false,
     "claim": "C3",
     "command": null,
@@ -5148,7 +5148,7 @@
     "terminal": false
    },
    {
-    "at": 1790593980.0,
+    "at": 1790594160.0,
     "bookkeeping": false,
     "claim": "C4",
     "command": null,
@@ -5160,7 +5160,7 @@
     "terminal": false
    },
    {
-    "at": 1790594040.0,
+    "at": 1790594220.0,
     "bookkeeping": false,
     "claim": "C4",
     "command": null,
@@ -5173,7 +5173,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:5e997007a2fea0a119bb05faa7eeeef2c8a4d9fc61d5390265f8bfd4d516f76e"
+  "version": "sha256:7de843cf3ee99840e33251a362ee95a613fbab6b0c33fa216050e3c30fd3d665"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
   "attempts": [
@@ -5285,10 +5285,10 @@
      "locator": null
     },
     "standing": "changed_since_audit",
-    "started": 1790588040.0,
+    "started": 1790588100.0,
     "state": "active",
-    "updated": 1790589120.0,
-    "version": "sha256:65fb1f038b75859463aceb3e46fbb06ef9e850cd5cd6a0cb946dcd381cdc47f4"
+    "updated": 1790589180.0,
+    "version": "sha256:a02ad4d3091a94343b7c57c27ad77e77678fabd910e4d9ab9f593d507de0b93a"
    }
   ],
   "audit": {
@@ -5297,7 +5297,7 @@
   "auditor": "anthropic/claude-opus-4-6",
   "audits": [
    {
-    "at": 1790588940.0,
+    "at": 1790589000.0,
     "auditor": "anthropic/claude-opus-4-6",
     "findings": [
      "C2 has no support yet."
@@ -5410,7 +5410,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790588400.0,
+    "at": 1790588460.0,
     "claim": null,
     "document": {
      "body": null,
@@ -5569,10 +5569,10 @@
     "locator": null
    },
    "standing": "changed_since_audit",
-   "started": 1790588040.0,
+   "started": 1790588100.0,
    "state": "active",
-   "updated": 1790589120.0,
-   "version": "sha256:65fb1f038b75859463aceb3e46fbb06ef9e850cd5cd6a0cb946dcd381cdc47f4"
+   "updated": 1790589180.0,
+   "version": "sha256:a02ad4d3091a94343b7c57c27ad77e77678fabd910e4d9ab9f593d507de0b93a"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5580,7 +5580,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790588040.0,
+    "at": 1790588100.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -5592,7 +5592,7 @@
     "terminal": false
    },
    {
-    "at": 1790588220.0,
+    "at": 1790588280.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -5604,7 +5604,7 @@
     "terminal": false
    },
    {
-    "at": 1790588580.0,
+    "at": 1790588640.0,
     "bookkeeping": false,
     "claim": "C1",
     "command": null,
@@ -5616,7 +5616,7 @@
     "terminal": false
    },
    {
-    "at": 1790588640.0,
+    "at": 1790588700.0,
     "bookkeeping": false,
     "claim": "C3",
     "command": null,
@@ -5628,7 +5628,7 @@
     "terminal": false
    },
    {
-    "at": 1790588880.0,
+    "at": 1790588940.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -5640,7 +5640,7 @@
     "terminal": false
    },
    {
-    "at": 1790588940.0,
+    "at": 1790589000.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -5652,7 +5652,7 @@
     "terminal": false
    },
    {
-    "at": 1790589000.0,
+    "at": 1790589060.0,
     "bookkeeping": false,
     "claim": "C2",
     "command": null,
@@ -5664,7 +5664,7 @@
     "terminal": false
    },
    {
-    "at": 1790589060.0,
+    "at": 1790589120.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -5676,7 +5676,7 @@
     "terminal": false
    },
    {
-    "at": 1790589120.0,
+    "at": 1790589180.0,
     "bookkeeping": false,
     "claim": "C3",
     "command": null,
@@ -5689,7 +5689,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:65fb1f038b75859463aceb3e46fbb06ef9e850cd5cd6a0cb946dcd381cdc47f4"
+  "version": "sha256:a02ad4d3091a94343b7c57c27ad77e77678fabd910e4d9ab9f593d507de0b93a"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
   "attempts": [
@@ -5736,7 +5736,7 @@
       "to": "C1"
      }
     ],
-    "ended": 1790590980.0,
+    "ended": 1790591100.0,
     "flags": {
      "changed_since_audit": false,
      "decided": true,
@@ -5765,10 +5765,10 @@
      "locator": null
     },
     "standing": "stopped_frozen",
-    "started": 1790590140.0,
+    "started": 1790590260.0,
     "state": "stopped_frozen",
-    "updated": 1790590980.0,
-    "version": "sha256:5fb75d1fc3dea537c0170b6259e2fbbc03b1953f52abec8af6b63856902f2b5f"
+    "updated": 1790591100.0,
+    "version": "sha256:ec02d42323bb25e8d89c0d410310aa81f283f9ee9f4515509524485f74048489"
    }
   ],
   "audit": {
@@ -5813,7 +5813,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790590500.0,
+    "at": 1790590620.0,
     "claim": null,
     "document": {
      "body": null,
@@ -5828,7 +5828,7 @@
    {
     "answer": "approve",
     "asked": "freeze_scope",
-    "at": 1790590920.0,
+    "at": 1790591040.0,
     "claim": null,
     "document": {
      "body": null,
@@ -5925,7 +5925,7 @@
      "to": "C1"
     }
    ],
-   "ended": 1790590980.0,
+   "ended": 1790591100.0,
    "flags": {
     "changed_since_audit": false,
     "decided": true,
@@ -5954,10 +5954,10 @@
     "locator": null
    },
    "standing": "stopped_frozen",
-   "started": 1790590140.0,
+   "started": 1790590260.0,
    "state": "stopped_frozen",
-   "updated": 1790590980.0,
-   "version": "sha256:5fb75d1fc3dea537c0170b6259e2fbbc03b1953f52abec8af6b63856902f2b5f"
+   "updated": 1790591100.0,
+   "version": "sha256:ec02d42323bb25e8d89c0d410310aa81f283f9ee9f4515509524485f74048489"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5965,7 +5965,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790590140.0,
+    "at": 1790590260.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -5977,7 +5977,7 @@
     "terminal": false
    },
    {
-    "at": 1790590320.0,
+    "at": 1790590440.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -5989,7 +5989,7 @@
     "terminal": false
    },
    {
-    "at": 1790590680.0,
+    "at": 1790590800.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -6001,7 +6001,7 @@
     "terminal": false
    },
    {
-    "at": 1790590800.0,
+    "at": 1790590920.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -6013,7 +6013,7 @@
     "terminal": false
    },
    {
-    "at": 1790590860.0,
+    "at": 1790590980.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -6025,7 +6025,7 @@
     "terminal": false
    },
    {
-    "at": 1790590920.0,
+    "at": 1790591040.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -6048,7 +6048,7 @@
    ],
    "status": "stopped_frozen"
   },
-  "version": "sha256:5fb75d1fc3dea537c0170b6259e2fbbc03b1953f52abec8af6b63856902f2b5f"
+  "version": "sha256:ec02d42323bb25e8d89c0d410310aa81f283f9ee9f4515509524485f74048489"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
   "attempts": [
@@ -6157,7 +6157,7 @@
     ],
     "diagnostic": null,
     "edges": [],
-    "ended": 1790590080.0,
+    "ended": 1790590200.0,
     "flags": {
      "changed_since_audit": false,
      "decided": true,
@@ -6186,10 +6186,10 @@
      "locator": null
     },
     "standing": "stopped_budget",
-    "started": 1790589180.0,
+    "started": 1790589240.0,
     "state": "stopped_budget",
-    "updated": 1790590080.0,
-    "version": "sha256:624c1bf1342eb3ba456557a992667e600baf10c03379637babadd403d0078471"
+    "updated": 1790590200.0,
+    "version": "sha256:af5fccd637003eb1102b3df3c68f97aa2067df5b965a81d85c7c13278520654b"
    }
   ],
   "audit": {
@@ -6338,7 +6338,7 @@
    {
     "answer": "approve",
     "asked": "approve_configuration",
-    "at": 1790589540.0,
+    "at": 1790589660.0,
     "claim": null,
     "document": {
      "body": null,
@@ -6353,7 +6353,7 @@
    {
     "answer": "approve",
     "asked": "consent_stop",
-    "at": 1790590020.0,
+    "at": 1790590140.0,
     "claim": null,
     "document": {
      "body": null,
@@ -6428,7 +6428,7 @@
    ],
    "diagnostic": null,
    "edges": [],
-   "ended": 1790590080.0,
+   "ended": 1790590200.0,
    "flags": {
     "changed_since_audit": false,
     "decided": true,
@@ -6457,10 +6457,10 @@
     "locator": null
    },
    "standing": "stopped_budget",
-   "started": 1790589180.0,
+   "started": 1790589240.0,
    "state": "stopped_budget",
-   "updated": 1790590080.0,
-   "version": "sha256:624c1bf1342eb3ba456557a992667e600baf10c03379637babadd403d0078471"
+   "updated": 1790590200.0,
+   "version": "sha256:af5fccd637003eb1102b3df3c68f97aa2067df5b965a81d85c7c13278520654b"
   },
   "spike_backend": {
    "backend": "docker",
@@ -6472,7 +6472,7 @@
   "stale": [],
   "steps": [
    {
-    "at": 1790589180.0,
+    "at": 1790589240.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -6484,7 +6484,7 @@
     "terminal": false
    },
    {
-    "at": 1790589360.0,
+    "at": 1790589480.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -6496,7 +6496,7 @@
     "terminal": false
    },
    {
-    "at": 1790589720.0,
+    "at": 1790589840.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -6508,7 +6508,7 @@
     "terminal": false
    },
    {
-    "at": 1790589780.0,
+    "at": 1790589900.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -6520,7 +6520,7 @@
     "terminal": false
    },
    {
-    "at": 1790589840.0,
+    "at": 1790589960.0,
     "bookkeeping": false,
     "claim": "C0",
     "command": null,
@@ -6532,7 +6532,7 @@
     "terminal": false
    },
    {
-    "at": 1790589900.0,
+    "at": 1790590020.0,
     "bookkeeping": true,
     "claim": null,
     "command": null,
@@ -6544,7 +6544,7 @@
     "terminal": false
    },
    {
-    "at": 1790589960.0,
+    "at": 1790590080.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -6556,7 +6556,7 @@
     "terminal": false
    },
    {
-    "at": 1790590020.0,
+    "at": 1790590140.0,
     "bookkeeping": false,
     "claim": null,
     "command": null,
@@ -6577,6 +6577,6 @@
    ],
    "status": "stopped_budget"
   },
-  "version": "sha256:624c1bf1342eb3ba456557a992667e600baf10c03379637babadd403d0078471"
+  "version": "sha256:af5fccd637003eb1102b3df3c68f97aa2067df5b965a81d85c7c13278520654b"
  }
 }

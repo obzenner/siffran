@@ -144,6 +144,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "application/observation.py",
     "application/ports.py",
     "application/protocol.py",
+    "application/qualification.py",
     "application/run_state.py",
     "application/snapshot.py",
     "application/transaction.py",

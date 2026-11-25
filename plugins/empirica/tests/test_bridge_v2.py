@@ -311,6 +311,10 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
         self.assertIs(compose.call_args.kwargs["image_resolver"], image_resolver)
         self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
+        # E9: the host qualification port is composed exactly where the generic Docker backend
+        # composed, and it is the bridge's own run-scoped port type.
+        port = compose.call_args.kwargs["qualification_port"]
+        self.assertIsInstance(port, bridge._RunQualificationPort)
 
     def test_sandbox_constructor_failure_degrades_only_spikes(self):
         names = ("GenericQualificationStore", "GenericBackendSelector", "freeze_loaded_release",
@@ -341,6 +345,8 @@ class BridgeV2Tests(unittest.TestCase):
             self.assertIsNone(service._harness)
             self.assertIsInstance(
                 service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            self.assertIsNone(service._coordinator.qualification_port,
+                               "a degraded composition composes no qualification port")
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
 
@@ -387,6 +393,7 @@ class BridgeV2Tests(unittest.TestCase):
             self.assertIsNone(service._harness)
             self.assertIsInstance(
                 service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            self.assertIsNone(service._coordinator.qualification_port)
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
         self.assertEqual(reads, [1])  # one snapshot attempt, at the failed first composition
@@ -406,7 +413,7 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertTrue(callable(service.dispatch))
         selector.select.assert_not_called()
 
-    def test_start_run_with_absent_authority_binds_unavailable_without_docker_reads(self):
+    def test_start_run_binds_the_run_scoped_reference_without_docker_reads(self):
         self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
         self.assertFalse(ABSENT_SANDBOX_HOME.exists())
         with tempfile.TemporaryDirectory() as home:
@@ -427,8 +434,10 @@ class BridgeV2Tests(unittest.TestCase):
                 else:
                     os.environ["EMPIRICA_HOME"] = saved
         self.assertIn(response["result"]["type"], {"Allow", "Block"}, response)
+        # E9: the composed generic Docker backend makes the run unqualified — the machine-wide
+        # authority record was never read (and in this test's sandbox home it does not exist).
         self.assertEqual(
-            service._coordinator.last_state.spike_backend, {"kind": "spikes_unavailable"})
+            service._coordinator.last_state.spike_backend, {"kind": "unqualified"})
 
     def test_unsafe_authority_does_not_block_nonspike_read(self):
         saved = os.environ["EMPIRICA_SANDBOX_HOME"]

@@ -102,7 +102,7 @@ class LiveDriver:
 
     __slots__ = (
         "_service", "_workspace", "_harness", "_runs", "_artifacts", "_host",
-        "_profile_id", "_limits", "_clock",
+        "_profile_id", "_limits", "_clock", "_qualify_next",
     )
 
     def __init__(self, service, workspace, harness, runs, artifacts, host,
@@ -116,9 +116,49 @@ class LiveDriver:
         self._profile_id = profile_id
         self._limits = limits
         self._clock = clock
+        self._qualify_next = False
 
     def request(self, envelope: dict) -> dict:
-        return self._service.dispatch(envelope)
+        result = self._service.dispatch(envelope)
+        if (self._qualify_next
+                and isinstance(envelope, dict)
+                and (envelope.get("command") or {}).get("type") == "StartRun"
+                and (result.get("result") or {}).get("type") == "Allow"):
+            # The fixture-completed environment cycle (E9): the flag set below lands the same
+            # active qualified binding StartRun once selected from machine state — now the one
+            # state change a succeeded qualification attempt's compare-and-set makes. The
+            # started view reports the binding the run now holds, as the core itself would.
+            self._qualify_next = False
+            run_id = result["result"]["run"]["id"]
+            self._seed_qualified_binding(run_id)
+            read_back = self._service._dispatch_validated(
+                {"request_id": envelope["request_id"],
+                 "command": {"type": "GetRun", "run_id": run_id}})
+            if read_back["result"]["type"] == "Allow" and "run" in read_back["result"]:
+                result["result"]["run"] = read_back["result"]["run"]
+        return result
+
+    def _seed_qualified_binding(self, run_id: str) -> None:
+        from dataclasses import replace
+        from application import generic_spike
+        from core import environment
+        from application.location import decode_handle
+        coordinator = self._service._coordinator
+        key = decode_handle(run_id)
+        loaded = coordinator._load(key)
+        snapshot = coordinator._assemble(
+            key, loaded.state, {"type": "GetRun", "run_id": run_id}, require_graph=False)
+        member = getattr(loaded.state, "environment", None)
+        proposed = (member or {}).get("proposal")
+        ceiling = environment.profile_ceiling(getattr(loaded.state, "invocation", None))
+        # E9: an approved revision's bound profile is the one it proposed — at or below the
+        # StartRun ceiling; a pre-member fixture run binds the ceiling the run started with.
+        profile = ((proposed or {}).get("profile_id") or ceiling
+                   or "docker-isolated-v1")
+        binding = generic_spike.GenericQualifiedBackend(
+            "docker", profile, "sha256:" + "a" * 64, "sha256:" + "b" * 64).to_data()
+        coordinator._commit(key, loaded.read.revision, snapshot,
+                            replace(loaded.state, spike_backend=binding), ())
 
     def approve_governance(self, run_id: str) -> None:
         from governance_setup import approve_current
@@ -155,8 +195,12 @@ class LiveDriver:
         return self._workspace.observe_history()
 
     def qualify_next_generic_run(self) -> None:
-        """Make the fake authority selector return one exact generic binding at StartRun."""
-        self._service._coordinator.spike_authority_selector.qualified_next = True
+        """Fixture seam (E9): the next started run completes its environment cycle — its
+        qualification binds the exact generic digest pair through the coordinator's own commit
+        machinery (the state change a succeeded attempt's compare-and-set makes), because
+        StartRun itself binds the run-scoped ``unqualified`` reference and reads no
+        machine-wide authority any more."""
+        self._qualify_next = True
 
     def generic_harness_complete(self, exit_code: int) -> None:
         """Queue one natural verdict for the next sealed generic harness request."""

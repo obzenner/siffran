@@ -36,7 +36,6 @@ from application.run_state import classify_and_decode
 from application.transaction import Coordinator
 from core import environment
 from core.canonical import canonical_digest
-from core.evaluation import ENVIRONMENT_NOT_AVAILABLE
 from core.governance import plain
 from application.v2 import compose
 from test_d7_transactions import Harness, Runs, Workspace
@@ -709,14 +708,19 @@ class AdmissionDecisionTests(unittest.TestCase):
         self.assertEqual([reason["code"] for reason in result["reasons"]],
                          [environment.ENVIRONMENT_PENDING])
 
-    def test_an_approved_revision_admits_but_the_effect_still_refuses_until_its_node_lands(self):
-        """E7 owns the decision only: with an approved revision the admission passes and the
-        missing host effect (E9) refuses with the one closed reason, charging nothing."""
+    def test_an_approved_revision_admits_but_a_host_without_a_port_refuses_unsupported(self):
+        """E9: with an approved revision the admission passes, and where the host composed no
+        qualification port (a degraded composition — Codex is withheld the same way) the admitted
+        qualify refuses as the unsupported host fact: nothing reserved, charged or bound."""
         env = DeliberationEnv(control_mode="auto")
+        before = copy.deepcopy(env.state().qualification_attempts)
+        binding = copy.deepcopy(dict(env.state().spike_backend))
         result = env.observe(copy.deepcopy(QUALIFY_ACTION))
-        self.assertEqual(result["type"], "Block", result)
-        self.assertEqual([reason["code"] for reason in result["reasons"]],
-                         [ENVIRONMENT_NOT_AVAILABLE])
+        self.assertTrue(protocol.validate_public_result(result), result)
+        self.assertEqual(result["type"], "Fault", result)
+        self.assertEqual(result["code"], "unsupported", result)
+        self.assertEqual(list(env.state().qualification_attempts), list(before))
+        self.assertEqual(dict(env.state().spike_backend), binding)
 
     def test_the_attempt_ceiling_decides_admission(self):
         """One attempt short of the ceiling is admissible; at the ceiling the closed reason is the

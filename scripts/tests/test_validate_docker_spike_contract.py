@@ -37,14 +37,24 @@ class LimitsClauseTests(unittest.TestCase):
             self.assertIn(fragment, text)
         for reason in validator.generic_spike.SPIKE_FAULT_REASONS:
             self.assertIn(f"reason {reason} | ", text)
-            self.assertRegex(reason, r"^[a-z]+(-[a-z]+)+$")
+            self.assertRegex(reason, r"^[a-z0-9]+(-[a-z0-9]+)+$")
 
     def test_a_non_hyphenated_reason_fails(self):
+        # E5's fixed uid spelling legitimately carries digits (image-uid65534-unusable), so the
+        # closure admits digit segments; it never admits an underscore or an unhyphenated word.
         reasons = validator.generic_spike.SPIKE_FAULT_REASONS + ("cleanup_unavailable",)
         hints = {**validator.REASON_HINTS, "cleanup_unavailable": "x"}
         with mock.patch.object(validator.generic_spike, "SPIKE_FAULT_REASONS", reasons), \
                 mock.patch.object(validator, "REASON_HINTS", hints):
-            with self.assertRaisesRegex(validator.ContractError, "one hyphenated spelling"):
+            with self.assertRaisesRegex(validator.ContractError, "one hyphenated lowercase spelling"):
+                validator.render_limits()
+
+    def test_an_upper_case_reason_fails(self):
+        reasons = validator.generic_spike.SPIKE_FAULT_REASONS + ("CleanupUnavailable",)
+        hints = {**validator.REASON_HINTS, "CleanupUnavailable": "x"}
+        with mock.patch.object(validator.generic_spike, "SPIKE_FAULT_REASONS", reasons), \
+                mock.patch.object(validator, "REASON_HINTS", hints):
+            with self.assertRaisesRegex(validator.ContractError, "one hyphenated lowercase spelling"):
                 validator.render_limits()
 
     def test_a_changed_constant_is_drift(self):

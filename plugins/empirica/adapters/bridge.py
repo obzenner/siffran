@@ -189,6 +189,40 @@ def GenericDockerHarness(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
+class _RunQualificationPort:
+    """The host qualification port (Empirica 7.2 §5, E9), bound only where the guarded generic
+    Docker composition succeeded: every call runs E5's owner
+    (``adapters.sandbox.run_qualification.qualify_run_environment``) under the run binding the
+    transaction reserved, with the approved revision's profile and spike-image references, the
+    one 90-second host deadline the owner owns, and the process's frozen loaded release. The
+    port holds no state of its own, and its closed failure mapping is the identity over every
+    registered attempt failure; the one non-failure spelling — the low-level invalid-input — is
+    an internal impossible-after-validation breach and refuses closed without an attempt
+    failure word (the transaction treats it as an internal host failure: the open reservation
+    stays charged and unresolved)."""
+
+    def run_qualification_attempt(self, request):
+        from application.ports import (QualificationAttemptBound,
+                                       QualificationAttemptFailed)
+        from adapters.sandbox import run_qualification
+        outcome = run_qualification.qualify_run_environment(
+            project_id=request.project_id, run_id=request.run_id,
+            generation=request.generation, attempt_id=request.attempt_id,
+            revision=request.revision,
+            proposal_digest=request.proposal_digest,
+            spike_images=list(request.spike_images),
+            profile_id=request.profile_id,
+            docker_cli=Path("docker"))
+        if type(outcome) is run_qualification.RunQualificationBound:
+            return QualificationAttemptBound(
+                outcome.record_digest,
+                outcome.record["execution_binding_digest"])
+        if outcome.reason is run_qualification.RunQualificationReason.INVALID_INPUT:
+            raise RuntimeError(
+                "the run qualification owner refused the transaction's validated binding")
+        return QualificationAttemptFailed(outcome.reason.value, outcome.probe)
+
+
 def build_service(profile_id: str, *, clock=time.time):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
@@ -222,12 +256,18 @@ def build_service(profile_id: str, *, clock=time.time):
         spike_authority = NullSpikeAuthoritySelector()
         spike_harness = None
         image_resolver = None
+        # (E9) a degraded composition also composes no qualification port (``_v2.compose``
+        # below receives ``None`` the same way): StartRun binds spikes-unavailable for the run's
+        # life and an admitted ``qualify`` refuses as the unsupported host fact before reserving
+        # anything.
+
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=spike_harness,
         runs=runs, artifacts=artifacts,
         host=None, profile_id=profile_id, limits={}, clock=None,
         spike_authority_selector=spike_authority,
         image_resolver=image_resolver,
+        qualification_port=_RunQualificationPort() if spike_harness is not None else None,
     )
 
 

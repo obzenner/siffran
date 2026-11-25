@@ -123,33 +123,36 @@ class RunQualificationReason(str, Enum):
     Additive only; existing values are never collapsed or rewritten.
 
     The attempt-failure values are bound to the public reason registry — the
-    ``GenericUnavailableReason`` members whose closed set the response schema mirrors
-    as ``qualification.last_failure.reason`` (``QUALIFICATION_FAILURE_REASONS``) — by
-    member, never by a second literal: renaming or removing one in the registry fails
-    this module at import instead of drifting. The owner never emits the
-    CAS/conflict value: the binding CAS the caller performs owns it. The remaining
-    values are owner-side admission and diagnostic refusals the public registry does
-    not carry."""
+    ``GenericUnavailableReason`` and ``GenericPreparationReason`` members whose closed set
+    the response schema mirrors as ``qualification.last_failure.reason``
+    (``QUALIFICATION_FAILURE_REASONS``) — by member, never by a second literal: renaming or
+    removing one in the registry fails this module at import instead of drifting. The owner
+    never emits the CAS/conflict value: the binding CAS the caller performs owns it. The one
+    closed, documented exception is ``invalid-input``: ingress is validated before any
+    reservation (the application transaction derives every binding fact from committed,
+    validated state), so the owner's invalid-input outcome is never an attempt failure — the
+    port refuses it fail-closed and no failure word is fabricated in its place."""
     INVALID_INPUT = "invalid-input"
     PROBE_IMAGE_UNTRUSTED = application.GenericUnavailableReason.PROBE_IMAGE_UNTRUSTED.value
     DOCKER_UNREACHABLE = application.GenericUnavailableReason.DOCKER_UNREACHABLE.value
-    RESOURCE_LIMITS_UNAVAILABLE = "resource-limits-unavailable"
-    CAPABILITY_UNAVAILABLE = "capability-unavailable"
-    SANDBOX_UNSAFE = "sandbox-scaffolding-unsafe"
+    RESOURCE_LIMITS_UNAVAILABLE = \
+        application.GenericUnavailableReason.RESOURCE_LIMITS_UNAVAILABLE.value
+    CAPABILITY_UNAVAILABLE = application.GenericUnavailableReason.CAPABILITY_UNAVAILABLE.value
+    SANDBOX_UNSAFE = application.GenericUnavailableReason.SANDBOX_SCAFFOLDING_UNSAFE.value
     STALE_DAEMON = application.GenericUnavailableReason.QUALIFICATION_STALE_DAEMON.value
     STALE_IMPLEMENTATION = \
         application.GenericUnavailableReason.QUALIFICATION_STALE_IMPLEMENTATION.value
     PROBE_FAILED = application.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value
-    IMAGE_NOT_LOCAL = "image-not-local"
-    IMAGE_REFERENCE_AMBIGUOUS = "image-reference-ambiguous"
-    IMAGE_MALFORMED = "image-malformed"
-    IMAGE_INSPECT_FAILED = "image-inspect-failed"
-    IMAGE_INSPECT_TIMEOUT = "image-inspect-timeout"
-    IMAGE_INSPECT_OUTPUT_LIMIT = "image-inspect-output-limit"
-    IMAGE_PLATFORM_MISMATCH = "image-platform-mismatch"
-    IMAGE_DECLARES_VOLUMES = "image-declares-volumes"
-    IMAGE_TOOL_MISSING = "image-tool-missing"
-    IMAGE_UID_UNUSABLE = "image-uid65534-unusable"
+    IMAGE_NOT_LOCAL = application.GenericPreparationReason.IMAGE_NOT_LOCAL.value
+    IMAGE_REFERENCE_AMBIGUOUS = application.GenericPreparationReason.IMAGE_REFERENCE_AMBIGUOUS.value
+    IMAGE_MALFORMED = application.GenericUnavailableReason.IMAGE_MALFORMED.value
+    IMAGE_INSPECT_FAILED = application.GenericUnavailableReason.IMAGE_INSPECT_FAILED.value
+    IMAGE_INSPECT_TIMEOUT = application.GenericUnavailableReason.IMAGE_INSPECT_TIMEOUT.value
+    IMAGE_INSPECT_OUTPUT_LIMIT = application.GenericUnavailableReason.IMAGE_INSPECT_OUTPUT_LIMIT.value
+    IMAGE_PLATFORM_MISMATCH = application.GenericPreparationReason.IMAGE_PLATFORM_MISMATCH.value
+    IMAGE_DECLARES_VOLUMES = application.GenericPreparationReason.IMAGE_DECLARES_VOLUMES.value
+    IMAGE_TOOL_MISSING = application.GenericUnavailableReason.IMAGE_TOOL_MISSING.value
+    IMAGE_UID_UNUSABLE = application.GenericUnavailableReason.IMAGE_UID_UNUSABLE.value
     EGRESS_UNAVAILABLE = application.GenericUnavailableReason.NETWORK_EGRESS_UNAVAILABLE.value
     CLEANUP_UNAVAILABLE = application.GenericUnavailableReason.CLEANUP_UNAVAILABLE.value
     DEADLINE_EXCEEDED = application.GenericUnavailableReason.QUALIFICATION_DEADLINE_EXCEEDED.value
