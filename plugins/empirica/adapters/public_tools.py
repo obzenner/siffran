@@ -285,20 +285,25 @@ class PublicTools:
         # A report presents the evidence waiting on a human; a report or a stop of a deliberative run presents the
         # consent to end non-converged (ADR-0063 amendment). The core says which, in the batch it returns.
         mediated = bool(self._confirm and name == REPORT_TOOL)
+        environmental = bool(self._environment and name == OBSERVE_TOOL
+                             and arguments["action"]["kind"] == "environment")
+        admission = None
         try:
             if mediated:
                 request, result = self._evaluate_observed(request, arguments["run_id"])
             else:
-                response = self._dispatch(request, self._profile_id)
+                if environmental:  # the private admission rides beside the response, never in it
+                    response, admission = self._environment.admit(request, self._profile_id)
+                else:
+                    response = self._dispatch(request, self._profile_id)
                 result = response.get("result") if isinstance(response, dict) else None
             if not isinstance(result, dict):
                 return self._error("Empirica bridge returned no typed result.")
             if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
                 result = self._govern(result)
-            elif self._environment and name == OBSERVE_TOOL and arguments["action"]["kind"] == "environment":
-                # E8: the admitted revision waits on one human approval — the host completes
-                # it (write-first document, one present, one elicit, one decision)
-                result = self._environment(result, arguments["action"].get("payload"))
+            elif environmental:
+                # the admitted revision waits on one human approval: the host completes it
+                result = self._environment(result, admission)
             elif mediated:
                 # The end of a pass: a block that waits on the human is presented once, then re-evaluated; a batch the
                 # host could not present is evaluated again with that failure, so the response says nobody was asked.

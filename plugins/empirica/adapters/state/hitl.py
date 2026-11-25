@@ -153,13 +153,10 @@ def publish(store: "HitlDocuments", run_id: object, pair: object, *,
     ``unavailable`` result, a typed fault). The published digest equals the pair's own identity,
     answered and never assumed.
 
-    Identity before the write (re-review of E8, blocking 3): when the caller names ``expect``,
-    every named member of the document — its embedded ``run_id``, its ``kind``, the admitted
-    revision's ``proposal_digest`` — must equal the document's own. A valid document of another
-    run, revision or kind is refused as ``None`` with nothing written, so a stale or substituted
-    fetch never leaves a sidecar for a form that will not be shown. A caller that names nothing
-    (the configuration and evidence flows, whose pairs the core derives from the one request)
-    publishes exactly as before."""
+    When the caller names ``expect``, every named member of the document (for an environment,
+    its ``run_id``, ``kind`` and ``revision``) must equal the document's own, else ``None`` with
+    nothing written: a stale or substituted fetch never leaves a sidecar. A caller that names
+    nothing publishes exactly as before."""
     from application.location import decode_handle  # lazy: the caller keeps its import-chain cost
     if not isinstance(pair, Mapping):
         return None

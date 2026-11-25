@@ -552,7 +552,7 @@ class EnvironmentGoldenTests(unittest.TestCase):
 
     def test_a_previous_binding_is_never_compared_with_the_proposal_digest(self):
         """A qualification record and a proposal are different objects: sharing a digest value
-        is no reason to refuse the document (E8 re-review, non-blocking 3), so it is carried."""
+        is no reason to refuse the document, so it is carried."""
         member = environment_member()
         document = environment_document(
             member, previous_binding={"record_digest": member["digest"], "revision": 1})
@@ -587,9 +587,9 @@ class EnvironmentGoldenTests(unittest.TestCase):
 
 
 class SharedPairTests(unittest.TestCase):
-    """One pair construction and one write-first verification for every kind (E8 re-review,
-    blocking 5): the pair is the document's exact rendered bytes and their digest, and the
-    verification admits exactly that digest — and, where a recorded row exists, its own."""
+    """One pair construction and one write-first verification for every kind: the pair is the
+    document's exact rendered bytes and their digest, and the verification admits exactly that
+    digest — and, where a recorded row exists, its own."""
 
     def test_the_pair_is_the_rendered_bytes_and_their_digest(self):
         document = environment_document()

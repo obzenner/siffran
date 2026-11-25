@@ -28,8 +28,6 @@ _SHORT_BODY = 12
 #: dialog sources, and the cross-host caption pin (``tests/v2/test_evidence_hosts.py``) holds
 #: the words both sides.
 _UI_COMMAND = "/empirica:ui"
-#: The one refusal of the environment legs whose recovery is a same-revision re-present.
-_ENVIRONMENT_MISMATCH = "environment.document_mismatch"
 
 
 @dataclass(frozen=True)
@@ -160,15 +158,19 @@ def _visible(*lines: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
+def _document_lines(document: Mapping[str, Any], *, linked: bool = True) -> tuple[str, ...]:
     """The bound document's Details (PR 16, ADR-0072 Q5's amendment): a live observer's link to
     the decision's row in the UI — plus the document's own short digest — or, when no observer of
     this home answers, the honest fallback that keeps the document's exact absolute path (O5,
     as decided: the path is dropped only when a verified link is shown). Presentation only: the
     URL is built by the discovery helper beside the store, once per presentation, and the core
     never sees it. The ``File:`` line keeps its copy-paste guarantee: never shortened,
-    never ``~-``shortened, never wrapped (Q4's one exempt line, new spelling)."""
+    never ``~-``shortened, never wrapped (Q4's one exempt line, new spelling). A document the
+    observer projects no row for (``linked=False``) is named by its ``File:`` line alone, then
+    its short digest."""
     short = f"Document {document['digest'][:7 + _SHORT_BODY]}"
+    if not linked:
+        return (f"File: {document['path']}", short)
     url = document.get("url")
     if isinstance(url, str) and url:
         return (f"Details: {url}", short)
@@ -308,30 +310,26 @@ def _strip_presentation(result: dict) -> dict:
 
 
 def environment_form(document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
-    """Map the published environment document to Claude's buttons-only approval form (E8,
-    ADR-0072): the decision is take-it-or-leave-it — there is nothing to edit, so no fields ride
-    the schema — and the native form stays short: it keeps only what the human must see to
-    decide whether to open the document, while every full text (the agent's plan, the rationale,
-    the image references, the previous binding) lives in the bound document the ``File:`` line
-    names, each under its own unverified label there. The opening follows ``_visible``'s
-    discipline — Claude Code shows only its first ``CLAUDE_VISIBLE_LINES`` lines — so the
-    heading, the profile with the network-egress call-out and the goal are what the window
-    shows: the egress call-out can never fold away. Re-review of E8 (blocking 1, 2): the
-    document's path is always carried, because the observer does not project environment
-    decisions yet, so no ``Details:`` link is ever built for them (E11 adds the row and the
-    link then replaces nothing here but this line)."""
+    """Map the published environment document to Claude's buttons-only approval form (ADR-0072).
+
+    The decision is take-it-or-leave-it, so no fields ride the schema, and the form stays short:
+    the full texts (the agent's plan, the rationale, the image references, the previous binding)
+    live in the bound document. The visible lines are the heading, the profile with its
+    network-egress call-out and the document's ``File:`` reference; the observer projects no
+    environment decision yet, so no ``Details:`` link is built (E11 adds that row and its link)."""
     doc = document["parsed"]
     profile = (f"Profile: {doc['profile_id']} · NETWORK EGRESS ENABLED" if doc["networked"]
                else f"Profile: {doc['profile_id']} · no network")
+    reference, *document_tail = _document_lines(document, linked=False)
     message = "\n".join((
         *_visible(
             _line(f"Empirica · approve environment revision {doc['revision']}"
                   f" · {_duration(timeout)}"),
             _line(profile),
-            _line(f'Goal: "{doc["goal"]}"', closing='"')),
+            reference),
+        _line(f'Goal: "{doc["goal"]}"', closing='"'),
         f"Spike images: {len(doc['spike_images'])} · the agent's plan and rationale: in the document",
-        f"Document {document['digest'][:7 + _SHORT_BODY]}",
-        f"File: {document['path']}",
+        *document_tail,
         "Accept = approve this revision for qualification",
         "Decline = reject · Esc = decide later",
     ))
@@ -360,36 +358,35 @@ class HostEnvironment:
     stays pending and the run's own recovery says what to do); nothing a host cannot show is
     ever fabricated (ADR-0072 never held for less)."""
 
-    def __init__(self, profile: str, *, elicit=None, fetch=None, decide=None, documents=None):
+    def __init__(self, profile: str, *, elicit=None, admit=None, fetch=None, decide=None, documents=None):
         self.profile, self.elicit = profile, elicit
+        self.admit = admit if admit is not None else bridge.handle_admitting
         self.fetch = fetch if fetch is not None else bridge.trusted_environment_document
         self.decide = decide if decide is not None else bridge.trusted_environment_decision
         # the same write-first sidecar store (ADR-0072 PR 08): the environment document is
         # published once under the real $EMPIRICA_HOME before any form is shown
         self.documents = documents if documents is not None else HitlDocuments()
 
-    def __call__(self, result: dict, proposal: object = None) -> dict:
+    def __call__(self, result: dict, admission: Mapping[str, Any] | None = None) -> dict:
         """Mediate one admitted environment action; no failure may change a typed result.
-        ``proposal`` is the action's own payload: the revision the action admitted is the one
-        whose canonical proposal digest it names, and nothing else is ever mediated."""
+        ``admission`` is the private fact the admitting transaction recorded (the run and the
+        revision it admitted): no other revision is ever mediated."""
         try:
-            return _strip_presentation(self._mediate(result, proposal))
+            return _strip_presentation(self._mediate(result, admission))
         except Exception:
             return _strip_presentation(result)
 
-    def _mediate(self, result: dict, proposal: object) -> dict:
+    def _mediate(self, result: dict, admission: Mapping[str, Any] | None) -> dict:
         run = result.get("run") if isinstance(result, dict) else None
         if result.get("type") != "Allow" or not isinstance(run, dict):
             return result
         # a host surface without a form (the initialize capability says none) asks nobody:
         # the admitted action's own run view keeps saying the revision is pending
-        if self.elicit is None:
+        if self.elicit is None or not isinstance(admission, Mapping) or admission.get("run_id") != run["id"]:
             return result
-        # the identity the fetched document must carry before anything is written (re-review of
-        # E8, blocking 3): this run, the kind, and the admitted revision's own canonical
-        # proposal digest
-        expect = {"run_id": run["id"], "kind": core_hitl.ENVIRONMENT,
-                  "proposal_digest": core_environment.proposal_digest(proposal)}
+        # the identity every fetched document must carry before anything is written, on each
+        # attempt: this run, the kind, and the revision the action admitted
+        expect = {"run_id": run["id"], "kind": core_hitl.ENVIRONMENT, "revision": admission["revision"]}
         for _ in range(2):  # the present, and one re-presentation of the same revision
             shown, response = self._present(run["id"], expect, result)
             if shown is not None:
@@ -455,7 +452,7 @@ def _is_document_mismatch(response: object) -> bool:
     """Whether a private leg refused with the closed document-mismatch reason: the one refusal
     whose recovery is a same-revision re-present (fetch the document again, present again)."""
     return (isinstance(response, dict) and response.get("type") == "Block"
-            and any(isinstance(row, dict) and row.get("code") == _ENVIRONMENT_MISMATCH
+            and any(isinstance(row, dict) and row.get("code") == core_environment.DOCUMENT_MISMATCH
                     for row in response.get("reasons", ())))
 
 
@@ -524,8 +521,8 @@ class HostGovernance:
         if run["status"] != "active" or g["state"] == "approved":
             return result
         approval_kind = expected_approval_kind(g, g["raises"])
-        approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
-        if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
+        approval_ingress = protocol.approval_ingress(self.profile)
+        if approval_kind == "host_ui" and (approval_ingress is None or self.elicit is None):
             # Report what this host can do NOW, so the run's own facts (and its Next) say nobody can be asked,
             # whatever an earlier context said; then the view names the stop alone.
             reported = self.context_ingress(self.profile, run["id"],

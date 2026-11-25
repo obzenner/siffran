@@ -41,7 +41,7 @@ from core.governance import plain
 from application.v2 import compose
 from test_d7_transactions import Harness, Runs, Workspace
 from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, PROFILE, QUALIFY_ACTION, ServiceEnv,
-                                       approve_current)
+                                       _networked_payload, _request, approve_current)
 
 _V2 = Path(__file__).resolve().parents[3] / "contracts/empirica/v2"
 _RECEIPT_ID_MAX = json.loads((_V2 / "request.schema.json").read_text(encoding="utf-8"))[
@@ -584,11 +584,39 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(dict(env.state().environment), dict(env.member))
 
 
+class AdmissionRecordTests(unittest.TestCase):
+    """The admitting transaction records the run (its handle names the generation) and the
+    revision it admitted for its own request, privately: never in a response, and nothing for a
+    request that admitted no revision."""
+
+    def test_the_admission_names_the_run_and_revision_of_its_own_request_only(self):
+        env = DeliberationEnv()
+        request_id = _request({})["request_id"]
+        self.assertIsNone(ServiceEnv().start().service.environment_admission(request_id=request_id))
+        self.assertEqual(env.service.environment_admission(request_id=request_id),
+                         {"run_id": env.run_id, "revision": 1})
+        self.assertIsNone(env.service.environment_admission(request_id="another-request"))
+        env.submit_revision()
+        self.assertEqual(env.service.environment_admission(request_id=request_id),
+                         {"run_id": env.run_id, "revision": 2})
+        refused = _submit(env, _networked_payload())
+        self.assertEqual(refused["type"], "Block")
+        self.assertIsNone(env.service.environment_admission(request_id=request_id))
+
+    def test_the_public_response_of_an_admission_names_no_revision(self):
+        env = DeliberationEnv()
+        response = env.service.dispatch(_request({"type": "ObserveAction", "run_id": env.run_id,
+                                                  "action": copy.deepcopy(ENVIRONMENT_ACTION)}))
+        self.assertEqual(response["result"]["type"], "Allow")
+        self.assertEqual(set(response), {"protocol", "request_id", "result"})
+        self.assertNotIn("admission", json.dumps(response))
+        self.assertEqual(env.service.environment_admission(request_id=response["request_id"])["revision"], 2)
+
+
 class HostIngressTests(unittest.TestCase):
-    """E8 re-review (blocking 6): the environment's private legs stand for the human only for the
-    host whose approval ingress opened the run's human episode. Another host's profile sharing
-    the run repository — Codex (no ingress at all, withheld) or a host with a different
-    ingress — reads no document and records no receipt, whatever digest and receipt it names."""
+    """The environment's private legs stand for the human only for the host whose approval
+    ingress opened the run's human episode. A profile without an ingress, or with another one,
+    sharing the run repository reads no document and records no receipt, whatever it names."""
 
     def _other_host(self, env, profile_id):
         coordinator = env.service._coordinator
@@ -600,10 +628,11 @@ class HostIngressTests(unittest.TestCase):
         return [row["profile_id"] for row in protocol._HOST_PROFILES["profiles"]
                 if row["approval_ingress"] != own]
 
-    def test_a_host_that_is_not_the_runs_reads_no_document_and_records_no_receipt(self):
+    def test_a_host_whose_ingress_is_not_the_runs_reads_no_document_and_records_no_receipt(self):
         env = DeliberationEnv()
         hosts = self._hosts_that_are_not_the_runs()
-        self.assertGreaterEqual(len(hosts), 2, "the codex-less profile and a different ingress")
+        self.assertTrue(any(protocol.approval_ingress(profile_id) is None for profile_id in hosts))
+        self.assertTrue(any(protocol.approval_ingress(profile_id) is not None for profile_id in hosts))
         before = plain(env.state().environment)
         for profile_id in hosts:
             with self.subTest(profile=profile_id):
@@ -619,9 +648,9 @@ class HostIngressTests(unittest.TestCase):
                 self.assertEqual(plain(env.state().environment), before)
 
     def test_a_host_without_any_ingress_never_matches_a_run_that_recorded_none(self):
-        """A run no host has reported on records ``unavailable``, and the Codex profile declares
-        ``unavailable``: equality alone would admit it, so the profile's own ingress must also
-        be one that can ask a human. No profile is admitted for a run that recorded none."""
+        """A run no host has reported on records ``unavailable``, which a profile without an
+        ingress also declares: equality alone would admit it, so the profile's own ingress must
+        also be one that can ask a human. No profile is admitted for a run that recorded none."""
         state = ServiceEnv().start().state()
         self.assertEqual(state.governance["context"]["ingress"], "unavailable")
         for row in protocol._HOST_PROFILES["profiles"]:
@@ -650,6 +679,7 @@ class AdmissionDecisionTests(unittest.TestCase):
             environment.QUALIFICATION_ATTEMPTS_EXHAUSTED,
             environment.ENVIRONMENT_REVISIONS_EXHAUSTED,
             environment.ENVIRONMENT_PRESENTATIONS_EXHAUSTED,
+            environment.DOCUMENT_MISMATCH,
         )}
         for reason in emitted:
             self.assertIn(reason, registry, reason)

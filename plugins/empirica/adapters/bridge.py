@@ -322,13 +322,14 @@ def trusted_attribution(profile_id: str, run_id: str, payload: dict) -> dict:
     return build_service(profile_id).trusted_attribution(run_id=run_id, payload=normalized)
 
 
-def handle(request: object, profile_id: str) -> dict:
+def handle(request: object, profile_id: str, admission: list | None = None) -> dict:
     """Run one ``empirica/v2`` request in-process, returning the response envelope. Never
     raises: a construction/dispatch failure becomes a closed Fault. Invalid requests return
     ``invalid_request``/closed BEFORE profile composition. A missing/unknown profile on a valid
     request returns correlated ``unavailable``/closed. The handler calls the service's private
     ``_dispatch_validated`` seam (not ``dispatch``) so the request and response are validated
-    exactly once by this outer protocol gateway.
+    exactly once by this outer protocol gateway. A caller that passes a list ``admission`` receives the
+    private environment admission of this very dispatch (see ``environment_admission``) appended to it.
     """
     def handler(envelope: dict) -> dict:
         try:
@@ -340,11 +341,22 @@ def handle(request: object, profile_id: str) -> dict:
             if command["type"] == "StartRun" and host_runtime.rejection(
                     _proto.host_profile(profile_id), command["invocation"].get("host_runtime")) is not None:
                 return _fault("invalid_request", envelope["request_id"])
-            return service._dispatch_validated(envelope)
+            response = service._dispatch_validated(envelope)
+            if admission is not None:
+                admission.append(service.environment_admission(request_id=envelope["request_id"]))
+            return response
         except Exception:  # resolved storage/adapter failures are closed, never inert
             return _fault("unavailable", envelope["request_id"])
 
     return _proto.dispatch_request(request, handler)
+
+
+def handle_admitting(request: object, profile_id: str) -> tuple[dict, dict | None]:
+    """:func:`handle` and the private environment admission its transaction recorded (the run and the
+    revision it admitted), or ``None``; the admission is never part of the response."""
+    admission: list = []
+    response = handle(request, profile_id, admission)
+    return response, admission[0] if admission else None
 
 
 def main() -> int:

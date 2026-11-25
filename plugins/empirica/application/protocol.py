@@ -205,6 +205,12 @@ def host_profile(profile_id: str) -> Mapping[str, Any]:
     return copy.deepcopy(_PROFILES[profile_id])
 
 
+def approval_ingress(profile_id: str) -> str | None:
+    """The ingress through which a host profile can put a question to a human, ``None`` when it has none."""
+    ingress = _PROFILES[profile_id]["approval_ingress"]
+    return None if ingress == "unavailable" else ingress
+
+
 def governance_decisions() -> tuple[tuple[str, Mapping[str, Any]], ...]:
     """Return the canonical governance decision rows."""
     return tuple((name, MappingProxyType(row)) for name, row in _GOVERNANCE_DECISIONS)

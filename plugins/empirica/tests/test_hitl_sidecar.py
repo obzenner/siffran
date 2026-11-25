@@ -411,25 +411,19 @@ class TestPublish(_Isolated):
                 self.assertEqual(self.published_file(), [], "no approve question, no write")
 
     def test_a_document_that_misses_the_expected_identity_writes_nothing(self):
-        """E8 re-review (blocking 3): a valid, self-consistent document of another run, another
-        kind or another revision's proposal is refused BEFORE the write when the caller names
-        the identity it expects — every named member must match, any one miss refuses — and the
-        very same pair publishes once every named member matches (a caller naming nothing
-        publishes as always)."""
+        """A valid, self-consistent document of another run, kind or revision is refused BEFORE
+        the write when the caller names the identity it expects: every named member must match,
+        and the same pair publishes once all do."""
         document = {"schema": hitl.SCHEMA_ID, "kind": hitl.ENVIRONMENT, "question": hitl.APPROVE,
-                    "run_id": self.HANDLE, "proposal_digest": hitl.document_digest({"p": 1})}
-        data = hitl.render(document)
-        pair = {"text": data.decode("utf-8"), "digest": hitl.digest(data)}
-        for name, other in (("run_id", "another-run"), ("kind", hitl.CONFIGURATION),
-                            ("proposal_digest", hitl.document_digest({"p": 2}))):
+                    "run_id": self.HANDLE, "revision": 2}
+        pair = hitl.rendered_pair(document)
+        expected = {name: document[name] for name in ("run_id", "kind", "revision")}
+        for name, other in (("run_id", "another-run"), ("kind", hitl.CONFIGURATION), ("revision", 1)):
             with self.subTest(member=name):
-                expected = {"run_id": self.HANDLE, "kind": hitl.ENVIRONMENT,
-                            "proposal_digest": document["proposal_digest"], name: other}
-                self.assertIsNone(hitl_sidecar.publish(self.store, self.HANDLE, pair, expect=expected))
+                self.assertIsNone(hitl_sidecar.publish(self.store, self.HANDLE, pair,
+                                                       expect={**expected, name: other}))
                 self.assertEqual(self.published_file(), [], f"a different {name} writes nothing")
-        expected = {name: document[name] for name in ("run_id", "kind", "proposal_digest")}
-        published = hitl_sidecar.publish(self.store, self.HANDLE, pair, expect=expected)
-        self.assertIsNotNone(published)
+        self.assertIsNotNone(hitl_sidecar.publish(self.store, self.HANDLE, pair, expect=expected))
         self.assertEqual(len(self.published_file()), 1)
 
     def test_a_digest_mismatch_writes_nothing(self):

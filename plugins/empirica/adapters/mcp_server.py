@@ -18,7 +18,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.confirmation import HostConfirmation  # noqa: E402
 from adapters.governance import HostEnvironment, HostGovernance, governance_timeout  # noqa: E402
-from application.protocol import host_profile_id  # noqa: E402
+from application.protocol import approval_ingress, host_profile_id  # noqa: E402
 
 PROTOCOL_VERSION = "2025-11-25"
 
@@ -95,11 +95,8 @@ class McpSession:
         self.timeout = governance_timeout() if timeout is None else timeout
         self.active_call_id = None
         self.mediator = HostGovernance(profile)
-        # Re-review of E8 (blocking 6): the environment form is composed for the Claude Code host
-        # profile alone (Pi's dialog arrives in E12 through its own composition, not this
-        # transport); every other profile this transport serves — Codex, withheld — composes no
-        # environment mediation, whatever form support its client claims.
-        self.environment = HostEnvironment(profile) if profile == host_profile_id("claude-code") else None
+        # a profile without an approval ingress gets no environment mediation, whatever form support its client claims
+        self.environment = HostEnvironment(profile) if approval_ingress(profile) else None
         # Codex has no human ingress: its route is `unavailable`, which `HostConfirmation` never presents.
         self.confirmer = HostConfirmation(profile, timeout=lambda: self.timeout)
         self.tools = tools or PublicTools(profile, govern=self.mediator, confirm=self.confirmer,

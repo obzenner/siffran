@@ -155,6 +155,15 @@ class _Service:
             return Coordinator._fault("trusted-presentation", "unavailable")
         return response
 
+    def environment_admission(self, *, request_id) -> dict | None:
+        """The run (its handle names the generation) and revision the environment action of this
+        request id admitted, as the committing transaction recorded them; private, never part of
+        any response. ``None`` when that request admitted nothing."""
+        admitted = self._coordinator.environment_admission
+        if admitted is None or admitted[0] != request_id:
+            return None
+        return {"run_id": admitted[1], "revision": admitted[2]}
+
     def trusted_environment_document(self, *, run_id, payload=None) -> dict:
         """The write-first fetch half of the environment's private path (E8, ADR-0072): the
         pending revision's core-rendered ``empirica.hitl/1`` document pair — the bytes the host
@@ -163,8 +172,7 @@ class _Service:
         and nothing is spent): an absent, corrupt-unreadable or terminal run, or one whose
         revision is not pending on a human (an auto run derives its approvals; a decided
         revision has no form), or whose recorded human ingress is not this executing host
-        profile's own (Codex has none, and a host sharing another host's run repository
-        stands for nobody), has no document to show and reads as Inert."""
+        profile's own (``host_ingress_admitted``), has no document to show and reads as Inert."""
         terminal = self._trusted_terminal(run_id)
         if terminal:
             return terminal

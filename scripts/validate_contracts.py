@@ -1916,11 +1916,10 @@ def check_hitl_bytes(raw: bytes, doc: Any, where: str, errors: list[str]) -> Non
 
 
 def check_hitl_environment_bounds(hitl_schema: dict, request_schema: dict, errors: list[str]) -> None:
-    """The environment document's escaped free-text bounds are derived, never restated (E8
-    re-review, blocking 4): each is the request schema's proposal bound times the longest
-    expansion the core's one escaper gives one character — measured over every character it
-    can rewrite, not assumed — so every admitted proposal renders inside the document schema
-    without the proposal being tightened or truncated. Both sides are read from the schemas."""
+    """The environment document's escaped free-text bounds are derived, never restated: each is
+    the request schema's proposal bound times the longest expansion the core's one escaper gives
+    one character (measured over every character, not assumed), so every admitted proposal
+    renders inside the document schema without being tightened or truncated."""
     from core.projection import safe_text
     expansion = max(len(safe_text(chr(code))) for code in range(0x10000))
     proposal = request_schema["$defs"]["environmentProposal"]["properties"]

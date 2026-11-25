@@ -56,6 +56,8 @@ QUALIFICATION_REQUIRED = "qualification-required"
 QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
 ENVIRONMENT_REVISIONS_EXHAUSTED = "environment-revisions-exhausted"
 ENVIRONMENT_PRESENTATIONS_EXHAUSTED = "environment-presentations-exhausted"
+#: A receipt that names a document other than the one the core renders for the pending revision.
+DOCUMENT_MISMATCH = "environment.document_mismatch"
 
 #: The receipt outcomes the environment deliberation records (spec §5, as the state contract's
 #: ``environmentReceipt`` row owns them): one presentation of a pending revision, then the

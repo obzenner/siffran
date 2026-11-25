@@ -81,11 +81,11 @@ def _transaction(c, rid, run_id, body, value_error):
 
 
 def _document_gate(c, snapshot, rid, derive, given, reason, *, recorded=None, presentation=False):
-    """The one write-first digest verification of every governance receipt (ADR-0072 Q3; re-review
-    of E8, blocking 5): ``derive`` is the kind-specific derivation of the document the core
-    renders now (configuration or environment), ``given`` the digest the reply names, and
-    ``recorded`` the receipt row the reply continues, if any. A reply that does not name exactly
-    that document is the human's stale fetch: a Block with the kind's own closed ``reason``,
+    """The one write-first digest verification of every governance receipt (ADR-0072 Q3).
+
+    ``derive`` builds the document the core renders now (configuration or environment), ``given``
+    is the digest the reply names and ``recorded`` the receipt row it continues, if any. A reply
+    that names another document is a stale fetch: a Block with the kind's own ``reason``,
     spending nothing. ``None`` admits."""
     if hitl.document_bound(given, derive(), recorded=recorded):
         return None
@@ -93,15 +93,11 @@ def _document_gate(c, snapshot, rid, derive, given, reason, *, recorded=None, pr
 
 
 def host_ingress_admitted(profile_id: str, state) -> bool:
-    """Whether the executing host profile may stand for the human on this run's environment
-    (re-review of E8, blocking 6): its profile declares an approval ingress that can ask a
-    human at all, and the run's own governance recorded that very ingress when its host
-    reported — the host that opened the human episode is the host that completes it. A profile
-    with no ingress (Codex, withheld) or a different host's profile sharing the run repository
-    admits nothing: the environment receipt of a host that cannot show the form never decides
-    or presents, and the private fetch has no document for it."""
-    ingress = _proto.host_profile(profile_id)["approval_ingress"]
-    return ingress != "unavailable" and state.governance["context"]["ingress"] == ingress
+    """Whether the executing host profile may stand for the human on this run's environment: it
+    has an approval ingress, and it is the one the run's governance recorded when its host
+    reported, so the host that opened the human episode is the host that completes it."""
+    ingress = _proto.approval_ingress(profile_id)
+    return ingress is not None and state.governance["context"]["ingress"] == ingress
 
 
 def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) -> dict:
@@ -276,18 +272,13 @@ def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
             return c._block_from_snapshot(snapshot, rid, reason)
         if reason:
             return c._fault_with_run(rid, snapshot)  # fail closed: nothing decides, nothing written
-        # ADR-0072, E8 — the one write-first path completed, not a second one: the reply must
-        # name the document the core renders for this pending revision (the pair the private
-        # fetch returned, which the host wrote once before it presented), verified by the very
-        # function the configuration decisions use, checked last so every existing refusal wins
-        # first and spends nothing. A mismatch is the human's stale fetch, a Block with its own
-        # closed reason, not a fail-closed protocol fault. The recorded-presentation clause the
-        # configuration passes is already the receipt engine's entire-reply fingerprint here
-        # (a decision names its own presentation's document, or it never reaches this line).
+        # the reply must name the document the core renders for this pending revision, by the
+        # function the configuration decisions use; last, so every other refusal wins first
+        # and spends nothing
         if refused := _document_gate(
                 c, snapshot, rid,
                 lambda: hitl.environment_for(run_id=run_id, snapshot=snapshot),
-                payload["document_digest"], "environment.document_mismatch"):
+                payload["document_digest"], environment.DOCUMENT_MISMATCH):
             return refused
         fingerprint = policy.canonical_digest(policy.plain(dict(payload)))
         member = policy.plain(state.environment)
