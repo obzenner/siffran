@@ -148,7 +148,7 @@
           "type": "integer",
           "x-core-only": [
             {
-              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 8.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "rule": "A JSON integer member lands as a Python int in the core, never a zeroed-fraction representation of the schema's const (draft 2020-12 admits a zeroed-fraction float for an integer; a numeric const compares equal) — the schema cannot say which Python class a number arrives as.",
               "case": "float-for-int",
               "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
             }

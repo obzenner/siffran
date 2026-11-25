@@ -367,22 +367,23 @@ class CoreOnlyRulesTests(_Base):
                     candidate["active"]["seq"] = float(candidate["active"]["seq"])
                 else:
                     row = candidate if isinstance(candidate, dict) else candidate[0]
-                    row[terminal] = float(row[terminal])  # 8 becomes 8.0: an integer to JSON only
+                    # the integer becomes its zeroed-fraction float: an integer to JSON only
+                    row[terminal] = float(row[terminal])
                 with self.subTest(key=key, member=terminal):
                     self.assertTrue(_CONTRACT.accepts(key, candidate),
                                     "draft 2020-12 must admit the float — the schema cannot say else")
                     self.assertRefused(key, candidate, f"a zeroed-fraction {terminal}")
 
     def test_the_fixed_attempt_ceiling_derives_its_float_exception_and_its_base_reads_the_owner(self):
-        """The E6c review's seeded disagreement (blocking 1): for a valid view with nothing used,
-        nothing bound and no failure, a zeroed-fraction ``attempts_max`` (an integer to draft
-        2020-12: a numeric ``const`` compares equal) is never an integer to the
-        application's Python validator. The strict Python integer rule stays; the plan must derive
-        the ceiling's float-for-int candidate and the entry declare it, exactly the way the other
-        view integers do — and the seed never restates the ceiling: it reads the one owner
+        """The seeded disagreement: for a valid view with nothing used, nothing bound and no
+        failure, a zeroed-fraction representation of the ceiling const (an integer to draft
+        2020-12: a numeric ``const`` compares equal) is never an integer to the application's
+        Python validator. The strict Python integer rule stays; the plan must derive the ceiling's
+        float-for-int candidate and the entry declare it, exactly the way the other view integers
+        do — and the seed never restates the ceiling: it reads the one owner
         (``qualification_attempts.maxItems`` in the run/5 state, generated here as
-        ``core.environment.MAX_QUALIFICATION_ATTEMPTS``; the drift check of 2026-11-23 bumped it
-        from 8 to 32, and this test must not notice).
+        ``core.environment.MAX_QUALIFICATION_ATTEMPTS``), so a future ceiling change passes
+        through without leaving this prose a stale example.
         """
         ceiling = environment.MAX_QUALIFICATION_ATTEMPTS
         document = {"attempts_used": 0, "attempts_max": ceiling, "active": None,

@@ -50,9 +50,9 @@ REASON_HINTS = {
     "environment-rejected": "the latest environment revision was rejected; submit a revised environment proposal",
     "qualification-required": "an approved revision has nothing bound; request qualification",
     "qualification-stale-implementation": "the loaded release differs from the binding; request qualification again",
-    "qualification-stale-daemon": "the Docker endpoint, daemon identity, server major version or capability differs from the binding (a minor or patch server update keeps the binding); prepare, then request qualification again",
-    "image-not-qualified": "the spike image reference is not in the approved revision's spike images; submit an environment proposal that names it",
-    "probe-image-untrusted": "the local probe image carries no repository-digest entry with the pinned probe image digest (the pinned digest is admitted under any repository name, so a mirror or proxy pull is admitted while a locally built, loaded or retagged image is not); pull the pinned reference the refusal renders, then request qualification again",
+    "qualification-stale-daemon": "the Docker endpoint, daemon identity, server major version or capability differs from the binding (a minor or patch server update keeps the binding — the full version is a diagnostic, compared within one attempt only); prepare, then request qualification again",
+    "image-not-qualified": "the spike image reference is not one of the spike images of the revision the active qualification bound; submit an environment proposal that names it",
+    "probe-image-untrusted": "the inspection of the pinned probe image reference fails an admission check — no repository-digests entry of the inspected image carries the pinned digest under any repository name, or the image is not Linux on the daemon's native architecture, or it declares a volume (a local build, load or retag does not by itself establish that digest); pull the pinned reference the refusal renders, then request qualification again",
     "qualification-probe-failed": "a qualification probe failed (the separate probe field names it, never the reason); prepare, then request qualification again",
     "qualification-deadline-exceeded": "the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady",
     "network-egress-unavailable": "the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again",
@@ -111,7 +111,11 @@ def render_limits() -> str:
             "spike Fault reasons must use one hyphenated spelling")
     rows = [
         "Agent chooses | any already-local image reference (name:tag, repo@sha256 digest, full "
-        "image ID, or unambiguous ID prefix); exact argv, any tool, no shell unless written; "
+        "image ID, or unambiguous ID prefix) on the out-of-band path until the run-scoped "
+        "environment cycle lands — once it lands, the reference must be one of the spike images "
+        "of the revision the active qualification bound (environment/actions/spikes; the closed "
+        "reason for a stray reference is image-not-qualified); exact argv, any tool, no shell "
+        "unless written; "
         f"inputs as repository-relative files or directories; up to {spike_plan.MAX_ENVIRONMENT} "
         "environment overrides, never secrets, HOME and TMPDIR reserved",
         f"Host fixes | one container; uid/gid {spike_plan.FIXED_UID}/{spike_plan.FIXED_GID}; "
@@ -141,10 +145,12 @@ def render_limits() -> str:
         "invalid frozen scope still blocks first) and the run keeps its current spike backend",
         "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
         "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
-        "it, admission requires the pinned digest in some repository-digests entry of the "
-        "inspected image — the digest is the content identity, the repository name is not, so a "
-        "mirror or proxy pull is admitted while a locally built, loaded or retagged image (which "
-        "has no such entry) is refused as untrusted, never silently accepted",
+        "it, and admission is the observable inspection of that pinned reference: some "
+        "repository-digests entry of the inspected image must carry the pinned digest — the "
+        "digest is the content identity, the repository name is not — beside the image being "
+        "Linux on the daemon's native architecture and declaring no volume; a local build, load "
+        "or retag does not by itself establish that digest, and an image that fails the "
+        "inspection is refused as untrusted, never silently accepted",
     ]
     rows.extend(f"reason {name} | {REASON_HINTS[name]}" for name in fault_reasons)
     return "\n".join(rows)
