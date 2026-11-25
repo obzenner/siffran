@@ -218,7 +218,7 @@ class PublicTools:
     """Profile-bound public tools over the canonical Empirica bridge."""
 
     def __init__(self, profile_id: str, *, dispatch: Dispatch | None = None, govern=None,
-                 confirm=None):
+                 confirm=None, environment=None):
         if profile_id not in _PROFILES:
             raise ValueError(f"unknown exact Empirica profile: {profile_id!r}")
         if dispatch is None:
@@ -228,6 +228,7 @@ class PublicTools:
         self._dispatch = dispatch
         self._govern = govern
         self._confirm = confirm
+        self._environment = environment
         self._artifact = _load_artifact()
         self._schemas = copy.deepcopy(self._artifact["schemas"]["model"])
         # Built once per server: jsonschema.validate would re-check each schema on every call.
@@ -294,6 +295,10 @@ class PublicTools:
                 return self._error("Empirica bridge returned no typed result.")
             if self._govern and name == OBSERVE_TOOL and arguments["action"]["kind"] == "configure_run":
                 result = self._govern(result)
+            elif self._environment and name == OBSERVE_TOOL and arguments["action"]["kind"] == "environment":
+                # E8: the admitted revision waits on one human approval — the host completes
+                # it (write-first document, one present, one elicit, one decision)
+                result = self._environment(result)
             elif mediated:
                 # The end of a pass: a block that waits on the human is presented once, then re-evaluated; a batch the
                 # host could not present is evaluated again with that failure, so the response says nobody was asked.

@@ -31,7 +31,13 @@ Claude Code 2.1.304 shows only the first three lines of an elicitation message �
 folded — while rendering field descriptions in full, so every Claude form front-loads the
 heading, the bound document's `Details:` line and its copy surface, and each field's
 description repeats what is being decided in full: the quote, the decision claim's text and the
-terminal consent's residual count ([ADR-0072](adr/0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md), PR 19); Pi is unchanged.
+terminal consent's residual count ([ADR-0072](adr/0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md), PR 19); Pi is unchanged. Environment (Empirica 7.2, E8):
+a pending environment revision is the same write-first word — the private fetch leg returns the
+revision's core-rendered `empirica.hitl/1` `environment` document, the host publishes it once through
+the one sidecar helper and mediates a buttons-only approve/reject form whose labels call out the
+networked profile and the agent's unverified plan, and the form's decline records nothing while the
+revision stays pending; a digest the host cannot recompute refuses with its own closed reason.
+Pi's environment dialog is E12's and nothing is claimed for it yet.
 
 ## Empirica 7 spike authority
 

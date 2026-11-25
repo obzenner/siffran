@@ -699,6 +699,17 @@
       "sources": "ADR-67 (\"One decision per item\", \"Human receipt\"), HEATH AS3; tests `V2/test_evidence_hosts.py::MediatorTests::test_cancel_timeout_decline_and_malformed_answers_grant_nothing`, `::test_later_grants_nothing_and_an_explicit_report_asks_again_within_the_ceiling`, `::test_a_dialog_that_raises_grants_nothing`, `V2/test_evidence_scenarios.py::BatchSizeCells::test_a_decline_or_cancel_that_carries_content_grants_nothing`, `PT/evidence-ui.test.ts`."
     },
     {
+      "id": "HX-DLG-02",
+      "boundary": "HB-DLG",
+      "title": "a pending environment revision's human approval document and form, one write-first present and one decision",
+      "control_mode_dependent": false,
+      "outcomes": "Claude: `approves` (MCP accept → one approve receipt naming the presented document's digest, the revision approved) | `rejects` (decline → one reject receipt, the revision rejected) | `no-decision` (timeout/None → only the presentation row, the revision pending) | `refused-document` (impostor or stale document digest → `environment.document_mismatch` Block, nothing written). The document publishes write-first through the one sidecar helper (mode 0400) and the form keeps the goal, the profile with the networked call-out, the spike image references, the agent's unverified plan, the author's unverified rationale and the installed binding. Auto modes derive the approval at submission: the private fetch reads Inert, nothing is mediated, and the same admission refuses every receipt as before (E7's own word).",
+      "scenarios": [
+        "EHB-DLG-10"
+      ],
+      "sources": "ADR-0072 (write-first, Q1 context, Q4/Q5 lines); Empirica 7.2 run-scoped environment qualification §5 (the private document fetch) and §6 (the `environment` document kind); `plugins/empirica/adapters/governance.py` (`HostEnvironment`), `plugins/empirica/core/hitl.py` (`environment_pair`/`environment_for`/`environment_document`), `plugins/empirica/adapters/state/hitl.py` (`publish`). Pi's dialog is E12's; Codex ships no environment form while its host port is composed out."
+    },
+    {
       "id": "HX-INT-01",
       "boundary": "HB-INT",
       "title": "an interrupt ends the turn without a gate, and nothing is granted",
@@ -1936,6 +1947,28 @@
       "ledger_rows": []
     },
     {
+      "id": "EHB-DLG-10",
+      "boundary": "HB-DLG",
+      "control_modes": [
+        "any"
+      ],
+      "setup": "an approved configuration with route and investigation recorded, so a closed `environment` action admits a pending revision on the fetched document's run",
+      "action": "the Claude session mediates `empirica_observe` with a closed `environment` action: it fetches the pending revision's private document pair, publishes it write-first through the one sidecar helper, presents one receipt, elicits the approval form, and decides",
+      "expected": "the sidecar file already holds exactly the document's bytes (mode 0400) before the present receipt reaches the service, and the present and the decision name the same fetched digest — the receipt's own revision and proposal digest come from the bound document, never from adapter state; the form keeps what the human judges with each unverified source labelled: the goal, the container profile with the networked one called out on its own line through the schema's two-way `networked` pair, the spike image references with a qualification-observed ID only as a diagnostic, the agent's plan under \"the agent's plan — not verified\", the author's unverified rationale, and the installed binding this revision replaces. An accept approves the revision, a decline rejects it, an unanswered form leaves it pending with only the presentation row and no decision; an impostor or stale document digest refuses with `environment.document_mismatch` before any row is written. A host surface without a form asks nobody: the admitted action is returned with the revision pending. The document text itself validates as `empirica.hitl/1` against the schema's additive third kind and escapes every free-text value through the core's one escaper. Pi's dialog is E12's and is not claimed here; Codex ships no environment form while its host port is composed out.",
+      "covered_by": [
+        "plugins/empirica/tests/test_governance_hosts.py::EnvironmentHostTests::test_the_document_is_written_before_the_present_and_binds_the_receipt",
+        "plugins/empirica/tests/test_governance_hosts.py::EnvironmentHostTests::test_a_decline_decides_reject_and_the_next_revision_starts_pending",
+        "plugins/empirica/tests/test_governance_hosts.py::EnvironmentHostTests::test_a_dismissed_form_leaves_the_revision_pending_and_spends_no_decision",
+        "plugins/empirica/tests/test_governance_hosts.py::EnvironmentHostTests::test_the_form_calls_out_the_networked_profile_and_labels_the_unverified_parts",
+        "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_an_impostor_document_digest_refuses_the_presentation_and_spends_nothing",
+        "plugins/empirica/tests/test_hitl_document.py::EnvironmentGoldenTests::test_approve_reproduces_the_fixture",
+        "plugins/empirica/tests/test_hitl_document.py::EnvironmentGoldenTests::test_the_built_document_is_schema_valid",
+        "plugins/empirica/tests/test_hitl_document.py::EnvironmentGoldenTests::test_the_networked_profile_is_called_out_exactly",
+        "plugins/empirica/tests/test_hitl_document.py::EnvironmentGoldenTests::test_hostile_text_never_reaches_the_bytes"
+      ],
+      "ledger_rows": []
+    },
+    {
       "id": "EHB-INT-01",
       "boundary": "HB-INT",
       "control_modes": [
@@ -2962,7 +2995,7 @@
       ],
       "setup": "an active run in each admission state (no revision, one pending, one approved), in any bootstrap state",
       "action": "the model calls `empirica_observe` with a closed `qualify` action (and, in the same family, `environment`)",
-      "expected": "one Block carrying `qualify`'s own closed admission reason when the admission fails, and exactly the missing-effect reason `environment.not_available` once a revision is approved while the effect has not landed — no attempt charged, no binding changed, an unchanged run view in both cases; on a terminal run the observation is inert instead. The family's mutual exclusion and ceiling hold the same way: a configuration revision admitted while an environment revision is pending closes it superseded without approval (its rows immutable), and a submission past the per-run revision ceiling refuses with `environment-revisions-exhausted` while nothing is ever evicted; the same family bounds each revision's private presentations (128, a per-revision allowance separate from the revision ceiling): a further presentation past it refuses with `environment-presentations-exhausted`, while one the revision already recorded can still finalize and a new revision starts a fresh allowance. Covered by in-process dispatch tests only: surface pass-through on a host transport, no transport wait or retry, and the absence of any host effect (no container, no host-shell fallback) are deliberately not claimed yet — those scenarios stay pending until the effect and the transports land (E9/E12/E13).",
+      "expected": "one Block carrying `qualify`'s own closed admission reason when the admission fails, and exactly the missing-effect reason `environment.not_available` once a revision is approved while the effect has not landed — no attempt charged, no binding changed, an unchanged run view in both cases; on a terminal run the observation is inert instead. The family's mutual exclusion and ceiling hold the same way: a configuration revision admitted while an environment revision is pending closes it superseded without approval (its rows immutable), and a submission past the per-run revision ceiling refuses with `environment-revisions-exhausted` while nothing is ever evicted; the same family bounds each revision's private presentations (128, a per-revision allowance separate from the revision ceiling): a further presentation past it refuses with `environment-presentations-exhausted`, while one the revision already recorded can still finalize and a new revision starts a fresh allowance. Covered by in-process dispatch tests only: surface pass-through on a host transport, no transport wait or retry, and the absence of any host effect (no container, no host-shell fallback) are deliberately not claimed yet — those scenarios stay pending until the effect and the transports land (E9/E12/E13). Since E8 the same family completes its write-first path: a presentation may name only the digest of the document the core renders for the pending revision — the pair the private fetch returns and the host writes before it presents — so a present under any other digest refuses with `environment.document_mismatch` (nothing written, no allowance spent) exactly as a stale document from an earlier revision does, while every decision keeps being bound first by its own recorded presentation (an impostor decision digest stays the engine's fail-closed replay refusal, and approve and reject both close only under the fetched document's digest).",
       "covered_by": [
         "plugins/empirica/tests/test_environment_actions.py::EnvironmentOrderingTests::test_a_fresh_run_names_the_qualify_reason_for_no_approved_revision",
         "plugins/empirica/tests/test_environment_actions.py::QualifyAdmissionTests::test_a_pending_revision_blocks_qualify_on_the_human",
@@ -2973,7 +3006,10 @@
         "plugins/empirica/tests/test_environment_actions.py::ConfigurationExclusionTests::test_a_host_mediated_amendment_closes_and_keeps_closed_a_pending_environment_revision",
         "plugins/empirica/tests/test_environment_governance.py::AdmissionDecisionTests::test_the_revision_ceiling_refuses_a_further_submission_and_never_drops_a_row",
         "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_the_presentation_allowance_refuses_a_further_presentation_after_its_bound",
-        "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_a_recorded_presentation_still_finalizes_over_the_allowance"
+        "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_a_recorded_presentation_still_finalizes_over_the_allowance",
+        "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_an_impostor_document_digest_refuses_the_presentation_and_spends_nothing",
+        "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_a_stale_document_after_a_newer_revision_cannot_present",
+        "plugins/empirica/tests/test_environment_governance.py::ReceiptTests::test_a_reject_under_the_current_document_closes_the_revision"
       ],
       "ledger_rows": []
     }

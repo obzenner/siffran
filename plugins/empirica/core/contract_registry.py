@@ -27,6 +27,7 @@ REGISTERED_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("request", "/$defs/environmentDecisionPayload"),
     ("request", "/$defs/environmentProposal"),
     ("response", "/$defs/digest256"),
+    ("response", "/$defs/environmentPresentation"),
     ("response", "/$defs/environmentView"),
     ("response", "/$defs/qualificationProbeName"),
     ("response", "/$defs/qualificationView"),

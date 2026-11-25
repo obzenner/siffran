@@ -2426,6 +2426,22 @@
       ],
       "message": "This environment revision's presentation allowance is spent — the per-revision bound the state contract owns (128 presentations), separate from the run's 64-revision ceiling. A further presentation under this revision is refused, but one it already recorded can still be approved or rejected: submit a new environment revision for a fresh allowance."
     },
+    "environment.document_mismatch": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "environment.propose",
+        "residual.accept"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "The host's dialog named an environment document that no longer matches this run's revision; a refused present spent no presentation and a refused decision kept its spent one. Fetch the document again through the private environment leg and re-present under the revision's own text, or submit a new environment revision if the environment changed.",
+      "disposition": "host_recovery"
+    },
     "qualification-attempts-exhausted": {
       "params": {
         "type": "object",

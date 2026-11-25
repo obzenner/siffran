@@ -17,7 +17,7 @@ if str(_PLUGIN_ROOT) not in sys.path:
 
 from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.confirmation import HostConfirmation  # noqa: E402
-from adapters.governance import HostGovernance, governance_timeout  # noqa: E402
+from adapters.governance import HostEnvironment, HostGovernance, governance_timeout  # noqa: E402
 from application.protocol import host_profile_id  # noqa: E402
 
 PROTOCOL_VERSION = "2025-11-25"
@@ -95,9 +95,11 @@ class McpSession:
         self.timeout = governance_timeout() if timeout is None else timeout
         self.active_call_id = None
         self.mediator = HostGovernance(profile)
+        self.environment = HostEnvironment(profile)
         # Codex has no human ingress: its route is `unavailable`, which `HostConfirmation` never presents.
         self.confirmer = HostConfirmation(profile, timeout=lambda: self.timeout)
-        self.tools = tools or PublicTools(profile, govern=self.mediator, confirm=self.confirmer)
+        self.tools = tools or PublicTools(profile, govern=self.mediator, confirm=self.confirmer,
+                                           environment=self.environment)
         self.initialized = False
 
     def process(self, message):
@@ -122,6 +124,7 @@ class McpSession:
                 self.initialized = True
                 self.mediator.elicit = self.elicit if form_supported else None
                 self.confirmer.elicit = self.elicit if form_supported else None
+                self.environment.elicit = self.elicit if form_supported else None
             return response
         # Unsolicited replies, including late dialog responses, are never new calls.
         if isinstance(message, dict) and "method" not in message:

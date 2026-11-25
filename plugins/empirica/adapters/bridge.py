@@ -253,6 +253,16 @@ def trusted_governance_decision(profile_id: str, run_id: str, payload: dict) -> 
     return build_service(profile_id).trusted_governance_decision(run_id=run_id, payload=payload)
 
 
+def trusted_environment_document(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Fetch the pending revision's core-rendered document pair (E8, write-first); private."""
+    return build_service(profile_id).trusted_environment_document(run_id=run_id, payload=payload)
+
+
+def trusted_environment_decision(profile_id: str, run_id: str, payload: dict) -> dict:
+    """Admit one private environment receipt (E7/E8); private, never exposed by public dispatch."""
+    return build_service(profile_id).trusted_environment_decision(run_id=run_id, payload=payload)
+
+
 def trusted_evidence_confirmation(profile_id: str, run_id: str, payload: dict) -> dict:
     """One human receipt of per-item decisions; private, never exposed by public dispatch."""
     return build_service(profile_id).trusted_evidence_confirmation(run_id=run_id, payload=payload)

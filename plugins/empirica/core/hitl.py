@@ -46,9 +46,11 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from core.canonical import CanonicalJSONError, canonical_json
+from core import environment, spike_plan
 from core.evaluation import (TERMINAL_STATUSES, batch_candidates, claim_digest, derive_claims,
                              terminal_key)
-from core.governance import HUMAN_WAIT_STATES, sized as _proposal_sized
+from core.governance import (HUMAN_WAIT_STATES, expected_approval_kind, plain as _plain_in,
+                             raises, sized as _proposal_sized)
 from core.projection import project_argument, project_presentation, project_runview, safe_text
 
 #: The document's protocol identity (the schema's ``schema`` const, ``contracts/empirica/v2/hitl.schema.json``).
@@ -61,6 +63,14 @@ EVIDENCE = "evidence"
 #: The configuration form's question (ADR-0072's discriminator, the schema's ``question`` enum).
 APPROVE = "approve"
 CONFIRM_AMENDMENT = "confirm_amendment"
+#: The third decision a document exists for (Empirica 7.2 §6, the schema's additive ``kind``
+#: enum member E8 lands): one pending environment revision, shown for its human approval.
+ENVIRONMENT = "environment"
+#: The document's unverified-source labels (the schema's consts): the environment's
+#: preparation is the agent's own plan — the form renders it under "the agent's plan — not
+#: verified" — and its rationale, like the configuration's, is the author's unverified wording.
+AGENT_UNVERIFIED = "agent_unverified"
+AUTHOR_UNVERIFIED = "author_unverified"
 #: The dialog's budget-row keys, copied closed (``core.projection.governance_dialog`` builds
 #: every row for exactly these, from ``core.governance.CEILINGS``).
 _BUDGET_KEYS = ("key", "label", "short", "help", "value", "used", "minimum", "maximum")
@@ -334,6 +344,153 @@ def configuration_document(*, run_id: str, dialog: Mapping[str, Any], proposal_d
     elif priors is not None:
         raise ValueError("an approve document confirms no amendment")
     return document
+
+
+def environment_document(*, run_id: str, revision: int, proposal_digest: str, goal: str,
+                        proposal: Mapping[str, Any], invocation: Mapping[str, Any],
+                        previous_binding: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """Build the ``environment`` document shown for one pending revision's human approval (E8).
+
+    Pure function of explicit inputs (ADR-0072's discipline, completed for the environment:
+    everything the human judges moves into the document; the native form keeps the decision
+    plus its path). Sources, one owner each:
+
+    - ``run_id``: the id the environment receipt payloads name (the request schema's
+      ``environmentDecisionPayload.run_id`` — the same id the receipt's whole reply binds).
+    - ``revision``/``proposal_digest``: the member row's own facts (its revision number and the
+      canonical digest of the exact proposal body the document renders), never re-derived here.
+    - ``goal``: the run's goal, raw state, escaped here by the core's one escaper — the document
+      is the first surface this text reaches without the dialog's escape.
+    - ``proposal``: the member's closed ``empirica.environment-proposal/1`` body, validated by
+      its own owner (:func:`core.environment.validate_proposal`, fail-closed) — the profile
+      (the networked container profile called out explicitly through the derived ``networked``
+      member), the spike image references (their qualification-observed IDs when known ride as
+      a diagnostic member, ``null`` until a qualification observes one — E9's binding owns that
+      derivation), the preparation (the agent's own plan, labelled unverified by the document's
+      ``preparation_source`` member, so untrusted text can never read as a core statement) and
+      the rationale (unverified the same way, as the configuration document reads it).
+    - ``invocation``: the run-fixed invocation facts, digested as context the same way the
+      configuration document reads them (nothing volatile — ADR-0072 Q1).
+    - ``previous_binding``: what the run ends the approval against — ``None`` when nothing was
+      ever bound, else ``{record_digest, revision}`` of the installed binding (the
+      ``spike_backend`` reference and the succeeded attempt that names it), so the human sees
+      what the new revision replaces.
+    """
+    if not isinstance(run_id, str) or not run_id:
+        raise ValueError("the environment document names its run")
+    if not isinstance(proposal_digest, str) or not _DIGEST.match(proposal_digest):
+        raise ValueError("the environment document binds a sha256 proposal digest")
+    revision = _integer("revision", revision, "the environment document")
+    if revision < 1:
+        raise ValueError("the environment document names a revision from one")
+    # the state's persisted member carries its arrays as tuples; the proposal's own owner
+    # validates the plain form exactly as the state member validator hands it over
+    proposal = environment.validate_proposal(_plain_in(dict(proposal)))
+    goal = _escaped("goal", goal, "the environment document")
+    rows = []
+    for reference in proposal["spike_images"]:
+        # the diagnostic ID a qualification observed for this reference: unknown until a
+        # qualification binds (E9 owns the record the derivation reads), never invented here
+        rows.append({"reference": reference, "image_id": None})
+    steps = [_escaped("preparation step", step, "the environment document")
+             for step in proposal["preparation"]]
+    if previous_binding is not None:
+        if not isinstance(previous_binding, Mapping):
+            raise ValueError("the environment document's previous binding is a mapping or null")
+        try:
+            record_digest = previous_binding["record_digest"]
+            bound_revision = previous_binding["revision"]
+        except KeyError as missing:
+            raise ValueError(f"the previous binding lacks {missing!r}") from missing
+        if not isinstance(record_digest, str) or not _DIGEST.match(record_digest):
+            raise ValueError("the previous binding names a sha256 record digest")
+        bound_revision = _integer("revision", bound_revision, "the previous binding")
+        if bound_revision < 1:
+            raise ValueError("the previous binding names a revision from one")
+        previous_binding = {"record_digest": record_digest, "revision": bound_revision}
+        if previous_binding["record_digest"] == proposal_digest:
+            raise ValueError("the previous binding names the very proposal being approved")
+    if not isinstance(invocation, Mapping) or any(key not in invocation for key in _INVOCATION_KEYS):
+        raise ValueError("the environment document's run-fixed invocation facts are missing")
+    return {
+        "schema": SCHEMA_ID,
+        "kind": ENVIRONMENT,
+        "run_id": run_id,
+        "question": APPROVE,
+        "revision": revision,
+        "proposal_digest": proposal_digest,
+        "goal": goal,
+        "profile_id": proposal["profile_id"],
+        "networked": proposal["profile_id"] == spike_plan.NETWORKED_PROFILE,
+        "spike_images": rows,
+        "preparation": steps,
+        "preparation_source": AGENT_UNVERIFIED,
+        "rationale": _escaped("rationale", proposal["rationale"], "the environment document"),
+        "rationale_source": AUTHOR_UNVERIFIED,
+        "previous_active_binding": previous_binding,
+        "context_when_shown": {"invocation": {key: invocation[key] for key in _INVOCATION_KEYS}},
+    }
+
+
+def _previous_binding(state: Any) -> dict[str, Any] | None:
+    """The installed binding the document names as the previous active one: ``spike_backend``'s
+    qualified reference and the succeeded attempt that records it — ``None`` while no binding
+    exists. A qualified backend no succeeded attempt names refuses (a document never invents a
+    binding fact); the binding's own sensors land with the qualification node (E9)."""
+    backend = state.spike_backend
+    if not isinstance(backend, Mapping) or backend.get("kind") != "qualified":
+        return None
+    record_digest = backend.get("qualification_record_digest")
+    for attempt in reversed(list(state.qualification_attempts)):
+        if (attempt.get("outcome") == "succeeded"
+                and attempt.get("record_digest") == record_digest):
+            return {"record_digest": record_digest, "revision": attempt["revision"]}
+    raise ValueError("the installed binding's record names no succeeded qualification attempt")
+
+
+def environment_for(*, run_id: str, snapshot: Any) -> dict[str, Any]:
+    """Derive every input of :func:`environment_document` from one run snapshot (E8 —
+    the environment counterpart of :func:`configuration_for`).
+
+    The one derivation the private fetch and the document digest check share: the pending
+    member's own revision, digest and proposal body, the run's raw goal and its fixed
+    invocation facts, and the installed binding above. Nothing volatile is read — the member's
+    receipts never enter the document — so the same document results whether or not the
+    receipt being presented is already in state, and the recompute at the decision admits every
+    honest present. A snapshot without a pending member revision refuses as :class:`ValueError`.
+    """
+    state = snapshot.state
+    member = getattr(state, "environment", None)
+    if not isinstance(member, Mapping):
+        raise ValueError("the environment derivation needs the pending revision's member")
+    bounds = _previous_binding(state)
+    return environment_document(
+        run_id=run_id, revision=member["revision"], proposal_digest=member["digest"],
+        goal=state.goal, proposal=member["proposal"], invocation=state.invocation,
+        previous_binding=bounds)
+
+
+def environment_pair(*, run_id: str, snapshot: Any) -> dict[str, str] | None:
+    """The core-rendered ``document: {text, digest}`` pair (ADR-0072 step 1, E8) for the pending
+    environment revision one snapshot shows — the pair the private fetch leg returns, the host
+    writes once beside the run, and the receipt the present commits binds. ``None`` exactly
+    where no human document exists for this state: the member is not pending, or the run
+    derives its approvals (``governance.expected_approval_kind`` says ``auto``), so no form is
+    ever shown; a member that should have one and fails to build refuses as :class:`ValueError`,
+    never as ``None``.
+    """
+    state = snapshot.state
+    member = getattr(state, "environment", None)
+    try:
+        governed = state.governance
+    except AttributeError as missing:
+        raise ValueError(f"the snapshot lacks its governance: {missing!r}") from missing
+    if (not isinstance(member, Mapping) or member.get("state") != environment.PENDING
+            or expected_approval_kind(governed, raises(governed, state.budgets)) != "host_ui"):
+        return None
+    document = environment_for(run_id=run_id, snapshot=snapshot)
+    data = render(document)
+    return {"text": data.decode("utf-8"), "digest": digest(data)}
 
 
 def evidence_document(*, run_id: str, batch: Mapping[str, Any],

@@ -1984,6 +1984,27 @@ def run_hitl_negatives(hitl_schema: dict, hitl_docs: dict[str, dict], errors: li
         ascii_escaped = (json.dumps(config, sort_keys=True, indent=2) + "\n").encode("utf-8")
         expect(lambda local: check_hitl_bytes(ascii_escaped, config, "neg", local),
                "pretty form", "byte form pins literal UTF-8 (no ASCII escaping)")
+    environment_doc = hitl_docs.get("valid-environment-approve")
+    if environment_doc:
+        # the environment kind's own required facts (spec §6, E8): the networked call-out member and the
+        # unverified plan label arrive only with the document that shows them
+        for missing in ("networked", "preparation_source", "rationale_source", "previous_active_binding"):
+            bad = copy.deepcopy(environment_doc)
+            bad.pop(missing, None)
+            expect(schema_errors(bad, "neg"), f"'{missing}' is a required property",
+                   f"the environment document's required {missing} bites")
+        # the two-way profile/networked pair: an isolated profile cannot call egress out
+        for profile, wait, label, bite in (("docker-isolated-v1", False, "isolated", "False"),
+                                            ("docker-networked-v1", True, "networked", "True")):
+            bad = copy.deepcopy(environment_doc)
+            bad["profile_id"] = profile
+            bad["networked"] = not wait
+            expect(schema_errors(bad, "neg"), f"{bite} was expected",
+                   f"the {label} profile must call itself out exactly ({wait})")
+        # cross-kind content: a configuration's budgets never ride the environment document
+        bad = copy.deepcopy(environment_doc)
+        bad["budgets"] = []
+        expect(schema_errors(bad, "neg"), "Additional properties", "cross-kind content bites")
     if evidence:
         bad = copy.deepcopy(evidence)
         bad["budgets"] = []
@@ -3001,6 +3022,7 @@ def main() -> int:
     REQUIRED_HITL_FIXTURES = {
         "valid-configuration-approve", "valid-configuration-confirm-edited",
         "valid-configuration-confirm-pre-approval", "valid-configuration-rejected",
+        "valid-environment-approve",
         "valid-evidence-batch", "valid-evidence-terminal",
         "invalid-wrong-schema", "invalid-unknown-kind", "invalid-unknown-field",
         "invalid-unknown-nested-field", "invalid-missing-required",
@@ -3017,10 +3039,11 @@ def main() -> int:
         "valid-configuration-confirm-edited": None,
         "valid-configuration-confirm-pre-approval": None,
         "valid-configuration-rejected": None,
+        "valid-environment-approve": None,
         "valid-evidence-batch": None,
         "valid-evidence-terminal": None,
         "invalid-wrong-schema": "'empirica.hitl/1' was expected",
-        "invalid-unknown-kind": "is not one of ['configuration', 'evidence']",
+        "invalid-unknown-kind": "is not one of ['configuration', 'evidence', 'environment']",
         "invalid-unknown-field": "Additional properties",
         "invalid-unknown-nested-field": "Additional properties",
         "invalid-missing-required": "'goal' is a required property",

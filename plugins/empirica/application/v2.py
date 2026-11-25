@@ -4,13 +4,14 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from core import governance
+from core import governance, hitl
 from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
 from .ports import NullSpikeAuthoritySelector
 from .governance import transact_environment
 from .run_state import classify_and_decode
+from .snapshot import HistoryCorrupt
 from .transaction import Coordinator
 
 # Canonical names of the adapter-private governance ingress operations, defined once here
@@ -154,6 +155,40 @@ class _Service:
             return Coordinator._fault("trusted-presentation", "unavailable")
         return response
 
+    def trusted_environment_document(self, *, run_id, payload=None) -> dict:
+        """The write-first fetch half of the environment's private path (E8, ADR-0072): the
+        pending revision's core-rendered ``empirica.hitl/1`` document pair — the bytes the host
+        writes once beside the run before it presents, whose digest the presenting receipt
+        names. A plain read (the derivation is a pure function of run state, so nothing races
+        and nothing is spent): an absent, corrupt-unreadable or terminal run, or one whose
+        revision is not pending on a human (an auto run derives its approvals; a decided
+        revision has no form), has no document to show and reads as Inert."""
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        key = decode_handle(run_id)
+        read = self._runs.read(key)
+        if not hasattr(read, "value"):
+            return Coordinator._inert("trusted-environment")
+        classification = classify_and_decode(read.value)
+        if classification.kind != "valid":
+            return Coordinator._fault("trusted-environment", "corrupt_run")
+        state = classification.state
+        if state.status != "active":
+            return Coordinator._inert("trusted-environment")
+        c = self._coordinator
+        try:
+            snapshot = c._assemble(key, state, {"type": "GetRun", "run_id": run_id},
+                                  require_graph=False)
+        except HistoryCorrupt:
+            return Coordinator._fault("trusted-environment", "corrupt_run")
+        pair = hitl.environment_pair(run_id=run_id, snapshot=snapshot)
+        if pair is None:
+            return Coordinator._inert("trusted-environment")
+        response = c._allow("trusted-environment", snapshot)
+        response["result"]["presentation"] = {"document": pair}
+        return response
+
     def trusted_environment_decision(self, *, run_id, payload) -> dict:
         """Admit one private environment receipt for the run's pending revision (Empirica 7.2 §5):
         the write-first presentation of a pending deliberative revision, or the approve/reject
@@ -167,7 +202,7 @@ class _Service:
         if not self._valid_trusted("environmentDecisionPayload", payload):
             return Coordinator._fault("trusted-environment", "invalid_request")
         response = transact_environment(self._coordinator, run_id, payload)
-        if not _proto.validate_public_result(response["result"]):
+        if not _proto.validate_private_environment_response(response):
             return Coordinator._fault("trusted-environment", "unavailable")
         return response
 

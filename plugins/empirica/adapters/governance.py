@@ -305,6 +305,136 @@ def _strip_presentation(result: dict) -> dict:
     return result
 
 
+def environment_form(document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+    """Map the published environment document to Claude's buttons-only approval form (E8,
+    ADR-0072): the decision is take-it-or-leave-it — there is nothing to edit, so no fields ride
+    the schema and the form keeps exactly what the human judges. The opening follows
+    ``_visible``'s discipline: the heading with its countdown, the document's ``Details:`` line,
+    the goal — then the revision's own facts stay below, whole, under plain-worded labels that
+    say what is unverified: the profile with the networked container profile called out on its
+    own line, the spike image references, the preparation under "the agent's plan — not
+    verified", the rationale under the core's unverified label, and the installed binding this
+    revision would replace."""
+    doc = document["parsed"]
+    details, *document_tail = _document_lines(document)
+    shown = []
+    for row in doc["spike_images"]:
+        reference = row["reference"]
+        shown.append(f"  · {reference}" if row.get("image_id") is None
+                     else f"  · {reference} (observed {row['image_id']})")
+    binding = doc["previous_active_binding"]
+    previous = ("Previous active binding: none"
+                if binding is None
+                else f"Previous active binding: record {binding['record_digest'][:7 + _SHORT_BODY]}"
+                     f" · environment revision {binding['revision']}")
+    message = "\n".join((
+        *_visible(
+            _line(f"Empirica · approve environment revision {doc['revision']}"
+                  f" · {_duration(timeout)}"),
+            details,
+            _line(f'Goal: "{doc["goal"]}"', closing='"')),
+        _line(f"Profile: {doc['profile_id']} · "
+              + ("network egress enabled" if doc["networked"] else "no network")),
+        "Spike images:", *shown,
+        "The agent's plan (unverified — the document labels it — \"the agent's plan — not verified\"):",
+        *(f"  {index}. {step}" for index, step in enumerate(doc["preparation"], start=1)),
+        "Rationale (author's own, unverified):",
+        *textwrap.wrap(doc["rationale"], width=72, break_long_words=True, break_on_hyphens=False),
+        previous,
+        *document_tail,
+        "Accept = approve this revision for qualification",
+        "Decline = reject · Esc = decide later",
+    ))
+    return message, {"type": "object", "properties": {}, "required": []}
+
+
+def environment_decision(answer: object) -> bool | None:
+    """Validate one MCP answer to the environment form: ``True`` approves the revision as shown,
+    ``False`` deliberately rejects it, ``None`` is a non-decision (dismiss) that changes nothing
+    — the revision stays pending, decided by nobody."""
+    if not isinstance(answer, dict):
+        return None
+    action = answer.get("action")
+    if action == "accept":
+        return True
+    if action == "decline":
+        return False
+    return None
+
+
+class HostEnvironment:
+    """The Claude mediation for one pending environment revision (E8, spec §5/§6): the public
+    action admitted the revision, then the host completes the human approval the core waits on —
+    write-first through the same bound sidecar helper, one present receipt, one elicit form, one
+    decision receipt. Every refusal of the private legs is returned unchanged (the revision
+    stays pending and the run's own recovery says what to do); nothing a host cannot show is
+    ever fabricated (ADR-0072 never held for less)."""
+
+    def __init__(self, profile: str, *, elicit=None, fetch=None, decide=None, documents=None):
+        self.profile, self.elicit = profile, elicit
+        self.fetch = fetch if fetch is not None else bridge.trusted_environment_document
+        self.decide = decide if decide is not None else bridge.trusted_environment_decision
+        # the same write-first sidecar store (ADR-0072 PR 08): the environment document is
+        # published once under the real $EMPIRICA_HOME before any form is shown
+        self.documents = documents if documents is not None else HitlDocuments()
+
+    def __call__(self, result: dict) -> dict:
+        """Mediate one admitted environment action; no failure may change a typed result."""
+        try:
+            return _strip_presentation(self._mediate(result))
+        except Exception:
+            return _strip_presentation(result)
+
+    def _mediate(self, result: dict) -> dict:
+        run = result.get("run") if isinstance(result, dict) else None
+        if result.get("type") != "Allow" or not isinstance(run, dict):
+            return result
+        # a host surface without a form (the initialize capability says none) asks nobody:
+        # the admitted action's own run view keeps saying the revision is pending
+        if self.elicit is None:
+            return result
+        fetched = (self.fetch(self.profile, run["id"], {}) or {}).get("result")
+        if (not isinstance(fetched, dict) or fetched.get("type") != "Allow"
+                or not isinstance(fetched.get("presentation"), Mapping)
+                or not isinstance(fetched.get("run"), dict)):
+            return fetched if isinstance(fetched, dict) else result
+        # write-first: publish the fetched pair once, through the one bound helper; a document
+        # this state cannot bind (or a storage refusal) is never a fabricated form
+        try:
+            published = publish(self.documents, run["id"], fetched["presentation"].get("document"))
+        except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
+            return result
+        if published is None or published.parsed.get("kind") != core_hitl.ENVIRONMENT:
+            return result
+        from adapters.observer.discovery import document_details  # lazy, the configuration path's own
+        document = {"digest": published.digest, "path": str(published.path), "parsed": published.parsed,
+                    **document_details(getattr(self.documents, "home", None), run["id"],
+                                       {"digest": published.digest, "path": str(published.path)})}
+        receipt_id = uuid4().hex
+        # the full receipt shape the member validates (E7): its revision and proposal digest come
+        # from the bound document itself — the very bytes just written whose digest the receipt
+        # names — so the mediation never carries state facts from anywhere but the write it owns
+        envelope = {"run_id": fetched["run"]["id"], "receipt_id": receipt_id,
+                    "revision": published.parsed["revision"],
+                    "proposal_digest": published.parsed["proposal_digest"],
+                    "outcome": "present", "document_digest": published.digest}
+        presented = (self.decide(self.profile, fetched["run"]["id"], envelope) or {}).get("result")
+        if not isinstance(presented, dict) or presented.get("type") != "Allow":
+            return presented if isinstance(presented, dict) else result
+        message, schema = environment_form(document, governance_timeout())
+        outcome = environment_decision(self.elicit(message, schema))
+        if outcome is None:
+            return presented  # nobody decided: the revision stays pending, its allowance
+            # untouched (a dismissed form spends no presentation row)
+        decision_envelope = {"run_id": fetched["run"]["id"], "receipt_id": receipt_id,
+                             "revision": published.parsed["revision"],
+                             "proposal_digest": published.parsed["proposal_digest"],
+                             "outcome": "approve" if outcome else "reject",
+                             "document_digest": published.digest}
+        decided = (self.decide(self.profile, fetched["run"]["id"], decision_envelope) or {}).get("result")
+        return decided if isinstance(decided, dict) else presented
+
+
 class HostGovernance:
     def __init__(self, profile: str, *, elicit=None, context_ingress=bridge.trusted_governance_context,
                  decision_ingress=bridge.trusted_governance_decision, documents=None):

@@ -1,0 +1,37 @@
+{
+  "context_when_shown": {
+    "invocation": {
+      "audit_retrieval": [
+        "local",
+        "workspace"
+      ],
+      "delegation": false,
+      "host": "test",
+      "interactive": true,
+      "signal": "operator"
+    }
+  },
+  "goal": "Qualify the run's environment from supplied context.",
+  "kind": "environment",
+  "networked": false,
+  "preparation": [
+    "Ask the operator to provide the needed images locally; the host never pulls.",
+    "The verifier runs one bounded container per spike under the isolated profile."
+  ],
+  "preparation_source": "agent_unverified",
+  "previous_active_binding": null,
+  "profile_id": "docker-isolated-v1",
+  "proposal_digest": "sha256:57ae50dddaa952620046fcf14d68fe6fdcd488d563504af9b7817f4018accb28",
+  "question": "approve",
+  "rationale": "One isolated profile over one local image; spikes stay bounded and offline.",
+  "rationale_source": "author_unverified",
+  "revision": 1,
+  "run_id": "run-fx-env",
+  "schema": "empirica.hitl/1",
+  "spike_images": [
+    {
+      "image_id": null,
+      "reference": "docker.io/library/alpine:3.22"
+    }
+  ]
+}

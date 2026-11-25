@@ -180,11 +180,13 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     # ``governance.approval_unavailable`` before any present, nothing spent, nothing written.
     # An evidence document carries no ``question`` and keeps publishing unchanged.
     kind = parsed.get("kind")
-    if kind not in (core_hitl.CONFIGURATION, core_hitl.EVIDENCE):
+    if kind not in (core_hitl.CONFIGURATION, core_hitl.EVIDENCE, core_hitl.ENVIRONMENT):
         return None
     if (kind == core_hitl.CONFIGURATION
             and parsed.get("question") not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT)):
         return None
+    if kind == core_hitl.ENVIRONMENT and parsed.get("question") != core_hitl.APPROVE:
+        return None  # the environment form's one question (E8): approve this revision
     path, written = store.write(key, data)
     if written != digest or path.name != f"{name}.json":  # defensive: the write answers its name
         return None

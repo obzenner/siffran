@@ -561,6 +561,219 @@
         "residuals"
       ],
       "type": "object"
+    },
+    "environmentDocument": {
+      "additionalProperties": false,
+      "type": "object",
+      "description": "What the environment approval form asks (Empirica 7.2 §6, E8, ADR-0072): one pending environment revision — the run's goal, the container profile with the networked one called out through its derived `networked` member, the spike image references (a qualification's observed ID rides as a diagnostic `image_id`, `null` until one observes it), the agent's preparation under the unverified plan label, the unverified rationale, the installed binding this revision would replace, and the run-fixed invocation facts as context — never anything volatile, so the recompute at the decision admits every honest present.",
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "profile_id": {
+                "const": "docker-networked-v1"
+              }
+            },
+            "required": [
+              "profile_id"
+            ]
+          },
+          "then": {
+            "description": "The networked profile is called out: `networked` is exactly true.",
+            "properties": {
+              "networked": {
+                "const": true
+              }
+            },
+            "required": [
+              "networked"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "profile_id": {
+                "const": "docker-isolated-v1"
+              }
+            },
+            "required": [
+              "profile_id"
+            ]
+          },
+          "then": {
+            "description": "The isolated profile is called out: `networked` is exactly false.",
+            "properties": {
+              "networked": {
+                "const": false
+              }
+            },
+            "required": [
+              "networked"
+            ]
+          }
+        }
+      ],
+      "properties": {
+        "context_when_shown": {
+          "$ref": "#/$defs/contextWhenShown"
+        },
+        "goal": {
+          "description": "The run's goal in full, display-escaped by the core's one escaper here (the environment form's first line; the document is the first surface this text reaches).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "kind": {
+          "const": "environment"
+        },
+        "networked": {
+          "description": "The networked container profile called out explicitly (spec §6): true exactly when `profile_id` is the networked profile — the two-way pair the schema pins below — so a human approving network egress never reads an isolated form.",
+          "type": "boolean"
+        },
+        "preparation": {
+          "description": "The agent's own plan, each step display-escaped (the environment proposal's preparation): the document labels the whole list unverified through `preparation_source`, the label the form renders as \"the agent's plan — not verified\".",
+          "items": {
+            "description": "One preparation step exactly as the proposal body carries it (the empirica/v2 request schema's environmentProposal.preparation item).",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+              }
+            ],
+            "maxLength": 200,
+            "minLength": 1,
+            "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
+            "type": "string"
+          },
+          "maxItems": 8,
+          "minItems": 1,
+          "type": "array"
+        },
+        "preparation_source": {
+          "const": "agent_unverified",
+          "description": "The preparation is the agent's own plan, unverified wording the form renders under \"the agent's plan — not verified\": the document says so, so untrusted text cannot read as a core statement (the environment counterpart of the configuration's `rationale_source`)."
+        },
+        "previous_active_binding": {
+          "anyOf": [
+            {
+              "additionalProperties": false,
+              "properties": {
+                "record_digest": {
+                  "description": "The installed binding's qualification record digest (spike_backend.qualification_record_digest, the succeeded attempt's record), never a proposal digest.",
+                  "pattern": "^sha256:[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "revision": {
+                  "description": "The approved environment revision the installed binding qualifies (the succeeded attempt's own revision member).",
+                  "minimum": 1,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "record_digest",
+                "revision"
+              ],
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What the run ends the approval against: the installed binding {record_digest, revision} the succeeded qualification attempt names, or `null` when nothing was ever bound — never invented (the binding's derivation lands as E9 wires the records)."
+        },
+        "profile_id": {
+          "description": "The revision's container profile (the proposal body's own profile member: the host's StartRun.spike_profile ceiling admits it).",
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
+        "proposal_digest": {
+          "description": "The member's digest — the canonical digest of the exact proposal body the document renders, the revision the decision binds again.",
+          "pattern": "^sha256:[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "question": {
+          "const": "approve",
+          "description": "The environment form's one question: approve this revision for qualification. A reject is the decline of the same form; the member's receipts — never this document — witness the decision."
+        },
+        "rationale": {
+          "description": "The proposal's sizing rationale, display-escaped (the schema's top note) — unverified author wording, labelled so by `rationale_source` exactly as the configuration document reads its own.",
+          "maxLength": 600,
+          "minLength": 1,
+          "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
+          "type": "string"
+        },
+        "rationale_source": {
+          "const": "author_unverified",
+          "description": "The rationale is the author's own sizing case, unverified wording (the same const the configuration document carries): the document says so, so untrusted text cannot read as a core statement."
+        },
+        "revision": {
+          "description": "The environment revision the form approves (the member's own revision member; a new revision supersedes one still pending), never the receipt's whole reply — that binds through the member's receipts.",
+          "minimum": 1,
+          "type": "integer"
+        },
+        "run_id": {
+          "description": "The run the environment receipts name (the environmentDecisionPayload.run_id).",
+          "minLength": 1,
+          "type": "string"
+        },
+        "schema": {
+          "const": "empirica.hitl/1"
+        },
+        "spike_images": {
+          "description": "The revision's spike image references in the proposal's own order (the environmentProposal.spike_images), each with the qualification-observed ID when known — a diagnostic fact, never authority to run anything.",
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "image_id": {
+                "anyOf": [
+                  {
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "The image ID a qualification observed for this reference, `null` until one observes it (E9 owns the record this derivation reads)."
+              },
+              "reference": {
+                "description": "One closed spike image reference (the empirica/v2 request schema's environmentProposal.spike_images item).",
+                "maxLength": 255,
+                "minLength": 1,
+                "pattern": "^(?:(?:sha256:)?[0-9a-f]{12,64}|(?:[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*|(?:(?:(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?|[a-z0-9]+(?:(?:_|__|-+)[a-z0-9]+)*)(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+))(?:@sha256:[0-9a-f]{64}|(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?))(?![\\s\\S])",
+                "type": "string"
+              }
+            },
+            "required": [
+              "reference",
+              "image_id"
+            ],
+            "type": "object"
+          },
+          "maxItems": 16,
+          "minItems": 1,
+          "type": "array"
+        }
+      },
+      "required": [
+        "schema",
+        "kind",
+        "run_id",
+        "question",
+        "revision",
+        "proposal_digest",
+        "goal",
+        "profile_id",
+        "networked",
+        "spike_images",
+        "preparation",
+        "preparation_source",
+        "rationale",
+        "rationale_source",
+        "previous_active_binding",
+        "context_when_shown"
+      ]
     }
   },
   "$id": "https://siffran.dev/contracts/empirica/v2/hitl.schema.json",
@@ -595,6 +808,21 @@
       "then": {
         "$ref": "#/$defs/evidenceDocument"
       }
+    },
+    {
+      "if": {
+        "properties": {
+          "kind": {
+            "const": "environment"
+          }
+        },
+        "required": [
+          "kind"
+        ]
+      },
+      "then": {
+        "$ref": "#/$defs/environmentDocument"
+      }
     }
   ],
   "description": "Source-tree schema (not vendored into the plugin; ADR-0072) of the core-owned immutable JSON document a human decides on: what the native forms moved out and the record binds by its digest. The bytes are pinned by the contract validator: json.dumps(doc, sort_keys=True, indent=2, ensure_ascii=False) plus one trailing newline, UTF-8; the document_digest is the SHA-256 of exactly those bytes. Field names and types are derived from the builders that render this content today, cited per field. Every free-text value is display-escaped by the core's one escaper (safe_text, core/projection.py:287-293) — a backslash doubled, bidi and zero-width characters turned into \\uXXXX — so a text-direction override can never reach the file a human opens; the raw wording stays bound by its digests, which are computed before the document is built. The document is a pure function of run state: no wall-clock times and nothing the adapter chooses (a receipt id the host generates is never here), and no value the human's own answer or the host's surface observation can change — nothing volatile is digested, or the core's recompute at the decision would refuse every decision.",
@@ -602,7 +830,8 @@
     "kind": {
       "enum": [
         "configuration",
-        "evidence"
+        "evidence",
+        "environment"
       ]
     },
     "schema": {

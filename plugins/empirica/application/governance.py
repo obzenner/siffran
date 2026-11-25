@@ -252,6 +252,16 @@ def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
             return c._block_from_snapshot(snapshot, rid, reason)
         if reason:
             return c._fault_with_run(rid, snapshot)  # fail closed: nothing decides, nothing written
+        # ADR-0072, E8 — the one write-first path completed, not a second one: the reply must
+        # name the document the core renders for this pending revision (the pair the private
+        # fetch returned, which the host wrote once before it presented). The recompute is the
+        # exact gate the configuration decisions share, checked last so every existing refusal
+        # wins first and spends nothing; a mismatch is the human's stale fetch, a Block with
+        # its own closed reason, not a fail-closed protocol fault. A defence-in-depth twin of
+        # the binding the entire-reply fingerprint already holds in the receipt engine.
+        expected = hitl.document_digest(hitl.environment_for(run_id=run_id, snapshot=snapshot))
+        if payload["document_digest"] != expected:
+            return c._block_from_snapshot(snapshot, rid, "environment.document_mismatch")
         fingerprint = policy.canonical_digest(policy.plain(dict(payload)))
         member = policy.plain(state.environment)
         if payload["outcome"] == "present":

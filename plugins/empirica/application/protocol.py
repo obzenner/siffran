@@ -278,6 +278,22 @@ def validate_public_result(result: object) -> bool:
     return True
 
 
+def validate_private_environment_response(response: object) -> bool:
+    """Validate one application-private environment response against the private-response
+    definition (E8: the fetch leg's Allow may carry the environment document presentation;
+    every presentation or decision receipt alternative must carry none).
+
+    The public response schema forbids a ``presentation`` key, so private environment
+    responses are validated here, never on the public wire. A mismatch lets the caller fail
+    closed with the same Fault shape ``dispatch_request`` produces.
+    """
+    try:
+        schema_validator("response", "privateEnvironmentResponse").validate(response)
+    except (jsonschema.ValidationError, TypeError):
+        return False
+    return True
+
+
 def policy_inputs(profile_id: str) -> dict[str, str]:
     """Return the canonical policy identity persisted with each observation basis."""
     inputs = {

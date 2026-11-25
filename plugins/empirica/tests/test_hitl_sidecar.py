@@ -395,6 +395,21 @@ class TestPublish(_Isolated):
                     {"text": data.decode("utf-8"), "digest": hitl.digest(data)}))
                 self.assertEqual(self.published_file(), [], "no question, no write")
 
+    def test_an_environment_document_carries_only_its_own_question(self):
+        """E8's X3 twin: the environment kind's one question is the approve of a revision — a
+        document claiming that kind with the configuration's amendment question (or none) is
+        digest-consistent JSON that no environment flow may ever show, so the shared helper
+        refuses it before the write, exactly as the configuration's own question check does."""
+        for document in ({"schema": hitl.SCHEMA_ID, "kind": hitl.ENVIRONMENT},
+                         {"schema": hitl.SCHEMA_ID, "kind": hitl.ENVIRONMENT,
+                          "question": hitl.CONFIRM_AMENDMENT}):
+            with self.subTest(question=document.get("question", "<missing>")):
+                data = hitl.render(document)
+                self.assertIsNone(hitl_sidecar.publish(
+                    self.store, self.HANDLE,
+                    {"text": data.decode("utf-8"), "digest": hitl.digest(data)}))
+                self.assertEqual(self.published_file(), [], "no approve question, no write")
+
     def test_a_digest_mismatch_writes_nothing(self):
         # Well-formed identity, wrong bytes: the text is real JSON, the digest names another
         # content — the one check a tampering or confused core answer cannot pass.

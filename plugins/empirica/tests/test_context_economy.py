@@ -1483,6 +1483,27 @@ class PrivateResponseSchemaTests(_ServiceHarness):
             self.assertFalse(_proto.validate_private_governance_response(without),
                              f"run-bearing {name} without presentation must be rejected")
 
+    def test_the_private_environment_response_guard_fails_closed_on_garbage(self):
+        """E8's guard is the environment twin of ``validate_private_governance_response``: a
+        schema-invalid answer — or one carrying a presentation where none may ride — reads
+        ``False``, so the trusted leg fails closed with its own fault and nothing reaches a
+        public wire. The variants name the shapes the transaction never emits; the fail-closed
+        word is the guard's own, never a restatement of the schema."""
+        # the positive case — a fetched presentation validating privately — is the E8
+        # flow's own fact (test_environment_governance's DeliberationEnv fetches through the
+        # service and the trusted leg's own switch accepts it); here everything malformed
+        # that must never pass rides the same shapes the fetch returns
+        presentation = {"document": {"text": "{}", "digest": "sha256:" + "a" * 64}}
+        env = {"protocol": "empirica/v2", "request_id": "t",
+               "result": {"type": "Allow", "converged": False, "presentation": presentation}}
+        for broken in ({}, {"result": env["result"]}, {**env, "result": None},
+                       {**env, "result": {"type": "Allow", "converged": "no"}},
+                       {**env, "result": {"type": "Inert", "reason": "trusted-environment",
+                                          "presentation": presentation}},
+                       "not even a mapping"):
+            with self.subTest(broken=repr(broken)[:60]):
+                self.assertFalse(_proto.validate_private_environment_response(broken))
+
     def test_decode_fallback_returns_runless_closed_fault(self):
         self.to_pending()
         key = next(iter(self.runs.data))
