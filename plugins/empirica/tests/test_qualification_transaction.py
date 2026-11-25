@@ -11,12 +11,13 @@ conflict cause and binds nothing.
 
 The delivery is the request: an exact replay of a delivery whose attempt resolved returns its
 recorded outcome with no charge and no effect. A qualify that finds an open row refuses with the
-closed in-progress reason while the attempt is live (this process drives it, or the shared runtime
-lock is held), and closes it as interrupted — charged, binding nothing, any record it published an
-orphan — when the attempt is dead, before evaluating the request as a fresh attempt. The
-qualification passes the current configuration approval before any reservation or effect, and a
-host that composed no port (a degraded composition, Codex) refuses an admitted qualify as the
-unsupported host fact before reserving anything (the admission family itself stays with
+closed in-progress reason while another attempt holds the shared runtime lock — taken before
+anything is reserved or settled and held to the end of the outcome, so an open row seen under the
+lock is dead — and closes it as interrupted — charged, binding nothing, any record it published an
+orphan — before evaluating the request as a fresh attempt. The qualification passes the current
+configuration approval before any reservation or effect, and a host that composed no port (a
+degraded composition, an unsupported profile) refuses an admitted qualify as the unsupported host
+fact before reserving anything (the admission family itself stays with
 ``test_environment_actions.py`` and the pure decisions with ``test_environment_governance.py``).
 
 No contract value is restated as a literal: every reason's spelling, the reserved outcome and the
@@ -26,14 +27,17 @@ binding's shape is built by its own constructor.
 """
 import copy
 import sys
+import threading
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from application import generic_spike, protocol
 from application.location import decode_handle
-from application.ports import QualificationAttemptBound, QualificationAttemptFailed
+from application.ports import (QualificationAttemptBound, QualificationAttemptFailed,
+                               QualificationRuntimeBusy)
 from application.run_state import decode_state
 from application.protocol import host_profile_id
 from application.transaction import Coordinator as ProductionCoordinator
@@ -71,11 +75,12 @@ class FakeQualificationPort:
     from the delivered request, so two deliveries read two distinct publishings of their own
     attempt; ``overrides`` pins specific attempts' outcomes for the race tests. ``published``
     records every record the fake published, ``publish_then`` makes the attempt die only after
-    publishing (the crash between record publication and the outcome commit). The settle half
-    answers as the lock would: free (recovers and closes the row) unless ``settle_busy``."""
+    publishing (the crash between record publication and the outcome commit). The runtime lease is
+    the shared lock: one ``lock`` (shared between fakes to model one runtime), taken without waiting
+    and busy while any holder has it; the settle half recovers and closes the row under the lease."""
 
     def __init__(self, *, reason=None, probe=None, raiser=None, before_result=None, overrides=None,
-                 publish_then=None, settle_busy=False, settle_failure=None,
+                 publish_then=None, lock=None, settle_failure=None,
                  before_close=None, settle_raises=None, settle_skips_close=False):
         self.requests = []
         self.calls = 0
@@ -86,14 +91,24 @@ class FakeQualificationPort:
         self.overrides = dict(overrides or {})
         self.publish_then = publish_then
         self.published = []
-        self.settle_busy = settle_busy
+        self.lock = lock if lock is not None else threading.Lock()
         self.settle_failure = settle_failure
         self.settles = []
         self.before_close = before_close
         self.settle_raises = settle_raises
         self.settle_skips_close = settle_skips_close
 
-    def run_qualification_attempt(self, request):
+    @contextmanager
+    def runtime_lease(self):
+        if not self.lock.acquire(blocking=False):
+            raise QualificationRuntimeBusy("the runtime lock is held")
+        try:
+            yield self.lock
+        finally:
+            self.lock.release()
+
+    def run_qualification_attempt(self, request, lease):
+        assert lease is self.lock and self.lock.locked(), "the attempt runs under the lease"
         self.calls += 1
         self.requests.append(request)
         if self.before_result is not None:
@@ -111,12 +126,11 @@ class FakeQualificationPort:
         self.published.append(_record_digest(request))
         return QualificationAttemptBound(_record_digest(request), _binding_digest(request))
 
-    def settle_interrupted_attempt(self, request, close):
+    def settle_interrupted_attempt(self, request, close, lease):
+        assert lease is self.lock and self.lock.locked(), "the settle runs under the lease"
         self.settles.append(request)
         if self.settle_raises is not None:
             raise self.settle_raises
-        if self.settle_busy:
-            return False
         if self.settle_failure is not None:
             return QualificationAttemptFailed(self.settle_failure)
         if self.before_close is not None:
@@ -403,7 +417,8 @@ class QualificationTransactionTests(unittest.TestCase):
         coordinator of the same process, a different request — refuses with the closed
         in-progress reason: nothing reserved, charged or attempted, the live attempt unharmed and
         later binding once."""
-        nested_port = FakeQualificationPort()
+        runtime = threading.Lock()
+        nested_port = FakeQualificationPort(lock=runtime)
         nested_result = {}
 
         def run_the_second_coordinator(request):
@@ -414,7 +429,8 @@ class QualificationTransactionTests(unittest.TestCase):
                 {"type": "ObserveAction", "run_id": env.run_id,
                  "action": copy.deepcopy(QUALIFY_ACTION)}, "concurrent"))
 
-        env = QualificationEnv(FakeQualificationPort(before_result=run_the_second_coordinator))
+        env = QualificationEnv(FakeQualificationPort(
+            before_result=run_the_second_coordinator, lock=runtime))
         result = self._qualify(env)
         self.assertEqual(result["type"], "Allow", result)
         refusal = nested_result["result"]
@@ -428,25 +444,57 @@ class QualificationTransactionTests(unittest.TestCase):
                          "the refusal reserved nothing: one charge for one attempt")
         self.assertEqual(env.binding()["kind"], "qualified")
 
-    def test_a_held_runtime_lock_refuses_with_in_progress_and_closes_nothing(self):
-        """An open row whose attempt this process does not drive, with the shared lock held
-        (another attempt of the runtime): the port answers busy, so the next qualify refuses as in
-        progress — nothing closed, reserved or attempted."""
-        port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))
-        env = QualificationEnv(port)
-        self._qualify(env)
-        port.settle_busy = True
-        before = env.rows()
-        result = self._qualify(env)
-        self.assertEqual((result["type"], result["code"]), ("Fault", "unavailable"), result)
-        self.assertEqual(result["reason"], IN_PROGRESS, result)
-        self.assertEqual(env.rows(), before)
-        self.assertEqual(port.calls, 1, "no further effect while the lock is held")
-        self.assertEqual(len(port.settles), 1)
+    def test_a_held_runtime_lock_refuses_in_progress_before_anything_is_reserved_or_closed(self):
+        """Another attempt of the runtime holds the shared lock: the qualify refuses as in progress
+        whether the run has no open row (nothing is reserved or charged) or a dead one (nothing is
+        closed) — the lock is taken before either — and no effect runs; released, it proceeds."""
+        for label, dead_attempt in (("no open row", False), ("a dead open row", True)):
+            with self.subTest(label):
+                port = FakeQualificationPort(
+                    raiser=RuntimeError("the host died mid-attempt") if dead_attempt else None)
+                env = QualificationEnv(port)
+                if dead_attempt:
+                    self._qualify(env)
+                    port.raiser = None
+                before, calls = env.rows(), port.calls
+                with env.port.runtime_lease():
+                    result = self._qualify(env)
+                self.assertEqual((result["type"], result["code"]), ("Fault", "unavailable"), result)
+                self.assertEqual(result["reason"], IN_PROGRESS, result)
+                self.assertEqual((env.rows(), port.calls, port.settles), (before, calls, []))
+                self.assertEqual(self._qualify(env)["type"], "Allow")
+
+    def test_the_runtime_lock_is_held_from_before_the_reservation_to_after_the_outcome(self):
+        """The order the transaction keeps: lock, (close an interrupted row), reserve, effect,
+        outcome, release — every durable commit of the call happens under the lock, and the lock
+        is free again once it returns, whether the attempt bound, failed or was interrupted."""
+        for label, port in (
+                ("bound", FakeQualificationPort()),
+                ("failed", FakeQualificationPort(
+                    reason=generic_spike.GenericUnavailableReason.DOCKER_UNREACHABLE)),
+                ("interrupted", FakeQualificationPort(raiser=RuntimeError("died")))):
+            with self.subTest(label):
+                env = QualificationEnv(port)
+                held_at_commit = []
+                commit = env.coordinator._commit
+
+                def observing_commit(*args, **kwargs):
+                    held_at_commit.append(port.lock.locked())
+                    return commit(*args, **kwargs)
+
+                with patch.object(env.coordinator, "_commit", observing_commit):
+                    self._qualify(env)
+                    if label == "interrupted":
+                        port.raiser = None
+                        self._qualify(env)
+                self.assertEqual(held_at_commit, [True] * len(held_at_commit))
+                self.assertEqual(len(held_at_commit), 4 if label == "interrupted" else 2,
+                                 "reservation and outcome (and, after a death, the closing again)")
+                self.assertFalse(port.lock.locked())
 
     def test_an_interrupted_attempt_is_closed_by_the_next_qualify_and_a_fresh_one_runs(self):
         """The attempt died before publishing anything (a plain host failure): the next delivery
-        finds an open row with no live attempt and a free lock, settles it — recovery under the
+        finds an open row under the lock it took, settles it — recovery under the
         lock, then the row closes failed-interrupted (charged, no record, no binding) — and only
         then is its own request a fresh charged attempt that binds."""
         port = FakeQualificationPort(raiser=RuntimeError("the host died mid-attempt"))

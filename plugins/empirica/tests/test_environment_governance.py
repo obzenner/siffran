@@ -710,7 +710,7 @@ class AdmissionDecisionTests(unittest.TestCase):
 
     def test_an_approved_revision_admits_but_a_host_without_a_port_refuses_unsupported(self):
         """E9: with an approved revision the admission passes, and where the host composed no
-        qualification port (a degraded composition — Codex is withheld the same way) the admitted
+        qualification port (a degraded composition — an unsupported profile is withheld the same way) the admitted
         qualify refuses as the unsupported host fact: nothing reserved, charged or bound."""
         env = DeliberationEnv(control_mode="auto")
         before = copy.deepcopy(env.state().qualification_attempts)

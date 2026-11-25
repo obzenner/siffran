@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import AbstractContextManager
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from core.freshness import FileObservation, observations_digest
 
@@ -74,23 +75,34 @@ class QualificationSettleRequest:
     profile_id: str
 
 
+class QualificationRuntimeBusy(Exception):
+    """The shared runtime lock is held by another attempt: a fact about the lock, not a failure."""
+
+
 class QualificationAttemptPort(Protocol):
     """One host qualification attempt under the run's sandbox authority (the bridge binds this
-    to E5's sandbox owner; no Docker in the host-neutral layer). Runs only after the
-    transaction's durable reservation; a killed or raising attempt binds nothing."""
+    to E5's sandbox owner; no Docker in the host-neutral layer). The transaction holds the
+    shared runtime lock (``runtime_lease``) from before its durable reservation to after its
+    outcome, so an open row seen under the lock is never a live attempt; a killed or raising
+    attempt binds nothing."""
+
+    def runtime_lease(self) -> AbstractContextManager[Any]:
+        """Take the shared runtime lock without waiting and hold it for the context, yielding the
+        lease the two calls below run under; raises :class:`QualificationRuntimeBusy` at once
+        when another attempt holds it."""
+        ...
 
     def run_qualification_attempt(
-        self, request: QualificationAttemptRequest,
+        self, request: QualificationAttemptRequest, lease: Any,
     ) -> QualificationAttemptBound | QualificationAttemptFailed: ...
 
     def settle_interrupted_attempt(
-        self, request: QualificationSettleRequest, close: Callable[[], None],
+        self, request: QualificationSettleRequest, close: Callable[[], None], lease: Any,
     ) -> bool | QualificationAttemptFailed:
-        """Settle the open row of an attempt that is no longer driven: take the shared runtime
-        lock without waiting, recover prior journals under it, and run ``close`` (the
-        transaction's durable closing of the row) still under it. ``False`` — the lock is held,
-        so an attempt may be live and nothing was closed; a failure — recovery could not run, the
-        row stays open; ``True`` — recovered and closed."""
+        """Settle the open row of an attempt that is no longer driven: recover prior journals
+        under the held lock and run ``close`` (the transaction's durable closing of the row)
+        still under it. A failure — recovery could not run, the row stays open; ``True`` —
+        recovered and closed."""
         ...
 
 

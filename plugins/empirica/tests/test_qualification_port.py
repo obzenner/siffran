@@ -6,11 +6,15 @@ inspections, fake effects — the owner suite's own harness).
 The seam under test is the one a fake port cannot witness: the identity the transaction hands the
 owner on a normally started run (the bounded storage run identifier beside the separate project
 and generation fields, in generation one and in a later generation), and the owner's recovery of a
-dead attempt under the shared runtime lock — taken without waiting — before its row is closed.
+dead attempt under the shared runtime lock — taken without waiting, before anything is reserved and held to the outcome — before its row is closed.
 Behaviour only; every contract value is read from its owner.
 """
+import json
+import select
+import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -23,14 +27,28 @@ from adapters.sandbox import common
 from adapters.sandbox import run_qualification as run_owner
 from application import generic_spike, protocol
 from core import run as core_run
-from test_environment_actions import ENVIRONMENT_ACTION
-from test_qualification_transaction import ProcessDied, QualificationEnv
+from application.transaction import Coordinator as ProductionCoordinator
+from test_d7_transactions import Harness, QualifiedSelector, Workspace
+from test_environment_actions import ENVIRONMENT_ACTION, QUALIFY_ACTION
+from test_qualification_transaction import PROFILE, ProcessDied, QualificationEnv
 from test_run_qualification import D0, OwnerHarness, spike_document
 
 IN_PROGRESS = generic_spike.GenericUnavailableReason.QUALIFICATION_IN_PROGRESS.value
 INTERRUPTED = generic_spike.GenericUnavailableReason.QUALIFICATION_INTERRUPTED.value
 RESERVED, SUCCEEDED, FAILED, SUPERSEDED = core_run.ATTEMPT_OUTCOMES
 PROPOSED_IMAGE = ENVIRONMENT_ACTION["payload"]["spike_images"][0]
+#: The hard bound on every wait of a test that spawns a process or a thread.
+PROCESS_BOUND_SECONDS = 20
+#: A second process that takes the runtime lease, says so, and holds it until told to release.
+HOLD_THE_RUNTIME_LOCK = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+from adapters.sandbox import run_qualification
+with run_qualification.hold_runtime_lock(sandbox_root=Path(sys.argv[2])):
+    print("held", flush=True)
+    sys.stdin.readline()
+"""
 
 
 class RealPortTests(unittest.TestCase):
@@ -143,6 +161,73 @@ class RealPortTests(unittest.TestCase):
         self.assertEqual(self.env.qualify()["type"], "Allow")
         self.assertEqual([row["outcome"] for row in self.env.rows()], [FAILED, SUCCEEDED])
 
+    def test_another_process_holding_the_runtime_lock_refuses_before_anything_is_reserved(self):
+        """The window the lock-first order closes, across two real processes: a process that
+        holds the shared lock (an attempt between its reservation and its outcome) is never
+        observed by a qualify that reserves first — the refusal reserves, charges and attempts
+        nothing, and the same request proceeds once the other process has released."""
+        holder = subprocess.Popen(
+            [sys.executable, "-c", HOLD_THE_RUNTIME_LOCK, str(Path(__file__).resolve().parents[1]),
+             str(self.root)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True)
+        try:
+            ready, _, _ = select.select([holder.stdout], [], [], PROCESS_BOUND_SECONDS)
+            self.assertTrue(ready, "the holder process took the lock within its bound")
+            self.assertEqual(holder.stdout.readline().strip(), "held")
+            result = self.env.qualify()
+            self.assertEqual((result["type"], result["reason"]), ("Fault", IN_PROGRESS), result)
+            self.assertEqual((self.env.rows(), self.harness.inspector_calls), ([], 0),
+                             "nothing reserved, charged or attempted while the other process holds it")
+        finally:
+            try:
+                holder.communicate("release\n", timeout=PROCESS_BOUND_SECONDS)
+            except subprocess.TimeoutExpired:
+                holder.kill()
+                holder.communicate()
+        self.assertEqual(holder.returncode, 0)
+        self.assertEqual(self.env.qualify()["type"], "Allow")
+        self.assertEqual([row["outcome"] for row in self.env.rows()], [SUCCEEDED])
+
+    def test_a_live_attempt_is_never_closed_as_interrupted_by_a_concurrent_qualify(self):
+        """The earliest instant after the reservation commit: the attempt already holds the real
+        lock, so a second coordinator's qualify (its own port, its own descriptor on the same
+        lock file) refuses in progress and leaves the open row alone; the attempt then binds."""
+        reserved, release = threading.Event(), threading.Event()
+        commit = self.env.coordinator._commit
+        commits = []
+
+        def pausing_commit(*args, **kwargs):
+            outcome = commit(*args, **kwargs)
+            commits.append(outcome)
+            if len(commits) == 1:
+                reserved.set()
+                self.assertTrue(release.wait(PROCESS_BOUND_SECONDS), "the test released the paused attempt")
+            return outcome
+
+        rival = ProductionCoordinator(
+            Workspace(), Harness(), self.env.runs, self.env.artifacts_repo, PROFILE, {},
+            QualifiedSelector(), None, bridge._RunQualificationPort(**self.harness.options()))
+        answers = {}
+        with mock.patch.object(self.env.coordinator, "_commit", pausing_commit):
+            attempt = threading.Thread(
+                target=lambda: answers.update(first=self.env.qualify("first")), daemon=True)
+            attempt.start()
+            try:
+                self.assertTrue(reserved.wait(PROCESS_BOUND_SECONDS), "the reservation committed")
+                self.assertEqual([row["outcome"] for row in self.env.rows()], [RESERVED])
+                answers["rival"] = rival.handle(
+                    {"type": "ObserveAction", "run_id": self.env.run_id,
+                     "action": json.loads(json.dumps(QUALIFY_ACTION))}, "rival")["result"]
+                self.assertEqual([row["outcome"] for row in self.env.rows()], [RESERVED],
+                                 "the live row was not closed by the rival")
+            finally:
+                release.set()
+                attempt.join(PROCESS_BOUND_SECONDS)
+                self.assertFalse(attempt.is_alive(), "the attempt finished within its bound")
+        self.assertEqual((answers["rival"]["type"], answers["rival"]["reason"]),
+                         ("Fault", IN_PROGRESS), answers["rival"])
+        self.assertEqual(answers["first"]["type"], "Allow", answers["first"])
+        self.assertEqual([row["outcome"] for row in self.env.rows()], [SUCCEEDED])
+        self.assertEqual(self.env.binding()["kind"], "qualified")
 
 if __name__ == "__main__":
     unittest.main()

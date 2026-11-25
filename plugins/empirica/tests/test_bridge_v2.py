@@ -525,8 +525,7 @@ class BridgeV2Tests(unittest.TestCase):
 
 class QualificationPortCompositionTests(unittest.TestCase):
     """The qualification port is an execution path: it is composed where the generic Docker
-    composition succeeded, and never for the Codex profile — Codex stays the documented refusal
-    host, exactly as the marketplace withholds the plugin."""
+    composition succeeded, and never for a profile the registry marks unsupported."""
 
     def _compose(self, profile_id):
         store = type("Store", (), {"execution_store": object()})()
@@ -538,30 +537,31 @@ class QualificationPortCompositionTests(unittest.TestCase):
               patch.object(bridge, "GenericDockerHarness", return_value=object())):
             return bridge.build_service(profile_id)
 
-    def test_the_port_is_composed_for_every_profile_but_codex(self):
-        codex = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if p["host_id"] == "codex-cli")
-        for profile_id in _PROFILE_IDS:
+    def test_the_port_is_composed_for_every_supported_profile(self):
+        for profile in _HOST_PROFILES["profiles"]:
+            profile_id = profile["profile_id"]
             with self.subTest(profile=profile_id):
                 port = self._compose(profile_id)._coordinator.qualification_port
-                if profile_id == codex:
+                if profile["promotion_status"] == bridge._QUALIFICATION_WITHHELD_STATUS:
                     self.assertIsNone(port)
                 else:
                     self.assertIsInstance(port, bridge._RunQualificationPort)
 
-    def test_a_codex_service_pointed_at_an_approved_run_refuses_unsupported_and_reserves_nothing(self):
+    def test_an_unsupported_profile_pointed_at_an_approved_run_refuses_unsupported_and_reserves_nothing(self):
         from test_d7_transactions import Workspace
         from test_environment_actions import QUALIFY_ACTION
         from test_qualification_transaction import FakeQualificationPort, QualificationEnv
         env = QualificationEnv(FakeQualificationPort())
-        codex = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if p["host_id"] == "codex-cli")
-        coordinator = self._compose(codex)._coordinator
+        unsupported = next(p["profile_id"] for p in _HOST_PROFILES["profiles"]
+                           if p["promotion_status"] == bridge._QUALIFICATION_WITHHELD_STATUS)
+        coordinator = self._compose(unsupported)._coordinator
         coordinator.runs, coordinator.artifacts, coordinator.workspace = (
             env.runs, env.artifacts_repo, Workspace())
         before = env.runs.data[env.key]
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": env.run_id,
-             "action": json.loads(json.dumps(QUALIFY_ACTION))}, "codex-qualify")["result"]
-        jsonschema.validate(instance={"protocol": _PROTOCOL, "request_id": "codex-qualify",
+             "action": json.loads(json.dumps(QUALIFY_ACTION))}, "unsupported-qualify")["result"]
+        jsonschema.validate(instance={"protocol": _PROTOCOL, "request_id": "unsupported-qualify",
                                       "result": response}, schema=_RESPONSE_SCHEMA)
         self.assertEqual((response["type"], response["code"]), ("Fault", "unsupported"), response)
         self.assertEqual(env.runs.data[env.key], before, "nothing was reserved or committed")

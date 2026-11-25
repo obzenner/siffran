@@ -22,10 +22,11 @@ from __future__ import annotations
 import json
 import re
 import time
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from adapters.state import fsio
 from application import generic_spike as application
@@ -1123,6 +1124,45 @@ def _concrete_effects(resolved: authority.ResolvedGenericAuthority) \
                                       dict(resolved.environment), resolved.work_directory)
 
 
+class RuntimeLease:
+    """Proof that the shared runtime lock is held by the caller: made only by
+    :func:`hold_runtime_lock`, valid until that context exits."""
+
+    __slots__ = ("root", "held")
+
+    def __init__(self, root: Path) -> None:
+        self.root, self.held = root, True
+
+
+@contextmanager
+def hold_runtime_lock(
+    *, sandbox_root: Path | None = None, clock: Callable[[], float] = time.monotonic,
+) -> Iterator[RuntimeLease]:
+    """Take the shared runtime lock without waiting and hold it for the context: an attempt or a
+    settle given the lease runs under it instead of taking its own, so a caller can order its own
+    durable steps (the transaction's reservation) inside the lock. A lock another holder has
+    raises :class:`common.RuntimeLockBusy` at once."""
+    root = (common.sandbox_home() if sandbox_root is None
+            else common.canonical_authority_path(Path(sandbox_root)))
+    store = common.ExecutionStore(root)
+    store.prepare_execution_scaffolding()
+    generic_journal.GenericJournalStore(store).prepare()
+    lease = RuntimeLease(root)
+    with common.runtime_lock(store, clock() + DEFAULT_QUALIFICATION_SECONDS, clock=clock,
+                             blocking=False):
+        try:
+            yield lease
+        finally:
+            lease.held = False
+
+
+def _lease_refusal(lease: object) -> RunQualificationFailed | None:
+    if type(lease) is RuntimeLease and lease.held:
+        return None
+    return RunQualificationFailed(RunQualificationReason.INVALID_INPUT,
+                                  "run qualification runtime lease is not held")
+
+
 def qualify_run_environment(
     *,
     project_id: str,
@@ -1143,6 +1183,7 @@ def qualify_run_environment(
     kernel_factory: Callable[..., qualification.QualificationProbeKernel] = qualification.ProductionProbeKernel,
     sandbox_root: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
+    lease: RuntimeLease | None = None,
 ) -> RunQualificationOutcome:
     """Run one qualification attempt for the run binding and write the `/3` record.
 
@@ -1158,7 +1199,8 @@ def qualify_run_environment(
     kernel postflights and the final re-observation — at that pinned endpoint, never a
     fresh context resolution. Expiry anywhere reports the deadline reason: when the budget is gone,
     every stage error path is converted to the deadline reason before the outcome is
-    built.
+    built. With a ``lease`` the caller already holds the runtime lock (``hold_runtime_lock``) and
+    the attempt runs under it instead of taking its own, in the lease's sandbox root.
     """
     # --- ingress -------------------------------------------------------------
     try:
@@ -1182,6 +1224,9 @@ def qualify_run_environment(
         docker_cli = Path(docker_cli)
     except (ValueError, TypeError, OSError) as exc:
         return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
+    refused = None if lease is None else _lease_refusal(lease)
+    if refused is not None:
+        return refused
     budget = float(qualification_seconds)
     began = clock()
     deadline = began + budget
@@ -1200,7 +1245,7 @@ def qualify_run_environment(
                                implementation_inspector=implementation_inspector,
                                image_runner=image_runner, effects_factory=effects_factory,
                                kernel_factory=kernel_factory, sandbox_root=sandbox_root,
-                               began=began, clock=clock, stage=stage)
+                               began=began, clock=clock, stage=stage, lease=lease)
     except _RunFailure as exc:
         if clock() >= deadline:
             # Expiry anywhere reports the deadline reason (E5 review, blocking 4), including
@@ -1305,22 +1350,23 @@ def settle_interrupted_attempt(
     attempt_id: str,
     profile_id: str,
     docker_cli: Path,
+    lease: RuntimeLease,
     on_settled: Callable[[], None],
     qualification_seconds: float | None = None,
     runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_observed_runtime,
     effects_factory: EffectsStage | None = None,
-    sandbox_root: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
 ) -> bool | RunQualificationFailed:
-    """Settle one open attempt row no live attempt drives (Empirica 7.2 §5, E9 fix round).
+    """Settle one open attempt row no live attempt drives (Empirica 7.2 §5), under the runtime
+    lock the caller holds (``lease``, from :func:`hold_runtime_lock`): an open row seen under the
+    lock is dead, because a live attempt keeps the lock from its reservation to its outcome.
 
-    Takes the shared runtime lock **without waiting**: a held lock answers ``False`` (an attempt
-    may be live; nothing was recovered and ``on_settled`` did not run). Under the lock it recovers
-    every prior journal exactly as an attempt does — the same owner, the same pinned daemon — and
-    runs ``on_settled`` (the transaction's durable closing of the row) still under the lock, so no
-    new attempt can start between the recovery and the closing. Returns ``True`` once settled, or
-    one closed failure when recovery could not run (the row then stays open for a later settle).
-    It never resumes or reuses the dead attempt's effect, and never publishes a record."""
+    Recovers every prior journal exactly as an attempt does — the same owner, the same pinned
+    daemon — and runs ``on_settled`` (the transaction's durable closing of the row) still under
+    the lock, so no new attempt can start between the recovery and the closing. Returns ``True``
+    once settled, or one closed failure when recovery could not run (the row then stays open for a
+    later settle). It never resumes or reuses the dead attempt's effect, and never publishes a
+    record."""
     try:
         for name, value in (("project_id", project_id), ("run_id", run_id),
                             ("attempt_id", attempt_id)):
@@ -1337,26 +1383,21 @@ def settle_interrupted_attempt(
         docker_cli = Path(docker_cli)
     except (ValueError, TypeError, OSError) as exc:
         return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
+    refused = _lease_refusal(lease)
+    if refused is not None:
+        return refused
     deadline = clock() + float(qualification_seconds)
-    stage: list[str] = ["the runtime lock"]
+    stage: list[str] = ["the prior journal recovery"]
     try:
-        root = (common.sandbox_home() if sandbox_root is None
-                else common.canonical_authority_path(Path(sandbox_root)))
-        store = common.ExecutionStore(root)
-        store.prepare_execution_scaffolding()
-        generic_journal.GenericJournalStore(store).prepare()
-        try:
-            with common.runtime_lock(store, deadline, clock=clock, blocking=False):
-                _recover_prior_journals(
-                    store, root, binding_seed={
-                        "project_id": project_id, "run_id": run_id, "generation": generation,
-                        "attempt_id": attempt_id},
-                    profile_id=profile_id, docker_cli=docker_cli,
-                    runtime_inspector=runtime_inspector, effects_factory=effects_factory,
-                    deadline=deadline, clock=clock, stage=stage)
-                on_settled()
-        except common.RuntimeLockBusy:
-            return False
+        store = common.ExecutionStore(lease.root)
+        _recover_prior_journals(
+            store, lease.root, binding_seed={
+                "project_id": project_id, "run_id": run_id, "generation": generation,
+                "attempt_id": attempt_id},
+            profile_id=profile_id, docker_cli=docker_cli,
+            runtime_inspector=runtime_inspector, effects_factory=effects_factory,
+            deadline=deadline, clock=clock, stage=stage)
+        on_settled()
         return True
     except _RunFailure as exc:
         return RunQualificationFailed(exc.reason, exc.detail, exc.probe)
@@ -1386,13 +1427,15 @@ def _qualify_locked(
     began: float,
     clock: Callable[[], float],
     stage: list[str],
+    lease: RuntimeLease | None = None,
 ) -> RunQualificationBound:
-    root = (common.sandbox_home() if sandbox_root is None
+    root = (lease.root if lease is not None else common.sandbox_home() if sandbox_root is None
             else common.canonical_authority_path(Path(sandbox_root)))
     store = common.ExecutionStore(root)
     store.prepare_execution_scaffolding()
     generic_journal.GenericJournalStore(store).prepare()
-    with common.runtime_lock(store, deadline, clock=clock):
+    with (nullcontext() if lease is not None
+          else common.runtime_lock(store, deadline, clock=clock)):
         observed, config, work, seed, selected_effects = _recover_prior_journals(
             store, root, binding_seed=binding.to_data(), profile_id=profile_id,
             docker_cli=docker_cli, runtime_inspector=runtime_inspector,

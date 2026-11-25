@@ -1,8 +1,8 @@
 """Single-writer transaction coordinator for Empirica v2."""
 from __future__ import annotations
 
-import threading
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -40,18 +40,10 @@ from .generic_spike import (
 from .ports import (NullSpikeAuthoritySelector, ObservationSnapshot,
                     QualificationAttemptRequest,
                     QualificationAttemptBound, QualificationAttemptFailed,
-                    QualificationSettleRequest)
+                    QualificationRuntimeBusy, QualificationSettleRequest)
 from .snapshot import (GraphInvalid, HistoryCorrupt, assemble, graph_from_history,
                        make_artifact, state_digest, traverse_history,
                        validate_investigation_history)
-
-
-#: The qualification attempts this process is driving right now, keyed by run binding and attempt
-#: identity (guarded by ``_LIVE_LOCK``): an open row that is listed here is live, never
-#: interrupted, whatever the shared runtime lock says in the instant before the attempt takes it.
-#: Module-wide, so every coordinator composed in this process agrees.
-_LIVE_QUALIFICATIONS: set[tuple[str, str, int, str]] = set()
-_LIVE_LOCK = threading.Lock()
 
 
 def _plain(value: Any) -> Any:
@@ -136,8 +128,8 @@ class Coordinator:
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
         self.profile_id, self.limits = profile_id, limits
         # The host qualification port (Empirica 7.2 §5, E9): composed only where the host bound a
-        # generic Docker backend. ``None`` — the composed-out half, Codex and a degraded
-        # composition — makes StartRun bind spikes-unavailable and an admitted ``qualify`` refuse
+        # generic Docker backend. ``None`` — the composed-out half, an unsupported profile and a
+        # degraded composition — makes StartRun bind spikes-unavailable and an admitted ``qualify`` refuse
         # as the unsupported host fact before reserving anything.
         self.qualification_port = qualification_port
         self.spike_authority_selector = (spike_authority_selector
@@ -742,17 +734,20 @@ class Coordinator:
 
         1. **An exact replay** — this delivery's own row already resolved — returns the recorded
            outcome: no charge, no effect.
-        2. **An open row** (an unresolved attempt) is either live — this process drives it, or the
-           shared runtime lock is held — and refuses with ``qualification-in-progress`` (nothing
-           reserved, charged or attempted), or its lock is free and the attempt died: the port
-           recovers the prior journals and, still under the lock, this transaction closes the row
-           failed as ``qualification-interrupted`` (charged, binding nothing, any record it
-           published an orphan no row names). The effect is never resumed or reused; the request is
-           then evaluated as a fresh attempt, so the ceiling refuses honestly if that was the last.
-        3. The core decides admission (environment, configuration approval, ceiling); an admitted
+        2. **The shared runtime lock**, taken without waiting before anything is reserved or
+           settled and held to the end of the call: where another attempt holds it the request
+           refuses with ``qualification-in-progress`` (nothing reserved, charged or attempted),
+           and since a live attempt keeps the lock from its reservation to its outcome, an open
+           row seen under the lock is dead. The state is then re-read under the lock.
+        3. **An open row** is recovered by the port (prior journals, under the lock) and closed by
+           this transaction, still under the lock, failed as ``qualification-interrupted``
+           (charged, binding nothing, any record it published an orphan no row names). The effect
+           is never resumed or reused; the request is then evaluated as a fresh attempt, so the
+           ceiling refuses honestly if that was the last.
+        4. The core decides admission (environment, configuration approval, ceiling); an admitted
            qualify with no composed port refuses as the unsupported host fact.
-        4. **Reserve** one charged row durably first, before any effect.
-        5. **Effect** through the port, then record the outcome by compare-and-set against the
+        5. **Reserve** one charged row durably first, before any effect, under the lock.
+        6. **Effect** through the port, then record the outcome by compare-and-set against the
            reservation's captured generation, approved revision, proposal digest and prior binding:
            bound installs the qualified binding; failed records the closed reason (and probe);
            a lost compare-and-set (stop, superseded revision, resolved row, changed binding) closes
@@ -764,8 +759,8 @@ class Coordinator:
         settled_here = False
         reserved = None
         prior_binding = None
-        live_key = None
-        try:
+        lease = None
+        with ExitStack() as held:
             for _ in range(8):
                 loaded = self._load(key)
                 if isinstance(loaded, CorruptLoad):
@@ -798,11 +793,16 @@ class Coordinator:
                         continue
                     self.last_state = state
                     return self._recorded_qualification(request_id, snapshot, rows[replayed])
-                # --- 2. an open row: live, or interrupted and closed here -----------------
+                # --- 2. an open row (settled under the lock) -----------------------------
                 if rows and rows[-1]["outcome"] == ATTEMPT_OUTCOMES[0]:
                     if port is None:
                         return self._fault(request_id, "unsupported")
-                    refusal = self._settle_open_attempt(key, read, snapshot, state)
+                    if lease is None:
+                        lease, refusal = self._hold_runtime(held)
+                        if refusal is not None:
+                            return self._fault(request_id, *refusal)
+                        continue
+                    refusal = self._settle_open_attempt(key, read, snapshot, state, lease)
                     if refusal is not None:
                         return self._fault(request_id, *refusal)
                     settled_here = True
@@ -823,23 +823,20 @@ class Coordinator:
                     return self._response(request_id, snapshot, decision)
                 if port is None:
                     # The effect half is composed out (no generic Docker backend bound on this
-                    # host, or the host's profile withheld: a degraded composition, Codex). An
+                    # host, or the host's profile unsupported: a degraded composition). An
                     # admitted qualify refuses as the unsupported host fact before reserving
                     # anything: not charged, nothing bound.
                     return self._fault(request_id, "unsupported")
-                # --- 4. reserve, durably, before any effect -------------------------------
-                new_row = decision.intent.state.qualification_attempts[-1]
-                candidate = (key.project_id, key.run_id, key.generation, new_row["attempt_id"])
-                with _LIVE_LOCK:
-                    _LIVE_QUALIFICATIONS.add(candidate)
-                live_key = candidate
+                # --- 4. reserve, durably, under the lock, before any effect ---------------
+                if lease is None:
+                    lease, refusal = self._hold_runtime(held)
+                    if refusal is not None:
+                        return self._fault(request_id, *refusal)
+                    continue
                 try:
                     committed, _, _, _ = self._commit(
                         key, read.revision, snapshot, decision.intent.state, ())
                 except Exception as exc:
-                    with _LIVE_LOCK:
-                        _LIVE_QUALIFICATIONS.discard(candidate)
-                    live_key = None
                     if self._is_conflict(exc):
                         continue
                     return self._fault(request_id, "unavailable")
@@ -851,24 +848,26 @@ class Coordinator:
             else:
                 return self._fault(request_id, "conflict")
             return self._attempt_and_record(
-                key, command, request_id, reserved, prior_binding)
-        finally:
-            if live_key is not None:
-                with _LIVE_LOCK:
-                    _LIVE_QUALIFICATIONS.discard(live_key)
+                key, command, request_id, reserved, prior_binding, lease)
+
+    def _hold_runtime(self, held: ExitStack) -> tuple[Any, tuple[Any, ...] | None]:
+        """Take the shared runtime lock without waiting, held until ``held`` closes: the lease, or
+        the arguments of the refusal Fault — in-progress where another attempt holds the lock."""
+        try:
+            return held.enter_context(self.qualification_port.runtime_lease()), None
+        except QualificationRuntimeBusy:
+            return None, ("unavailable", qualification.QUALIFICATION_IN_PROGRESS)
+        except Exception:
+            return None, ("unavailable",)
 
     def _settle_open_attempt(self, key: RunKey, read: Any, snapshot: EvaluationSnapshot,
-                             state: OperationalState) -> tuple[Any, ...] | None:
-        """The open row's two fates (spec §5, E9 fix round). ``None``: the row was closed
-        failed-interrupted under the shared runtime lock, after journal recovery — the caller
-        re-reads and evaluates its request afresh. Otherwise the arguments of the refusal Fault:
-        in-progress while an attempt is live (this process drives it, or the lock is held),
-        the recovery's own closed reason when it could not run, or a plain unavailable."""
+                             state: OperationalState, lease: Any) -> tuple[Any, ...] | None:
+        """The open row, seen under the lock and so dead (spec §5). ``None``: the row was closed
+        failed-interrupted after journal recovery — the caller re-reads and evaluates its request
+        afresh. Otherwise the arguments of the refusal Fault: the recovery's own closed reason when
+        it could not run, or a plain unavailable."""
         rows = state.qualification_attempts
         row = rows[-1]
-        with _LIVE_LOCK:
-            if (key.project_id, key.run_id, key.generation, row["attempt_id"]) in _LIVE_QUALIFICATIONS:
-                return ("unavailable", qualification.QUALIFICATION_IN_PROGRESS)
         member = state.environment
         profile_id = (_plain(member["proposal"])["profile_id"] if member is not None
                       else spike_plan.ISOLATED_PROFILE)
@@ -889,11 +888,9 @@ class Coordinator:
             settled = self.qualification_port.settle_interrupted_attempt(
                 QualificationSettleRequest(
                     project_id=key.project_id, run_id=key.run_id, generation=key.generation,
-                    attempt_id=row["attempt_id"], profile_id=profile_id), close)
+                    attempt_id=row["attempt_id"], profile_id=profile_id), close, lease)
         except Exception:
             return ("unavailable",)
-        if settled is False:
-            return ("unavailable", qualification.QUALIFICATION_IN_PROGRESS)
         if isinstance(settled, QualificationAttemptFailed):
             try:
                 outcome = qualification.validate_attempt_outcome(settled)
@@ -920,18 +917,18 @@ class Coordinator:
 
     def _attempt_and_record(self, key: RunKey, command: dict[str, Any], request_id: str,
                             reserved: QualificationAttemptRequest,
-                            prior_binding: Any) -> dict[str, Any]:
+                            prior_binding: Any, lease: Any) -> dict[str, Any]:
         """Step 5: the host attempt on the durable reservation, then the outcome's
         compare-and-set against the facts the reservation captured."""
         # --- the host attempt, only ever after the durable reservation -------------------
         outcome = None
         try:
             outcome = qualification.validate_attempt_outcome(
-                self.qualification_port.run_qualification_attempt(reserved))
+                self.qualification_port.run_qualification_attempt(reserved, lease))
         except Exception:
             # Nothing binds and the open reservation stays charged and unresolved. A Fault
             # without a reason is an internal host failure: the next qualify finds the open row
-            # with no live attempt and closes it as interrupted before it asks for a fresh one.
+            # under the lock and closes it as interrupted before it asks for a fresh one.
             return self._fault(request_id, "unavailable")
         # --- the outcome compare-and-set against the exact run facts ---------------------
         conflict = False

@@ -60,9 +60,11 @@ Docker authority after the final tree is clean and committed, and the spike harn
 record and pointer. The **run qualification path** is the run's own: `StartRun` binds the run's own `unqualified`
 reference and never reads machine-wide authority, and a run binds its exact qualified `docker-isolated-v1` or
 `docker-networked-v1` qualification and execution digest pair only through its own approved environment revision and
-`qualify` attempt (a charged attempt, compare-and-set into the run). The host composes the run qualification port
-wherever the guarded generic Docker composition succeeded, never for Codex, and a run whose host composition did not
-bind reads `spikes_unavailable`; existing runs never adopt a later current record. Qualified means bound, not live
+`qualify` attempt (a charged attempt, compare-and-set into the run). `qualify` takes the shared runtime lock without
+waiting before it reserves anything and holds it until the outcome is recorded: a request that cannot take it refuses with
+`qualification-in-progress` and is never charged, and an open attempt row seen under the lock belongs to a dead attempt.
+The host composes the run qualification port wherever the guarded generic Docker composition succeeded, never for an
+unsupported profile, and a run whose host composition did not bind reads `spikes_unavailable`; existing runs never adopt a later current record. Qualified means bound, not live
 health. At host
 session launch, `EMPIRICA_SPIKE_PROFILE` may be omitted (the core selects isolated) or set exactly to
 `docker-isolated-v1` or `docker-networked-v1`; malformed configured values refuse before `StartRun`. This is

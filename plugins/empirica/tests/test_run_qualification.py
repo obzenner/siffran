@@ -1953,17 +1953,20 @@ class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
         self.harness.effects_factory = recording
 
     def settle(self, on_settled, **overrides):
+        """Settle under the lease the caller holds, as the transaction does."""
         options = self.harness.options()
         arguments = {
             "project_id": "project-1", "run_id": "run-1", "generation": 1,
             "attempt_id": self.harness.attempt_id, "profile_id": self.harness.profile_id,
             "docker_cli": self.harness.docker_cli, "on_settled": on_settled,
             "runtime_inspector": options["runtime_inspector"],
-            "effects_factory": options["effects_factory"],
-            "sandbox_root": self.root, "clock": options["clock"],
+            "effects_factory": options["effects_factory"], "clock": options["clock"],
         }
         arguments.update(overrides)
-        return run_owner.settle_interrupted_attempt(**arguments)
+        if "lease" in arguments:
+            return run_owner.settle_interrupted_attempt(**arguments)
+        with run_owner.hold_runtime_lock(sandbox_root=self.root, clock=options["clock"]) as lease:
+            return run_owner.settle_interrupted_attempt(lease=lease, **arguments)
 
     def test_a_free_lock_recovers_journals_and_runs_the_closing_under_the_lock(self):
         held_during = []
@@ -1983,14 +1986,36 @@ class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(self.harness.inspector_calls, 1)
         self.assertNoRecordPublished()
 
-    def test_a_held_lock_answers_busy_without_recovering_or_closing(self):
+    def test_a_lock_another_holder_has_is_busy_at_once(self):
         store = common.ExecutionStore(self.root)
         store.prepare_execution_scaffolding()
-        closed = []
         with common.runtime_lock(store, time.monotonic() + 5.0):
-            outcome = self.settle(lambda: closed.append(True))
-        self.assertIs(outcome, False)
-        self.assertEqual((closed, self.recoveries, self.harness.inspector_calls), ([], [], 0))
+            with self.assertRaises(common.RuntimeLockBusy):
+                with run_owner.hold_runtime_lock(sandbox_root=self.root):
+                    self.fail("the lease is never granted over a held lock")
+        with run_owner.hold_runtime_lock(sandbox_root=self.root):
+            pass
+
+    def test_a_lease_that_is_not_held_is_refused_as_invalid_input(self):
+        with run_owner.hold_runtime_lock(sandbox_root=self.root) as lease:
+            pass
+        closed = []
+        for stale in (lease, None):
+            outcome = self.settle(lambda: closed.append(True), lease=stale)
+            self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+            self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual((closed, self.recoveries), ([], []))
+
+    def test_an_attempt_under_a_held_lease_runs_without_taking_the_lock_again(self):
+        """The lease is the caller's hold on the one lock: the attempt runs under it (a second
+        acquisition on another descriptor would block against the holder itself), and a lease
+        that is no longer held is refused before any effect."""
+        with run_owner.hold_runtime_lock(sandbox_root=self.root) as lease:
+            outcome = self.harness.call(lease=lease)
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        stale = self.harness.call(lease=lease)
+        self.assertIs(type(stale), run_owner.RunQualificationFailed)
+        self.assertIs(stale.reason, run_owner.RunQualificationReason.INVALID_INPUT)
 
     def test_a_recovery_that_cannot_run_returns_its_closed_failure_and_never_closes(self):
         closed = []
