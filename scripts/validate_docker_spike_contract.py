@@ -50,9 +50,9 @@ REASON_HINTS = {
     "environment-rejected": "the latest environment revision was rejected; submit a revised environment proposal",
     "qualification-required": "an approved revision has nothing bound; request qualification",
     "qualification-stale-implementation": "the loaded release differs from the binding; request qualification again",
-    "qualification-stale-daemon": "the Docker endpoint, daemon identity, version or capability differs from the binding; prepare, then request qualification again",
-    "image-not-qualified": "the spike's image is not one of the binding's sealed image IDs; submit an environment proposal that names it",
-    "probe-image-untrusted": "the local probe image does not match the pinned probe image digest; pull the pinned reference the refusal renders, then request qualification again",
+    "qualification-stale-daemon": "the Docker endpoint, daemon identity, server major version or capability differs from the binding (a minor or patch server update keeps the binding); prepare, then request qualification again",
+    "image-not-qualified": "the spike image reference is not in the approved revision's spike images; submit an environment proposal that names it",
+    "probe-image-untrusted": "the local probe image carries no repository-digest entry with the pinned probe image digest (the pinned digest is admitted under any repository name, so a mirror or proxy pull is admitted while a locally built, loaded or retagged image is not); pull the pinned reference the refusal renders, then request qualification again",
     "qualification-probe-failed": "a qualification probe failed (the separate probe field names it, never the reason); prepare, then request qualification again",
     "qualification-deadline-exceeded": "the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady",
     "network-egress-unavailable": "the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again",
@@ -141,8 +141,10 @@ def render_limits() -> str:
         "invalid frozen scope still blocks first) and the run keeps its current spike backend",
         "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
         "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
-        "it, admission requires the pinned digest in the image's repository digests, and a probe "
-        "image that is not the pinned one is refused as untrusted, never silently accepted",
+        "it, admission requires the pinned digest in some repository-digests entry of the "
+        "inspected image — the digest is the content identity, the repository name is not, so a "
+        "mirror or proxy pull is admitted while a locally built, loaded or retagged image (which "
+        "has no such entry) is refused as untrusted, never silently accepted",
     ]
     rows.extend(f"reason {name} | {REASON_HINTS[name]}" for name in fault_reasons)
     return "\n".join(rows)
