@@ -24,6 +24,7 @@ from unittest import mock
 from adapters.sandbox import common
 from adapters.sandbox import generic_authority as authority
 from adapters.sandbox import generic_journal
+from adapters.sandbox import planner
 from adapters.sandbox import process
 from adapters.sandbox import probe_image
 from adapters.sandbox import run_qualification as run_owner
@@ -52,10 +53,13 @@ class MutableClock:
 
 class ImageInspects:
     """The one trust boundary runner: `docker image inspect` for the pinned probe image
-    and every approved spike reference."""
+    and every approved spike reference, and the bounded `docker image list --digests`
+    fallback when the pinned reference finds no image locally."""
 
     def __init__(self, *, probe_document=None, spike_documents=None, on_probe=None,
-                 on_reference=None):
+                 on_reference=None, probe_absent=False, list_rows=None,
+                 on_list=None, list_output_limited=False, list_exits_nonzero=False,
+                 probe_timed_out=False):
         self.probe_document = probe_document if probe_document is not None else {
             "Id": D1, "Os": "linux", "Architecture": "x86_64",
             "RepoDigests": [PIN.repo_digest], "Volumes": None,
@@ -63,24 +67,51 @@ class ImageInspects:
         self.spike_documents = dict(spike_documents or {})
         self.on_probe = on_probe
         self.on_reference = on_reference
+        self.probe_absent = probe_absent
+        self.list_rows = list_rows
+        self.on_list = on_list
+        self.list_output_limited = list_output_limited
+        self.list_exits_nonzero = list_exits_nonzero
+        self.probe_timed_out = probe_timed_out
         self.calls = []
 
     def run(self, argv, **kwargs):
         self.calls.append((tuple(argv), kwargs))
         argv = tuple(argv)
+        if argv[1:5] == ("image", "list", "--digests", "--no-trunc"):
+            assert argv[5:7] == ("--format", run_owner.PROBE_IMAGE_LIST_FORMAT), argv
+            self._check_env(kwargs)
+            # the bounded read the owner itself declares: the listing is fetched with
+            # the owner's own byte cap, never an unbounded one
+            assert kwargs["output_limit_bytes"] == run_owner.MAX_IMAGE_LIST_BYTES, kwargs
+            if self.on_list is not None:
+                self.on_list(self)
+            rows = [json.dumps(row) for row in (self.list_rows if self.list_rows is not None else ())]
+            if self.list_output_limited:
+                return process.CommandResult.fake(stdout="\n".join(rows), output_limited=True)
+            if self.list_exits_nonzero:
+                return process.CommandResult.fake(
+                    125, stdout="\n".join(rows), stderr="Error listing images")
+            return process.CommandResult.fake(stdout="\n".join(rows))
         assert argv[1:4] == ("image", "inspect", "--format"), argv
         reference = argv[-1]
         if reference == PIN.reference:
             if self.on_probe is not None:
                 self.on_probe(self)
+            if self.probe_absent:
+                return process.CommandResult.fake(
+                    1, stderr="Error: No such image: " + PIN.reference)
+            if self.probe_timed_out:
+                # a killed inspection may still hold a prefix that parses; the
+                # timeout flag alone ends the read
+                return process.CommandResult.fake(
+                    stdout=json.dumps(self.probe_document), timed_out=True)
             # the projection is verified at the command boundary (re-review,
             # non-blocking 3): the daemon is asked by the owner's exact constant, so a
             # mutant that drops the digest membership (or any other member the
             # admission reads) fails here before any fake answer can mask it
             assert argv[4] == run_owner.PROBE_IMAGE_INSPECT_FORMAT, argv
-            assert kwargs["env"] == {
-                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime()["endpoint"],
-                "DOCKER_CONFIG": kwargs["env"]["DOCKER_CONFIG"]}, kwargs["env"]
+            self._check_env(kwargs)
             return process.CommandResult.fake(stdout=json.dumps(self.probe_document))
         if self.on_reference is not None:
             self.on_reference(self, reference)
@@ -90,6 +121,11 @@ class ImageInspects:
         if isinstance(document, Exception):
             return process.CommandResult.fake(1, stderr=str(document))
         return process.CommandResult.fake(stdout=json.dumps(document))
+
+    def _check_env(self, kwargs):
+        assert kwargs["env"] == {
+            "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime()["endpoint"],
+            "DOCKER_CONFIG": kwargs["env"]["DOCKER_CONFIG"]}, kwargs["env"]
 
 
 def spike_document(image_id=D1, raw_architecture="x86_64", volumes=None):
@@ -375,7 +411,245 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                 self.assertIs(outcome.reason,
                               run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
                 self.assertIsNone(outcome.probe)
+
+    def test_a_mirror_named_local_image_is_admitted_by_its_repository_digest_when_the_pinned_name_is_absent(
+            self):
+        # (drift review, non-blocking 6) the pinned name may find no image in the
+        # local store while the digest exists under a proxy's own name: the digest
+        # is the content identity, the repository name is not (the coordinator's
+        # real mirror pull witnessed it end to end). One bounded
+        # `docker image list --digests` locates any row whose digest is the pin —
+        # the same admission rule as RepoDigests, repository-agnostic — and the
+        # admission re-inspects the located row's digest-sealed reference
+        # (`<repository>@<pin>`, answered by both image stores), NEVER the row's
+        # reported image ID: the classic store's ID is the config digest, not the
+        # index digest, so a by-ID lookup is store-dependent. The sealed reference
+        # stays the pinned canonical one; the mirror's own daemon ID is sealed as
+        # the diagnostic the record stores.
+        mirror_id = "sha256:" + "d" * 64
+        mirror_reference = "mirror.example/alpine@" + PIN.index_digest
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.images.probe_absent = True
+        harness.images.list_rows = [
+            {"Repository": "mirror.example/other", "Tag": "latest",
+             "Digest": "sha256:" + "e" * 64, "ID": "sha256:" + "c" * 64},
+            {"Repository": "mirror.example/alpine", "Tag": "3.22",
+             "Digest": PIN.index_digest, "ID": mirror_id},
+        ]
+        harness.images.spike_documents[mirror_reference] = probe_document(
+            ["mirror.example/alpine@" + PIN.index_digest], image_id=mirror_id)
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        commands = [call[0] for call in harness.images.calls]
+        # The fallback admission itself is exactly three bounded image commands
+        # (drift review, non-blocking 6): the pinned-reference inspect, the one
+        # bounded digest listing, and the re-inspection of the located row's
+        # digest-sealed reference through the ordinary content rules — the same
+        # projection the pinned inspect uses, so the third command reads the same
+        # members the first one would.
+        self.assertEqual(commands[0][1:], ("image", "inspect", "--format",
+                                           run_owner.PROBE_IMAGE_INSPECT_FORMAT,
+                                           PIN.reference))
+        self.assertEqual(commands[1][1:], ("image", "list", "--digests", "--no-trunc",
+                                           "--format", run_owner.PROBE_IMAGE_LIST_FORMAT))
+        self.assertEqual(commands[2][1:], ("image", "inspect", "--format",
+                                           run_owner.PROBE_IMAGE_INSPECT_FORMAT,
+                                           mirror_reference))
+        # A fourth image command exists, and it is a different stage, never a
+        # re-inspection of the probe image: the per-spike image inspection of the
+        # declared spike reference, through the planner's own projection (no
+        # RepoDigests — spike images are inspected, never admitted by digest).
+        # It is present in every successful qualification with at least one spike
+        # image, so the whole attempt's image commands are the three admission
+        # ones plus exactly one inspection per spike reference.
+        self.assertEqual(commands[3][1:], ("image", "inspect", "--format",
+                                           planner.IMAGE_INSPECT_FORMAT,
+                                           harness.spike_images[0]))
+        self.assertEqual(len(commands), 3 + len(harness.spike_images))
+        # the record seals the pinned canonical reference and the exact inspected ID
+        self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
+                         PIN.repo_digest)
+        self.assertEqual(outcome.record["probe_image_id"], mirror_id)
+        self.assertEqual(outcome.record["qualification_image"]["id"], mirror_id)
+
+    def test_an_absent_probe_image_without_a_matching_local_digest_keeps_the_pull_hint(self):
+        # the bounded digest list finds no row carrying the pinned digest (a locally
+        # built image answers its own digest; a proxy pull kept the docker.io name and
+        # was found by the pinned reference itself): the refusal is the untrusted
+        # one, and the detail keeps the operator's pull hint — and a malformed or
+        # oversized list is refused the same way, never parsed further.
+        for label, rows in (
+            ("a local image with its own digest",
+             [{"Repository": "mirror.example/other", "Tag": "latest",
+               "Digest": "sha256:" + "e" * 64, "ID": "sha256:" + "c" * 64}]),
+            ("an unparsable row", ["not json"]),
+        ):
+            with self.subTest(rows=label):
+                harness = OwnerHarness(self._fresh_cell())
+                harness.manifests = [{"implementation_digest": D0}] * 32
+                harness.images.probe_absent = True
+                harness.images.list_rows = rows
+                outcome = harness.call()
+                self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                self.assertIs(outcome.reason,
+                              run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+                self.assertIn("pull " + PIN.reference, outcome.detail)
+                self.assertIsNone(outcome.probe)
                 self.assertNoRecord(harness)
+
+    def test_the_digest_listing_itself_is_bounded_at_its_declared_rows_and_bytes(self):
+        # (drift review, non-blocking 6) the fallback's one listing is a bounded
+        # read: the owner's own row cap is read from the module, never restated here,
+        # and the admission keeps both of its sides — a list with a row count past the
+        # cap is refused the untrusted way, never parsed further (feeding a partial
+        # read could admit a present image by luck of an alphabet that survives
+        # truncation), while a list exactly at the cap still admits when the pinned
+        # digest appears in it. An output-limited answer refuses the same way; the
+        # byte cap is the formatter-level bound the runner enforces, asserted at the
+        # boundary in the fake (ADR-0075: no bound restated as a literal here).
+        cap = run_owner.MAX_IMAGE_LIST_ROWS
+        pinned = {"Repository": "mirror.example/alpine", "Tag": "3.22",
+                  "Digest": PIN.index_digest, "ID": "sha256:" + "d" * 64}
+        other = {"Repository": "mirror.example/other", "Tag": "latest",
+                 "Digest": "sha256:" + "e" * 64, "ID": "sha256:" + "c" * 64}
+        oversized = [other] * cap + [pinned]
+        with self.subTest(rows="one row past the cap"):
+            harness = OwnerHarness(self._fresh_cell())
+            harness.manifests = [{"implementation_digest": D0}] * 32
+            harness.images.probe_absent = True
+            harness.images.list_rows = oversized
+            outcome = harness.call()
+            self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+            self.assertIs(outcome.reason,
+                          run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+            self.assertIn("pull " + PIN.reference, outcome.detail)
+            self.assertIsNone(outcome.probe)
+            self.assertNoRecord(harness)
+        with self.subTest(rows="exactly the cap"):
+            harness = OwnerHarness(self._fresh_cell())
+            harness.manifests = [{"implementation_digest": D0}] * 32
+            harness.images.probe_absent = True
+            harness.images.list_rows = [other] * (cap - 1) + [pinned]
+            harness.images.spike_documents["mirror.example/alpine@" + PIN.index_digest] = \
+                probe_document(["mirror.example/alpine@" + PIN.index_digest],
+                                image_id=pinned["ID"])
+            outcome = harness.call()
+            self.assertIs(type(outcome), run_owner.RunQualificationBound)
+            self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
+                             PIN.repo_digest)
+        with self.subTest(answer="output-limited"):
+            harness = OwnerHarness(self._fresh_cell())
+            harness.manifests = [{"implementation_digest": D0}] * 32
+            harness.images.probe_absent = True
+            harness.images.list_rows = [pinned]
+            harness.images.list_output_limited = True
+            outcome = harness.call()
+            self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+            self.assertIs(outcome.reason,
+                          run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+            self.assertIsNone(outcome.probe)
+            self.assertNoRecord(harness)
+
+    def test_a_listing_row_with_no_usable_repository_name_is_skipped_never_fatal(self):
+        # a row whose Repository member is not a usable name carries no reference to
+        # inspect even when its digest is the pin, so it is skipped — never fatal to a
+        # list whose other rows name the pinned content (an unparsable row, by
+        # contrast, ends the listing: a partially parsable answer is never trusted)
+        mirror_id = "sha256:" + "d" * 64
+        mirror_reference = "mirror.example/alpine@" + PIN.index_digest
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.images.probe_absent = True
+        harness.images.list_rows = [
+            {"Repository": None, "Tag": "latest", "Digest": PIN.index_digest,
+             "ID": "sha256:" + "c" * 64},
+            {"Repository": "mirror.example/alpine", "Tag": "3.22",
+             "Digest": PIN.index_digest, "ID": mirror_id},
+        ]
+        harness.images.spike_documents[mirror_reference] = probe_document(
+            ["mirror.example/alpine@" + PIN.index_digest], image_id=mirror_id)
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
+                         PIN.repo_digest)
+
+    def test_a_timed_out_probe_inspection_is_never_admitted_even_when_its_output_parses(self):
+        # the read ends the attempt on its timeout flag alone: a killed inspection
+        # may hold a prefix that still parses (or a document the daemon completed
+        # writing before the kill), and it must be refused — never admitted — because
+        # the bounded read is over, so the inspection's own answer cannot be trusted
+        # to be the whole one
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.images.probe_document = probe_document(
+            ["mirror.example/alpine@" + PIN.index_digest])
+        harness.images.probe_timed_out = True
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason,
+                      run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+        self.assertIsNone(outcome.probe)
+        self.assertNoRecord(harness)
+
+    def test_a_digest_listing_that_failed_is_never_trusted_even_when_its_rows_parse(self):
+        # (drift review, non-blocking 6) the one bounded listing is trusted for the
+        # located digest-sealed reference alone and only from a successful answer:
+        # a listing that exited nonzero must end the attempt the untrusted way even
+        # though its stdout rows carry the pinned digest and would otherwise
+        # admit — never a partial or failed answer's leftover rows
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        mirror_id = "sha256:" + "d" * 64
+        mirror_reference = "mirror.example/alpine@" + PIN.index_digest
+        harness.images.probe_absent = True
+        harness.images.list_rows = [{"Repository": "mirror.example/alpine",
+                                     "Tag": "3.22", "Digest": PIN.index_digest,
+                                     "ID": mirror_id}]
+        harness.images.list_exits_nonzero = True
+        harness.images.spike_documents[mirror_reference] = probe_document(
+            ["mirror.example/alpine@" + PIN.index_digest], image_id=mirror_id)
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason,
+                      run_owner.RunQualificationReason.PROBE_IMAGE_UNTRUSTED)
+        self.assertIn("pull " + PIN.reference, outcome.detail)
+        self.assertIsNone(outcome.probe)
+        self.assertNoRecord(harness)
+
+    def test_several_mirror_named_copies_of_the_pinned_digest_admit_through_the_sorted_first_reference(
+            self):
+        # (the coordinator's real mirror evidence, drift review non-blocking 6) more
+        # than one repository may carry the pinned digest — the same content pulled
+        # through different proxies — and any of them admits; the choice must be
+        # deterministic, the sorted-first repository, so the same store answers the
+        # same re-inspection on every attempt: the third command names the
+        # sorted-first reference, never the later-named one that happened to be
+        # listed first
+        mirror_id = "sha256:" + "d" * 64
+        chosen = "mirror-a.example/alpine@" + PIN.index_digest
+        listed_later = "mirror-b.example/alpine@" + PIN.index_digest
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.images.probe_absent = True
+        harness.images.list_rows = [
+            {"Repository": "mirror-b.example/alpine", "Tag": "3.22",
+             "Digest": PIN.index_digest, "ID": "sha256:" + "b" * 64},
+            {"Repository": "mirror-a.example/alpine", "Tag": "3.22",
+             "Digest": PIN.index_digest, "ID": mirror_id},
+        ]
+        harness.images.spike_documents[chosen] = probe_document(
+            ["mirror-a.example/alpine@" + PIN.index_digest], image_id=mirror_id)
+        harness.images.spike_documents[listed_later] = probe_document(
+            ["mirror-b.example/alpine@" + PIN.index_digest],
+            image_id="sha256:" + "e" * 64)
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        commands = [call[0] for call in harness.images.calls]
+        self.assertEqual(commands[2][-1], chosen,
+                         "the sorted-first repository is re-inspected")
+        self.assertEqual(outcome.record["qualification_image"]["id"], mirror_id,
+                         "the re-inspected mirror's own daemon ID is the sealed one")
 
     def test_the_probe_image_inspection_timeout_is_the_remaining_budget(self):
         harness = OwnerHarness(self._fresh_cell())
@@ -394,25 +668,41 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
     def test_sealed_spike_rows_refuse_every_non_conforming_form_at_load(self):
         # (the registered /3 schema owns the closed row shape — the field set, the
         # identity digest, the os enum and the no-volumes constant are the contract
-        # conformance harness's — so these variants stay only for the semantics the
-        # schema cannot express) the loader's row rules refuse a platform that is not
-        # the bound runtime's with the closed record error — a canonical platform is
-        # a cross-field identity with the observed runtime, never a plain shape — and
-        # the refusal is the closed one, never a leaked exception.
-        facts = runtime()
-        conforming = {"reference": "python:3.12-slim", "id": D1, "raw_os": "linux",
-                      "os": "linux", "raw_architecture": "x86_64", "architecture": "amd64",
-                      "declared_volumes": []}
-        self.assertEqual(run_owner._spike_image_row(dict(conforming), facts, "spike image"),
-                         conforming)
+        # conformance harness's — so the owner keeps only the row behaviour it owns:
+        # the cross-field identity with the observed runtime, at the loader itself)
+        # a sealed record whose row names a platform that is not the bound runtime's,
+        # or one whose image declares volumes, is refused by load_record from its
+        # own published state, with the closed record error, never a leaked exception
+        # (drift review, non-blocking 4: through load_record, never a private
+        # validator).
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        store = run_owner.RunQualificationStore(harness.root)
+        digest = outcome.record["qualification_record_digest"]
+        path = store.records / (digest.removeprefix("sha256:") + ".json")
+        payload = run_owner.fsio.dump_json(outcome.record)
+        rows = list(outcome.record["spike_images"])
         variants = (
             ("a foreign canonical platform",
-             {**conforming, "raw_architecture": "aarch64", "architecture": "arm64"}),
+             [{**rows[0], "raw_architecture": "aarch64", "architecture": "arm64"}]),
+            ("declared volumes", [{**rows[0], "declared_volumes": ["/data"]}]),
         )
-        for label, row in variants:
+        for label, mutated in variants:
             with self.subTest(row=label):
+                body = dict(outcome.record)
+                body["spike_images"] = mutated
+                path.write_bytes(run_owner.fsio.dump_json(body))
+                path.chmod(common.MODE_FILE)
                 with self.assertRaises(authority.GenericQualificationError):
-                    run_owner._spike_image_row(row, facts, "spike image")
+                    store.load_record(digest, project_id="project-1", run_id="run-1",
+                                      generation=1)
+                path.write_bytes(payload)
+                path.chmod(common.MODE_FILE)
+                self.assertEqual(store.load_record(digest, project_id="project-1",
+                                                  run_id="run-1", generation=1),
+                                 outcome.record)
 
     # --- stale daemon, version change, implementation drift ------------------
 
@@ -499,6 +789,33 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         for record in (base, minor_update):
             self.assertEqual(run_owner.server_version_major(record["runtime"]["server_version"]),
                              major)
+        # the real-world daemon spellings stay literal here (drift review,
+        # non-blocking 3): a vendor-suffixed and a pre-release version keep the same
+        # major binding, and a same-major pair that differs only in the suffix never
+        # rebinds — the derived forms alone would let a mutant that requires the whole
+        # string numeric-dotted pass. A leading zero in the major is normalized away
+        # before the binding ever sees it (non-blocking 2): the invariant is numeric,
+        # never textual.
+        self.assertEqual(run_owner.server_version_major("0" + major + ".7"), major,
+                         "the major is the normalized integer, never the literal text")
+        for spelling in (major + ".5.1-desktop", major + ".0.0-rc.1",
+                         "0" + major + ".5.1"):
+            with self.subTest(spelling=spelling):
+                update = rebuilt(spelling)
+                self.assertEqual(base["execution_binding_digest"],
+                                 update["execution_binding_digest"],
+                                 "a same-major spelling keeps the bound facts")
+                self.assertNotEqual(base["qualification_record_digest"],
+                                    update["qualification_record_digest"],
+                                    "a changed diagnostic changes the record")
+                self.assertEqual(run_owner.server_version_major(spelling), major,
+                                 "the real spelling still names its major")
+        for one, other in ((major + ".0.0-rc.1", major + ".0.0"),
+                           (major + ".5.1-desktop", major + ".5.1")):
+            with self.subTest(suffix_pair=(one, other)):
+                self.assertEqual(rebuilt(one)["execution_binding_digest"],
+                                 rebuilt(other)["execution_binding_digest"],
+                                 "a suffix change alone never rebinds")
 
         major_update = rebuilt(str(int(major) + 1) + ".0")
         self.assertNotEqual(major_update["execution_binding_digest"],
@@ -516,6 +833,22 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertIs(type(outcome), run_owner.RunQualificationFailed)
         self.assertIs(outcome.reason, run_owner.RunQualificationReason.CAPABILITY_UNAVAILABLE)
         self.assertIsNone(outcome.probe)
+        self.assertNoRecord(harness)
+
+    def test_a_version_without_a_derivable_major_is_refused_at_the_initial_admission(self):
+        # (drift review, non-blocking 1) the major is derived once at the facts'
+        # admission, before the trusted probe image is ever inspected: a `dev` daemon
+        # ends the attempt with the capability reason at the admission itself — never
+        # after a whole probe run — and no Docker image command has run at all
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.inspector_facts["server_version"] = "dev"
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.CAPABILITY_UNAVAILABLE)
+        self.assertIsNone(outcome.probe)
+        self.assertEqual(harness.images.calls, [],
+                         "the refusal precedes every Docker image command")
         self.assertNoRecord(harness)
 
     def test_post_probe_version_change_is_stale_daemon_and_not_a_probe_failure(self):

@@ -111,7 +111,7 @@
         "reference": {"type": "string", "minLength": 1, "maxLength": 255},
         "id": {
           "$ref": "#/$defs/digest",
-          "description": "The full daemon image ID observed at qualification: a diagnostic. The row is inspected, never probed, and carries no capability list."
+          "description": "The full daemon image ID observed at qualification: a diagnostic, never a spike admission gate. The row is inspected, never probed, and carries no capability list; a later per-spike resolution compares this stored ID, it never re-derives it from a re-observed image (spike images may be rebuilt without requalifying)."
         },
         "raw_os": {"type": "string", "minLength": 1},
         "os": {"enum": ["linux"]},

@@ -66,6 +66,13 @@ _MAJOR_VERSION = re.compile(r"^[0-9]+$")
 #: on a ``RepoDigests`` entry carrying the pinned index digest under any repository
 #: name (the digest is the image's content identity, the repository name is not),
 #: never on the daemon-local ``Id``; the record stores both.
+PROBE_IMAGE_LIST_FORMAT = "{{json .}}"
+#: The bounded `docker image list --digests` fallback (drift review, non-blocking 6): the
+#: answer's bytes and rows are each capped, and an oversized or unparsable list refuses
+#: the admission rather than risk a partial read.
+MAX_IMAGE_LIST_BYTES = 256 * 1024
+MAX_IMAGE_LIST_ROWS = 512
+
 PROBE_IMAGE_INSPECT_FORMAT = (
     '{"Id":{{json .Id}},"Os":{{json .Os}},"Architecture":{{json .Architecture}},'
     '"RepoDigests":{{json .RepoDigests}},"Volumes":{{json (index .Config "Volumes")}}}'
@@ -97,12 +104,17 @@ def server_version_major(value: object) -> str:
     stays a diagnostic in the record's runtime facts; within one attempt the exact
     version must still match (the after-probe re-observation), which this derivation
     never relaxes. A version with no numeric major part — a private build, a garbage
-    answer — can seal no binding and fails closed."""
+    answer — can seal no binding and fails closed.
+
+    The major is the normalized integer, never the literal text (drift review,
+    non-blocking 2): ``029.1`` and ``29.1`` bind the same ``29``, so the invariant is
+    numeric rather than textual.
+    """
     major = value.partition(".")[0] if type(value) is str else None
     if major is None or _MAJOR_VERSION.fullmatch(major) is None:
         raise authority.GenericQualificationError(
             "Docker server major version is unavailable: " + repr(value))
-    return major
+    return str(int(major))
 
 
 class RunQualificationReason(str, Enum):
@@ -897,39 +909,130 @@ def _final_reobservation(runtime: Mapping[str, Any], implementation_digest: str,
                           "the loaded release differs from the qualified release")
 
 
+def _read_probe_inspect(argv: tuple, runner: process.Runner, environment: dict,
+                        deadline: float, clock: Callable[[], float]) -> object | None:
+    """One bounded ``docker image inspect`` read: its parsed JSON object, or ``None``
+    when the named reference yields no usable document (a failed read, a nonzero
+    exit, a truncated or oversized answer, or an unreadable JSON object). No
+    admission happens here - the caller owns the content rules."""
+    try:
+        result = runner.run(argv, timeout_seconds=min(10.0, deadline - clock()),
+                            output_limit_bytes=authority.MAX_POINTER_BYTES, env=environment)
+    except Exception:
+        return None
+    try:
+        result = qualification._command_result(result, "the trusted probe image inspection")
+    except qualification.GenericQualificationFailure:
+        return None
+    if result.timed_out or result.output_limited or result.returncode != 0:
+        return None
+    try:
+        return admission.json_object(result.stdout.data)
+    except Exception:
+        return None
+
+
+def _locate_probe_image_by_repository_digest(runtime: Mapping[str, Any], pin: Any,
+                                             *, runner: process.Runner, environment: dict,
+                                             deadline: float, clock: Callable[[], float]) -> str | None:
+    """The one bounded ``docker image list --digests`` fallback (drift review,
+    non-blocking 6): when the pinned reference finds no local image, the digest is
+    still the image's content identity, so the list may name it under some other
+    repository - a proxy's own pull name - whose reported repository digest is the
+    pin's. Returns the located row's digest-sealed reference to inspect -
+    ``<repository>@<pinned index digest>`` - or ``None`` when no row carries the
+    pinned digest or the list is unusable (truncated, oversized, or unparsable:
+    never a partial admission). The row's reported image ID is never trusted or
+    returned: the classic store's ID is the config digest, not the index digest
+    (the digest-sealed reference is the one form both image stores answer — the
+    coordinator's real mirror pull on Docker Desktop 29.7.2/containerd witnessed
+    it). More than one matching repository is fine (same content): the choice is
+    deterministic, the sorted-first repository. The located reference is
+    re-inspected by the ordinary admission rules, which alone decide."""
+    _remain(deadline, clock, "the trusted probe image digest listing")
+    argv = (runtime["docker_cli"], "image", "list", "--digests", "--no-trunc", "--format",
+            PROBE_IMAGE_LIST_FORMAT)
+    try:
+        result = runner.run(argv, timeout_seconds=min(10.0, deadline - clock()),
+                            output_limit_bytes=MAX_IMAGE_LIST_BYTES, env=environment)
+    except Exception:
+        return None
+    try:
+        # the listing's bounded read re-enters through the authority's pointer
+        # admission at its OWN fetch bound, never the single-pointer 64 KiB one:
+        # a digest listing the 256 KiB fetch legitimately returns (hundreds of
+        # rows) must not be refused as malformed, while an answer past the bound
+        # refuses the same closed way
+        result = authority._admit_command_result(
+            result, MAX_IMAGE_LIST_BYTES, "the trusted probe image digest listing")
+        if result.timed_out or result.output_limited or result.returncode != 0:
+            return None
+        lines = result.stdout.data.strip().split(b"\n")
+        if not lines or lines == [b""]:
+            return None
+        if len(lines) > MAX_IMAGE_LIST_ROWS:
+            return None
+        repositories: set[str] = set()
+        for line in lines:
+            try:
+                row = admission.json_object(line)
+            except Exception:
+                return None
+            if (type(row.get("Repository")) is not str
+                    or row.get("Digest") != pin.index_digest):
+                continue
+            repositories.add(row["Repository"])
+        if not repositories:
+            return None
+        # deterministic among equal-density mirror names: the sorted-first repository
+        return min(repositories) + "@" + pin.index_digest
+    except Exception:
+        return None
+    return None
+
+
 def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: process.Runner,
                       deadline: float, clock: Callable[[], float]) -> tuple[dict[str, Any], str]:
     """Verify the trusted probe image per spec section 4.3, under the pinned endpoint.
 
     One ``docker image inspect`` of the exact pinned reference must show the pinned
-    index digest in some ``RepoDigests`` entry — under any repository name, because
+    index digest in some ``RepoDigests`` entry - under any repository name, because
     the digest is the image's content identity and the repository name is not (a
     mirror or proxy pull reports the digest under its own name), never on the
-    daemon-local ``Id`` — plus the server-native platform and no declared volumes;
-    anything else — including a locally built, loaded or retagged image, which carries
-    no ``RepoDigests`` entry with the pinned digest — is ``probe-image-untrusted``.
+    daemon-local ``Id`` - plus the server-native platform and no declared volumes;
+    anything else, including a locally built, loaded or retagged image (which carries
+    no ``RepoDigests`` entry with the pinned digest), is ``probe-image-untrusted``.
+
+    When the pinned reference finds no local image at all, one bounded
+    ``docker image list --digests`` locates the pinned digest under any repository
+    name and the admission inspects the located row's digest-sealed reference —
+    ``<repository>@<pinned digest>``, the one form both image stores answer; the
+    row's reported ID is never trusted, because the classic store's ID is the
+    config digest, not the index digest — through the same content rules (drift
+    review, non-blocking 6; the coordinator's real mirror pull on Docker Desktop
+    29.7.2's containerd store witnessed the digest-sealed reference answering
+    where the pinned one does not).
     """
     _remain(deadline, clock, "the trusted probe image inspection")
     pin = probe_image.pinned_probe_image()
     environment = {"LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime["endpoint"],
                    "DOCKER_CONFIG": str(config)}
-    argv = (runtime["docker_cli"], "image", "inspect", "--format",
-            PROBE_IMAGE_INSPECT_FORMAT, pin.reference)
     detail = ("the pinned probe image is not admitted locally; pull " + pin.reference
               + ", then qualify")
+    argv = (runtime["docker_cli"], "image", "inspect", "--format",
+            PROBE_IMAGE_INSPECT_FORMAT, pin.reference)
+    document = _read_probe_inspect(argv, runner, environment, deadline, clock)
+    if document is None:
+        located = _locate_probe_image_by_repository_digest(
+            runtime, pin, runner=runner, environment=environment,
+            deadline=deadline, clock=clock)
+        if located is None:
+            raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail)
+        argv = (*argv[:-1], located)
+        document = _read_probe_inspect(argv, runner, environment, deadline, clock)
+        if document is None:
+            raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail)
     try:
-        result = runner.run(argv, timeout_seconds=min(10.0, deadline - clock()),
-                             output_limit_bytes=authority.MAX_POINTER_BYTES, env=environment)
-    except Exception as exc:
-        raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail) from exc
-    try:
-        result = qualification._command_result(result, "the trusted probe image inspection")
-    except qualification.GenericQualificationFailure as exc:
-        raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail) from exc
-    if result.timed_out or result.output_limited or result.returncode != 0:
-        raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail)
-    try:
-        document = admission.json_object(result.stdout.data)
         image_id = validate_digest256(document.get("Id"))
         digests = document.get("RepoDigests")
         if (type(digests) is not list or len(digests) > 128
@@ -1165,6 +1268,18 @@ def _qualify_locked(
         # kept reason and has already recovered its prior journals.
         stage[0] = "the authority admission"
         runtime = _admit_observed_facts(observed)
+        # The binding's server major (operator decision, drift "Server version") is
+        # derived once, here at the facts' admission: a daemon whose version has no
+        # derivable major — a private build, a garbage answer — ends the attempt with
+        # the capability reason before any Docker image command runs, never after a
+        # whole probe run (drift review, non-blocking 1). The builder re-derives the
+        # same value for the execution binding; within one attempt the exact version
+        # must still match (the after-probe re-observation).
+        try:
+            server_version_major(runtime["server_version"])
+        except authority.GenericQualificationError as exc:
+            raise _RunFailure(RunQualificationReason.CAPABILITY_UNAVAILABLE,
+                              str(exc)) from exc
         # The frozen loaded release (E4): one per-process freeze, compared against disk;
         # an unprovable loaded release can never be bound.
         stage[0] = "the loaded release check"
