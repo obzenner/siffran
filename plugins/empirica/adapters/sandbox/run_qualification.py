@@ -108,16 +108,26 @@ def server_version_major(value: object) -> str:
 class RunQualificationReason(str, Enum):
     """The closed failure values this owner can return: spec section 5.1 where named,
     plus the kept deadline, egress, cleanup, image-resolution and capability values.
-    Additive only; existing values are never collapsed or rewritten."""
+    Additive only; existing values are never collapsed or rewritten.
+
+    The attempt-failure values are bound to the public reason registry — the
+    ``GenericUnavailableReason`` members whose closed set the response schema mirrors
+    as ``qualification.last_failure.reason`` (``QUALIFICATION_FAILURE_REASONS``) — by
+    member, never by a second literal: renaming or removing one in the registry fails
+    this module at import instead of drifting. The owner never emits the
+    CAS/conflict value: the binding CAS the caller performs owns it. The remaining
+    values are owner-side admission and diagnostic refusals the public registry does
+    not carry."""
     INVALID_INPUT = "invalid-input"
-    PROBE_IMAGE_UNTRUSTED = "probe-image-untrusted"
-    DOCKER_UNREACHABLE = "docker-unreachable"
+    PROBE_IMAGE_UNTRUSTED = application.GenericUnavailableReason.PROBE_IMAGE_UNTRUSTED.value
+    DOCKER_UNREACHABLE = application.GenericUnavailableReason.DOCKER_UNREACHABLE.value
     RESOURCE_LIMITS_UNAVAILABLE = "resource-limits-unavailable"
     CAPABILITY_UNAVAILABLE = "capability-unavailable"
     SANDBOX_UNSAFE = "sandbox-scaffolding-unsafe"
-    STALE_DAEMON = "qualification-stale-daemon"
-    STALE_IMPLEMENTATION = "qualification-stale-implementation"
-    PROBE_FAILED = "qualification-probe-failed"
+    STALE_DAEMON = application.GenericUnavailableReason.QUALIFICATION_STALE_DAEMON.value
+    STALE_IMPLEMENTATION = \
+        application.GenericUnavailableReason.QUALIFICATION_STALE_IMPLEMENTATION.value
+    PROBE_FAILED = application.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value
     IMAGE_NOT_LOCAL = "image-not-local"
     IMAGE_REFERENCE_AMBIGUOUS = "image-reference-ambiguous"
     IMAGE_MALFORMED = "image-malformed"
@@ -128,9 +138,9 @@ class RunQualificationReason(str, Enum):
     IMAGE_DECLARES_VOLUMES = "image-declares-volumes"
     IMAGE_TOOL_MISSING = "image-tool-missing"
     IMAGE_UID_UNUSABLE = "image-uid65534-unusable"
-    EGRESS_UNAVAILABLE = "network-egress-unavailable"
-    CLEANUP_UNAVAILABLE = "cleanup-unavailable"
-    DEADLINE_EXCEEDED = "qualification-deadline-exceeded"
+    EGRESS_UNAVAILABLE = application.GenericUnavailableReason.NETWORK_EGRESS_UNAVAILABLE.value
+    CLEANUP_UNAVAILABLE = application.GenericUnavailableReason.CLEANUP_UNAVAILABLE.value
+    DEADLINE_EXCEEDED = application.GenericUnavailableReason.QUALIFICATION_DEADLINE_EXCEEDED.value
 
 # Kept `/2` values this owner forwards unchanged to its outcome.
 _MAPPED_QUALIFICATION_REASONS = {
