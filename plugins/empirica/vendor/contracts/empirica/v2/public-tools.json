@@ -76,7 +76,7 @@
     },
     "environment": {
       "operation": "environment",
-      "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing recorded.",
+      "description": "Submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after configuration approval and investigation admission. A profile above the host's StartRun.spike_profile ceiling is refused with profile-not-allowed. Every submission is a new revision: a new revision supersedes one still pending, and approving one revision never approves a later replay of the same body (an accepted, rejected then accepted-again proposal is three revisions). A deliberative run's revision is pending until the human's private receipt approves or rejects it; an auto run derives approval from provenance and fabricates no receipt.",
       "example": {
         "kind": "environment",
         "payload": {
@@ -94,7 +94,7 @@
     },
     "qualify": {
       "operation": "qualify",
-      "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing attempted.",
+      "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
       "example": {
         "kind": "qualify"
       }
@@ -842,7 +842,7 @@
                 ]
               },
               {
-                "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing recorded.",
+                "description": "Submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after configuration approval and investigation admission. A profile above the host's StartRun.spike_profile ceiling is refused with profile-not-allowed. Every submission is a new revision: a new revision supersedes one still pending, and approving one revision never approves a later replay of the same body (an accepted, rejected then accepted-again proposal is three revisions). A deliberative run's revision is pending until the human's private receipt approves or rejects it; an auto run derives approval from provenance and fabricates no receipt.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -950,7 +950,7 @@
                 ]
               },
               {
-                "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing attempted.",
+                "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -1447,7 +1447,7 @@
                 ]
               },
               {
-                "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing recorded.",
+                "description": "Submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after configuration approval and investigation admission. A profile above the host's StartRun.spike_profile ceiling is refused with profile-not-allowed. Every submission is a new revision: a new revision supersedes one still pending, and approving one revision never approves a later replay of the same body (an accepted, rejected then accepted-again proposal is three revisions). A deliberative run's revision is pending until the human's private receipt approves or rejects it; an auto run derives approval from provenance and fabricates no receipt.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [
@@ -1555,7 +1555,7 @@
                 ]
               },
               {
-                "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing attempted.",
+                "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
                 "type": "object",
                 "additionalProperties": false,
                 "required": [

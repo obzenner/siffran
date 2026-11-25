@@ -78,7 +78,9 @@
         "host.repair_context",
         "governance.propose",
         "human.confirm_evidence",
-        "convergence.report"
+        "convergence.report",
+        "environment.propose",
+        "qualification.request"
       ],
       "untrusted_delimiters": {
         "open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
@@ -147,5 +149,5 @@
       }
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  empirica_observe kind=configure_run (a raise above the approved ceilings: needs a person this host can ask)\n  Agent {\"subagent_type\":\"empirica:empirica-auditor\",\"description\":\"Audit\",\"prompt\":\"Audit the host-provided dossier.\"}\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run\n  human: confirmation\n  report_convergence intent=report_convergence"
+  "text": "Allow (converged=false) active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes unavailable; no spike requests (research, graph, honest stop still allowed)\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  host: StartRun\n  empirica_observe kind=graph\n  empirica_read GetRun\n  empirica_observe kind=route\n  empirica_observe kind=investigate\n  empirica_observe kind=research\n  empirica_observe kind=spike_request\n  empirica_observe kind=spike_request\n  empirica_observe kind=configure_run (a raise above the approved ceilings: needs a person this host can ask)\n  Agent {\"subagent_type\":\"empirica:empirica-auditor\",\"description\":\"Audit\",\"prompt\":\"Audit the host-provided dossier.\"}\n  host: child_event\n  host: child_reserve\n  report_convergence intent=stop\n  host: governance_context\n  empirica_observe kind=configure_run\n  human: confirmation\n  report_convergence intent=report_convergence\n  empirica_observe kind=environment\n  empirica_observe kind=qualify"
 }

@@ -13,6 +13,13 @@ from typing import Any
 from . import spike_plan
 from .canonical import canonical_digest
 from .contract_bounds import (
+    ENVIRONMENT_DECISION_PAYLOAD_DOCUMENT_DIGEST_PATTERNS,
+    ENVIRONMENT_DECISION_PAYLOAD_PROPOSAL_DIGEST_PATTERNS,
+    ENVIRONMENT_DECISION_PAYLOAD_RECEIPT_ID_MAX_LENGTH,
+    ENVIRONMENT_DECISION_PAYLOAD_RECEIPT_ID_MIN_LENGTH,
+    ENVIRONMENT_DECISION_PAYLOAD_REVISION_MINIMUM,
+    ENVIRONMENT_DECISION_PAYLOAD_RUN_ID_MAX_LENGTH,
+    ENVIRONMENT_DECISION_PAYLOAD_RUN_ID_MIN_LENGTH,
     ENVIRONMENT_HISTORY_MAX_ITEMS,
     ENVIRONMENT_PROPOSAL_PREPARATION_MAX_ITEMS,
     ENVIRONMENT_PROPOSAL_PREPARATION_MAX_LENGTH,
@@ -21,8 +28,31 @@ from .contract_bounds import (
     ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_MAX_ITEMS,
     QUALIFICATION_ATTEMPTS_MAX_ITEMS,
 )
+from .governance import plain as _plain
 
 PROPOSAL_SCHEMA = "empirica.environment-proposal/1"
+
+#: The run state's environment member states (spec §4.2), the one vocabulary ``core.run`` owns.
+PENDING, APPROVED, REJECTED = "pending", "approved", "rejected"
+
+#: The closed Block reason codes the environment admission decides with (spec §5.1). The public
+#: registry owns every reason's text, sections and recovery rows; these are the core's own
+#: spellings of the code identifiers it emits, exactly as every other core reason constant.
+PROFILE_NOT_ALLOWED = "profile-not-allowed"
+ENVIRONMENT_REQUIRED = "environment-required"
+ENVIRONMENT_PENDING = "environment-pending"
+ENVIRONMENT_REJECTED = "environment-rejected"
+QUALIFICATION_REQUIRED = "qualification-required"
+QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
+
+#: The private receipt artifacts the environment deliberation records (ADR-0072's write-first
+#: discipline, as the configuration machinery models it): one presentation of a pending revision,
+#: then one decision naming that presentation id. Cancel, timeout, a missing surface and stale
+#: replies are never decisions — they arrive as no artifact at all and leave the revision pending.
+PRESENTATION_KIND = "environment_presentation"
+DECISION_KIND = "environment_decision"
+_APPROVE, _REJECT = "approve", "reject"
+_PRESENT_OUTCOMES = ("present", _APPROVE, _REJECT)
 
 #: The bounds are the contract's own word (contracts/empirica/v2/state.schema.json, regenerated straight from
 #: its annotated definitions into core.contract_bounds by ``make contract-bounds``): neither side rewrites the
@@ -174,3 +204,95 @@ def next_revision(history_revisions: object) -> int:
             raise EnvironmentProposalError("environment proposal history is malformed")
         highest = max(highest, item)
     return highest + 1
+
+
+def validate_decision(value: object) -> dict[str, object]:
+    """The closed private environment receipt shape — the contract-conformance harness's validator
+    (``x-core-validator``, ADR-0075): exactly the ``environmentDecisionPayload`` the request schema
+    owns, every bound and pattern read from the generated module, never restated here. Behaviour
+    (the write-first ordering, replay and staleness) is core-only and lives in the decision plan."""
+    if type(value) is not dict or frozenset(value) != frozenset(
+            ("run_id", "receipt_id", "revision", "proposal_digest", "outcome", "document_digest")):
+        raise EnvironmentProposalError("environment decision is not closed")
+    for name, low, high in (("run_id", ENVIRONMENT_DECISION_PAYLOAD_RUN_ID_MIN_LENGTH,
+                            ENVIRONMENT_DECISION_PAYLOAD_RUN_ID_MAX_LENGTH),
+                           ("receipt_id", ENVIRONMENT_DECISION_PAYLOAD_RECEIPT_ID_MIN_LENGTH,
+                            ENVIRONMENT_DECISION_PAYLOAD_RECEIPT_ID_MAX_LENGTH)):
+        text = value[name]
+        if type(text) is not str or not low <= len(text) <= high:
+            raise EnvironmentProposalError("environment decision member is malformed")
+    revision = value["revision"]
+    if type(revision) is not int or revision < ENVIRONMENT_DECISION_PAYLOAD_REVISION_MINIMUM:
+        raise EnvironmentProposalError("environment decision revision is malformed")
+    for name, patterns in (("proposal_digest", ENVIRONMENT_DECISION_PAYLOAD_PROPOSAL_DIGEST_PATTERNS),
+                           ("document_digest", ENVIRONMENT_DECISION_PAYLOAD_DOCUMENT_DIGEST_PATTERNS)):
+        digest_value = value[name]
+        if type(digest_value) is not str or not re.fullmatch(patterns[0], digest_value):
+            raise EnvironmentProposalError("environment decision digest is malformed")
+    if value["outcome"] not in _PRESENT_OUTCOMES:
+        raise EnvironmentProposalError("environment decision outcome is unknown")
+    return value
+
+
+def profile_ceiling(invocation: object) -> object:
+    """The run's host profile ceiling bound once at StartRun into its invocation (spec §4.4): a
+    profile id, or ``None`` — absent reads as the isolated ceiling, never a guess. Never author
+    data: only the StartRun command member reaches state."""
+    if not isinstance(invocation, (dict, tuple)) and not hasattr(invocation, "get"):
+        return None
+    return invocation.get("spike_profile")
+
+
+def qualify_admission(state: object) -> str | None:
+    """The pure ``qualify`` admission decision (spec §5, the effect itself is E9's): admissible
+    only for the latest approved revision with attempts remaining; otherwise the one closed reason
+    that names what is missing. Reads the member the run state carries and derives nothing else, so
+    E9's transaction admits and charges against exactly this decision. Attempts used are the
+    append-only rows, bounded by the run ceiling the contract owns (32, generated)."""
+    member = getattr(state, "environment", None)
+    if member is None:
+        return ENVIRONMENT_REQUIRED
+    member_state = member["state"]
+    if member_state == PENDING:
+        return ENVIRONMENT_PENDING
+    if member_state == REJECTED:
+        return ENVIRONMENT_REJECTED
+    if len(state.qualification_attempts) >= MAX_QUALIFICATION_ATTEMPTS:
+        return QUALIFICATION_ATTEMPTS_EXHAUSTED
+    return None
+
+
+def spike_prerequisite(state: object) -> str | None:
+    """The pure spike prerequisite (spec §5.1, decision only; per-spike image resolution is E10):
+    on a run with no active qualified binding, ``environment-required`` when no approved
+    environment revision exists (the way on is a proposal) and ``qualification-required`` once one
+    is approved but nothing is bound (the way on is a qualification attempt)."""
+    if spike_plan.spike_backend_kind(state.spike_backend) == "qualified":
+        return None
+    member = getattr(state, "environment", None)
+    if member is not None and member["state"] == APPROVED:
+        return QUALIFICATION_REQUIRED
+    return ENVIRONMENT_REQUIRED
+
+
+def revision_member(proposal_body: object, revision: int, *, approved: bool) -> dict[str, object]:
+    """One closed {revision, proposal, digest, state, receipt_id} member for a new revision: the
+    canonical proposal body, its canonical digest, pending in a deliberative run, and approved with
+    no receipt (none is ever fabricated, spec §5) where the core derived the approval in auto."""
+    return {"revision": revision,
+            "proposal": canonical_proposal(proposal_body),
+            "digest": proposal_digest(proposal_body),
+            "state": APPROVED if approved else PENDING,
+            "receipt_id": None}
+
+
+def superseded_history(state: object) -> tuple[dict[str, object], ...]:
+    """The member the new revision supersedes, appended to the immutable history within its bound:
+    verified rows only, the oldest dropped first when the bound is full so a run submitting a
+    further revision never corrupts itself — the revision numbers keep their monotonic word."""
+    member = getattr(state, "environment", None)
+    if member is None:
+        return tuple(state.environment_history)
+    rows = list(state.environment_history) + [_plain(member)]
+    overflow = len(rows) - MAX_ENVIRONMENT_HISTORY
+    return tuple(rows[max(0, overflow):])

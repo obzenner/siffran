@@ -380,7 +380,7 @@
       },
       "environment": {
         "operation": "environment",
-        "description": "Coming: submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after investigation admission. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing recorded.",
+        "description": "Submit one closed environment proposal (profile, 1-16 already-local spike images, 1-8 preparation steps, one rationale) as a new revision after configuration approval and investigation admission. A profile above the host's StartRun.spike_profile ceiling is refused with profile-not-allowed. Every submission is a new revision: a new revision supersedes one still pending, and approving one revision never approves a later replay of the same body (an accepted, rejected then accepted-again proposal is three revisions). A deliberative run's revision is pending until the human's private receipt approves or rejects it; an auto run derives approval from provenance and fabricates no receipt.",
         "example": {
           "kind": "environment",
           "payload": {
@@ -398,7 +398,7 @@
       },
       "qualify": {
         "operation": "qualify",
-        "description": "Coming: request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Not yet available: refused in every active run state with environment.not_available (a terminal run is inert), nothing attempted.",
+        "description": "Request one host qualification attempt of the latest approved environment revision; the host owns the attempt and its binding, and the action carries no payload. Admissible only for the latest approved revision with attempts remaining; otherwise the closed reason is environment-required (no revision was ever approved), environment-pending, environment-rejected, or qualification-attempts-exhausted. While the host effect is still coming, an admissible qualify refuses with environment.not_available and nothing is attempted.",
         "example": {
           "kind": "qualify"
         }
@@ -1058,6 +1058,49 @@
       "surface": {
         "tool": "report_convergence",
         "intent": "report_convergence"
+      },
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      }
+    },
+    "environment.propose": {
+      "description": "Submit one closed environment proposal (a Docker profile under the host's StartRun.spike_profile ceiling, 1-16 already-local spike image references, 1-8 unverified preparation steps, a nonblank rationale) as a new revision: a deliberative run's human then approves or rejects it, and an auto run derives the approval from provenance and fabricates no receipt.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "environment"
+      },
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "profile_id",
+          "spike_images",
+          "preparation",
+          "rationale"
+        ],
+        "properties": {
+          "profile_id": {
+            "type": "string"
+          },
+          "spike_images": {
+            "type": "array"
+          },
+          "preparation": {
+            "type": "array"
+          },
+          "rationale": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "qualification.request": {
+      "description": "Request one host qualification attempt of the latest approved environment revision; admissible only while that revision is approved and attempts remain, and the host owns the attempt, its charging and its binding.",
+      "surface": {
+        "tool": "empirica_observe",
+        "action": "qualify"
       },
       "params": {
         "type": "object",
@@ -2295,7 +2338,93 @@
       "sections": [
         "environment/actions"
       ],
-      "message": "The environment and qualify actions are not available yet in this release: no proposal is recorded and no qualification attempt is started. Inspect the run and continue without them; this refusal changes nothing."
+      "message": "The environment proposal step is available, but the qualify effect is not in this release: the admission was decided and nothing was attempted, charged, or bound. Inspect the run and continue without it; this refusal changes nothing."
+    },
+    "profile-not-allowed": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "environment.propose"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "The requested profile is above the host ceiling; propose one within the ceiling."
+    },
+    "environment-required": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "environment.propose"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "This step needs a qualified environment and the run has no binding and no approved environment revision: submit an environment proposal."
+    },
+    "environment-pending": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "run.inspect"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "The latest environment revision is pending on the human; nothing for the agent to do until they answer, and a cancel, timeout or missing surface only leaves it pending."
+    },
+    "environment-rejected": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "environment.propose"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "The latest environment revision was rejected; submit a revised environment proposal."
+    },
+    "qualification-attempts-exhausted": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "spike.run",
+        "residual.accept",
+        "run.start_fresh"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "The run's qualification attempts are spent; continue on the current binding, stop, or start a fresh run."
+    },
+    "qualification-required": {
+      "params": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {}
+      },
+      "next_actions": [
+        "qualification.request"
+      ],
+      "sections": [
+        "environment/actions"
+      ],
+      "message": "This step needs a spike under a qualified environment: the run has an approved environment revision but nothing is bound yet, so request the qualification (the qualify action); the request is refused when its effect has not landed, and retrying changes nothing."
     }
   },
   "sections": {
@@ -2491,7 +2620,7 @@
         },
         {
           "id": "evidence/spike/limits",
-          "text": "Agent chooses | any already-local image reference (name:tag, repo@sha256 digest, full image ID, or unambiguous ID prefix) on the out-of-band path until the run-scoped environment cycle lands — once it lands, the reference must be one of the spike images of the revision the active qualification bound (environment/actions/spikes; the closed reason for a stray reference is image-not-qualified); exact argv, any tool, no shell unless written; inputs as repository-relative files or directories; up to 128 environment overrides, never secrets, HOME and TMPDIR reserved\nHost fixes | one container; uid/gid 65534/65534; /work 512 MiB exec tmpfs = HOME = workdir; /tmp 64 MiB noexec; /dev/shm 64 MiB; read-only rootfs; /inputs read-only; CPU min(2, NCPU); 2 GiB memory, no swap; 256 PIDs; nofile 1024; fsize 64 MiB; core 0; 120 s workload; 1 MiB stdout and 1 MiB stderr; capture 256 files, 64 MiB total, 64 MiB per file; host-owned profile: docker-isolated-v1 has no network, docker-networked-v1 is outbound only with no published ports\nNever available | image pull, build, load, or login; published ports; devices; host mounts; privileged mode; the Docker socket; more than one container; cross-architecture images; images that declare VOLUME\nVerdicts | natural exit 0 is PASS; any other natural exit except 137 is FAIL; 137, OOM, timeout, output overflow, or any ambiguity is unavailable and admits no evidence\nRefusals | an unavailable spike Fault carries one closed reason whenever the cause is attributable; a Fault without a reason is an internal host failure: retry once, then ask the operator\nEnvironment step | coming: a spike becomes admissible only through the run's own environment cycle (environment proposes, the human or the approval provenance approves, prepare, qualify binds) with the attempts a run may start bounded in the run view; until the cycle lands, in every active run state every environment and qualify action refuses with the closed reason environment.not_available (a terminal run is inert instead, and an invalid frozen scope still blocks first) and the run keeps its current spike backend\nProbe image | the qualification probes run one host-trusted probe image pinned by digest in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls it, and admission is the observable inspection of that pinned reference: some repository-digests entry of the inspected image must carry the pinned digest — the digest is the content identity, the repository name is not — beside the image being Linux on the daemon's native architecture and declaring no volume; a local build, load or retag does not by itself establish that digest, and an image that fails the inspection is refused as untrusted, never silently accepted\nreason image-not-local | the image is not in the local daemon; ask the operator to provide it (the host never pulls or builds)\nreason image-reference-ambiguous | the reference matches more than one local image; use a full image ID or repo@sha256 digest\nreason image-platform-mismatch | the image is not Linux on the daemon's native architecture; choose a native image\nreason image-declares-volumes | the image declares VOLUME; choose an image without declared volumes\nreason malformed-required-result | the host could not read a well-formed image or capture answer; retry once, then redesign\nreason authority-drift | Docker is unavailable, or Docker, the qualified binding, or the image the reference names changed; pin a full image ID or repo@sha256 and request again, or ask the operator to start Docker or requalify; never use a host shell\nreason capture-invalid | inputs changed, are missing, or exceed the capture limits; fix inputs and request again\nreason spikes-unavailable | this run has no qualified Docker backend; spikes need a new run after the operator qualifies one\nreason environment-required | a spike was requested with no binding and no approved environment revision; submit an environment proposal\nreason environment-pending | the environment revision is pending on the human; nothing for the agent to do until they answer\nreason environment-rejected | the latest environment revision was rejected; submit a revised environment proposal\nreason qualification-required | an approved revision has nothing bound; request qualification\nreason image-not-qualified | the spike image reference is not one of the spike images of the revision the active qualification bound; submit an environment proposal that names it\nreason profile-not-allowed | the requested profile is above the host ceiling; propose one within the ceiling\nreason qualification-attempts-exhausted | the run's qualification attempts are spent; continue on the current binding, stop, or start a fresh run\nreason superseded-binding | the spike request outlived its binding; resubmit the spike request under the new binding\nreason authority-invalid | Docker or the host spike runtime was unavailable when the spike started (including another spike holding it); retry once, then ask the operator to start Docker or requalify; never use a host shell\nreason lifecycle-unavailable | the container did not reach one admissible natural exit (exit 137, OOM, timeout, output overflow, or a staging, network-create, start, inspect, or static-policy failure); narrow the workload, or retry once if the cause was host-side (staging, network create, or static policy)\nreason cleanup-unavailable | the next spike retries recovery automatically; if it persists, ask the operator (private operation ID)\nreason postflight-changed | the Docker authority changed during the spike; request again after it is stable\nreason qualification-stale-implementation | the loaded release differs from the binding; request qualification again\nreason qualification-stale-daemon | the Docker endpoint, daemon identity, server major version or capability differs from the binding (a minor or patch server update keeps the binding — the full version is a diagnostic, compared within one attempt only); prepare, then request qualification again\nreason probe-image-untrusted | the inspection of the pinned probe image reference fails an admission check — no repository-digests entry of the inspected image carries the pinned digest under any repository name, or the image is not Linux on the daemon's native architecture, or it declares a volume (a local build, load or retag does not by itself establish that digest); pull the pinned reference the refusal renders, then request qualification again\nreason qualification-probe-failed | a qualification probe failed (the separate probe field names it, never the reason); prepare, then request qualification again\nreason docker-unreachable | no Docker daemon is reachable at the endpoint; prepare, then request qualification again\nreason qualification-conflict | the attempt lost the binding race or another attempt is running; request qualification again\nreason qualification-deadline-exceeded | the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady\nreason network-egress-unavailable | the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again"
+          "text": "Agent chooses | any already-local image reference (name:tag, repo@sha256 digest, full image ID, or unambiguous ID prefix) on the out-of-band path until the run-scoped environment cycle lands — once it lands, the reference must be one of the spike images of the revision the active qualification bound (environment/actions/spikes; the closed reason for a stray reference is image-not-qualified); exact argv, any tool, no shell unless written; inputs as repository-relative files or directories; up to 128 environment overrides, never secrets, HOME and TMPDIR reserved\nHost fixes | one container; uid/gid 65534/65534; /work 512 MiB exec tmpfs = HOME = workdir; /tmp 64 MiB noexec; /dev/shm 64 MiB; read-only rootfs; /inputs read-only; CPU min(2, NCPU); 2 GiB memory, no swap; 256 PIDs; nofile 1024; fsize 64 MiB; core 0; 120 s workload; 1 MiB stdout and 1 MiB stderr; capture 256 files, 64 MiB total, 64 MiB per file; host-owned profile: docker-isolated-v1 has no network, docker-networked-v1 is outbound only with no published ports\nNever available | image pull, build, load, or login; published ports; devices; host mounts; privileged mode; the Docker socket; more than one container; cross-architecture images; images that declare VOLUME\nVerdicts | natural exit 0 is PASS; any other natural exit except 137 is FAIL; 137, OOM, timeout, output overflow, or any ambiguity is unavailable and admits no evidence\nRefusals | an unavailable spike Fault carries one closed reason whenever the cause is attributable; a Fault without a reason is an internal host failure: retry once, then ask the operator\nEnvironment step | a spike becomes admissible only through the run's own environment cycle (environment proposes, the human or the approval provenance approves, prepare, qualify binds) with the attempts a run may start bounded in the run view; the propose half has landed and the qualify effect has not: an inadmissible qualify names its own closed admission reason, an admissible one still refuses with the closed reason environment.not_available charging nothing (a terminal run is inert instead, an invalid frozen scope still blocks first), and the run keeps its current spike backend\nProbe image | the qualification probes run one host-trusted probe image pinned by digest in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls it, and admission is the observable inspection of that pinned reference: some repository-digests entry of the inspected image must carry the pinned digest — the digest is the content identity, the repository name is not — beside the image being Linux on the daemon's native architecture and declaring no volume; a local build, load or retag does not by itself establish that digest, and an image that fails the inspection is refused as untrusted, never silently accepted\nreason image-not-local | the image is not in the local daemon; ask the operator to provide it (the host never pulls or builds)\nreason image-reference-ambiguous | the reference matches more than one local image; use a full image ID or repo@sha256 digest\nreason image-platform-mismatch | the image is not Linux on the daemon's native architecture; choose a native image\nreason image-declares-volumes | the image declares VOLUME; choose an image without declared volumes\nreason malformed-required-result | the host could not read a well-formed image or capture answer; retry once, then redesign\nreason authority-drift | Docker is unavailable, or Docker, the qualified binding, or the image the reference names changed; pin a full image ID or repo@sha256 and request again, or ask the operator to start Docker or requalify; never use a host shell\nreason capture-invalid | inputs changed, are missing, or exceed the capture limits; fix inputs and request again\nreason spikes-unavailable | this run has no qualified Docker backend; spikes need a new run after the operator qualifies one\nreason environment-required | a spike was requested with no binding and no approved environment revision; submit an environment proposal\nreason environment-pending | the environment revision is pending on the human; nothing for the agent to do until they answer\nreason environment-rejected | the latest environment revision was rejected; submit a revised environment proposal\nreason qualification-required | an approved revision has nothing bound; request qualification\nreason image-not-qualified | the spike image reference is not one of the spike images of the revision the active qualification bound; submit an environment proposal that names it\nreason profile-not-allowed | the requested profile is above the host ceiling; propose one within the ceiling\nreason qualification-attempts-exhausted | the run's qualification attempts are spent; continue on the current binding, stop, or start a fresh run\nreason superseded-binding | the spike request outlived its binding; resubmit the spike request under the new binding\nreason authority-invalid | Docker or the host spike runtime was unavailable when the spike started (including another spike holding it); retry once, then ask the operator to start Docker or requalify; never use a host shell\nreason lifecycle-unavailable | the container did not reach one admissible natural exit (exit 137, OOM, timeout, output overflow, or a staging, network-create, start, inspect, or static-policy failure); narrow the workload, or retry once if the cause was host-side (staging, network create, or static policy)\nreason cleanup-unavailable | the next spike retries recovery automatically; if it persists, ask the operator (private operation ID)\nreason postflight-changed | the Docker authority changed during the spike; request again after it is stable\nreason qualification-stale-implementation | the loaded release differs from the binding; request qualification again\nreason qualification-stale-daemon | the Docker endpoint, daemon identity, server major version or capability differs from the binding (a minor or patch server update keeps the binding — the full version is a diagnostic, compared within one attempt only); prepare, then request qualification again\nreason probe-image-untrusted | the inspection of the pinned probe image reference fails an admission check — no repository-digests entry of the inspected image carries the pinned digest under any repository name, or the image is not Linux on the daemon's native architecture, or it declares a volume (a local build, load or retag does not by itself establish that digest); pull the pinned reference the refusal renders, then request qualification again\nreason qualification-probe-failed | a qualification probe failed (the separate probe field names it, never the reason); prepare, then request qualification again\nreason docker-unreachable | no Docker daemon is reachable at the endpoint; prepare, then request qualification again\nreason qualification-conflict | the attempt lost the binding race or another attempt is running; request qualification again\nreason qualification-deadline-exceeded | the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady\nreason network-egress-unavailable | the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again"
         },
         {
           "id": "evidence/spike/missing",
@@ -2858,20 +2987,20 @@
       ]
     },
     "environment/actions": {
-      "title": "Environment qualification (coming)",
-      "summary": "The run-scoped environment proposal and qualification actions, declared now and not yet available.",
+      "title": "Environment qualification",
+      "summary": "The run-scoped environment proposal action with its revisions and receipts, and the qualify action whose host effect is still coming.",
       "clauses": [
         {
           "id": "environment/actions/coming",
-          "text": "Two author actions are coming, after configuration approval and investigation admission and before the first spike: environment submits one closed environment proposal as a new revision (a Docker profile under the host's StartRun.spike_profile ceiling, 1-16 already-local spike image references, 1-8 unverified preparation sentences, and a nonblank rationale), and qualify requests one host qualification attempt of the latest approved revision with no payload (the host owns the attempt, its journalling and its binding; the probe image is pinned by digest in the support contract, and untrusted probe images are refused as probe-image-untrusted)."
+          "text": "Two author actions close the environment step, after configuration approval and investigation admission and before the first spike: environment submits one closed environment proposal as a new revision (a Docker profile under the host's StartRun.spike_profile ceiling, 1-16 already-local spike image references, 1-8 unverified preparation sentences, and a nonblank rationale), and qualify requests one host qualification attempt of the latest approved revision with no payload (the host owns the attempt, its journalling and its binding; the probe image is pinned by digest in the support contract, and untrusted probe images are refused as probe-image-untrusted)."
         },
         {
           "id": "environment/actions/not_available",
-          "text": "Neither action is available yet: in every active run state the core refuses both with the one closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact; an invalid frozen scope still blocks first (graph.invalid), and a terminal run stays Inert. No revision is recorded, no attempt started, no binding changed by the refusal; the run keeps its current spike backend, and the host still qualifies one out of band."
+          "text": "The environment proposal step has landed: the environment action admits a closed proposal as a new revision after configuration approval and investigation admission, refuses a profile above the ceiling with profile-not-allowed, and records revisions and their receipts in the run's state. The qualify effect has not: its admission is decided exactly as the lifecycle says — admissible only for the latest approved revision with attempts remaining, otherwise environment-required, environment-pending, environment-rejected or qualification-attempts-exhausted — but while the host attempt itself is missing, an admissible qualify still refuses with the one closed reason environment.not_available (a terminal run is inert), and nothing is attempted, charged or bound by the refusal; the run keeps its current spike backend."
         },
         {
           "id": "environment/actions/ceiling",
-          "text": "StartRun.spike_profile is the host profile ceiling, an explicit wire reinterpretation: absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. It is bound once at StartRun, is never author action data, and no author action can raise it. Until the cycle lands, the host selector still uses this field to select exactly one profile for the run; permitting both under docker-networked-v1 is the forthcoming ceiling meaning, not current behaviour."
+          "text": "StartRun.spike_profile is the host profile ceiling, an explicit wire reinterpretation: absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. It is bound once at StartRun into the run's state, is never author action data, and no author action can raise it. The core enforces it now: an environment proposal naming a profile above the ceiling is refused with the closed reason profile-not-allowed, and a delegated auto run may use the networked profile only when the ceiling allows it. The host selector still uses this field at StartRun to select the one profile of the run's current binding, until the run-scoped cycle replaces that selection."
         },
         {
           "id": "environment/actions/revisions",
@@ -2879,7 +3008,7 @@
         },
         {
           "id": "environment/actions/approval",
-          "text": "A revision is pending until someone honest approves it: a deliberative run asks the human through a pending presentation of the proposal (cancel, timeout, a missing surface or a stale answer leave it pending), an auto run derives its approval from the configuration or delegation provenance the run already carries, and no public action approves its own proposal and no receipt is ever fabricated."
+          "text": "A revision is pending until someone honest approves it: a deliberative run asks the human through a pending presentation of the proposal (the presentation is recorded by private host ingress as a receipt; cancel, timeout, a missing surface or a stale answer leave it pending; reject closes that presentation without approving; and an approval replayed for an earlier revision never decides a later one), an auto run derives its approval from the configuration or delegation provenance the run already carries, and no public action approves its own proposal and no receipt is ever fabricated. The human-facing document itself is a later node's; the core only consumes the receipt shape."
         },
         {
           "id": "environment/actions/qualify",

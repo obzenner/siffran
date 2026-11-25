@@ -48,6 +48,13 @@
         "delegation": {
           "type": "boolean"
         },
+        "spike_profile": {
+          "description": "The run's host profile ceiling, bound once at StartRun and never author action data (Empirica 7.2 §4.4, an explicit wire reinterpretation of the StartRun member of the same name): docker-isolated-v1 permits only the isolated environment profile, docker-networked-v1 permits both. The application binds only the StartRun command member into state; a provenance copy never decides anything. Absent means the isolated ceiling, on the wire as in state, and no later action can raise it.",
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
         "host_runtime": {
           "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",

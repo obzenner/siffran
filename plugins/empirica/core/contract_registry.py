@@ -24,6 +24,7 @@ from __future__ import annotations
 REGISTERED_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("request", "/$defs/actionEnvironment"),
     ("request", "/$defs/actionQualify"),
+    ("request", "/$defs/environmentDecisionPayload"),
     ("request", "/$defs/environmentProposal"),
     ("response", "/$defs/digest256"),
     ("response", "/$defs/environmentView"),

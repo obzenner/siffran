@@ -12,16 +12,16 @@ from .canonical import canonical_digest
 from .freshness import (ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, is_digest256,
                         valid_claim_id)
 from .run import OperationalState
-from . import citations, confirmation, governance, spike_plan, spike_plan_draft
+from . import citations, confirmation, environment, governance, spike_plan, spike_plan_draft
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
                 "audit": ("max_audit_spawns", *governance.BUDGETS["max_audit_spawns"])}
 HOST_TIER_UNSUPPORTED = {"foreground_only": "host.async_unsupported",
                          "observational": "host.audit_output_unobservable"}
 READ_COMMANDS = frozenset({"GetRun", "GetArgument", "RestoreRun"})
-# The run-scoped environment qualification actions (Empirica 7.2, §5): declared on the wire now, implemented by
-# E7/E9 later. Until the behaviour lands they share one closed refusal in every run state, so the core never
-# crashes on them and never silently accepts one.
+# The run-scoped environment qualification actions (Empirica 7.2 §5): the ``environment`` action admits
+# one closed proposal as a new revision (E7); the ``qualify`` action decides admission (E7) while its
+# host effect is still missing, so an admissible qualify refuses with the one closed reason below.
 ENVIRONMENT_ACTIONS = frozenset({"environment", "qualify"})
 ENVIRONMENT_NOT_AVAILABLE = "environment.not_available"
 
@@ -844,6 +844,46 @@ def _investigation_block(snapshot: EvaluationSnapshot) -> Decision | None:
     return None
 
 
+def _submit_environment(snapshot: EvaluationSnapshot, command: Mapping[str, Any]) -> Decision:
+    """Admit one closed ``environment`` proposal as a new revision (Empirica 7.2 §5, order R1).
+
+    The step sits between configuration approval and the first spike: it is refused while a
+    configuration is pending (the two are never pending at the same time) and before investigation
+    admission, with the two reasons those gates already own; a profile above the run's StartRun-bound
+    ceiling is refused with ``profile-not-allowed``; and every submission is a new revision that
+    supersedes one still pending. The approval is the human's receipt in a deliberative run (the
+    decision plan below consumes it) and derived here — never fabricated as a receipt — where the
+    configuration or delegation provenance says auto."""
+    state = snapshot.state
+    if reason := governance.admission(state.governance):
+        return _decision(snapshot, state, "Block", reason=reason,
+                         parameters=governance.refusal_parameters(state.governance, reason),
+                         affected="obligation.approval")
+    if state.investigation_stamp is None:
+        return _decision(snapshot, state, "Block", reason="investigation.required",
+                         affected="obligation.investigation")
+    try:
+        environment.validate_action_environment(command["action"])
+        proposal = environment.canonical_proposal(command["action"]["payload"])
+    except environment.EnvironmentProposalError:
+        return _decision(snapshot, state, "Fault", reason="invalid_request")
+    if not environment.profile_allowed(proposal["profile_id"],
+                                        environment.profile_ceiling(state.invocation)):
+        return _decision(snapshot, state, "Block",
+                        reason=environment.PROFILE_NOT_ALLOWED)
+    revisions = [row["revision"] for row in state.environment_history]
+    if state.environment is not None:
+        revisions.append(state.environment["revision"])
+    expected = governance.expected_approval_kind(state.governance,
+                                                 governance.raises(state.governance, state.budgets))
+    member = environment.revision_member(
+        proposal, environment.next_revision(revisions),
+        # the approval-kind word of governance.APPROVAL_KINDS: auto derives here, fabricating no receipt
+        approved=expected == "auto")
+    return _decision(snapshot, replace(
+        state, environment=member, environment_history=environment.superseded_history(state)))
+
+
 def validate_sealed_spike_request(
     action: object,
     sealed_facts: object,
@@ -1220,6 +1260,77 @@ def plan_evidence_confirmation(snapshot: EvaluationSnapshot, payload: Mapping[st
                 hitl.evidence_for(run_id=snapshot.run_id, snapshot=snapshot, key=shown["key"]))):
         return _decision(snapshot, state, "Block", reason="evidence.document_mismatch")
     return _decision(snapshot, state, artifacts=tuple(planned))
+
+
+def _environment_receipt(snapshot: EvaluationSnapshot, kind: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The content-addressed receipt artifact body one environment decision records (ADR-0072's
+    write-first discipline, as the configuration machinery models it): the presentation names the
+    revision, its digest and the document the host showed; the finalizing decision names the same
+    presentation id and its outcome. Nothing else is ever recorded — a cancel, timeout, missing
+    surface or stale reply is simply no artifact, and the revision stays pending."""
+    body = {"kind": kind, "receipt_id": payload["receipt_id"], "revision": payload["revision"],
+            "proposal_digest": payload["proposal_digest"], "document_digest": payload["document_digest"],
+            "approval_kind": "host_ui", "route_stamp": snapshot.state.route_stamp,
+            "investigation_stamp": snapshot.state.investigation_stamp}
+    if kind == environment.DECISION_KIND:
+        body["outcome"] = payload["outcome"]
+    return artifact(kind, body)
+
+
+def plan_environment_decision(snapshot: EvaluationSnapshot, payload: Mapping[str, Any]) -> Decision:
+    """Purely admit one private environment receipt against the pending revision (Empirica 7.2 §5).
+
+    The receipt is host ingress, never a public author action. In a deliberative run ``present``
+    records that the human was shown the pending revision's document; ``approve``/``reject`` name
+    that presentation and finalize the revision. In an auto run nothing reaches here — the core
+    derived the approval at submission and spends no receipt, so any receipt fails closed. Every
+    existing refusal wins before anything is written: an unknown or superseded revision (a stale
+    reply, or an earlier revision's approval replayed at a newer one), a decided revision, and a
+    decision whose digest differs from the one its own presentation recorded; an exact replay is
+    ``Inert``. The member's mutation and the decision artifact commit together in one CAS."""
+    state = snapshot.state
+    if payload.get("run_id") != snapshot.run_id:
+        return _decision(snapshot, state, "Fault", reason="conflict")  # a receipt of another run or generation
+    try:
+        environment.validate_decision(dict(payload))
+    except environment.EnvironmentProposalError:
+        return _decision(snapshot, state, "Fault", reason="invalid_request")
+    member = state.environment
+    if member is None:
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    expected = governance.expected_approval_kind(state.governance,
+                                                 governance.raises(state.governance, state.budgets))
+    if expected != "host_ui":
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    if payload["revision"] != member["revision"] or payload["proposal_digest"] != member["digest"]:
+        return _decision(snapshot, state, "Fault", reason="conflict")  # a receipt of an earlier revision is stale
+    replay = next((a for a in reversed(snapshot.history)
+                   if a.get("kind") in (environment.PRESENTATION_KIND, environment.DECISION_KIND)
+                   and a.get("receipt_id") == payload["receipt_id"]), None)
+    if payload["outcome"] == "present":
+        if member["state"] != environment.PENDING:
+            return _decision(snapshot, state, "Fault", reason="conflict")  # a decided revision shows nothing new
+        if replay is not None:
+            return _decision(snapshot, state, "Inert") if replay["artifact_id"] == digest(
+                _environment_receipt(snapshot, environment.PRESENTATION_KIND, payload)["body"]) else _decision(
+                snapshot, state, "Fault", reason="conflict")
+        return _decision(snapshot, state, artifacts=(
+            _environment_receipt(snapshot, environment.PRESENTATION_KIND, payload),))
+    if member["state"] != environment.PENDING:
+        if member["receipt_id"] == payload["receipt_id"] and replay is not None:
+            return _decision(snapshot, state, "Inert") if replay["artifact_id"] == digest(
+                _environment_receipt(snapshot, environment.DECISION_KIND, payload)["body"]) else _decision(
+                snapshot, state, "Fault", reason="conflict")
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    shown = replay if replay is not None and replay.get("kind") == environment.PRESENTATION_KIND else None
+    if shown is None or shown.get("document_digest") != payload["document_digest"]:
+        # Nothing finalizes a presentation it does not name, or with a document digest its present did not record.
+        return _decision(snapshot, state, "Fault", reason="conflict")
+    decided = {**governance.plain(member),
+               "state": environment.APPROVED if payload["outcome"] == "approve" else environment.REJECTED,
+               "receipt_id": payload["receipt_id"]}
+    return _decision(snapshot, replace(state, environment=decided), artifacts=(
+        _environment_receipt(snapshot, environment.DECISION_KIND, payload),))
 
 
 def approved_claim_ids(snapshot: EvaluationSnapshot) -> list[str]:
@@ -1690,10 +1801,22 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
 
     if kind == "EvaluateRun" and command["intent"] == "stop" and snapshot.graph is None:
         return _decision(snapshot, replace(state, status="stopped_residual"))
-    # The coming environment step sits between configuration approval and the first spike, but its two actions
-    # refuse identically in every active run state, so the one closed reason is decided before any other admission.
-    if kind == "ObserveAction" and command["action"]["kind"] in ENVIRONMENT_ACTIONS:
-        return _decision(snapshot, state, "Block", reason=ENVIRONMENT_NOT_AVAILABLE)
+    # The run-scoped environment step sits between configuration approval and the first spike (Empirica 7.2 §5,
+    # order R1). Its admission is decided here, before the bootstrap and governance gates of every other operation:
+    # the ``environment`` action owns its ordering reasons itself (never a pending configuration, never before
+    # investigation), and the ``qualify`` admission reads only the environment facts of the run — the member's
+    # state and the attempt ceiling — so it needs no bootstrap predicate at all.
+    if kind == "ObserveAction":
+        environment_kind = command["action"]["kind"]
+        if environment_kind == "environment":
+            return _submit_environment(snapshot, command)
+        if environment_kind == "qualify":
+            # E7 owns the admission decision only; the host attempt, its charging and its binding land with E9
+            # (spec §5 step 1). While the effect is missing, the one closed refusal keeps failing honest:
+            # nothing is attempted, nothing is charged, no binding changes, in any active run state.
+            reason = environment.qualify_admission(state)
+            return _decision(snapshot, state, "Block",
+                            reason=reason or ENVIRONMENT_NOT_AVAILABLE)
     operation = (command["action"]["kind"] if kind == "ObserveAction"
                  and command["action"]["kind"] in {"route", "graph", "configure_run", "investigate"}
                  else "report_convergence" if kind == "EvaluateRun"

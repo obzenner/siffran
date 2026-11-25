@@ -137,12 +137,13 @@ def render_limits() -> str:
         "Refusals | an unavailable spike Fault carries one closed reason whenever the cause is "
         "attributable; a Fault without a reason is an internal host failure: retry once, then "
         "ask the operator",
-        "Environment step | coming: a spike becomes admissible only through the run's own "
+        "Environment step | a spike becomes admissible only through the run's own "
         "environment cycle (environment proposes, the human or the approval provenance approves, "
-        "prepare, qualify binds) with the attempts a run may start bounded in the run view; until "
-        "the cycle lands, in every active run state every environment and qualify action refuses "
-        "with the closed reason environment.not_available (a terminal run is inert instead, and an "
-        "invalid frozen scope still blocks first) and the run keeps its current spike backend",
+        "prepare, qualify binds) with the attempts a run may start bounded in the run view; the "
+        "propose half has landed and the qualify effect has not: an inadmissible qualify names its "
+        "own closed admission reason, an admissible one still refuses with the closed reason "
+        "environment.not_available charging nothing (a terminal run is inert instead, an invalid "
+        "frozen scope still blocks first), and the run keeps its current spike backend",
         "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
         "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
         "it, and admission is the observable inspection of that pinned reference: some "

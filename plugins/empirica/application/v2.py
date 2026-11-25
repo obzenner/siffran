@@ -153,6 +153,21 @@ class _Service:
             return Coordinator._fault("trusted-presentation", "unavailable")
         return response
 
+    def trusted_environment_decision(self, *, run_id, payload) -> dict:
+        """Admit one private environment receipt for the run's pending revision (Empirica 7.2 §5):
+        the write-first presentation of a pending deliberative revision, or the approve/reject
+        decision that names it. The receipt shape is the request schema's closed
+        ``environmentDecisionPayload``; an auto run derives its approvals and has none."""
+        terminal = self._trusted_terminal(run_id)
+        if terminal:
+            return terminal
+        if not self._valid_trusted("environmentDecisionPayload", payload):
+            return Coordinator._fault("trusted-environment", "invalid_request")
+        response = self._coordinator.trusted_environment_decision(run_id, payload)
+        if not _proto.validate_public_result(response["result"]):
+            return Coordinator._fault("trusted-environment", "unavailable")
+        return response
+
     def trusted_human_surface(self, *, run_id, payload) -> dict:
         """Record whether the host can show a human a dialog now; the latest observation counts."""
         terminal = self._trusted_terminal(run_id)
