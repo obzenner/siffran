@@ -20,6 +20,22 @@ test("schemaPattern reads the vendored digest pattern exactly", () => {
   assert.equal(pattern.test(`xsha256:${"a".repeat(64)}`), false);
 });
 
+test("schemaPattern accepts the absolute-lookahead anchor and its end is absolute", () => {
+  const pattern = schemaPattern({ type: "string", pattern: "^sha256:[0-9a-f]{64}(?![\\s\\S])" });
+  assert.equal(pattern.test(`sha256:${"a".repeat(64)}`), true);
+  // the escaped `$` would match before a final newline in JavaScript's RegExp; the word refuses it
+  assert.equal(pattern.test(`sha256:${"a".repeat(64)}\n`), false);
+  assert.equal(pattern.test(`xsha256:${"a".repeat(64)}`), false);
+});
+
+test("schemaPattern treats x- extension members as nonsemantic (ADR-0075 annotations)", () => {
+  const pattern = schemaPattern({
+    type: "string", pattern: "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+    "x-core-validator": "core.freshness.validate_digest256",
+  });
+  assert.equal(pattern.test(`sha256:${"a".repeat(64)}`), true);
+});
+
 test("schemaPattern refuses every shape it cannot read as one anchored pattern", () => {
   for (const [label, schema] of [
     ["no pattern", { type: "string" }],

@@ -142,17 +142,27 @@ export function schemaBoolean(schema: Schema | undefined): boolean {
   return schema.const;
 }
 
+/** The semantic keys a string-pattern schema may carry; `x-`-prefixed extension members (ADR-0075
+ * registration annotations, vendor documentation) carry no validation meaning and are nonsemantic. */
 const PATTERN_KEYS = new Set(["type", "pattern", "description"]);
+
+const nonsemantic = (key: string) => key.startsWith("x-");
 
 /**
  * The anchored pattern a string schema admits; any other admission keyword (`format`, `enum`, ...),
  * an unanchored pattern, or a top-level alternation (`|`, which `^...$` would not anchor) refuses to load.
+ * The end is one of the two closed anchors: `^...$` (never an escaped `\$`) and the absolute
+ * `(?![\s\S])` lookahead the re-anchored contract word uses — JavaScript's `$` matches before a
+ * final newline, the lookahead does not, so both anchors hold the end absolute, each in its word.
  */
 export function schemaPattern(schema: Schema | undefined): RegExp {
   const pattern = schema?.pattern;
-  if (schema?.type !== "string" || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key))
-      || typeof pattern !== "string" || !pattern.startsWith("^") || !pattern.endsWith("$")
-      || pattern.endsWith("\\$") || pattern.includes("|"))
+  if (schema?.type !== "string"
+      || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key) || key.startsWith("x-"))
+      || typeof pattern !== "string" || !pattern.startsWith("^")
+      || !(pattern.endsWith("(?![\\s\\S])")
+           || (pattern.endsWith("$") && !pattern.endsWith("\\$")))
+      || pattern.includes("|"))
     throw new Error(`contract schema is not a closed anchored string pattern: ${JSON.stringify(schema)}`);
   return new RegExp(pattern);
 }
