@@ -37,19 +37,50 @@ test("schemaPattern treats x- extension members as nonsemantic (ADR-0075 annotat
   assert.equal(pattern.test(`sha256:${"a".repeat(64)}`), true);
 });
 
-test("schemaPattern refuses the class escapes the engines read differently", () => {
-  // The seed from the E6c review (blocking 2): `^sha256:[0-9a-f]{63}[^\d](?![\s\S])` admits
-  // `sha256:` + 63 `a` + the Arabic-Indic digit U+0661 in JavaScript (`\d` is ASCII-only there)
-  // and refuses it in Python (`\d` is Unicode-wide), so the pattern is wider than the shared word
-  // this loader may serve — the subset this page accepts never includes the class escapes.
+test("schemaPattern serves the one bounded word its only caller guards", () => {
+  // The digest guard is schemaPattern's only caller, so the page serves exactly the word that
+  // caller needs: `^`, a literal prefix of [a-z0-9:] characters, one [0-9a-f] class with a fixed
+  // positive count, and one of the two closed end anchors. The grammar is positive and bounded —
+  // no escape class, no dot, no group, no quantifier but the one fixed count, no alternation — so
+  // both engines read every admitted pattern identically (E6c re-review 1, blocking 1).
+  for (const pattern of ["^sha256:[0-9a-f]{32}(?![\\s\\S])", "^[0-9a-f]{8}$", "^[0-9a-f]{64}$", "^sha256:[0-9a-f]{64}(?![\\s\\S])"])
+    assert.doesNotThrow(() => schemaPattern({ type: "string", pattern }));
+});
+
+test("schemaPattern refuses Sol's two seeds — a positive grammar, not a blacklist", () => {
+  // E6c re-review 1, blocking 1: both seeds load under a class-escape blacklist and serve the
+  // two engines different words — the digests themselves were never wrong, the loader was too
+  // wide. The first rests a `(?!.)` on the Unicode line separator U+2028: JavaScript's dot never
+  // matches it (the `u` flag changes nothing), Python's does, so the pattern accepts a value in
+  // one engine that the other refuses. The second, `^\q`, is an identity escape JavaScript
+  // compiles (it matches `q`) and Python cannot compile at all. Both refuse at load here.
+  assert.throws(() => schemaPattern({
+    type: "string", pattern: "^sha256:[0-9a-f]{63}(?!.)[\u2028](?![\\s\\S])",
+    "x-core-validator": "core.freshness.validate_digest256",
+  }), /not a closed anchored string pattern/);
+  assert.throws(() => schemaPattern({ type: "string", pattern: "^\\q(?![\\s\\S])" }),
+    /not a closed anchored string pattern/);
+});
+
+test("schemaPattern refuses every shape outside the bounded grammar", () => {
   for (const [label, pattern] of [
-    ["a complemented digit class", "^sha256:[0-9a-f]{63}[^\\d](?![\\s\\S])"],
-    ["a digit class", "^x[\\d]$"],
-    ["a word class", "^x\\w+$"],
-    ["a space class", "^x\\s+$"],
-    ["a negated space class", "^x\\S+$"],
-    ["a word boundary", "^x\\b$"],
-  ])
+    ["a class escape", "^sha256:[\\d]+$"],
+    ["a word escape beside the class", "^sha256:\\w[0-9a-f]{4}$"],
+    ["a dot", "^sha256:.$"],
+    ["a non-hex literal prefix", "^sha256![0-9a-f]{4}$"],
+    ["an uppercase literal prefix", "^SHA256:[0-9a-f]{4}$"],
+    ["an uppercase class", "^sha256:[0-9A-F]{64}$"],
+    ["a complemented class", "^sha256:[^0-9a-f]{4}$"],
+    ["two classes", "^sha256:[0-9a-f]{32}[0-9a-f]{32}$"],
+    ["a ranged count", "^sha256:[0-9a-f]{2,4}$"],
+    ["an open count", "^sha256:[0-9a-f]{4,}$"],
+    ["a star count", "^sha256:[0-9a-f]*$"],
+    ["a zero count", "^sha256:[0-9a-f]{0}$"],
+    ["no class at all", "^sha256$"],
+    ["a group", "^sha256:([0-9a-f]){4}$"],
+    ["an inline lookahead that is not the closed end atom", "^sha256:(?=[0-9])[0-9a-f]{4}$"],
+    ["an absolute-end atom twice", "^sha256:[0-9a-f]{4}(?![\\s\\S])(?![\\s\\S])"],
+  ] as const)
     assert.throws(() => schemaPattern({ type: "string", pattern }), /not a closed anchored string pattern/, label);
 });
 
@@ -59,7 +90,7 @@ test("schemaPattern refuses every shape it cannot read as one anchored pattern",
     ["non-string pattern", { type: "string", pattern: 7 }],
     ["unanchored pattern", { type: "string", pattern: "sha256:[0-9a-f]{64}" }],
     ["unanchored end", { type: "string", pattern: "^sha256:[0-9a-f]{64}" }],
-    ["escaped end anchor", { type: "string", pattern: "^sha256:\\$" }],
+    ["escaped end anchor", { type: "string", pattern: "^sha256:[0-9a-f]{64}\\$" }],
     ["top-level alternation", { type: "string", pattern: "^a|b$" }],
     ["format keyword", { type: "string", pattern: "^a$", format: "uri" }],
     ["enum keyword", { type: "string", pattern: "^a$", enum: ["a"] }],

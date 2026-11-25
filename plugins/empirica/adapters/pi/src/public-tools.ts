@@ -150,21 +150,27 @@ const PATTERN_KEYS = new Set(["type", "pattern", "description"]);
  * one atom the page may serve, so the atom itself is allowlisted, not its classes. */
 const ABSOLUTE_END = "(?![\\s\\S])";
 
-/** The class escapes whose meaning the two engines disagree on: Python reads `\d`, `\w`, `\s` and
- * their complement or boundary forms Unicode-wide, JavaScript ASCII-only (the `u` flag changes
- * neither), so a pattern wearing them serves a wider or narrower word per engine and refuses to
- * load here (E6c review, blocking 2: the Arabic-Indic digit seed `U+0661`). Everything else —
- * literals, explicit `[...]` classes, quantifiers, groups — reads the same in both engines. */
-const ENGINE_DISAGREEING_CLASSES = /[\\][dDwWsSbB]/;
+/** The positive bounded grammar this page's one pattern caller (the digest guard) may serve,
+ * after `^` is stripped and the end anchor taken off: a literal prefix of `[a-z0-9:]` characters,
+ * then exactly one `[0-9a-f]` class with a fixed positive count — no escape class, no dot, no
+ * group, no alternation, no other quantifier (E6c re-review 1, blocking 1). A blacklist of
+ * disagreeing atoms cannot hold that word: the class-escape list admitted `^\q`, an identity
+ * escape JavaScript compiles and Python refuses at compile time, and the seed resting a `(?!.)`
+ * on the Unicode line separator U+2028, which JavaScript's dot never matches (the `u` flag changes
+ * neither that nor dot semantics) while Python's does — the engines' `\d`/`\w`/`\s` families
+ * apart, their whitespace sets are simply *different*, not a Unicode-versus-ASCII split, so no
+ * restatement of “which escapes disagree” is the boundary. The boundary is the grammar itself:
+ * the digest word matches it, and both engines read every admitted pattern identically. */
+const BOUNDED_WORD = /^[a-z0-9:]*\[0-9a-f\]\{[1-9][0-9]*\}$/;
 
-/**
- * The anchored pattern a string schema admits, restricted to the subset both engines agree on
- * (ADR-0075 re-anchoring; E6c review): any other admission keyword (`format`, `enum`, ...), an
- * unanchored pattern, or a top-level alternation (`|`, which `^...$` would not anchor) refuses to
- * load. The end is one of the two closed anchors: `^...$` (never an escaped `\$`; JavaScript's
- * `$` with no `m` flag already refuses a trailing newline — it is Python's `re.search` that
- * would admit the position before one, which is why the core re-anchored its word) and the
- * absolute `(?![\s\S])` lookahead, the one allowlisted atom.
+/** The anchored pattern a string schema serves: exactly the bounded digest-guard word — `^`,
+ * that literal prefix, the one fixed-count class, and one of the two closed ends. Any other
+ * admission keyword (`format`, `enum`, ...), an unanchored or an escaped end, a top-level
+ * alternation (`|`, which `^...$` would not anchor) refuses to load. The end is one of the two
+ * closed anchors: `^...$` (never an escaped `\$`; JavaScript's `$` with no `m` flag already
+ * refuses a trailing newline — it is Python's `re.search` that would admit the position before
+ * one, which is why the core re-anchored its word) and the absolute `(?![\s\S])` lookahead, the
+ * one allowlisted atom.
  */
 export function schemaPattern(schema: Schema | undefined): RegExp {
   const pattern = schema?.pattern;
@@ -175,7 +181,7 @@ export function schemaPattern(schema: Schema | undefined): RegExp {
   if (schema?.type !== "string"
       || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key) || key.startsWith("x-"))
       || typeof pattern !== "string" || typeof body !== "string" || !pattern.startsWith("^")
-      || ENGINE_DISAGREEING_CLASSES.test(body) || body.includes("|"))
+      || !BOUNDED_WORD.test(body.slice(1)))
     throw new Error(`contract schema is not a closed anchored string pattern: ${JSON.stringify(schema)}`);
   return new RegExp(pattern);
 }
