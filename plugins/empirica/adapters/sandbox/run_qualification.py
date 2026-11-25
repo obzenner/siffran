@@ -20,7 +20,6 @@ record and pointer namespaces are never read, and no pointer is written.
 from __future__ import annotations
 
 import json
-import os
 import re
 import time
 from dataclasses import dataclass
@@ -470,21 +469,24 @@ class RunQualificationStore:
                 fsio.sync_directory(level)
             return path
         fsio.atomic_write(path, payload, durable=True)
-        # The mode change goes through a descriptor opened without following symlinks
-        # (re-review, blocking 3: no path-following permission changes on the newly
-        # written publication either).
-        publication = None
+        # The published entry is validated — never mutated. No permission is changed
+        # after the rename at all: the closed 0600 mode was fixed on the exclusive
+        # temporary descriptor before its fsync and the rename (fsio.atomic_write), so
+        # an entry that appears here with any other mode, owner, or link shape — for
+        # example a hard link to an unrelated 0644 file swapped onto the fresh
+        # publication — is refused without one write through the name (re-review 2,
+        # blocking 4: hard links are no-follow-proof, only absence-of-mutation is).
         try:
-            publication = os.open(path, os.O_RDONLY | common.NOFOLLOW | common.CLOEXEC)
-            os.fchmod(publication, common.MODE_FILE)
-        except OSError as exc:
-            raise authority.GenericQualificationError(
-                "run qualification record cannot be sealed safely") from exc
-        finally:
-            if publication is not None:
-                os.close(publication)
-        if common.safe_file(path, cap=MAX_RECORD_BYTES) != payload:
-            raise authority.GenericQualificationError("run qualification record publication differs")
+            readback = common.safe_file(path, cap=MAX_RECORD_BYTES)
+            if readback != payload:
+                raise authority.GenericQualificationError(
+                    "run qualification record publication differs")
+        except common.GenericScaffoldingError as exc:
+            if path.exists() or path.is_symlink():
+                # a swapped-in impostor occupies the publication name: unsafe, refused
+                raise authority.GenericQualificationError(
+                    "run qualification record path is unsafe") from exc
+            raise
         for level in reversed(_naming_levels(self)):
             fsio.sync_directory(level)
         return path

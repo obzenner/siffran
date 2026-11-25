@@ -25,7 +25,13 @@ MODE_DIR = 0o700
 MAX_CONTROL_FILE_BYTES = 2 * 1024 * 1024
 OPERATION_ID = re.compile(r"^o-[0-9a-f]{32}$")
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+OPENDIR = getattr(os, "O_DIRECTORY", 0)
 CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+# Opening a scaffold name asks the kernel for a directory directly (O_DIRECTORY): a
+# planted non-directory — a regular file, a device, or a named pipe — fails the open
+# with ENOTDIR immediately instead of parking the caller in the kernel's blocked-open
+# wait (re-review 2, blocking 3); O_NONBLOCK is never needed for that refusal.
+DIRECTORY_OPEN = os.O_RDONLY | NOFOLLOW | OPENDIR | CLOEXEC
 EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
 
 # The implementation manifest is exactly the closure of these roots, by the rule in doc/testing.md ("The generic
@@ -224,59 +230,131 @@ def sandbox_home(env: Mapping[str, str] | None = None) -> Path:
     return canonical_authority_path(selected)
 
 
-def safe_directory(path: Path, *, create: bool) -> None:
-    """Validate a scaffolding directory's identity without ever chmod'ing through a path.
+def _verified_identity(descriptor: int, name: str, *, final: bool, created: bool) -> None:
+    """Verify one opened scaffold component's identity from ``fstat`` alone.
 
-    Identity is validated through a descriptor opened without following symlinks
-    (re-review, blocking 3), and no permission is ever changed through the path: a
-    directory that lost a concurrent first-use race to a planted link is refused with
-    its target's permissions untouched. A fresh creation gains its closed mode at
-    creation time itself, inside a zero-umask window, so a restrictive umask can neither
-    mask the closed mode (which would need a healing chmod) nor smuggle it in past the
-    identity admission.
+    A component this caller freshly created may gain the closed mode after the check, by
+    ``fchmod`` on its own descriptor; a component anybody else created (a pre-existing
+    entry or a lost-race winner) is validated and never altered, whatever its mode.
     """
-    try:
-        path.lstat()
-    except FileNotFoundError:
-        if not create:
-            raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}")
-        try:
-            # the closed mode belongs at creation, under a zero umask: nothing chmod's
-            # the fresh scaffold afterwards, and no umask can mask its ownership bits
-            saved = os.umask(0)
-            try:
-                path.mkdir(parents=True, mode=MODE_DIR)
-            finally:
-                os.umask(saved)
-        except FileExistsError:
-            # a concurrent first initializer (E5 review, finding 3) won the create: its
-            # directory (or, under attack, a planted entry) is validated below and is
-            # never changed before the validation accepts it (re-review, blocking 3)
-            pass
-        except OSError as exc:
-            raise GenericScaffoldingError(
-                f"sandbox directory cannot be created safely: {path.name}") from exc
-    except OSError as exc:
-        raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}") from exc
-    try:
-        descriptor = os.open(path, os.O_RDONLY | NOFOLLOW | CLOEXEC)
-    except OSError as exc:
-        # a planted symlink (or other non-directory) at the named path cannot be opened
-        # without following it, so it is refused without any permission change to it
-        raise GenericScaffoldingError(
-            f"sandbox directory cannot be opened safely: {path.name}") from exc
     try:
         info = os.fstat(descriptor)
         if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid != os.getuid()
-                or stat.S_IMODE(info.st_mode) != MODE_DIR):
+                or (final or created) and info.st_uid != os.getuid()):
             raise GenericScaffoldingError(
-                f"sandbox directory has unsafe ownership/mode: {path.name}")
+                f"sandbox directory has unsafe identity: {name}")
+        if created:
+            # the own fresh creation gains the closed mode by descriptor — the process
+            # mask cannot mask an fchmod, and nothing chmod's through the name
+            os.fchmod(descriptor, MODE_DIR)
+            if stat.S_IMODE(os.fstat(descriptor).st_mode) != MODE_DIR:
+                raise GenericScaffoldingError(
+                    f"sandbox directory refused its closed mode: {name}")
+        elif final and stat.S_IMODE(info.st_mode) != MODE_DIR:
+            # a pre-existing or race-won directory is refused, never healed back to the
+            # closed mode: a permission change before the identity admission is the
+            # exact behaviour this check must not have
+            raise GenericScaffoldingError(
+                f"sandbox directory has unsafe ownership/mode: {name}")
     except OSError as exc:
         raise GenericScaffoldingError(
-            f"sandbox directory cannot be initialized safely: {path.name}") from exc
+            f"sandbox directory cannot be initialized safely: {name}") from exc
+
+
+def _scaffold_component(parent: int, name: str, *, create: bool, final: bool) -> int:
+    """Open one scaffold component relative to its opened, verified parent.
+
+    An existing component is opened directory-only and never modified. A missing
+    component is created by ``mkdir`` anchored to the parent descriptor (no
+    ``parents=True`` walk, so intermediates never get a default mode), then opened the
+    same way and, when the caller won that create, fixed to the closed mode by
+    ``fchmod`` on the opened descriptor. If the process mask leaves the fresh directory
+    unopenable, the scaffolding is refused — the mask is never set or zeroed, no helper
+    process establishes the mode, and no permission is ever changed through the path
+    (re-review 2, blocking 1).
+    """
+    def opened() -> int:
+        try:
+            return os.open(name, DIRECTORY_OPEN, dir_fd=parent)
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                f"sandbox directory cannot be opened safely: {name}") from exc
+
+    def adopted(descriptor: int, *, created: bool) -> int:
+        try:
+            _verified_identity(descriptor, name, final=final, created=created)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    created = False
+    try:
+        descriptor = os.open(name, DIRECTORY_OPEN, dir_fd=parent)
+    except FileNotFoundError:
+        if not create:
+            raise GenericScaffoldingError(f"sandbox directory is unavailable: {name}") from None
+    except OSError as exc:
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be opened safely: {name}") from exc
+    else:
+        # an existing component is validated and never altered
+        return adopted(descriptor, created=False)
+    try:
+        os.mkdir(name, MODE_DIR, dir_fd=parent)
+        created = True
+    except FileExistsError:
+        # lost the create race: the winner is validated below and never altered; the
+        # descriptor opened on it is never chmod'ed (re-review 1, blocking 3)
+        pass
+    except OSError as exc:
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be created safely: {name}") from exc
+    if not created:
+        return adopted(opened(), created=False)
+    try:
+        descriptor = os.open(name, DIRECTORY_OPEN, dir_fd=parent)
+    except OSError as exc:
+        # the fresh directory this caller won cannot be opened — most plausibly the
+        # process mask stripped the owner-read bit the same mask applied at creation:
+        # refuse (sandbox-scaffolding-unsafe), never change the mask and never chmod
+        # through the path. The unusable fresh entry is rolled back best-effort through
+        # the opened parent descriptor, restoring the caller's tree.
+        try:
+            os.rmdir(name, dir_fd=parent)
+        except OSError:
+            pass
+        raise GenericScaffoldingError(
+            "sandbox directory cannot be opened under the current process mask: " + name) from exc
+    return adopted(descriptor, created=True)
+
+
+def safe_directory(path: Path, *, create: bool) -> None:
+    """Validate one scaffolding directory's identity, component by component.
+
+    The process umask is never read or changed: a fresh component is created relative
+    to its opened, verified parent, opened with ``O_DIRECTORY|O_NOFOLLOW``, verified from
+    ``fstat``, and — for the caller's own fresh creation only — fixed to the closed mode
+    by ``fchmod`` on the opened descriptor. A race winner or a planted impostor is
+    validated and refused without a single permission change, and a name that is not a
+    directory (a regular file, a device, a named pipe) is refused by the directory-only
+    open without blocking (re-review 2, blocking 3).
+    """
+    supplied = Path(path)
+    if (not supplied.is_absolute() or ".." in supplied.parts
+            or os.path.normpath(str(supplied)) != str(supplied)
+            or not supplied.parts[1:]):
+        raise GenericScaffoldingError("sandbox directory path is not canonical and absolute")
+    parent = os.open(supplied.anchor or os.sep, DIRECTORY_OPEN)
+    try:
+        names = supplied.parts[1:]
+        for index, name in enumerate(names):
+            final = index == len(names) - 1
+            descriptor = _scaffold_component(parent, name, create=create, final=final)
+            os.close(parent)
+            parent = descriptor
     finally:
-        os.close(descriptor)
+        os.close(parent)
 
 
 def safe_file(path: Path, *, cap: int = MAX_CONTROL_FILE_BYTES) -> bytes:

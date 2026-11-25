@@ -30,7 +30,7 @@ from adapters.sandbox import run_qualification as run_owner
 from core import spike_plan
 from test_docker_planner import D0, D1
 from test_generic_authority import CLI, runtime
-from test_generic_execution import FakeDocker
+from test_generic_execution import FakeDocker, StubRunner
 from test_generic_qualification import FakeKernelFactory
 
 PIN = probe_image.pinned_probe_image()
@@ -863,79 +863,81 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                     self.assertFalse(records.exists() and any(records.iterdir()))
 
     def test_the_second_first_use_attempt_never_replaces_the_inode_the_first_holds(self):
-        # The witnessed first-use sequence (re-review, blocking 3): both attempts miss
-        # the initial lock lookup; the second resolves its own initialization while the
-        # first holds the lock; the held inode is never replaced. A replacing writer
-        # (the old atomic-rename lock creator) unlinks the held inode, so the assertions
-        # below fail on that mutant and pass only on the exclusive create.
-        for attempt_index in range(3):
-            with self.subTest(race=attempt_index):
-                cell = self._fresh_cell()
-                store = common.ExecutionStore(cell)
-                lock_path = store.runtime_lock
-                self.assertFalse(lock_path.exists())  # both miss the initial lookup
-                held: dict[str, int] = {}
-                overlaps: list[int] = []
-                guard = threading.Lock()
-                both_missed = threading.Barrier(2)
-                first_holds = threading.Event()
-                second_attempted = threading.Event()
-                errors: list[BaseException] = []
+        # Sol's exact witness (re-review 2, blocking 2): both attempts genuinely miss
+        # the lock lookup — the barrier runs before either initializer looks — and the
+        # second attempt's missed lookup is paused until the first attempt holds the
+        # published inode, so its publication happens against a held lock. The
+        # exclusive create then loses (FileExistsError) and adopts the held inode; a
+        # lookup-then-replace writer unlinks it instead, and the assertions fail. The
+        # committed sequence it replaces let the second initializer run after the
+        # publication, so an old replacing writer survived it.
+        cell = self._fresh_cell()
+        store = common.ExecutionStore(cell)
+        for path in (store.home, store.runtime, store.staging):
+            common.safe_directory(path, create=True)
+        lock_path = store.runtime_lock
+        self.assertFalse(lock_path.exists())   # first use: both lookups can miss
+        barrier = threading.Barrier(2)
+        first_locked = threading.Event()
+        first_done = threading.Event()
+        state = threading.local()
+        entries: list[int] = []
+        errors: list[BaseException] = []
+        original = type(lock_path).lstat
 
-                def first_attempt():
+        def missed_lookup_then_pause(path):
+            # only the initializer's own lookup on the lock name is paused, once per
+            # attempt; everything else reads the filesystem as it is
+            if Path(path) == lock_path and getattr(state, "first_lookup", False):
+                state.first_lookup = False
+                barrier.wait(timeout=10.0)   # both missed lookups are synchronized and real
+                if state.index == 1 and not first_locked.wait(timeout=10.0):
+                    raise AssertionError("the first attempt never held the lock")
+                raise FileNotFoundError(path)
+            return original(path)
+
+        def attempt(index):
+            state.index = index
+            state.first_lookup = True
+            try:
+                # the real production initializer, lookup included
+                store.prepare_execution_scaffolding()
+                if index == 1:
+                    # the lost race adopted the winner: the held inode is the name's inode
+                    self.assertEqual(lock_path.stat().st_ino, entries[0])
+                    return
+                with common.runtime_lock(store, time.monotonic() + 30.0):
+                    entries.append(lock_path.stat().st_ino)
+                    descriptor = os.open(lock_path, os.O_RDONLY)
                     try:
-                        both_missed.wait(timeout=10.0)
-                        store.prepare_execution_scaffolding()
-                        with common.runtime_lock(store, time.monotonic() + 30.0):
-                            # the held descriptor proves the inode the flock is held on
-                            descriptor = os.open(lock_path, os.O_RDONLY)
-                            try:
-                                held["ino"] = os.fstat(descriptor).st_ino
-                                first_holds.set()
-                                second_attempted.wait(timeout=10.0)
-                                # while the second attempt published, the held inode
-                                # was neither replaced nor unlinked
-                                info = os.fstat(descriptor)
-                                self.assertEqual(info.st_ino, held["ino"])
-                                self.assertEqual(info.st_nlink, 1)
-                                self.assertEqual(lock_path.lstat().st_ino, held["ino"])
-                                with guard:
-                                    overlaps.append(len(overlaps) + 1)
-                            finally:
-                                os.close(descriptor)
-                    except BaseException as exc:
-                        errors.append(exc)
-                        first_holds.set()
+                        first_locked.set()
+                        held = os.fstat(descriptor)
+                        # while the second attempt published against this held lock, the
+                        # held inode was neither replaced nor unlinked away
+                        self.assertEqual(held.st_nlink, 1,
+                                         "the second attempt replaced the held lock inode")
+                    finally:
+                        os.close(descriptor)
+                    if not first_done.wait(timeout=10.0):
+                        raise AssertionError("the second attempt never finished its initialization")
+            except BaseException as exc:
+                errors.append(exc)
+            finally:
+                if index == 1:
+                    first_done.set()
 
-                def second_attempt():
-                    try:
-                        both_missed.wait(timeout=10.0)
-                        first_holds.wait(timeout=10.0)
-                        # the second tries to publish its lock while the first holds:
-                        # the exclusive create adopts the held name, never replaces it
-                        store.prepare_execution_scaffolding()
-                        self.assertEqual(lock_path.lstat().st_ino, held["ino"])
-                        second_attempted.set()   # its publication attempt is in flight
-                        with common.runtime_lock(store, time.monotonic() + 30.0):
-                            self.assertEqual(lock_path.lstat().st_ino, held["ino"])
-                            with guard:
-                                overlaps.append(len(overlaps) + 1)
-                    except BaseException as exc:
-                        errors.append(exc)
-                        second_attempted.set()
-
-                workers = [threading.Thread(target=first_attempt),
-                           threading.Thread(target=second_attempt)]
-                for worker in workers:
-                    worker.start()
-                for worker in workers:
-                    worker.join(timeout=30.0)
-                self.assertFalse(any(worker.is_alive() for worker in workers),
-                                 "a first-use attempt failed but never ended")
-                self.assertEqual(errors, [])
-                self.assertEqual(overlaps, [1, 2],
-                                 "the two first attempts serialize; the held inode is kept")
-                store._check_runtime_lock()
+        with mock.patch.object(type(lock_path), "lstat", missed_lookup_then_pause):
+            workers = [threading.Thread(target=attempt, args=(index,)) for index in range(2)]
+            for worker in workers:
+                worker.start()
+            for worker in workers:
+                worker.join(timeout=30.0)
+        self.assertFalse(any(worker.is_alive() for worker in workers),
+                         "a first-use attempt failed but never ended")
+        self.assertEqual(errors, [])
+        self.assertEqual(lock_path.stat().st_ino, entries[0],
+                         "the name still addresses the inode the first attempt locked")
+        store._check_runtime_lock()
 
     # --- effects and resolved-authority wiring -------------------------------
 
@@ -1003,6 +1005,53 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                                  / spike_plan.ISOLATED_PROFILE)})
         self.assertEqual(work, harness.root / run_owner.NAMESPACE / "work")
         self.assertEqual(cli, facts["docker_cli"])
+
+    def test_the_default_recovery_effects_launch_commands_at_the_pinned_destination(self):
+        # (re-review 2, non-blocking 2) the destination witness below the concrete
+        # effects implementation: with the production default effects factory, the
+        # commands the real ConcreteGenericEffects launches — not the objects it is
+        # constructed with — carry the pinned Docker CLI, the pinned endpoint and the
+        # private config directory. The runner is injected under the effects (the
+        # ConcreteGenericEffects process boundary); the recording construction test above
+        # watches the constructor, and this one watches the actual launched commands.
+        cell = self._fresh_cell()
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.effects_options["realization"] = {"crash_after": 5}
+        crashed = harness.call()
+        self.assertIs(type(crashed), run_owner.RunQualificationFailed)
+        self.assertIs(crashed.reason, run_owner.RunQualificationReason.CLEANUP_UNAVAILABLE)
+        rows = generic_journal.GenericJournalStore(common.ExecutionStore(cell)).scan()
+        self.assertEqual(len(rows), 1, "a retained journal gives the recovery real work")
+
+        facts = runtime()
+        runner = DestinationRecordingRunner(rows[0].operation)
+        fresh = OwnerHarness(cell)
+        fresh.manifests = [{"implementation_digest": D0}] * 32
+        fresh.attempt_id = "a-2"
+        fresh.kernel_factory = FakeKernelFactory()   # the probes own no docker effects
+        fresh.effects_factory = None                  # the production default: _concrete_effects
+        with mock.patch.object(process, "BoundedRunner", mock.Mock(return_value=runner)):
+            outcome = fresh.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        self.assertEqual(generic_journal.GenericJournalStore(
+            common.ExecutionStore(cell)).scan(), (),
+            "the real recovery finished the retained journal and emptied the store")
+        self.assertTrue(runner.destinations,
+                        "the recovery launched real docker commands through the concrete effects")
+        config = cell / run_owner.NAMESPACE / "configs" / spike_plan.ISOLATED_PROFILE
+        for argv, environment in runner.destinations:
+            self.assertEqual(argv[0], facts["docker_cli"],
+                             "the pinned CLI prefixes every launched command")
+            self.assertEqual(environment, {
+                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": facts["endpoint"],
+                "DOCKER_CONFIG": str(config)})
+            self.assertIn(argv[1], {"container", "network"},
+                          "recovery only reads and removes the journal's own resources")
+        inspected = {argv[-1] for argv, _ in runner.destinations
+                     if argv[1:3] == ("container", "inspect")}
+        self.assertEqual(inspected, {rows[0].container_id},
+                         "the recovery proved the journal's exact container name")
 
     # --- legacy /2 namespaces and lineage --------------------------------------
 
@@ -1386,10 +1435,12 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
                          outcome.record)
 
     def test_the_publication_seal_never_follows_a_replaced_symbolic_link(self):
-        # (mutation survivors: the seal's O_NOFOLLOW, and the `publication` default) the
-        # mode change of a fresh publication opens the renamed file without following a
-        # link swapped in after the durable write: it is refused, and the swapped link's
-        # target keeps its own mode and is never chmod'ed through the link.
+        # (mutation survivors: the publication validation's `path.exists` `or` islink, and
+        # the read-back itself) the freshly renamed publication is validated without
+        # following a symbolic link swapped in after the durable write: it is refused,
+        # and the swapped link's target keeps its own mode — no permission is ever
+        # changed through the name (the closed mode was already fixed on the exclusive
+        # temporary descriptor before the rename).
         import tempfile
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)
@@ -1431,6 +1482,59 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
             stat_module.S_IMODE(victim.lstat().st_mode), 0o755,
             "the link target was never chmod'ed through the swapped name")
         self.assertTrue(path.is_symlink(), "the attacker's swap is still in place")
+        with self.assertRaises((authority.GenericQualificationError,
+                                common.GenericScaffoldingError)):
+            store.load_record(different["qualification_record_digest"],
+                              project_id="project-1", run_id="run-1", generation=1)
+
+    def test_a_hardlinked_impostor_on_the_fresh_publication_is_refused_unmutated(self):
+        # (re-review 2, blocking 4) there is no permission change after the rename at
+        # all: the closed mode was fixed on the exclusive temporary descriptor before
+        # the sync and rename (fsio.atomic_write), and the published entry is validated
+        # without ever being mutated. A hard link to an unrelated 0644 file swapped onto
+        # the fresh publication is refused by the identity admission — O_NOFOLLOW
+        # cannot stop a hard link; only the absent chmod can keep it harmless.
+        import stat as stat_module
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        cell = (Path(temporary.name) / "sandbox").resolve()
+        cell.mkdir(mode=0o700)
+        harness = OwnerHarness(cell)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        store = run_owner.RunQualificationStore(cell)
+
+        neighbor = tempfile.TemporaryDirectory()
+        self.addCleanup(neighbor.cleanup)
+        unrelated = (Path(neighbor.name) / "unrelated-0644").resolve()
+        unrelated.write_bytes(b"someone else's data")
+        unrelated.chmod(0o644)
+        different = dict(outcome.record)
+        different["qualification_elapsed_ms"] = different["qualification_elapsed_ms"] + 7
+        body = {key: item for key, item in different.items()
+                if key != "qualification_record_digest"}
+        different["qualification_record_digest"] = run_owner.canonical_digest(body)
+        path = store.records / (different["qualification_record_digest"]
+                                .removeprefix("sha256:") + ".json")
+        self.assertFalse(path.exists())
+        original_write = run_owner.fsio.atomic_write
+
+        def swapped_write(target, data, *, durable=False):
+            original_write(target, data, durable=durable)
+            # the attacker wins the race window after the durable write, with a hard
+            # link — the one swap a no-follow open cannot refuse by itself
+            target.unlink()
+            os.link(unrelated, target)
+
+        with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
+            with self.assertRaises(authority.GenericQualificationError):
+                store.write_record(different)
+        self.assertEqual(stat_module.S_IMODE(unrelated.stat().st_mode), 0o644,
+                         "the publication validates without mutating: an unrelated "
+                         "hard-linked file keeps its own mode")
+        self.assertEqual(path.stat().st_ino, unrelated.stat().st_ino)
         with self.assertRaises((authority.GenericQualificationError,
                                 common.GenericScaffoldingError)):
             store.load_record(different["qualification_record_digest"],
@@ -1664,6 +1768,21 @@ class DaemonFixtureRunner:
                     raise OSError("the Docker CLI could not be launched")
         answer = self._answers(args)
         return process.CommandResult.fake(stdout=answer + "\n")
+
+
+class DestinationRecordingRunner(StubRunner):
+    """A process runner *below* the concrete effects implementation: it records every
+    command the real ConcreteGenericEffects launches — its full argv and environment —
+    and answers from the in-memory FakeDocker, so the retry/recovery path of the owner
+    can be witnessed at the actual command destination, not at the constructors."""
+
+    def __init__(self, operation):
+        super().__init__(FakeDocker(operation))
+        self.destinations: list[tuple[tuple[str, ...], dict[str, str]]] = []
+
+    def run(self, argv, *, env=None, **kwargs):
+        self.destinations.append((tuple(argv), dict(env or {})))
+        return super().run(argv, env=env, **kwargs)
 
 
 if __name__ == "__main__":

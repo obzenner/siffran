@@ -162,22 +162,179 @@ class ScaffoldingTests(unittest.TestCase):
                         common.GenericScaffoldingError):
                     common.safe_directory(impersonator, create=create)
 
-    def test_a_restrictive_umask_lets_the_created_scaffold_gain_its_closed_mode(self):
-        # (mutation survivor: `own_creation = True` after a successful mkdir) with umask
-        # 0777 the mkdir cannot carry the closed mode itself; only the validated
-        # descriptor's fchmod completes it - the mutant refuses the fresh scaffold.
+    def test_a_typical_umask_yields_the_created_scaffold_its_closed_mode_by_descriptor(self):
+        # (re-review 2, blocking 1) the process umask is never touched, so the closed
+        # mode reaches a fresh scaffold through the opened descriptor's fchmod — masks
+        # that only strip group/other bits are indistinguishable, so the witness uses a
+        # mask that also strips owner-write (the directory stays openable at 0500):
+        # without the descriptor fix the mode stays wrong and the admission refuses.
         import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            previous = None
+            try:
+                previous = os.umask(0o177)
+                fresh = root / "runtime"
+                common.safe_directory(fresh, create=True)
+                observed = os.umask(previous)
+                previous = None
+            finally:
+                if previous is not None:
+                    os.umask(previous)
+            self.assertEqual(observed, 0o177,
+                             "the process mask is unchanged through the creation")
+            self.assertEqual(
+                stat_module.S_IMODE(fresh.lstat().st_mode), common.MODE_DIR)
+
+    def test_a_mask_that_hides_the_fresh_directory_is_refused_never_chmodded(self):
+        # (re-review 2, blocking 1) a mask that strips the owner-read bit from the fresh
+        # directory makes its descriptor unopenable: the scaffolding is refused with
+        # sandbox-scaffolding-unsafe — the mask is never zeroed, no helper process runs,
+        # no path-based permission change happens — and the unusable fresh entry is
+        # rolled back through the opened parent descriptor.
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(strict=True)
             previous = None
             try:
                 previous = os.umask(0o777)
                 fresh = root / "runtime"
-                common.safe_directory(fresh, create=True)
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_directory(fresh, create=True)
+                observed = os.umask(previous)
+                previous = None
             finally:
-                os.umask(previous)
+                if previous is not None:
+                    os.umask(previous)
+            self.assertEqual(observed, 0o777,
+                             "no umask window: the mask survives every refusal")
+            self.assertFalse(fresh.exists(),
+                             "the unopenable fresh entry was rolled back, never left stranded")
+
+    def test_created_components_never_touch_the_process_mask_or_a_stranger(self):
+        # (re-review 2, blocking 1) the controlled-thread result, made deterministic: a
+        # file created inside the creation window — by any thread — must inherit the
+        # ambient 0o077 mask (0600, not 0666), an intermediate parent must be created at
+        # the closed mode through the descriptor (never a 0777 default-mode parent), and
+        # the process mask must be exactly what it was. The old zero-umask window and the
+        # old parents=True walk both fail here.
+        import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            leaf = root / "missing-parent" / "closed-leaf"
+            strangers: list[int] = []
+            real_mkdir = os.mkdir
+
+            def mkdir_with_a_stranger_inside(path, *args, **kwargs):
+                # a file created during the scaffolding window: under the old
+                # os.umask(0) window it lands at 0666, under the ambient mask at 0600
+                if not strangers:
+                    stranger = root / "stranger-file"
+                    stranger.write_text("x")
+                    strangers.append(stat_module.S_IMODE(stranger.stat().st_mode))
+                return real_mkdir(path, *args, **kwargs)
+
+            previous = None
+            try:
+                previous = os.umask(0o077)
+                with patch("os.mkdir", mkdir_with_a_stranger_inside):
+                    common.safe_directory(leaf, create=True)
+                observed = os.umask(previous)
+                previous = None
+            finally:
+                if previous is not None:
+                    os.umask(previous)
+            self.assertEqual(strangers, [0o600],
+                             "a mask-changing creation window is visible in a stranger's file")
+            self.assertEqual(observed, 0o077, "the process mask was never changed")
             self.assertEqual(
-                stat_module.S_IMODE(fresh.lstat().st_mode), common.MODE_DIR)
+                stat_module.S_IMODE((root / "missing-parent").lstat().st_mode), common.MODE_DIR,
+                "intermediates are created relative to opened parents at the closed mode")
+            self.assertEqual(stat_module.S_IMODE(leaf.lstat().st_mode), common.MODE_DIR)
+
+    def test_a_racing_competitor_is_never_chmodded_back_into_admission(self):
+        # (mutation Survivor: the lost-create branch must validate the winner it never
+        # created, never fchmod it) the race is made deterministic: the walker's own
+        # first open misses, and its mkdir is diverted to create a permissive 0755
+        # competitor and then lose to it. The winner keeps its own mode and is refused;
+        # a mutant that adopts the winner as its own creation heals it to 0700 and
+        # accepts, and both mutants of the `created` flag fail here.
+        import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            work = root / "work"
+            real_mkdir = os.mkdir
+
+            def mkdir_that_loses_the_race(path, mode=0o777, **kwargs):
+                # the competitor wins the name with a permissive directory, and this
+                # caller is told it lost: a first-initializer race, deterministically
+                real_mkdir(path, common.MODE_DIR, **kwargs)
+                os.chmod(path, 0o755, dir_fd=kwargs.get("dir_fd"))
+                raise FileExistsError(path)
+
+            with patch("os.mkdir", mkdir_that_loses_the_race):
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_directory(work, create=True)
+            self.assertEqual(stat_module.S_IMODE(work.lstat().st_mode), 0o755,
+                             "the competitor's permissive mode was never chmod'ed away")
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_directory(work, create=False)
+
+    def test_a_component_owned_by_another_user_is_refused(self):
+        # (mutation survivor: the `(final or created) and st_uid != os.getuid()` guard)
+        # a scaffold component another user owns - the planted root-owned directory
+        # here, a directory whose fresh creation is owned by "someone else" from the
+        # walker's point of view - is refused on identity, never adopted and never
+        # chmod'ed, whether it was found pre-existing or was lost by create. The other
+        # user is simulated through the identity comparison, so the block needs no
+        # privileged setup.
+        real = os.getuid()
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            preexisting = root / "work"
+            preexisting.mkdir(mode=common.MODE_DIR)
+            with patch.object(os, "getuid", lambda: real + 1):
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_directory(preexisting, create=False)   # found pre-existing
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_directory(root / "runtime", create=True)   # freshly created
+
+    def test_a_closed_component_of_the_filesystem_root_is_never_a_scaffold(self):
+        # (mutation survivor: the empty-component guard) the filesystem root itself is
+        # the anchor of every walk, never a scaffold: a path with no components must
+        # be refused before the walk starts, or the walker would open the root anchor
+        # and return it as verified scaffolding.
+        with self.assertRaises(common.GenericScaffoldingError):
+            common.safe_directory(Path("/"), create=False)
+        with self.assertRaises(common.GenericScaffoldingError):
+            common.safe_directory(Path("/"), create=True)
+
+    def test_a_named_pipe_at_a_scaffold_name_is_refused_without_blocking(self):
+        # (re-review 2, blocking 3) a named pipe parked at the scaffold name must be
+        # refused promptly: the directory-only open rejects a non-directory kernel-side
+        # instead of waiting for a reader. The call runs on its own thread so a blocked
+        # worker is a bounded failure, not a parked suite.
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            impostor = root / "runtime"
+            os.mkfifo(impostor, 0o700)
+            for create in (True, False):
+                with self.subTest(create=create):
+                    refusals: list[BaseException] = []
+
+                    def call(impostor=impostor, create=create, refusals=refusals):
+                        try:
+                            common.safe_directory(impostor, create=create)
+                        except common.GenericScaffoldingError as exc:
+                            refusals.append(exc)
+
+                    worker = threading.Thread(target=call)
+                    worker.start()
+                    worker.join(timeout=5.0)
+                    self.assertFalse(worker.is_alive(),
+                                     "the named pipe parked the scaffolding open: a "
+                                     "non-directory must be refused without blocking")
+                    self.assertEqual(len(refusals), 1)
 
     def test_mount_csv_delimiters_are_rejected_with_actionable_setup_error(self):
         with tempfile.TemporaryDirectory() as temporary:
