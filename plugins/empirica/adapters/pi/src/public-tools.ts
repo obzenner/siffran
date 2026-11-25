@@ -151,7 +151,7 @@ const PATTERN_KEYS = new Set(["type", "pattern", "description"]);
 const ABSOLUTE_END = "(?![\\s\\S])";
 
 /** The positive bounded grammar this page's one pattern caller (the digest guard) may serve,
- * after `^` is stripped and the end anchor taken off: a literal prefix of `[a-z0-9:]` characters,
+ * after `^` is stripped and the absolute end taken off: a literal prefix of `[a-z0-9:]` characters,
  * then exactly one `[0-9a-f]` class with a fixed positive count — no escape class, no dot, no
  * group, no alternation, no other quantifier (E6c re-review 1, blocking 1). A blacklist of
  * disagreeing atoms cannot hold that word: the class-escape list admitted `^\q`, an identity
@@ -160,23 +160,25 @@ const ABSOLUTE_END = "(?![\\s\\S])";
  * neither that nor dot semantics) while Python's does — the engines' `\d`/`\w`/`\s` families
  * apart, their whitespace sets are simply *different*, not a Unicode-versus-ASCII split, so no
  * restatement of “which escapes disagree” is the boundary. The boundary is the grammar itself:
- * the digest word matches it, and both engines read every admitted pattern identically. */
+ * the digest word matches it, and both engines read every admitted pattern identically.
+ *
+ * The one closed end is the absolute lookahead; a `$` anchor never loads (E6c re-review 2,
+ * blocking 1). JSON Schema's `pattern` is Python `re.search`, whose `$` matches before a final
+ * line feed, while JavaScript's unescaped `$` (no `m` flag) refuses that value — the same
+ * split that made the core re-anchor its digest word, so the page admits no `$`-anchored word
+ * at all, not even the anchored digest itself: only `(?![\s\S])` closes the grammar. */
 const BOUNDED_WORD = /^[a-z0-9:]*\[0-9a-f\]\{[1-9][0-9]*\}$/;
 
 /** The anchored pattern a string schema serves: exactly the bounded digest-guard word — `^`,
- * that literal prefix, the one fixed-count class, and one of the two closed ends. Any other
- * admission keyword (`format`, `enum`, ...), an unanchored or an escaped end, a top-level
- * alternation (`|`, which `^...$` would not anchor) refuses to load. The end is one of the two
- * closed anchors: `^...$` (never an escaped `\$`; JavaScript's `$` with no `m` flag already
- * refuses a trailing newline — it is Python's `re.search` that would admit the position before
- * one, which is why the core re-anchored its word) and the absolute `(?![\s\S])` lookahead, the
- * one allowlisted atom.
+ * that literal prefix, the one fixed-count class, and the one closed end, the absolute
+ * `(?![\s\S])` lookahead. Any other admission keyword (`format`, `enum`, ...), an unanchored,
+ * escaped or dollar end, a top-level alternation (`|`, which `^...` would not anchor) refuses to
+ * load.
  */
 export function schemaPattern(schema: Schema | undefined): RegExp {
   const pattern = schema?.pattern;
   const body = typeof pattern !== "string" ? undefined
     : pattern.endsWith(ABSOLUTE_END) ? pattern.slice(0, -ABSOLUTE_END.length)
-    : pattern.endsWith("$") && !pattern.endsWith("\\$") ? pattern.slice(0, -1)
     : undefined;
   if (schema?.type !== "string"
       || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key) || key.startsWith("x-"))

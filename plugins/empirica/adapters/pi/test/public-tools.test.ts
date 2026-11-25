@@ -40,26 +40,35 @@ test("schemaPattern treats x- extension members as nonsemantic (ADR-0075 annotat
 test("schemaPattern serves the one bounded word its only caller guards", () => {
   // The digest guard is schemaPattern's only caller, so the page serves exactly the word that
   // caller needs: `^`, a literal prefix of [a-z0-9:] characters, one [0-9a-f] class with a fixed
-  // positive count, and one of the two closed end anchors. The grammar is positive and bounded —
-  // no escape class, no dot, no group, no quantifier but the one fixed count, no alternation — so
-  // both engines read every admitted pattern identically (E6c re-review 1, blocking 1).
-  for (const pattern of ["^sha256:[0-9a-f]{32}(?![\\s\\S])", "^[0-9a-f]{8}$", "^[0-9a-f]{64}$", "^sha256:[0-9a-f]{64}(?![\\s\\S])"])
+  // positive count, and the one closed end — the absolute-end lookahead; `$` never loads
+  // (E6c re-review 2, blocking 1). The grammar is positive and bounded — no escape class, no dot,
+  // no group, no quantifier but the one fixed count, no alternation — so both engines read every
+  // admitted pattern identically.
+  for (const pattern of ["^sha256:[0-9a-f]{32}(?![\\s\\S])", "^[0-9a-f]{8}(?![\\s\\S])", "^sha256:[0-9a-f]{64}(?![\\s\\S])"])
     assert.doesNotThrow(() => schemaPattern({ type: "string", pattern }));
 });
 
-test("schemaPattern refuses Sol's two seeds — a positive grammar, not a blacklist", () => {
-  // E6c re-review 1, blocking 1: both seeds load under a class-escape blacklist and serve the
-  // two engines different words — the digests themselves were never wrong, the loader was too
-  // wide. The first rests a `(?!.)` on the Unicode line separator U+2028: JavaScript's dot never
+test("schemaPattern refuses Sol's three seeds — a positive grammar, not a blacklist", () => {
+  // E6c reviews 1 and 2, blocking 1: all three seeds serve the two engines different words and
+  // refuse at load here — the digests themselves were never wrong, the loader was too wide.
+  // The first rests a `(?!.)` on the Unicode line separator U+2028: JavaScript's dot never
   // matches it (the `u` flag changes nothing), Python's does, so the pattern accepts a value in
   // one engine that the other refuses. The second, `^\q`, is an identity escape JavaScript
-  // compiles (it matches `q`) and Python cannot compile at all. Both refuse at load here.
+  // compiles (it matches `q`) and Python cannot compile at all. The third, the dollar-anchored
+  // digest, is the one the schema admits wider than the page: JSON Schema's `pattern` is Python
+  // `re.search`, whose `$` matches before a final line feed, while JavaScript's `RegExp.test`
+  // with an unescaped `$` refuses that value — so a `$` anchor can never load, only the
+  // absolute-end lookahead may close the word.
   assert.throws(() => schemaPattern({
     type: "string", pattern: "^sha256:[0-9a-f]{63}(?!.)[\u2028](?![\\s\\S])",
     "x-core-validator": "core.freshness.validate_digest256",
   }), /not a closed anchored string pattern/);
   assert.throws(() => schemaPattern({ type: "string", pattern: "^\\q(?![\\s\\S])" }),
     /not a closed anchored string pattern/);
+  assert.throws(() => schemaPattern({
+    type: "string", pattern: "^sha256:[0-9a-f]{64}$",
+    "x-core-validator": "core.freshness.validate_digest256",
+  }), /not a closed anchored string pattern/);
 });
 
 test("schemaPattern refuses every shape outside the bounded grammar", () => {
