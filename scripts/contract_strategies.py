@@ -63,6 +63,11 @@ from hypothesis import strategies as st  # noqa: E402
 from ui_view_strategies import Strategies  # noqa: E402
 
 CONTRACTS = ROOT / "contracts" / "empirica" / "v2"
+#: The second contract surface: Empirica 7.2's Docker-spike support contracts. Its schema documents
+#: register by the same declaration, so the harness reads them with the v2 surface (the /3 record's
+#: shape, E5) — the continuation's discovery change, which later docker-spike documents ride with no
+#: further harness change.
+DOCKER_SPIKE_CONTRACTS = ROOT / "contracts" / "empirica-docker-spike" / "v1"
 STATE_SCHEMA_PATH = CONTRACTS / "state.schema.json"
 X_VALIDATOR = "x-core-validator"
 X_CORE_ONLY = "x-core-only"
@@ -116,11 +121,14 @@ _WHOLE = object()  # _walk's return marker for "the base document itself is the 
 
 
 def documents() -> dict[str, dict]:
-    """Every ``contracts/empirica/v2`` schema document by name, sorted — the whole surface the annotations
-    may attach to, so a later node's response document registers by declaration, not by harness change."""
+    """Every ``contracts/empirica/v2`` and ``contracts/empirica-docker-spike/v1`` schema document by
+    name, sorted — the whole surface the annotations may attach to, so a later node's response document
+    or Docker-spike contract registers by declaration, not by harness change."""
     loaded = {}
-    for path in sorted(CONTRACTS.glob("*.schema.json")):
-        loaded[path.name.removesuffix(".schema.json")] = json.loads(path.read_text(encoding="utf-8"))
+    for directory in (CONTRACTS, DOCKER_SPIKE_CONTRACTS):
+        for path in sorted(directory.glob("*.schema.json")):
+            loaded[path.name.removesuffix(".schema.json")] = json.loads(
+                path.read_text(encoding="utf-8"))
     return loaded
 
 
@@ -788,8 +796,11 @@ class Contract:
         self."""
         if key not in self._draft:
             name, _, local = key.partition("#")
-            self._draft[key] = Draft202012Validator(
-                {"$ref": f"{self.documents[name]['$id']}#{local}"}, registry=self.registry)
+            # the whole-document root's pointer is empty: ``$id#/`` would name an empty-string
+            # member, so a registered document root resolves to its resource itself
+            reference = (f"{self.documents[name]['$id']}#{local}" if local != "/"
+                        else self.documents[name]["$id"])
+            self._draft[key] = Draft202012Validator({"$ref": reference}, registry=self.registry)
         return not bool(list(self._draft[key].iter_errors(document)))
 
     def core_callable(self, key: str) -> tuple[str, str]:

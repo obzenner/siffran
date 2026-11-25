@@ -273,8 +273,9 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         # sealed /3 spike row carries the requested reference, the full daemon image ID
         # observed at qualification (a diagnostic), the canonical platform and its
         # volume facts — and no capability list. The one trusted probe image keeps the
-        # shared qualification helper's own list. (The closed row shape itself is the
-        # contract conformance harness's at the restack; this keeps the behaviour.)
+        # shared qualification helper's own list. The closed row shape itself is the
+        # contract conformance harness's (the registered /3 schema's shapes own it);
+        # this keeps the behaviour.
         harness = OwnerHarness(self.root)
         harness.spike_images = ["python:3.12-slim", "busybox:latest"]
         harness.images.spike_documents["busybox:latest"] = spike_document(
@@ -285,7 +286,6 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         for row in outcome.record["spike_images"]:
             self.assertNotIn("capabilities", row,
                              "a sealed spike row never lists capabilities")
-            self.assertEqual(set(row), run_owner.SPIKE_IMAGE_FIELDS)
         self.assertEqual(outcome.record["qualification_image"]["capabilities"],
                          list(run_owner.qualification.IMAGE_CAPABILITIES),
                          "the trusted probe image keeps the shared helper's list")
@@ -392,13 +392,13 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(call[1]["timeout_seconds"], 0.5)
 
     def test_sealed_spike_rows_refuse_every_non_conforming_form_at_load(self):
-        # (the /3 record schema names these cross-field rules as the runtime admission's:
-        # the closed row set, the trusted identity, the server-native platform and the
-        # absence of declared volumes cannot be expressed as plain shapes) the loader's
-        # row rules refuse every non-conforming form with the closed record error — a
-        # shape that names the exact field set by its elements is still not a map, a
-        # canonical platform that is not the bound runtime's is foreign, and each
-        # refusal is the closed one, never a leaked exception.
+        # (the registered /3 schema owns the closed row shape — the field set, the
+        # identity digest, the os enum and the no-volumes constant are the contract
+        # conformance harness's — so these variants stay only for the semantics the
+        # schema cannot express) the loader's row rules refuse a platform that is not
+        # the bound runtime's with the closed record error — a canonical platform is
+        # a cross-field identity with the observed runtime, never a plain shape — and
+        # the refusal is the closed one, never a leaked exception.
         facts = runtime()
         conforming = {"reference": "python:3.12-slim", "id": D1, "raw_os": "linux",
                       "os": "linux", "raw_architecture": "x86_64", "architecture": "amd64",
@@ -406,14 +406,8 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(run_owner._spike_image_row(dict(conforming), facts, "spike image"),
                          conforming)
         variants = (
-            ("a non-map naming every field", list(run_owner.SPIKE_IMAGE_FIELDS)),
-            ("a foreign key", {**conforming, "capabilities": []}),
-            ("a missing key", {key: value for key, value in conforming.items()
-                               if key != "declared_volumes"}),
-            ("an untrusted daemon image identity", {**conforming, "id": "not-a-digest"}),
             ("a foreign canonical platform",
              {**conforming, "raw_architecture": "aarch64", "architecture": "arm64"}),
-            ("declared volumes", {**conforming, "declared_volumes": ["/data"]}),
         )
         for label, row in variants:
             with self.subTest(row=label):

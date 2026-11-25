@@ -315,20 +315,237 @@ def _elapsed_ms(value: object, where: str) -> int:
     return value
 
 
+# --- the closed shapes of the record's definition home (the conformance harness's word) -----
+#
+# The /3 record schema (contracts/empirica-docker-spike/v1/qualification-record.schema.json is
+# the shape's definition home) is registered with the ADR-0075 contract conformance harness
+# through its declaration pair: the schema's ``x-core-ingress`` roots with their
+# ``x-core-validator`` annotations, and the core's row in ``core.contract_registry``. These
+# public callables mirror their schema nodes exactly, so the harness's differential holds the
+# two voices of every closed shape together; each raises only the ValueError family — the
+# harness's domain of a refusal — as a pure function of one value. The semantic admission
+# (``validate_run_record`` below and its runtime row helpers) composes on them and owns every
+# rule the schema cannot express: the /2 runtime and daemon-identity admission, the semantic
+# authority projection, the platform cross-field identities, the byte-bounded identifiers, the
+# policy and implementation bindings, the probe order and outcome equality, and the
+# content-addressed file name, digests and run-generation lineage of the store.
+
+#: The probe rows' duration ceiling (the /2 millisecond bound minus one) and the record's elapsed
+#: ceiling (the operator timing session's default qualification budget), mirrored from the
+#: schema nodes' own descriptions.
+PROBE_DURATION_CEILING_MS = 59_999
+QUALIFICATION_ELAPSED_CEILING_MS = int(DEFAULT_QUALIFICATION_SECONDS * 1000) - 1
+_DAEMON_IDENTIFIER = re.compile(
+    r"^[^\u0000-\u0020\u007f-\u009f]*"
+    r"[^\u0000-\u0020\u007f-\u009f\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]"
+    r"[^\u0000-\u0020\u007f-\u009f]*(?![\s\S])")
+_PROBE_ROW_FIELDS = frozenset({
+    "name", "expected", "observed", "operation_digest", "cleanup_proven",
+    "duration_ms", "running_network_membership", "realization_digest",
+})
+_PROBE_OUTCOMES = frozenset(qualification.PROBE_EXPECTED)
+_PROBE_IMAGE_FIELDS = SPIKE_IMAGE_FIELDS | {"capabilities", "repo_digest"}
+
+
+def _refuse(where: str) -> None:
+    raise ValueError("run qualification " + where)
+
+
+def validate_binding_identifier(value: object) -> str:
+    """The record's identifier lexeme (the schema's ``$defs/identifier``): one nonempty
+    string of at most 128 closed characters — bytes stay the semantic admission's, whose
+    identifiers are bounded per UTF-8 encoding."""
+    if (type(value) is not str or len(value) > MAX_IDENTIFIER_CHARS
+            or _IDENTIFIER.fullmatch(value) is None):
+        _refuse("identifier is not closed")
+    return value  # type: ignore[return-value]
+
+
+def validate_binding_counter(value: object) -> int:
+    """The schema's ``$defs/counter``: a counted integer, never a JSON boolean."""
+    if type(value) is not int or isinstance(value, bool) or not 1 <= value <= 2_147_483_647:
+        _refuse("counter is not closed")
+    return value
+
+
+def validate_repo_digest(value: object) -> str:
+    """The schema's ``$defs/repoDigest``: a canonical repository reference pinned to its content
+    digest — the same absolutely anchored lexeme the /2 helper `$repo_digest` admits."""
+    if type(value) is not str or _REPO_DIGEST.fullmatch(value) is None:
+        _refuse("repo digest is malformed")
+    return value
+
+
+def validate_run_binding_shape(value: object) -> dict[str, Any]:
+    """The schema's ``$defs/runBinding``: the run facts a qualification attempt binds its
+    record to, as one closed map."""
+    if type(value) is not dict or set(value) != RUN_BINDING_FIELDS:
+        _refuse("binding shape is unknown")
+    for member in ("project_id", "run_id", "attempt_id"):
+        validate_binding_identifier(value[member])
+    for member in ("generation", "revision"):
+        validate_binding_counter(value[member])
+    validate_digest256(value["proposal_digest"])
+    return value
+
+
+def validate_daemon_identity_shape(value: object) -> str:
+    """The record's optional ``daemon_id`` member's own lexeme (self-describing, at least one
+    non-whitespace character); everything beyond the lexeme — when the identity may appear at
+    all and which daemon it names — is the runtime admission's."""
+    if (type(value) is not str or not 1 <= len(value) <= 128
+            or _DAEMON_IDENTIFIER.fullmatch(value) is None):
+        _refuse("daemon identity lexeme is malformed")
+    return value
+
+
+def validate_spike_image_row_shape(value: object) -> dict[str, Any]:
+    """The schema's ``$defs/spikeImageRow``: one sealed spike-image row — the requested
+    reference, the full daemon image ID (a diagnostic, never an admission gate), the platform
+    facts as recorded, and no declared volumes. No capability list: spike images are
+    inspected, never probed."""
+    if type(value) is not dict or set(value) != SPIKE_IMAGE_FIELDS:
+        _refuse("spike row shape is unknown")
+    reference = value["reference"]
+    if type(reference) is not str or not 1 <= len(reference) <= 255:
+        _refuse("spike row reference is abnormal")
+    validate_digest256(value["id"])
+    raw_os = value["raw_os"]
+    raw_architecture = value["raw_architecture"]
+    architecture = value["architecture"]
+    if (type(raw_os) is not str or not raw_os or value["os"] != "linux"
+            or type(raw_architecture) is not str or not raw_architecture
+            or type(architecture) is not str or not architecture):
+        _refuse("spike row platform is unknown")
+    if type(value["declared_volumes"]) is not list or value["declared_volumes"]:
+        _refuse("spike row declares volumes")
+    return value
+
+
+def validate_qualification_image_shape(value: object) -> dict[str, Any]:
+    """The schema's ``$defs/probeImage``: the one trusted probe image's own row — digest-pinned
+    reference, the daemon image ID, the recorded platform facts, no declared volumes, the
+    shared helper's closed capability list and the repo-digest admission proof."""
+    if type(value) is not dict or set(value) != _PROBE_IMAGE_FIELDS:
+        _refuse("probe image row shape is unknown")
+    validate_repo_digest(value["reference"])
+    validate_digest256(value["id"])
+    raw_os = value["raw_os"]
+    raw_architecture = value["raw_architecture"]
+    architecture = value["architecture"]
+    if (type(raw_os) is not str or not raw_os or value["os"] != "linux"
+            or type(raw_architecture) is not str or not raw_architecture
+            or type(architecture) is not str or not architecture):
+        _refuse("probe image row platform is unknown")
+    if type(value["declared_volumes"]) is not list or value["declared_volumes"]:
+        _refuse("probe image row declares volumes")
+    capabilities = value["capabilities"]
+    if (type(capabilities) is not list or len(capabilities) != len(qualification.IMAGE_CAPABILITIES)
+            or any(type(item) is not str or not item for item in capabilities)):
+        _refuse("probe image capability list is unknown")
+    validate_repo_digest(value["repo_digest"])
+    return value
+
+
+def validate_spike_images_shape(value: object) -> list:
+    """The schema's ``$defs/spikeImages``: the environment proposal's 1..16 approved sealed
+    rows."""
+    if (type(value) is not list or not 1 <= len(value) <= MAX_SPIKE_IMAGE_REFERENCES):
+        _refuse("spike rows are outside their bound")
+    for row in value:
+        validate_spike_image_row_shape(row)
+    return value
+
+
+def validate_probe_row_shape(value: object) -> dict[str, Any]:
+    """The schema's ``$defs/probe``: one recorded probe — its fixed name, the outcomes as
+    recorded (which must equal the expected one is the semantic admission's), the operation
+    digest, the proven cleanup, the measured duration and the realized image digest when the
+    probe reached a verdict."""
+    if type(value) is not dict or set(value) != _PROBE_ROW_FIELDS:
+        _refuse("probe row shape is unknown")
+    if value["name"] not in qualification.PROBE_ORDER:
+        _refuse("probe row name is unknown")
+    expected, observed = value["expected"], value["observed"]
+    if (type(expected) is not str or expected not in _PROBE_OUTCOMES
+            or type(observed) is not str or observed not in _PROBE_OUTCOMES):
+        _refuse("probe row outcome is unknown")
+    validate_digest256(value["operation_digest"])
+    if value["cleanup_proven"] is not True or type(value["running_network_membership"]) is not bool:
+        _refuse("probe row proofs differ")
+    duration = value["duration_ms"]
+    if (type(duration) is not int or isinstance(duration, bool)
+            or not 0 <= duration <= PROBE_DURATION_CEILING_MS):
+        _refuse("probe row duration is outside its bound")
+    realization = value["realization_digest"]
+    if realization is not None:
+        validate_digest256(realization)
+    return value
+
+
+def validate_qualification_elapsed(value: object) -> int:
+    """The schema's ``$defs/elapsedMs``: the record's measured elapsed milliseconds,
+    zero to the default qualification budget made exclusive on its last millisecond."""
+    if (type(value) is not int or isinstance(value, bool)
+            or not 0 <= value <= QUALIFICATION_ELAPSED_CEILING_MS):
+        _refuse("elapsed time is outside its bound")
+    return value
+
+
+def validate_qualification_record_shape(value: object) -> dict[str, Any]:
+    """The schema's root: the whole closed `/3` record shape (the definition home's word). The
+    runtime projections themselves stay open maps at this layer — their closed fact sets are
+    `/2` semantics the harness cannot draw — and every digest field is the one digest lexeme."""
+    if type(value) is not dict:
+        _refuse("record shape is unknown")
+    base = (_RECORD_BODY_FIELDS - {"daemon_id?"}) | {"qualification_record_digest"}
+    if set(value) != base | ({"daemon_id"} if "daemon_id" in value else frozenset()):
+        _refuse("record field set is unknown")
+    if value["schema"] != QUALIFICATION_RECORD_SCHEMA:
+        _refuse("record schema differs")
+    validate_run_binding_shape(value["run_binding"])
+    profile_id = value["profile_id"]
+    if type(profile_id) is not str or profile_id not in spike_plan.NETWORK_PROFILES:
+        _refuse("record profile is unknown")
+    if type(value["runtime"]) is not dict or type(value["semantic_authority"]) is not dict:
+        _refuse("record projections are unknown")
+    for member in ("authority_digest", "policy_digest", "implementation_digest",
+                   "probe_image_id", "execution_binding_digest", "qualification_record_digest"):
+        validate_digest256(value[member])
+    if "daemon_id" in value:
+        validate_daemon_identity_shape(value["daemon_id"])
+    validate_qualification_image_shape(value["qualification_image"])
+    validate_spike_images_shape(value["spike_images"])
+    if type(value["probes"]) is not list or len(value["probes"]) != len(qualification.PROBE_ORDER):
+        _refuse("record must contain five probes")
+    for probe in value["probes"]:
+        validate_probe_row_shape(probe)
+    if type(value["cleanup"]) is not dict or value["cleanup"] != _CLEANUP_PROOF:
+        _refuse("record cleanup proof differs")
+    validate_qualification_elapsed(value["qualification_elapsed_ms"])
+    return value
+
+
 def validate_run_record(value: object) -> dict[str, Any]:
     """Validate the exact closed `/3` record and fail closed on every malformed form.
+
+    The record's closed shapes are the conformance harness's word (the schema's own
+    annotated callables above, `validate_qualification_record_shape` down to every row);
+    this admission composes on them and then owns the semantic rules no schema can
+    express (the `/2` runtime and daemon-identity admission, the semantic-authority
+    projection, the platform cross-fields, the byte-bounded identifiers, the policy and
+    implementation bindings, and the probe order and outcome equality).
 
     Loading additionally verifies the run-generation lineage; the verification itself
     (below) is lineage-free so the record stays a pure function of one attempt.
     """
     if type(value) is not dict:
         raise authority.GenericQualificationError("run qualification record shape is unknown")
-    # the optional ``daemon_id`` member completes the closed set
-    base = _RECORD_BODY_FIELDS - {"daemon_id?"}
-    expected = base | ({"daemon_id"} if "daemon_id" in value else frozenset())
-    if (set(value) != expected | {"qualification_record_digest"}
-            or value.get("schema") != QUALIFICATION_RECORD_SCHEMA):
-        raise authority.GenericQualificationError("run qualification record schema or shape is unknown")
+    try:
+        validate_qualification_record_shape(value)
+    except ValueError as exc:
+        raise authority.GenericQualificationError(
+            "run qualification record schema or shape is unknown") from exc
     row = json.loads(json.dumps(value))
     try:
         binding = RunBinding(**row["run_binding"]) if type(row.get("run_binding")) is dict else None
@@ -344,8 +561,11 @@ def validate_run_record(value: object) -> dict[str, Any]:
         raise authority.GenericQualificationError("run qualification record semantic authority differs")
     if row["policy_digest"] != spike_plan.FRAMEWORK_SPIKE_POLICY.digest:
         raise authority.GenericQualificationError("run qualification record framework policy differs")
-    if not validate_digest256(row["implementation_digest"]):
-        raise authority.GenericQualificationError("run qualification record implementation digest differs")
+    try:
+        validate_digest256(row["implementation_digest"])
+    except ValueError as exc:
+        raise authority.GenericQualificationError(
+            "run qualification record implementation digest differs") from exc
     if ("daemon_id" in row) != ("daemon_id" in runtime) or (
             "daemon_id" in row and row["daemon_id"] != runtime["daemon_id"]):
         raise authority.GenericQualificationError("run qualification record daemon identity differs")
@@ -396,6 +616,9 @@ def validate_run_record(value: object) -> dict[str, Any]:
     }
     if row["execution_binding_digest"] != canonical_digest(binding_body):
         raise authority.GenericQualificationError("run qualification record execution binding differs")
+    # the validated field set minus the record digest's own member: the body the digest
+    # closes over never carries the digest itself
+    expected = set(row) - {"qualification_record_digest"}
     body = {key: row[key] for key in expected}
     if row["qualification_record_digest"] != canonical_digest(body):
         raise authority.GenericQualificationError("run qualification record digest differs")

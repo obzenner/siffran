@@ -16,9 +16,11 @@ this module — it is a declaration, not a dependency, and the guard reads it as
 """
 from __future__ import annotations
 
-#: Every registered definition key of ``contracts/empirica/v2``, in the core's own hand — this tuple is
-#: the data the static guard compares with the contracts' ``x-core-ingress`` + ``x-core-validator``
-#: inventory (its callers write it ``"<document>#<local pointer>"``).
+#: Every registered definition key, in the core's own hand — this tuple is the data the static guard
+#: compares with the contracts' ``x-core-ingress`` + ``x-core-validator`` inventory (its callers write
+#: it ``"<document>#<local pointer>"``). The Docker-spike qualification record's keys (E5, ADR-0075
+#: registration) declare the closed /3 record shape: the schema's own root and every ``$defs``
+#: definition its ingress reaches.
 REGISTERED_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("request", "/$defs/actionEnvironment"),
     ("request", "/$defs/actionQualify"),
@@ -34,4 +36,15 @@ REGISTERED_DEFINITIONS: tuple[tuple[str, str], ...] = (
     ("state", "/properties/environment"),
     ("state", "/properties/environment_history"),
     ("state", "/properties/qualification_attempts"),
+    ("qualification-record", "/"),
+    ("qualification-record", "/$defs/digest"),
+    ("qualification-record", "/$defs/elapsedMs"),
+    ("qualification-record", "/$defs/identifier"),
+    ("qualification-record", "/$defs/counter"),
+    ("qualification-record", "/$defs/runBinding"),
+    ("qualification-record", "/$defs/spikeImageRow"),
+    ("qualification-record", "/$defs/probeImage"),
+    ("qualification-record", "/$defs/repoDigest"),
+    ("qualification-record", "/$defs/spikeImages"),
+    ("qualification-record", "/$defs/probe"),
 )

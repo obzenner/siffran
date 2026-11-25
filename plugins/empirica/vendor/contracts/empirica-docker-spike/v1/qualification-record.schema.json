@@ -2,7 +2,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://siffran.dev/contracts/empirica-docker-spike/v1/qualification-record.schema.json",
   "title": "Empirica run-scoped Docker spike qualification record /3",
-  "description": "The closed shape of siffran.empirica.docker-spike-qualification-record/3 (Empirica 7.2 section 4.5), written durably and content-addressed under $EMPIRICA_SANDBOX_HOME/docker-spike-qualification-v3/records/ before the run's binding compare-and-set (write-first). This schema is the record shape's definition home; the runtime validator (adapters/sandbox/run_qualification.py:validate_run_record) remains the authoritative admission and is registered with the contract conformance harness at the restack through that harness's existing discovery and annotation conventions. The semantic rules this schema cannot express stay behaviour-tested by named owner tests: the exact content-addressed file name and qualification_record_digest equality, the execution_binding_digest recomputation, the run-generation lineage on load, the /2 namespace isolation, and the probe order/expected equality.",
+  "description": "The closed shape of siffran.empirica.docker-spike-qualification-record/3 (Empirica 7.2 section 4.5), written durably and content-addressed under $EMPIRICA_SANDBOX_HOME/docker-spike-qualification-v3/records/ before the run's binding compare-and-set (write-first). This schema is the record shape's definition home; the runtime validator (adapters/sandbox/run_qualification.py:validate_run_record) remains the authoritative admission and is registered with the ADR-0075 contract conformance harness: its x-core-ingress declares the record root, every definition it reaches names its own shape callable under x-core-validator, and core.contract_registry carries the core's own declaration of the same keys, so the harness's differential holds the closed shapes (never hand-written test-side restatements). The runtime admission (adapters/sandbox/run_qualification.py:validate_run_record) remains the authoritative gate: it composes on the annotated shape callables and owns the semantic rules this schema cannot express, which stay behaviour-tested by named owner tests: the /2 runtime and daemon-identity admission, the semantic-authority projection and its digest, the exact policy, implementation and probe-image identity bindings, the platform cross-field identities, the UTF-8 byte bound on identifiers, the probe order and expected/observed equality, the execution_binding_digest recomputation, the run-generation lineage on load, the /2 namespace isolation, and the exact content-addressed file name and qualification_record_digest equality.",
+  "x-core-ingress": ["/"],
+  "x-core-validator": "adapters.sandbox.run_qualification.validate_qualification_record_shape",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -42,7 +44,7 @@
       "type": "string",
       "minLength": 1,
       "maxLength": 128,
-      "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*\\S[^\\u0000-\\u001f\\u007f-\\u009f]*$",
+      "pattern": "^[^\\u0000-\\u0020\\u007f-\\u009f]*[^\\u0000-\\u0020\\u007f-\\u009f\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000\\ufeff][^\\u0000-\\u0020\\u007f-\\u009f]*(?![\\s\\S])",
       "description": "Docker info.ID when the observed daemon reports one; present exactly when the runtime carries it, and equal to it."
     },
     "probe_image_id": {"$ref": "#/$defs/digest"},
@@ -65,28 +67,32 @@
         "journals_empty": {"const": true}
       }
     },
-    "qualification_elapsed_ms": {
-      "type": "integer",
-      "minimum": 0,
-      "exclusiveMaximum": 90000,
-      "description": "Measured with the injected qualification clock. The exclusive maximum is the 90 s default qualification budget, set from the operator timing session's measured evidence (spec section 5, Timing evidence: worst attempt 18.5 s); the owner constant DEFAULT_QUALIFICATION_SECONDS owns the binding code-side and re-measuring the timing session may move it."
-    },
+    "qualification_elapsed_ms": {"$ref": "#/$defs/elapsedMs"},
     "execution_binding_digest": {"$ref": "#/$defs/digest"},
     "qualification_record_digest": {"$ref": "#/$defs/digest"}
   },
   "$defs": {
-    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])", "x-core-validator": "core.freshness.validate_digest256", "description": "The one digest lexeme; the absolute end anchor, never a bare $ (which Python matches before a trailing line feed), keeps both judges in agreement with core.freshness."},
     "identifier": {
       "type": "string",
       "minLength": 1,
       "maxLength": 128,
-      "pattern": "^[^\\u0000-\\u0020/\\\\\\u007f-\\u009f][^\\u0000-\\u0020/\\\\\\u007f-\\u009f]*$"
+      "pattern": "^[^\\u0000-\\u0020/\\\\\\u007f-\\u009f][^\\u0000-\\u0020/\\\\\\u007f-\\u009f]*(?![\\s\\S])",
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_binding_identifier",
+      "description": "One closed identifier lexeme; the runtime admission's byte bound (128 UTF-8 bytes) is semantic on top, never expressible here."
     },
-    "counter": {"type": "integer", "minimum": 1, "maximum": 2147483647},
+    "counter": {"type": "integer", "minimum": 1, "maximum": 2147483647, "x-core-validator": "adapters.sandbox.run_qualification.validate_binding_counter", "x-core-only": [
+          {
+            "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+            "case": "float-for-int",
+            "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+          }
+        ]},
     "runBinding": {
       "type": "object",
       "additionalProperties": false,
       "required": ["project_id", "run_id", "generation", "attempt_id", "revision", "proposal_digest"],
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_run_binding_shape",
       "properties": {
         "project_id": {"$ref": "#/$defs/identifier"},
         "run_id": {"$ref": "#/$defs/identifier"},
@@ -100,6 +106,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["reference", "id", "raw_os", "os", "raw_architecture", "architecture", "declared_volumes"],
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_spike_image_row_shape",
       "properties": {
         "reference": {"type": "string", "minLength": 1, "maxLength": 255},
         "id": {
@@ -110,13 +117,14 @@
         "os": {"enum": ["linux"]},
         "raw_architecture": {"type": "string", "minLength": 1},
         "architecture": {"type": "string", "minLength": 1},
-        "declared_volumes": {"type": "array", "maxItems": 0, "items": {"type": "string"}}
+        "declared_volumes": {"type": "array", "const": [], "description": "An image that declares volumes is not admissible: the row is sealed only with none."}
       }
     },
     "probeImage": {
       "type": "object",
       "additionalProperties": false,
       "required": ["reference", "id", "raw_os", "os", "raw_architecture", "architecture", "declared_volumes", "capabilities", "repo_digest"],
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_qualification_image_shape",
       "properties": {
         "reference": {"$ref": "#/$defs/repoDigest"},
         "id": {"$ref": "#/$defs/digest"},
@@ -124,7 +132,7 @@
         "os": {"enum": ["linux"]},
         "raw_architecture": {"type": "string", "minLength": 1},
         "architecture": {"type": "string", "minLength": 1},
-        "declared_volumes": {"type": "array", "maxItems": 0, "items": {"type": "string"}},
+        "declared_volumes": {"type": "array", "const": [], "description": "An image that declares volumes is not admissible: the row is sealed only with none."},
         "capabilities": {
           "type": "array",
           "minItems": 12,
@@ -134,14 +142,23 @@
         "repo_digest": {"$ref": "#/$defs/repoDigest"}
       }
     },
+    "elapsedMs": {"type": "integer", "minimum": 0, "maximum": 89999, "x-core-validator": "adapters.sandbox.run_qualification.validate_qualification_elapsed", "x-core-only": [
+        {
+          "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+          "case": "float-for-int",
+          "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+        }
+      ], "description": "The record's elapsed milliseconds: zero to the 90 s default qualification budget made exclusive on its last millisecond (the engines draw inclusive maxima), set from the operator timing session's measured evidence; the owner constant DEFAULT_QUALIFICATION_SECONDS owns the binding code-side and re-measuring the timing session may move it."},
     "repoDigest": {
       "type": "string",
-      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]{0,253}@sha256:[0-9a-f]{64}$"
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._/:-]{0,253}@sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_repo_digest"
     },
     "spikeImages": {
       "type": "array",
       "minItems": 1,
       "maxItems": 16,
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_spike_images_shape",
       "items": {"$ref": "#/$defs/spikeImageRow"},
       "description": "The environment proposal's 1..16 approved local references, each sealed to its daemon image ID and canonical server-native platform with no declared volumes (Empirica 7.2 section 4.1). The rows carry no capability list, because spike images are inspected, never probed (Empirica 7.2 section 4.5); the shared qualification-image helper keeps its own list for the one trusted probe image. Per-spike resolution — and the platform re-verification it repeats under the pinned endpoint — is E10's, not this record's."
     },
@@ -149,6 +166,7 @@
       "type": "object",
       "additionalProperties": false,
       "required": ["name", "expected", "observed", "operation_digest", "cleanup_proven", "duration_ms", "running_network_membership", "realization_digest"],
+      "x-core-validator": "adapters.sandbox.run_qualification.validate_probe_row_shape",
       "properties": {
         "name": {
           "enum": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"]
@@ -157,7 +175,13 @@
         "observed": {"enum": ["PASS", "FAIL", "UNAVAILABLE_OUTPUT_LIMIT", "UNAVAILABLE_TIMEOUT"]},
         "operation_digest": {"$ref": "#/$defs/digest"},
         "cleanup_proven": {"const": true},
-        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 59999},
+        "duration_ms": {"type": "integer", "minimum": 0, "maximum": 59999, "x-core-only": [
+          {
+            "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+            "case": "float-for-int",
+            "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+          }
+        ]},
         "running_network_membership": {"type": "boolean"},
         "realization_digest": {
           "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}],
