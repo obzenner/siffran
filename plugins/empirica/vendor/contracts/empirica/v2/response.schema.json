@@ -133,7 +133,7 @@
         "attempts_used": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 8,
+          "maximum": 32,
           "x-core-only": [
             {
               "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
@@ -143,7 +143,7 @@
           ]
         },
         "attempts_max": {
-          "const": 8,
+          "const": 32,
           "description": "The fixed per-run attempt ceiling, generated from the one owner (the run's qualification_attempts bound) — not a sometimes-smaller limit.",
           "type": "integer",
           "x-core-only": [
@@ -172,7 +172,7 @@
                 "seq": {
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 8,
+                  "maximum": 32,
                   "x-core-only": [
                     {
                       "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",

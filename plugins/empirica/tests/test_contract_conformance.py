@@ -46,6 +46,8 @@ from hypothesis import HealthCheck, find, given, settings  # noqa: E402
 import contract_strategies as engine  # noqa: E402
 from contract_strategies import KNOWN_OPEN, Contract  # noqa: E402
 
+from core import environment  # noqa: E402
+
 _CONTRACT = Contract()
 if _CONTRACT.findings:
     raise ImportError("contract annotations are malformed: " + "; ".join(_CONTRACT.findings))
@@ -371,17 +373,24 @@ class CoreOnlyRulesTests(_Base):
                                     "draft 2020-12 must admit the float — the schema cannot say else")
                     self.assertRefused(key, candidate, f"a zeroed-fraction {terminal}")
 
-    def test_the_fixed_attempt_ceiling_derives_its_float_exception_and_sol_seed_is_pinned(self):
+    def test_the_fixed_attempt_ceiling_derives_its_float_exception_and_its_base_reads_the_owner(self):
         """The E6c review's seeded disagreement (blocking 1): for a valid view with nothing used,
-        nothing bound and no failure, an ``attempts_max`` of ``8.0`` is an integer to draft 2020-12
-        (a numeric ``const`` compares equal) and never one to the application's Python validator.
-        The strict Python integer rule stays; the plan must derive the ceiling's float-for-int
-        candidate and the entry declare it, exactly the way the other view integers do."""
-        document = {"attempts_used": 0, "attempts_max": 8, "active": None, "last_failure": None}
+        nothing bound and no failure, a zeroed-fraction ``attempts_max`` (an integer to draft
+        2020-12: a numeric ``const`` compares equal) is never an integer to the
+        application's Python validator. The strict Python integer rule stays; the plan must derive
+        the ceiling's float-for-int candidate and the entry declare it, exactly the way the other
+        view integers do — and the seed never restates the ceiling: it reads the one owner
+        (``qualification_attempts.maxItems`` in the run/5 state, generated here as
+        ``core.environment.MAX_QUALIFICATION_ATTEMPTS``; the drift check of 2026-11-23 bumped it
+        from 8 to 32, and this test must not notice).
+        """
+        ceiling = environment.MAX_QUALIFICATION_ATTEMPTS
+        document = {"attempts_used": 0, "attempts_max": ceiling, "active": None,
+                    "last_failure": None}
         self.assertTrue(_CONTRACT.accepts("response#/$defs/qualificationView", document),
                         "the seed base must be schema-valid on both sides")
         self.assertRefused("response#/$defs/qualificationView",
-                           {**document, "attempts_max": 8.0},
+                           {**document, "attempts_max": float(ceiling)},
                            "a zeroed-fraction attempts_max")
         planned = [case for case in _CONTRACT.cases("response#/$defs/qualificationView")
                    if case.kind == "float-for-int"
