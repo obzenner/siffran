@@ -670,12 +670,12 @@ skills-check: ## Validate every SKILL.md against the Agent Skills spec, the Clau
 	@$(PYTHON) $(SCRIPTS)/tests/test_validate_skills.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_native_qualification_census.py
 
-suites-check: ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner, make mutate's plan and make dup-check's clone pairs (its scenarios need make dup-install), and docs-check's README image check
+suites-check: dev-python ## Test the parallel suite runner, that every test module belongs to exactly one suite, make verify's step runner, make mutate's plan and make dup-check's git handling and clone pairs (its one real-detector test needs make dup-install), and docs-check's README image check
 	@$(PYTHON) $(SCRIPTS)/tests/test_run_suites.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_suite_ownership.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_verify.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_mutate.py
-	@$(PYTHON) $(SCRIPTS)/tests/test_dup_check.py
+	@$(DEV_PYTHON) $(SCRIPTS)/tests/test_dup_check.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_doc_review.py
 	@$(PYTHON) $(SCRIPTS)/tests/test_check_generated_docs.py
 
@@ -898,8 +898,8 @@ mutate: ## Mutation testing of the changed lines (git diff HEAD, and untracked f
 dup-install: ## Install the pinned clone detector (npm ci in tools/dup-check; jscpd 5.4.3, lockfile)
 	cd tools/dup-check && npm ci --ignore-scripts --no-audit --no-fund
 
-dup-check: ## New code clones: fail on a new production clone between BASE and HEAD (default BASE: merge base with main; TOKENS=60 least size), warn on a new one in test code; jscpd over plugins/ and scripts/, committed content, generated and vendored files left out; not in make check (needs make dup-install)
-	@$(PYTHON) $(SCRIPTS)/dup_check.py $(if $(BASE),--base "$(BASE)") $(if $(TOKENS),--tokens "$(TOKENS)")
+dup-check: dev-python ## New code clones: fail on a new production clone between BASE (an ancestor of HEAD; default: the merge base with main) and HEAD, warn on a new one in test code; TOKENS=60 least size; jscpd over plugins/ and scripts/, committed content; no clone made only by deleting lines or by moving code unedited out of a test or excluded path; not in make check (needs make dup-install)
+	@$(DEV_PYTHON) $(SCRIPTS)/dup_check.py $(if $(BASE),--base "$(BASE)") $(if $(TOKENS),--tokens "$(TOKENS)")
 
 .PHONY: ui-smoke ui-shots
 ui-smoke: ## One headless-Chrome smoke run at 1,000 generated runs: first render, DOM bounds, a zoom's frames (needs Chrome; in make verify)

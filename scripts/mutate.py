@@ -50,7 +50,7 @@ EMPIRICA_TEST_PATH = "plugins/empirica:plugins/empirica/tests"
 STRYKER_REPORT = "reports/mutation.json"  # relative to the UI, as stryker.config.json writes it
 TEST_PATH = re.compile(r"(^|/)(tests?/|test_[^/]*\.py$)|\.test\.(mjs|ts)$")
 _NEVER = re.compile(r"(^|/)(vendor|node_modules|\.venv|dist|reports)/")
-_HUNK = re.compile(r"^@@ -\d+(?:,\d+)? \+(\d+)(?:,(\d+))? @@")
+_HUNK = re.compile(r"^@@ -\d+(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
 
 @dataclass
 class Plan:
@@ -77,17 +77,61 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], cwd=ROOT, capture_output=True, text=True, check=True).stdout
 
 
+_ESCAPES = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11}
+_OCTAL = re.compile(r"[0-7]{1,3}")
+
+
+def unquote(spelled: str) -> str:
+    """A path as git quotes it (between the quotes): octal bytes, the usual backslash escapes, every other character itself."""
+    out, i = bytearray(), 0
+    while i < len(spelled):
+        if spelled[i] != "\\":
+            out += spelled[i].encode("utf-8")
+            i += 1
+        elif octal := _OCTAL.match(spelled, i + 1):
+            out.append(int(octal.group(), 8) & 255)
+            i = octal.end()
+        else:
+            out.append(_ESCAPES.get(spelled[i + 1], ord(spelled[i + 1])))
+            i += 2
+    return out.decode("utf-8", "surrogateescape")
+
+
+def header_path(text: str) -> str | None:
+    """The path of a ``+++`` header of git's patch format, ``None`` for ``/dev/null``: git writes a name with an unusual
+    character in quotes, and ends one with a space in it with a tab."""
+    text = unquote(text[1:text.rindex('"')]) if text.startswith('"') else text.removesuffix("\t")
+    return None if text == "/dev/null" else text.removeprefix("b/")
+
+
 def hunks(diff: str) -> dict[str, list[tuple[int, int]]]:
-    """The changed lines of each file of a ``git diff -U0`` (its new side): a deletion alone changes no line that is left."""
+    """The changed lines of each file of a ``git diff -U0`` (its new side): a deletion alone changes no line that is left.
+    A hunk's body is read by the line counts its header gives, so a body line that reads ``+++ x`` (the addition of ``++ x``)
+    is never a file header."""
     out: dict[str, list[tuple[int, int]]] = {}
     current = None
-    for line in diff.splitlines():
-        if line.startswith("+++ "):
-            current = None if line[4:] == "/dev/null" else line[4:].removeprefix("b/")
+    old_left = new_left = 0
+    for line in diff.split("\n"):
+        if old_left or new_left:
+            if line.startswith("\\"):
+                continue
+            kind = line[:1]
+            if kind in ("-", " "):
+                old_left = max(old_left - 1, 0)
+            if kind in ("+", " "):
+                new_left = max(new_left - 1, 0)
+            if kind in ("-", "+", " "):
+                continue
+            old_left = new_left = 0
+        if line.startswith("diff "):
+            current = None
+        elif line.startswith("+++ "):
+            current = header_path(line[4:])
             if current:
                 out.setdefault(current, [])
         elif current and (m := _HUNK.match(line)):
-            start, count = int(m.group(1)), int(m.group(2) if m.group(2) is not None else 1)
+            start, count = int(m.group(2)), int(m.group(3) if m.group(3) is not None else 1)
+            old_left, new_left = int(m.group(1) if m.group(1) is not None else 1), count
             if count:
                 out[current].append((start, start + count - 1))
     return out
@@ -96,7 +140,7 @@ def hunks(diff: str) -> dict[str, list[tuple[int, int]]]:
 def changed(git=_git) -> dict:
     """The changed lines of every changed file (repository paths) against ``HEAD``, and every line (None) of an untracked one."""
     scope: dict = {f: r for f, r in hunks(git("diff", "-U0", "--no-color", "--no-ext-diff", "HEAD")).items() if r}
-    for f in git("ls-files", "--others", "--exclude-standard").splitlines():
+    for f in git("ls-files", "-z", "--others", "--exclude-standard").split("\0"):
         if f:
             scope[f] = None
     return scope

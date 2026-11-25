@@ -47,15 +47,38 @@ class ScopeTests(unittest.TestCase):
     def test_the_changed_lines_are_each_hunk_s_new_side_and_a_deletion_changes_no_line(self):
         self.assertEqual(mutate.hunks(DIFF), {"plugins/empirica/ui/app/geometry.js": [(41, 43), (120, 120)]})
 
+    def test_a_body_line_that_reads_like_a_file_header_is_never_one(self):
+        diff = (
+            "diff --git a/scripts/a.js b/scripts/a.js\n--- a/scripts/a.js\n+++ b/scripts/a.js\n"
+            "@@ -3,0 +4,2 @@\n+  ++ index;\n+++ b/scripts/other.js\n"
+            "@@ -9 +11 @@\n-old\n+new\n"
+            "diff --git a/scripts/b.js b/scripts/b.js\n--- a/scripts/b.js\n+++ b/scripts/b.js\n@@ -1 +1 @@\n-x\n+++ y\n")
+        self.assertEqual(mutate.hunks(diff), {"scripts/a.js": [(4, 5), (11, 11)], "scripts/b.js": [(1, 1)]})
+
+    def test_a_line_separator_inside_a_body_line_does_not_split_it(self):
+        diff = "diff --git a/a.py b/a.py\n--- a/a.py\n+++ b/a.py\n@@ -1 +1 @@\n-x\n+a\x0c+++ b/evil.py\u2028@@ -1 +9 @@\n"
+        self.assertEqual(mutate.hunks(diff), {"a.py": [(1, 1)]})
+
+    def test_a_path_with_a_space_loses_the_tab_git_ends_it_with_and_a_quoted_path_is_unquoted(self):
+        diff = ("diff --git a/dir/a b.py b/dir/a b.py\n--- a/dir/a b.py\t\n+++ b/dir/a b.py\t\n@@ -1 +1 @@\n-x\n+y\n"
+                'diff --git "a/caf\\303\\251.py" "b/caf\\303\\251.py"\n--- "a/caf\\303\\251.py"\n+++ "b/caf\\303\\251.py"\n@@ -2 +2 @@\n-x\n+y\n'
+                'diff --git "a/q\\"t\\tab.py" "b/q\\"t\\tab.py"\n--- "a/q\\"t\\tab.py"\n+++ "b/q\\"t\\tab.py"\n@@ -5,0 +6,2 @@\n+x\n+y\n')
+        self.assertEqual(mutate.hunks(diff), {"dir/a b.py": [(1, 1)], "caf\u00e9.py": [(2, 2)], 'q"t\tab.py': [(6, 7)]})
+
+    def test_the_default_scope_reads_a_diff_with_such_paths_and_a_listing_of_untracked_paths_by_nul(self):
+        diff = "diff --git a/dir/a b.js b/dir/a b.js\n--- a/dir/a b.js\t\n+++ b/dir/a b.js\t\n@@ -1 +1 @@\n-x\n+++ y\n"
+        scope = mutate.changed(lambda *args: diff if args[0] == "diff" else "new file.py\0odd\nname.py\0")
+        self.assertEqual(scope, {"dir/a b.js": [(1, 1)], "new file.py": None, "odd\nname.py": None})
+
     def test_the_default_scope_is_the_diff_s_lines_and_every_line_of_an_untracked_file(self):
         calls = []
 
         def git(*args):
             calls.append(args)
-            return DIFF if args[0] == "diff" else "plugins/empirica/ui/app/new.js\n"
+            return DIFF if args[0] == "diff" else "plugins/empirica/ui/app/new.js\0"
         self.assertEqual(mutate.changed(git), {"plugins/empirica/ui/app/geometry.js": [(41, 43), (120, 120)],
                                                "plugins/empirica/ui/app/new.js": None})
-        self.assertEqual(calls, [("diff", "-U0", "--no-color", "--no-ext-diff", "HEAD"), ("ls-files", "--others", "--exclude-standard")])
+        self.assertEqual(calls, [("diff", "-U0", "--no-color", "--no-ext-diff", "HEAD"), ("ls-files", "-z", "--others", "--exclude-standard")])
 
     def test_sources_are_split_by_tool_and_tests_docs_vendored_code_and_build_scripts_are_left_alone(self):
         work = mutate.plan({f: None for f in EVERY}, exists=lambda p: True)
