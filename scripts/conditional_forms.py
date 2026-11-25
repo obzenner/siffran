@@ -6,7 +6,10 @@ Both engines — the drawing side (`ui_view_strategies`) and the derivation side
 forms they support cannot drift apart. The parse is strict: a form the engine does not fully
 model refuses at parse, never guesses silently, and a refusal on one side is a refusal on both.
 
-The modelled forms, exactly (Empirica 7.2 §5.1):
+The modelled forms, exactly (Empirica 7.2 §5.1); a ``then``-less or one-side guard, a
+boolean ``if`` (``true``/``false`` — always/never applies, so no member is guarded) at the node
+level or inside ``allOf``, and any other ``if``-carrying shape refuse at parse (E6c re-review 1,
+blocking 2); a composition entry with no ``if`` key at all is not conditional and stays ignored:
 
 * the two-way value pairing — an ``allOf`` entry ``{if, then, else}`` whose ``if`` names one
   guarded member with a ``{const}`` (its ``required``, when present, names the guarded member
@@ -69,11 +72,18 @@ def parse(node: object, doc_id: str, pointer: str) -> tuple[list[Guard], list[Pa
     if not isinstance(node, dict):
         return guards, pairings
     for entry in node.get("allOf", ()):
-        if not isinstance(entry, dict) or not isinstance(entry.get("if"), dict):
-            # ``allOf`` also composes pattern conjuncts and ``$ref`` shapes — other engines' kinds.
-            # This parse claims the conditional forms alone; anything conditional-shaped it cannot
-            # model still refuses below, so tolerance here is scope, never a silent pass for them.
+        if not isinstance(entry, dict) or "if" not in entry:
+            # ``allOf`` also composes pattern conjuncts and ``$ref`` shapes — other engines' kinds,
+            # none conditional. This parse claims the conditional forms alone; a composition entry
+            # that carries no ``if`` key is not conditional-shaped, so skipping it is scope.
             continue
+        if not isinstance(entry["if"], dict):
+            # a boolean (or otherwise non-object) ``if`` is conditional-shaped: JSON Schema reads
+            # ``if: true`` as always applying and ``if: false`` as never, so its ``then``/``else``
+            # are not a pairing this engine can draw or derive — refusing it here keeps both
+            # sides honest instead of silently guessing (E6c re-review 1, blocking 2).
+            raise ValueError(f"{doc_id}#{pointer}: an allOf condition with a boolean (non-object) "
+                             "if is not this engine's conditional")
         if set(entry) == {"if", "then", "else"}:
             pairings.append(_two_way(entry, doc_id, pointer))
             continue
@@ -82,7 +92,13 @@ def parse(node: object, doc_id: str, pointer: str) -> tuple[list[Guard], list[Pa
             continue
         raise ValueError(f"{doc_id}#{pointer}: an allOf condition with keys "
                          f"{sorted(set(entry) - {'if'})} is not this engine's conditional")
-    if isinstance(node.get("if"), dict):
+    if "if" in node:
+        if not isinstance(node["if"], dict):
+            # the node-level twin of the allOf refusal above: a boolean ``if`` is not a presence
+            # guard on one member, and ignoring it drew the guarded branch without its paired
+            # member (a document the schema itself refused, E6c re-review 1, blocking 2).
+            raise ValueError(f"{doc_id}#{pointer}: a node-level boolean (non-object) if is not "
+                             "this engine's conditional")
         pairings.append(_presence(node, doc_id, pointer))
     return guards, pairings
 

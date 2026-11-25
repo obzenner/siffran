@@ -899,6 +899,23 @@ class TwoWayFormTests(unittest.TestCase):
                 mutant.drawn("two-way#/$defs/attempt")
 
 
+    def test_a_boolean_if_inside_allof_stays_refused(self):
+        """Sol's seed (E6c re-review 1, blocking 2): replacing a two-way guard's ``if`` with a
+        boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies (its
+        ``then`` names the probe on every reason, a boolean is no const on a member), and the old
+        parse silently ignored the entry, so the drawing drew a null probe the schema refused and
+        the plan yielded zero pairing flips. An ``if`` key this engine cannot model refuses at
+        parse, on both engines, in drawing and derivation alike."""
+        for boolean in (True, False):
+            with self.subTest(if_=boolean):
+                document = copy.deepcopy(TWO_WAY)
+                document["$defs"]["attempt"]["allOf"][0]["if"] = boolean
+                mutant = Contract({"two-way": document})
+                with self.assertRaises(ValueError):
+                    mutant.drawn("two-way#/$defs/attempt")
+                with self.assertRaises(ValueError):
+                    mutant.cases("two-way#/$defs/attempt")
+
     def test_a_multi_key_if_required_with_an_optional_member_stays_refused(self):
         """Sol's seed (E6c review, blocking 3): a two-way conditional whose ``if`` demands the
         guarded member *and* an optional sibling loads today and draws a document the schema itself
@@ -925,6 +942,24 @@ class PresenceFormTests(unittest.TestCase):
     driver too - forbids it. The drawing engine must draw every direction, the pairing must derive
     its own breaches, and a gated member's own challenges must still fire against a base that drew
     the complementary side (the guard is placed for them, never guessed away)."""
+
+    def test_a_boolean_if_at_the_node_level_stays_refused(self):
+        """Sol's seed (E6c re-review 1, blocking 2): replacing a presence guard's ``if`` with a
+        boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies
+        (its ``then`` demands the probe on every reason, ``else`` never fires), and the old parse
+        silently ignored the node's ``if``, so the drawing drew the guarded reason without its
+        probe (a document the schema itself refused) and the plan yielded zero pairing flips. Any
+        ``if`` key this engine cannot model refuses at parse, on both engines, both sides."""
+        for boolean in (True, False):
+            for which in ("looking", "wire"):
+                with self.subTest(if_=boolean, node=which):
+                    document = copy.deepcopy(PRESENCE)
+                    document["$defs"][which]["if"] = boolean
+                    mutant = Contract({"presence": document})
+                    with self.assertRaises(ValueError):
+                        mutant.drawn(f"presence#/$defs/{which}")
+                    with self.assertRaises(ValueError):
+                        mutant.cases(f"presence#/$defs/{which}")
 
     def test_a_presence_side_that_only_redeclares_properties_stays_refused(self):
         """Sol's seed (E6c review, blocking 3): a ``then`` that only re-declares the paired member
