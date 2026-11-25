@@ -78,7 +78,8 @@ domain (decided at the E1 review). All free text must be valid UTF-8 (no lone su
 - `environment`: `null` | `{revision, proposal, digest, state: pending|approved|rejected, receipt_id|null}`. Earlier
   revisions and their receipts are kept immutable in `environment_history`.
 - `qualification_attempts`: append-only `{attempt_id, revision, started_stamp, outcome, record_digest|null,
-  reason|null}`. Ceiling: 8 started attempts per run (§11.1 answer).
+  reason|null}`. Ceiling: 32 started attempts per run (operator decision 2026-11-23, drift check item 4: the ceiling
+  only bounds run-state growth; with images resolved per spike and only the major version bound, requalifying is rare).
 - The active reference **is the existing `spike_backend` field** (decided while briefing E2; no second field): kinds
   `unqualified` (new) | `qualified` (unchanged shape, its record digest now a `/3` run-scoped record) |
   `spikes_unavailable` (no generic backend composed). The attempt sequence number is derived from the attempts.
@@ -97,9 +98,11 @@ bytes live in the repository.
   `docker.io/library/alpine:3.22@sha256:49340b34…e898f`. The contract digest is part of the implementation manifest.
 - During preparation the agent runs `docker pull <that reference>`; the host still never pulls.
 - Admission: under the pinned endpoint, one `docker image inspect` of the exact reference must show that index
-  digest in `RepoDigests`, a server-native platform and no declared volumes. Otherwise `probe-image-untrusted`, with
-  the reference rendered so the agent can pull it. A locally built, loaded or retagged image has no matching
-  `RepoDigests` entry and is refused.
+  digest in some `RepoDigests` entry (`<any repository>@sha256:<pinned digest>`: the digest is the content identity,
+  the repository name is not, so a mirror or proxy pull is admitted), a server-native platform and no declared
+  volumes. Otherwise `probe-image-untrusted`, with the reference rendered so the agent can pull it. A locally built,
+  loaded or retagged image has no `RepoDigests` entry with the pinned digest and is refused (operator decision
+  2026-11-23, drift check item 3).
 - Observed 2026-11-22, Docker Desktop with the containerd store, arm64: after `docker pull alpine:3.22`,
   `RepoDigests == ["alpine@sha256:49340b…"]` and `Id` equals the index digest. The classic store reports the
   same `RepoDigests`, but its `Id` is the platform config digest. So admission keys on `RepoDigests`, never on
@@ -118,7 +121,8 @@ use networked only when the ceiling allows it.
 ### 4.5 Qualification record `siffran.empirica.docker-spike-qualification-record/3`
 
 The `/2` facts plus `run_binding` (`project_id`, `run_id`, `generation`, `attempt_id`, `revision`,
-`proposal_digest`), `probe_image_id`, `spike_images` (requested ref, sealed full ID, canonical platform, no volumes),
+`proposal_digest`), `probe_image_id`, `spike_images` (requested ref, the full ID observed at qualification as a
+diagnostic, canonical platform, no volumes; no capability list, since spike images are inspected, never probed),
 `daemon_id` (Docker `info.ID` when present), and the loaded-release implementation digest. Written durably and
 content-addressed under `$EMPIRICA_SANDBOX_HOME/docker-spike-qualification-v3/records/` **before** the binding CAS.
 On load, the exact digest and the run-generation lineage are verified. An orphan left by a lost CAS is inert. There
@@ -223,7 +227,8 @@ route → graph → configure_run (approval) → investigate → … research �
   2. Under the shared runtime lock: recover prior journals; resolve the endpoint once and pin every read and effect
      to it.
   3. Observe authority (context, version, info including `daemon_id`, capability) and the loaded implementation;
-     verify the trusted probe image; resolve and seal every `spike_images` ID.
+     verify the trusted probe image; resolve every `spike_images` reference and record its ID as a diagnostic
+     (spikes resolve their image again per spike).
   4. Run the five fixed probes through the journalled production lifecycle, then prove exact cleanup.
   5. Re-observe the authority and implementation (replacing today's constant postflight, R5).
   6. Write the `/3` record, then CAS `spike_backend` against the exact run generation, approved revision and
@@ -233,14 +238,18 @@ route → graph → configure_run (approval) → investigate → … research �
     (proposal: 150 s). The Pi and Claude transport budgets add `qualify` to the long-operation class (R6). A
     killed or timed-out attempt binds nothing and leaves recoverable journals.
   - Failure never changes the active binding.
-- **Spikes.** Admissible only with an active binding. The plan's image must resolve, under the same pinned endpoint,
-  to one of the binding's sealed IDs; creation is by exact ID with `--pull never`. Authority and implementation are
+- **Spikes.** Admissible only with an active binding. The plan's image reference must be one of the approved
+  revision's `spike_images` references; it is resolved per spike under the same pinned endpoint and checked exactly as
+  in 7.1 (local, server-native platform, no declared volumes), and creation is by the ID resolved for that spike with
+  `--pull never`, which the spike's sealed request records. Rebuilding a listed image needs no new proposal or
+  qualification (operator decision 2026-11-23, drift check item 1). Authority and implementation are
   re-observed before effects and before admitting the result. Spike effects and a rebind are serialized per run. A
   spike request left uncompleted when the binding changes ends with an explicit terminal `superseded-binding`
   outcome, so a retry under the new binding is not blocked (`transaction.py:742-758,806-816`, R4).
-- **Server version (E4 review).** Within one qualification, pre- and post-probe `server_version` must be equal (E4). For
-  `/3` records, `server_version` joins the bound semantic facts, and a change is `qualification-stale-daemon` (E5). `/2`
-  records keep version as a diagnostic.
+- **Server version (operator decision 2026-11-23, drift check item 2).** Within one qualification attempt, pre- and
+  post-probe `server_version` must be equal (identity within one attempt). Across the binding only the Docker
+  server's **major** version is bound: a patch or minor update keeps the binding; a major change is
+  `qualification-stale-daemon`. The full version is kept as a diagnostic, as in `/2`.
 - **Deadline (E4 review).** The 60 s operator qualification budget is kept as is until native timing evidence exists.
   The run-scoped `qualify` deadline (proposed 150 s) is set in E5 from that evidence, explicitly budgeting recovery,
   five probes with their re-observations, final re-observation and publication.
@@ -252,7 +261,8 @@ route → graph → configure_run (approval) → investigate → … research �
   was not exercised. Lima (`empirica-box`) is used only to run Empirica inside the VM, where the host is Linux and the VM's native
   Docker Engine is admitted; pointing a macOS process at the VM's daemon is refused (only Docker Desktop is admitted on
   macOS), which surfaced a misleading `docker-unreachable` reason, fixed in E5. Deadline: **90 s** (five times the worst measured attempt).
-- **Residual (R5).** Equality is semantic: the socket path, `daemon_id`, version and capabilities. A daemon restart
+- **Residual (R5).** Equality across a binding is semantic: the socket path, `daemon_id`, the server **major** version
+  and capabilities (the full version is compared only within one attempt). A daemon restart
   on the same socket with the same identity is not detectable and is accepted as the same authority.
 
 ### 5.1 Closed reasons (additive values; only bounded identifiers such as a probe enum or image index)
@@ -264,13 +274,13 @@ route → graph → configure_run (approval) → investigate → … research �
 | `environment-rejected` | latest revision rejected | `environment` |
 | `qualification-required` | approved, nothing bound | `qualify` |
 | `qualification-stale-implementation` | loaded release ≠ binding | `qualify` |
-| `qualification-stale-daemon` | endpoint, `daemon_id` or capability ≠ binding | prepare, then `qualify` |
-| `image-not-qualified` | spike image ID not in the binding | `environment` |
+| `qualification-stale-daemon` | endpoint, `daemon_id`, server major version or capability ≠ binding | prepare, then `qualify` |
+| `image-not-qualified` | spike image reference not in the approved revision | `environment` |
 | `probe-image-untrusted` | local probe image ≠ pin | prepare (pull the pinned ref), then `qualify` |
 | `qualification-probe-failed` | carries `probe` ∈ the five names | prepare, then `qualify` |
 | `docker-unreachable` | no daemon at the endpoint | prepare, then `qualify` |
 | `profile-not-allowed` | profile above the host ceiling | `environment` |
-| `qualification-attempts-exhausted` | 8 attempts used | continue on the current binding, stop, or start fresh |
+| `qualification-attempts-exhausted` | 32 attempts used | continue on the current binding, stop, or start fresh |
 | `qualification-conflict` | lost CAS or concurrent attempt | `qualify` |
 | `superseded-binding` | spike request outlived its binding | resubmit the `spike_request` |
 
@@ -287,13 +297,13 @@ never from a shorter list, and never a reason encoded into a string.
 **The active binding in reads (E6b review).** `qualification.active` is the installed binding reference (the last
 successful attempt's record digest and seq), not an in-flight attempt: it stays set while a new attempt runs or
 fails, and is `null` only when nothing was ever bound in this run. `attempts_used`, `attempts_max` and `active.seq`
-take their bound from the one run ceiling owner (`qualification_attempts`, 8), through the shared/generated bound
+take their bound from the one run ceiling owner (`qualification_attempts`, 32), through the shared/generated bound
 (ADR-0075), never a second literal.
 
 ## 6. Human in the loop
 
 - HITL `empirica.hitl/1` gains the additive kind `environment`: goal, profile (networked called out), spike images
-  with their sealed IDs once known, preparation labelled "the agent's plan — not verified", rationale, previous
+  with the IDs observed at qualification once known, preparation labelled "the agent's plan — not verified", rationale, previous
   active binding.
 - Pi: dialog via the shared builder. Claude Code: elicitation form referencing the document path (ADR-0072).
   Codex: withheld; `qualify` is refused as unsupported unless a host qualification port is composed (R10). There is no
@@ -344,8 +354,8 @@ Live (operator, native qualification):
   `qualify` → spike runs. The audit argument shows both qualifications and each spike's lineage.
 - A3. Deliberative: `qualify` is refused before approval; reject keeps the old binding; cancel leaves it pending.
 - A4. Auto (interactive and delegated): no prompt after configuration; receipt kind `auto`.
-- A5. `python:3.12-slim` spike image plus the pinned probe image qualify together; an unlisted image →
-  `image-not-qualified`.
+- A5. `python:3.12-slim` spike image plus the pinned probe image qualify together; an unlisted image reference →
+  `image-not-qualified`; rebuilding a listed image and spiking again needs no new qualification.
 
 Deterministic (no Docker): stale receipt or revision; A→B→A; failed replacement keeps the old binding; concurrent
 attempts; spike versus rebind; retagging between qualify and spike; authority drift during probes; a crash at the
@@ -358,7 +368,7 @@ with no UI; Claude `-p` refusal as a documented limitation.
 
 ## 11. Decisions
 
-1. Attempt ceiling: a separate limit of 8 **started** attempts, not `max_passes`.
+1. Attempt ceiling: a separate limit of 32 **started** attempts, not `max_passes`.
 2. No combined presentation: configuration first, then environment when needed.
 3. Probe image: one digest-pinned reference in the support contract; no image in the repository (§4.3).
 4. Profile ceiling: the existing `StartRun.spike_profile` (§4.4).
