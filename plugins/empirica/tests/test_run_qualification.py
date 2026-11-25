@@ -863,14 +863,14 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                     self.assertFalse(records.exists() and any(records.iterdir()))
 
     def test_the_second_first_use_attempt_never_replaces_the_inode_the_first_holds(self):
-        # Sol's exact witness (re-review 2, blocking 2): both attempts genuinely miss
-        # the lock lookup — the barrier runs before either initializer looks — and the
-        # second attempt's missed lookup is paused until the first attempt holds the
-        # published inode, so its publication happens against a held lock. The
-        # exclusive create then loses (FileExistsError) and adopts the held inode; a
-        # lookup-then-replace writer unlinks it instead, and the assertions fail. The
-        # committed sequence it replaces let the second initializer run after the
-        # publication, so an old replacing writer survived it.
+        # Sol's exact witness (re-review 2, blocking 2; re-review 3, non-blocking 1):
+        # both attempts' lock lookups are the initializer's own real `lstat` calls, and
+        # both genuinely miss — the barrier runs inside the actual FileNotFoundError
+        # handler, before either initializer creates. The second attempt's *missed*
+        # lookup is released only after the first attempt holds the published inode, so
+        # its publication happens against a held lock. The exclusive create then loses
+        # (FileExistsError) and adopts the held inode; a lookup-then-replace writer
+        # unlinks it instead, and the assertions fail.
         cell = self._fresh_cell()
         store = common.ExecutionStore(cell)
         for path in (store.home, store.runtime, store.staging):
@@ -885,16 +885,21 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         errors: list[BaseException] = []
         original = type(lock_path).lstat
 
-        def missed_lookup_then_pause(path):
-            # only the initializer's own lookup on the lock name is paused, once per
-            # attempt; everything else reads the filesystem as it is
-            if Path(path) == lock_path and getattr(state, "first_lookup", False):
-                state.first_lookup = False
-                barrier.wait(timeout=10.0)   # both missed lookups are synchronized and real
-                if state.index == 1 and not first_locked.wait(timeout=10.0):
-                    raise AssertionError("the first attempt never held the lock")
-                raise FileNotFoundError(path)
-            return original(path)
+        def observed_lstat(path):
+            # the hook runs the real lookup and observes its result; only a genuine
+            # miss on the lock name is synchronized — inside the actual
+            # FileNotFoundError handler — and the second's continuation is delivered
+            # once the first attempt holds the published inode (re-review 3,
+            # non-blocking 1: the old hook fabricated the miss)
+            try:
+                return original(path)
+            except FileNotFoundError:
+                if Path(path) == lock_path and getattr(state, "first_lookup", False):
+                    state.first_lookup = False
+                    barrier.wait(timeout=10.0)   # both genuine misses are synchronized
+                    if state.index == 1 and not first_locked.wait(timeout=10.0):
+                        raise AssertionError("the first attempt never held the lock")
+                raise
 
         def attempt(index):
             state.index = index
@@ -926,7 +931,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                 if index == 1:
                     first_done.set()
 
-        with mock.patch.object(type(lock_path), "lstat", missed_lookup_then_pause):
+        with mock.patch.object(type(lock_path), "lstat", observed_lstat):
             workers = [threading.Thread(target=attempt, args=(index,)) for index in range(2)]
             for worker in workers:
                 worker.start()

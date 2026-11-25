@@ -162,53 +162,51 @@ class ScaffoldingTests(unittest.TestCase):
                         common.GenericScaffoldingError):
                     common.safe_directory(impersonator, create=create)
 
-    def test_a_typical_umask_yields_the_created_scaffold_its_closed_mode_by_descriptor(self):
-        # (re-review 2, blocking 1) the process umask is never touched, so the closed
-        # mode reaches a fresh scaffold through the opened descriptor's fchmod — masks
-        # that only strip group/other bits are indistinguishable, so the witness uses a
-        # mask that also strips owner-write (the directory stays openable at 0500):
-        # without the descriptor fix the mode stays wrong and the admission refuses.
+    def test_an_owner_stripping_umask_refuses_the_created_entry_unfixed(self):
+        # (re-review 3, blocking 1) there is no mode change on scaffolding at all:
+        # the mask can only remove bits, so a mask that strips owner-write (0o177)
+        # leaves the fresh component at 0600 and the walk refuses it — never fchmod'ed
+        # back to the closed mode. Masks that only strip group/other bits (0o077)
+        # leave the requested 0700 intact and the creation succeeds. The mask itself
+        # survives every creation and refusal untouched.
         import stat as stat_module
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(strict=True)
-            previous = None
-            try:
-                previous = os.umask(0o177)
-                fresh = root / "runtime"
-                common.safe_directory(fresh, create=True)
-                observed = os.umask(previous)
-                previous = None
-            finally:
-                if previous is not None:
-                    os.umask(previous)
-            self.assertEqual(observed, 0o177,
+            ambient = os.umask(0o077)
+            self.addCleanup(lambda: os.umask(ambient))
+            good = root / "group-strip"
+            common.safe_directory(good, create=True)
+            self.assertEqual(os.umask(0o177), 0o077,
                              "the process mask is unchanged through the creation")
-            self.assertEqual(
-                stat_module.S_IMODE(fresh.lstat().st_mode), common.MODE_DIR)
+            refused = root / "owner-strip"
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_directory(refused, create=True)
+            self.assertEqual(os.umask(0o177), 0o177,
+                             "no umask window: the mask survives every refusal")
+            self.assertEqual(stat_module.S_IMODE(good.lstat().st_mode), common.MODE_DIR)
+            self.assertEqual(stat_module.S_IMODE(refused.lstat().st_mode), 0o600,
+                             "the wrongly-masked creation is left exactly as the mask made it")
 
-    def test_a_mask_that_hides_the_fresh_directory_is_refused_never_chmodded(self):
-        # (re-review 2, blocking 1) a mask that strips the owner-read bit from the fresh
-        # directory makes its descriptor unopenable: the scaffolding is refused with
+    def test_a_mask_that_hides_the_fresh_directory_refuses_without_changing_the_mask(self):
+        # (re-review 3, blocking 1) a mask that strips the owner-read bit (0o777) makes
+        # the fresh directory unopenable: the scaffolding is refused with
         # sandbox-scaffolding-unsafe — the mask is never zeroed, no helper process runs,
-        # no path-based permission change happens — and the unusable fresh entry is
-        # rolled back through the opened parent descriptor.
+        # no path-based permission change happens — and the unusable entry is left in
+        # place: this code never removes anything by name either.
+        import stat as stat_module
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary).resolve(strict=True)
-            previous = None
-            try:
-                previous = os.umask(0o777)
-                fresh = root / "runtime"
-                with self.assertRaises(common.GenericScaffoldingError):
-                    common.safe_directory(fresh, create=True)
-                observed = os.umask(previous)
-                previous = None
-            finally:
-                if previous is not None:
-                    os.umask(previous)
-            self.assertEqual(observed, 0o777,
+            previous = os.umask(0o777)
+            self.addCleanup(lambda: os.umask(previous))
+            fresh = root / "runtime"
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_directory(fresh, create=True)
+            self.assertEqual(os.umask(previous), 0o777,
                              "no umask window: the mask survives every refusal")
-            self.assertFalse(fresh.exists(),
-                             "the unopenable fresh entry was rolled back, never left stranded")
+            self.assertTrue(fresh.exists(),
+                             "the entry is never removed by name, fixed, or chmod'ed")
+            self.assertEqual(stat_module.S_IMODE(fresh.lstat().st_mode), 0o000,
+                             "the unopenable entry keeps exactly the mode the mask gave it")
 
     def test_created_components_never_touch_the_process_mask_or_a_stranger(self):
         # (re-review 2, blocking 1) the controlled-thread result, made deterministic: a
@@ -308,6 +306,121 @@ class ScaffoldingTests(unittest.TestCase):
             common.safe_directory(Path("/"), create=False)
         with self.assertRaises(common.GenericScaffoldingError):
             common.safe_directory(Path("/"), create=True)
+
+    def test_a_replacement_after_a_successful_mkdir_is_refused_and_left_alone(self):
+        # (re-review 3, blocking 1) a successful mkdir by name does not establish that
+        # the opened inode is the one created: between them, the fresh component is
+        # moved aside and a same-owner 0755 replacement stands at the name. The walk
+        # refuses, the replacement's mode and content are left untouched, the moved
+        # entry is left alone, and no child is created inside the impostor. The old
+        # code chmod'ed the replacement to 0700 and built the scaffold inside it.
+        import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            name = root / "swap" / "child"
+            real_mkdir = os.mkdir
+
+            def mkdir_then_replace(path, mode=0o777, **kwargs):
+                real_mkdir(path, common.MODE_DIR, **kwargs)
+                swapped = Path(root) / Path(path).name
+                if swapped == root / "swap":
+                    swapped.rename(root / "moved-aside")
+                    real_mkdir(swapped)
+                    os.chmod(swapped, 0o755)
+
+            with patch("os.mkdir", mkdir_then_replace):
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_directory(name, create=True)
+            replacement = root / "swap"
+            self.assertEqual(stat_module.S_IMODE(replacement.lstat().st_mode), 0o755,
+                             "the same-owner replacement is refused, never chmod'ed")
+            self.assertFalse(list(replacement.iterdir()),
+                             "nothing was ever created inside the impostor")
+            self.assertTrue((root / "moved-aside").is_dir(),
+                             "the moved-aside creation is left alone: never removed by name")
+
+    def test_sandbox_file_verification_reads_one_descriptor_and_names_it(self):
+        # (re-review 3, blocking 2) one descriptor owns the metadata checks and the
+        # bounded read; an entry substituted at the name between the two — Sol's hard
+        # link carrying the very same bytes — is neither read as the record nor
+        # reported: the call refuses, and the substitute keeps exactly its own mode.
+        import stat as stat_module
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve(strict=True)
+            record = root / "record.json"
+            payload = b'{\n  "exact": "bytes"\n}\n'
+            record.write_bytes(payload)
+            record.chmod(common.MODE_FILE)
+            self.assertEqual(common.safe_file(record, cap=len(payload)), payload)
+
+            unrelated = root / "unrelated-0644"
+            unrelated.write_bytes(payload)
+            unrelated.chmod(0o644)
+            substituted: list[int] = []
+            real_read = os.read
+
+            def read_then_substitute(descriptor, size):
+                # between the metadata checks and the bytes: the name is replaced by a
+                # hard link to an unrelated 0644 file carrying the same bytes
+                if not substituted:
+                    substituted.append(descriptor)
+                    record.unlink()
+                    os.link(unrelated, record)
+                return real_read(descriptor, size)
+
+            with patch("os.read", read_then_substitute):
+                with self.assertRaises(common.GenericScaffoldingError):
+                    common.safe_file(record, cap=len(payload))
+            self.assertEqual(stat_module.S_IMODE(unrelated.lstat().st_mode), 0o644,
+                             "the substitute is never chmod'ed through the swapped name")
+            self.assertEqual(record.stat().st_ino, unrelated.stat().st_ino,
+                             "the substitution is still in place, left untouched")
+            # the next checked read refuses the substituted entry on its own
+            # identity: mode and link count, not today's bytes
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_file(record, cap=len(payload))
+
+            # a symbolic link at the control name is refused without following it:
+            # the target keeps its mode and is never read through the link
+            linked = root / "linked.json"
+            target = root / "the-target"
+            target.write_bytes(payload)
+            target.chmod(common.MODE_FILE)
+            linked.symlink_to(target)
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_file(linked, cap=len(payload))
+            self.assertEqual(common.safe_file(target, cap=len(payload)),
+                             payload, "the target was never touched")
+
+            # a named pipe at the control name is refused without blocking: the open is
+            # non-blocking and the type check refuses anything not a regular file
+            pipe = root / "pipe.json"
+            os.mkfifo(pipe, common.MODE_FILE)
+            refusals: list[BaseException] = []
+
+            def call_pipe(pipe=pipe, refusals=refusals):
+                try:
+                    common.safe_file(pipe, cap=len(payload))
+                except common.GenericScaffoldingError as exc:
+                    refusals.append(exc)
+
+            worker = threading.Thread(target=call_pipe)
+            worker.start()
+            worker.join(timeout=5.0)
+            self.assertFalse(worker.is_alive(),
+                             "the named pipe parked the verified read: the open must be "
+                             "non-blocking and refuse a non-regular-file entry")
+            self.assertEqual(len(refusals), 1)
+
+            # a multi-chunk document round-trips exactly (the bounded read loop), and an
+            # entry over its cap refuses without revealing how much it holds
+            large = root / "large.json"
+            big = payload * (128 * 1024 // len(payload) + 1)   # several read chunks
+            large.write_bytes(big)
+            large.chmod(common.MODE_FILE)
+            self.assertEqual(common.safe_file(large, cap=len(big)), big)
+            with self.assertRaises(common.GenericScaffoldingError):
+                common.safe_file(large, cap=len(big) - 1)
 
     def test_a_named_pipe_at_a_scaffold_name_is_refused_without_blocking(self):
         # (re-review 2, blocking 3) a named pipe parked at the scaffold name must be

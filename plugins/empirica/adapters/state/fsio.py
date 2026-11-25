@@ -114,12 +114,15 @@ def atomic_write(path: Path, data: bytes, *, durable: bool = False) -> None:
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=".tmp.", suffix=".json")
     tmp = Path(tmp_name)
     try:
-        # The closed 0600 mode is fixed on the exclusive temporary descriptor itself,
-        # before the write, the fsync and the rename (re-review 2, blocking 4): no
-        # path-based chmod ever runs — not after the rename, where a concurrent swap
-        # could put another file at the name, and not on the temporary either.
-        os.fchmod(fd, _MODE)
         with os.fdopen(fd, "wb") as handle:
+            # The closed 0600 mode is fixed on the exclusive temporary descriptor before
+            # the write, the fsync and the rename — and inside the descriptor-owning
+            # context, so an injected mode-change failure closes the descriptor on the
+            # way out, exactly like every other failure below it (re-review 2, blocking
+            # 4; re-review 3, blocking 3). No path-based chmod ever runs — not after
+            # the rename, where a concurrent swap could put another file at the name,
+            # and not on the temporary either.
+            os.fchmod(handle.fileno(), _MODE)
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())

@@ -292,6 +292,58 @@ class TestSymlinkRefusal(_Isolated):
             fsio.atomic_write(path, b"{}")
 
 
+class TestAtomicWriteFailure(_Isolated):
+    """The shared writer's failure path (re-review 3, blocking 3).
+
+    The closed mode is set on the exclusive temporary descriptor inside the
+    descriptor-owning context, before the write and the sync: an injected mode-change
+    failure must come out of ``atomic_write`` with the descriptor closed, the
+    temporary name removed, and the destination exactly as it was — matching the
+    historical (main-branch) failure behavior for every caller.
+    """
+
+    def test_a_failed_mode_change_closes_the_descriptor_and_cleans_up(self):
+        import errno
+        from unittest import mock
+        captured: list[int] = []
+
+        def refusing(descriptor, mode, *args, **kwargs):
+            captured.append(descriptor)
+            raise OSError(errno.EPERM, "seeded mode-setting failure")
+
+        destination = Path(self._tmp.name) / "state" / "record.json"
+        destination.parent.mkdir(mode=0o700)
+        destination.write_bytes(b"old bytes")
+        destination.chmod(0o600)
+        with mock.patch.object(fsio.os, "fchmod", refusing):
+            with self.assertRaises(OSError) as refused:
+                fsio.atomic_write(destination, b"new bytes")
+        self.assertEqual(refused.exception.errno, errno.EPERM)
+        self.assertEqual(len(captured), 1)
+        # destination unchanged, temporary removed, descriptor closed (not leaked as
+        # the unlinked file this head used to hold open until process exit)
+        self.assertEqual(destination.read_bytes(), b"old bytes")
+        self.assertEqual(stat.S_IMODE(destination.stat().st_mode), 0o600)
+        self.assertEqual(list(destination.parent.glob(".tmp.*")), [])
+        with self.assertRaises(OSError):
+            os.fstat(captured[0])   # closed: no descriptor leaks the unlinked file
+
+    def test_a_failed_mode_change_on_a_fresh_destination_cleans_up(self):
+        import errno
+        from unittest import mock
+
+        def refusing(descriptor, mode, *args, **kwargs):
+            raise OSError(errno.EPERM, "seeded mode-setting failure")
+
+        destination = Path(self._tmp.name) / "state" / "fresh.json"
+        destination.parent.mkdir(mode=0o700)
+        with mock.patch.object(fsio.os, "fchmod", refusing):
+            with self.assertRaises(OSError):
+                fsio.atomic_write(destination, b"new bytes")
+        self.assertFalse(destination.exists())
+        self.assertEqual(list(destination.parent.glob(".tmp.*")), [])
+
+
 class TestNoRepositoryWrites(_Isolated):
     def test_adapter_never_writes_into_the_project_repo(self):
         root = Path(self._tmp.name) / "repo"
