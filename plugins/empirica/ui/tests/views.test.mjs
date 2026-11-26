@@ -49,7 +49,7 @@ test("the run header distinguishes read-only unavailable capability from human o
   assert.match(qualified, /sha256:aaaaaaaa…aaaaaaaa/);
   assert.match(qualified, /sha256:bbbbbbbb…bbbbbbbb/);
   assert.doesNotMatch(qualified, /unix:\/\/|\.sock|current\.json/);
-  // E2a finding 4: run/5's closed non-authoritative kind renders as not qualified, never as qualified
+  // run/5's closed non-authoritative kind renders as not qualified, never as qualified
   const unqualified = structuredClone(qualifiedSheet);
   unqualified.spike_backend = { kind: "unqualified" };
   const unqualifiedText = text(sheetHtml(ctx(unqualified)));

@@ -75,7 +75,7 @@ X_INGRESS = "x-core-ingress"
 X_GRAMMAR = "x-grammar"
 X_REGRESSION_WITNESSES = "x-regression-witnesses"
 X_WORK_LIMIT = "x-work-limit"
-#: The feasible-work limit for generation (T1's bounded work, not the review's unbounded scaling): a
+#: The feasible-work limit for generation (bounded work, never unbounded scaling): a
 #: registered definition whose own high bounds — an array's ``maxItems``, a string's ``maxLength`` —
 #: ask for more rows or characters than these ceilings is refused at load with a finding naming the
 #: node and the bound, instead of the harness silently scaling with an arbitrary schema. A definition
@@ -273,8 +273,8 @@ def _class_holds(items: list, character: str) -> bool:
 def _case_restricted_letters(patterns: list[str]) -> list[tuple[str, str]]:
     """(the letter a case-restricted class holds, its case flip the class does not) pairs, one per
     restricted class of a node's patterns: a lowercase-only ``[a-z0-9]`` name component yields
-    ``('a', 'A')`` — the in-place uppercase challenge of *each case-restricted class* (the re-review's
-    seeded spelling defect was an uppercase exactly where the grammar admits only lowercase), derived
+    ``('a', 'A')`` — the in-place uppercase challenge of *each case-restricted class* (a spelling defect is an
+    uppercase exactly where the grammar admits only lowercase), derived
     from the grammar, never a hand-listed value. Classes that admit both cases have no case to violate."""
     if not (sys.version_info >= (3, 11)):
         import sre_parse  # noqa: F401 — the fallback parser import above already guarded this
@@ -598,8 +598,7 @@ def witness_of_family(case: "Case") -> bool:
 def method_name(key: str, taken: set[str]) -> str:
     """The harness test-method name of one registered key — the *document identity is part of the name*:
     the state definition's ``defs_environmentproposal`` and the request definition's never overwrite one
-    another (the re-review found the request copy's seven methods silently dropped when the name kept
-    only the pointer). A collision — two registered keys whose names normalize alike — is *refused*
+    another (a name keeping only the pointer would silently drop the request copy's methods). A collision — two registered keys whose names normalize alike — is *refused*
     (raised), never silently merged."""
     document, _, pointer = key.partition("#")
     name = (document + "_" + pointer.strip("/")).replace("$defs/", "defs_").replace("properties/", "member_") \
@@ -696,10 +695,10 @@ class Contract:
             self.findings.extend(self._feasibility_errors(key, noted))
 
     def _feasibility_errors(self, key: str, noted: set[str]) -> list[str]:
-        """The generation feasibility limit (the two re-reviews' findings): a registered definition whose
+        """The generation feasibility limit: a registered definition whose
         own allocation-driving bounds — an array's ``maxItems``/``minItems``, a string's
         ``maxLength``/``minLength``, *minima included because a minimum allocates on every draw*
-        (a ``minLength`` of a million with no ``maxLength`` is the reviewer's seed) — ask for more rows
+        (a ``minLength`` of a million with no ``maxLength``, say) — ask for more rows
         or characters than these ceilings is refused at load with a finding naming the node and the
         bound. A definition whose larger work is honest declares an ``x-work-limit`` override."""
         findings: list[str] = []
@@ -727,7 +726,7 @@ class Contract:
         """The named regression-witness corpus of a definition — the bounded list of *evidenced defects*
         the contract itself carries on a patterned node (``x-regression-witnesses``: ``value`` plus its
         defect reference, at most eight per node, all unique), each placed in a drawn base and fed to
-        both judges: both must refuse (the reviewed ``Python:3.12`` seed dies here and nowhere else,
+        both judges: both must refuse (the ``Python:3.12`` witness dies here and nowhere else,
         because a defect that normalizes one input is invisible to the generic probes and lives only as
         a named case)."""
         out: list[Derived] = []
@@ -1041,9 +1040,9 @@ class Contract:
         """The first same-family candidate the node itself admits with only the challenged keyword
         removed: Draft 2020-12 over the node's remaining keywords — the ``x-`` annotations are ignored
         by the draft, exactly as the test-side word computes it — must accept it, or the refusal the
-        sweep would find belongs to a sibling keyword, never to this one (the re-review 3's control: a
-        two-row ``const`` beside ``maxItems: 2`` used to feed an always-longer probe both judges
-        refused for length, and a core enforcing only ``maxItems`` was silently credited with covering
+        sweep would find belongs to a sibling keyword, never to this one (otherwise a
+        two-row ``const`` beside ``maxItems: 2`` would feed an always-longer probe both judges
+        refused for length, and a core enforcing only ``maxItems`` would be silently credited with covering
         ``const``). ``None`` means no candidate isolates the keyword — an empty series is the genuinely
         exhausted family (``unsupported``), a refused one is the siblings' word (``redundant``) —
         and the ledger never credits either with coverage."""

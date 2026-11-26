@@ -227,7 +227,7 @@ def daemon_identity(value: object) -> dict[str, str]:
     """Which daemon owns the recorded IDs. Capability facts are not identity: passive
     verification and postflight enforce them for new execution, never for recovery.
 
-    Inherited limitation (explicit, E5 review): a journal row is keyed on the endpoint and
+    Inherited limitation (explicit): a journal row is keyed on the endpoint and
     the server platform, never on the Docker daemon identifier — a daemon restarted on the
     same socket with the same platform owns its IDs regardless of identity proof, and the
     residual is accepted by spec section 5 ("Residual"). The ownership and exact-identifier

@@ -441,7 +441,7 @@ def receipt_error(run_id: str, state: object, receipt: Mapping) -> str | None:
         if prior is not None:
             return "receipt_absent"  # the id already named a decision: it can present nothing
         if len(member["receipts"]) >= MAX_MEMBER_RECEIPTS:
-            # Re-review 1 (non-blocking 3): the per-revision presentation allowance is a
+            # The per-revision presentation allowance is a
             # behavioural limit of its own, not merely a storage bound — a further
             # presentation is refused with its own closed reason (the public reason row names
             # the recovery: a new environment revision), while a presentation this revision

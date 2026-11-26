@@ -208,8 +208,7 @@ def check_limits() -> None:
             "the closed qualification failure set must stay a subset of the Fault reasons")
     # The qualificationView last-failure reason enumeration belongs to the registered ADR-0075
     # harness alone (E6c): the application's view validator reads it from its owner and the
-    # differential holds both sides, so this script keeps no shape mirror of it (E6c review
-    # blocking 4). Fault stays here by design: it is deferred to migration node T1, and the code
+    # differential holds both sides, so this script keeps no shape mirror of it. Fault stays here by design: it is deferred to migration node T1, and the code
     # vocabulary/subset checks below are its only cross-facet pin.
 
 

@@ -1559,7 +1559,7 @@ class LocationsTests(unittest.TestCase):
 
 
 class UnqualifiedBindingTests(unittest.TestCase):
-    """E2a review finding 4: a populated run/5 whose binding is ``unqualified`` (spec 7.2 §4.2
+    """A populated run/5 whose binding is ``unqualified`` (spec 7.2 §4.2
     admits the closed kind; StartRun binds it from E9 on) must be served by the observer as what
     it is — its own non-authoritative kind on the contract boundary, never dropped to nothing
     and never read as a qualified profile binding."""

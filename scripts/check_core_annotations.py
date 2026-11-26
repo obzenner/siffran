@@ -15,8 +15,8 @@ response ``Fault`` registers by declaration:
   ``$defs`` — must be attached to a node inside a declared ingress's reachable closure: an annotation
   nothing reaches is orphaned and refused;
 * an ``x-core-validator`` placement is a registration, never a decoration: it sits on a declared
-  ingress root or a reachable annotated ``$defs`` definition *exactly* — an interior placement (the
-  re-review seeded one on a member's revision) is reported whatever name it carries, real or not;
+  ingress root or a reachable annotated ``$defs`` definition *exactly* — an interior placement (one on a
+  member's revision, say) is reported whatever name it carries, real or not;
 * every ``$defs`` definition inside a declared closure that the core validates carries its own
   annotation — a definition can never slip out of the harness by riding in unannotated;
 * an ingress that names a property holds a member its own object requires;
@@ -29,8 +29,8 @@ response ``Fault`` registers by declaration:
   entries, unique, each an object ``{"value": <string>, "defect": <a structured reference>}`` — the
   value at most 256 characters and inside the node's own length bounds where they are smaller (a length
   refusal is a shape defect, never a pattern regression), the defect reference at most 120 characters
-  and pattern-checked: ``<review file>.md#<finding number>`` or ``commit:<40 lowercase hex>`` (the
-  guard cannot prove the named evidence, so code review is the control for the corpus itself); a
+  and pattern-checked as ``test:<repository path>::<Class>.<test_name>`` — the committed test that
+  guards the defect, which must exist (the file in the repository, the class and the test on it); a
   corpus value the node's own Draft 2020-12 verdict
   still accepts is a contract bug (never ``any(re.fullmatch(...))``, which read the pattern semantics
   backwards), and the differential harness is the second check — the core's verdict;
@@ -156,15 +156,38 @@ REGRESSION_CORPUS_CAP = 8
 #: own ``minLength``/``maxLength`` bounds where they are smaller — a length refusal is a shape defect
 #: the generated length challenges already cover, never a pattern regression.
 REGRESSION_VALUE_CAP = 256
-#: A defect reference is bounded and structured, never prose: ``<review file>#<finding number>`` or
-#: ``commit:<40 lowercase hex>``. The guard pattern-checks the shape; the evidence itself is what code
-#: review controls — the guard cannot prove a reference names a real defect.
+#: A defect reference is bounded and structured, never prose: ``test:<repository path>::<Class>.<test_name>``,
+#: the committed test that guards the defect. The guard checks the shape and that the named test exists.
 REGRESSION_DEFECT_CAP = 120
 DEFECT_REFERENCE = re.compile(
-    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*\.md#[1-9][0-9]*|commit:[0-9a-f]{40})")
+    r"test:((?:[A-Za-z0-9_][A-Za-z0-9_.-]*/)*test_[A-Za-z0-9_]+\.py)::([A-Za-z_][A-Za-z0-9_]*)\.(test_[A-Za-z0-9_]+)")
+_TEST_MODULES: dict[Path, object] = {}
+
+
+def _named_test_exists(path: str, owner: str, name: str) -> bool:
+    """Whether the repository file holds the test class with the test method: the module is imported
+    (once per file), so a generated test method counts exactly as a hand-written one."""
+    import importlib.util
+
+    file = (ROOT / path).resolve()
+    if not file.is_file() or not file.is_relative_to(ROOT):
+        return False
+    if file not in _TEST_MODULES:
+        spec = importlib.util.spec_from_file_location("_regression_witness_" + file.stem, file)
+        module = importlib.util.module_from_spec(spec)
+        sys.path.insert(0, str(file.parent))
+        try:
+            spec.loader.exec_module(module)
+        except Exception:  # noqa: BLE001 - an unimportable file names no test
+            module = None
+        finally:
+            sys.path.remove(str(file.parent))
+        _TEST_MODULES[file] = module
+    holder = getattr(_TEST_MODULES[file], owner, None)
+    return isinstance(holder, type) and callable(getattr(holder, name, None))
 #: A regression witness must be refused by the node's own draft word: the pattern keyword searches
-#: (an unanchored ``a`` accepts ``ba``), every conjunct must agree — the reviewer's ``any(fullmatch)``
-#: got exactly those two cases backwards.
+#: (an unanchored ``a`` accepts ``ba``), every conjunct must agree — an ``any(fullmatch)``
+#: would get exactly those two cases backwards.
 _DRAFT_OF_NODE = ("type", "enum", "const", "pattern", "minLength", "maxLength")
 
 
@@ -185,12 +208,11 @@ def _regression_errors(node: dict, node_id: str) -> list[str]:
     """A named regression-witness corpus (``x-regression-witnesses``) — a *bounded* corpus of evidenced
     defects, never a back door for hand-written cases: at most {} entries, unique values, each an
     object ``{{"value": <string>, "defect": <a structured reference>}}`` naming the demonstrated
-    defect — the review file and its finding (``<review file>.md#<finding number>``), or the commit
-    that fixed it (``commit:<40 lowercase hex>``) — with the value a string of at most {cap_v}
+    defect — the committed test that guards it (``test:<repository path>::<Class>.<test_name>``),
+    which must exist — with the value a string of at most {cap_v}
     characters and inside the node's own ``minLength``/``maxLength`` bounds where they are smaller
     (a length refusal is a shape defect, never a pattern regression), and the defect reference at
-    most {cap_d} characters, pattern-checked. The guard cannot prove the named evidence is real, so
-    code review is the control for the corpus itself; a corpus value the node's own Draft 2020-12
+    most {cap_d} characters, pattern-checked; a corpus value the node's own Draft 2020-12
     word still accepts is a contract bug, and the differential harness is the second check (the
     core's verdict).""".format(REGRESSION_CORPUS_CAP, cap_v=REGRESSION_VALUE_CAP,
     cap_d=REGRESSION_DEFECT_CAP)
@@ -233,17 +255,21 @@ def _regression_errors(node: dict, node_id: str) -> list[str]:
             continue
         if not isinstance(defect, str) or not defect.strip():
             out.append(f"{node_id}: a regression entry without its evidenced defect reference "
-                       f"({value!r}): a structured reference — the review file and its finding, or "
-                       "the commit that fixed it — is required")
+                       f"({value!r}): a structured reference — the committed test that guards the "
+                       "defect — is required")
             continue
         if len(defect) > REGRESSION_DEFECT_CAP:
             out.append(f"{node_id}: a defect reference of {len(defect)} characters exceeds the cap "
                         f"of {REGRESSION_DEFECT_CAP}: {defect!r}")
             continue
-        if not DEFECT_REFERENCE.fullmatch(defect):
+        reference = DEFECT_REFERENCE.fullmatch(defect)
+        if not reference:
             out.append(f"{node_id}: a defect reference that is not structured evidence — "
-                       "'<review file>.md#<finding number>' or 'commit:<40 lowercase hex>', "
+                       "'test:<repository path>::<Class>.<test_name>', "
                        f"never prose: {defect!r}")
+            continue
+        if not _named_test_exists(*reference.groups()):
+            out.append(f"{node_id}: a defect reference naming no committed test: {defect!r}")
             continue
         if not _draft_refuses(node, value):
             out.append(f"{node_id}: a named regression witness the node's Draft 2020-12 word still "
@@ -293,7 +319,7 @@ def check(documents_map: dict[str, dict] | None = None, schema: dict | None = No
             if word == X_VALIDATOR:
                 # a validator placement is a *registration*, never a decoration: it sits on an
                 # x-core-ingress root or a reachable annotated $defs definition exactly, or it is
-                # reported — an interior placement (the review seeded one on a member's revision)
+                # reported — an interior placement (one on a member's revision, say)
                 # is a finding whatever name it carries, and whatever it names must also resolve.
                 if where in contract.registered:
                     continue

@@ -27,7 +27,7 @@ _EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
 PROBE_IMAGE_CONTRACT = _EMPIRICA_ROOT / "vendor" / "contracts" / "empirica-docker-spike" / "v1" / "support-contract.json"
 
 PROBE_IMAGE_FIELDS = frozenset({"reference", "repository", "index_digest"})
-#: Pins are official Docker Hub library images only (Empirica 7.2 coordinator decision on E3b finding 1).
+#: Pins are official Docker Hub library images only (Empirica 7.2).
 OFFICIAL_REGISTRY = "docker.io"
 OFFICIAL_NAMESPACE = "library"
 #: distribution/reference caps the repository path, the ``library/`` namespace included, at 255

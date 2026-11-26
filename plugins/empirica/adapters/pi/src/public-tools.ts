@@ -153,7 +153,7 @@ const ABSOLUTE_END = "(?![\\s\\S])";
 /** The positive bounded grammar this page's one pattern caller (the digest guard) may serve,
  * after `^` is stripped and the absolute end taken off: a literal prefix of `[a-z0-9:]` characters,
  * then exactly one `[0-9a-f]` class with a fixed positive count — no escape class, no dot, no
- * group, no alternation, no other quantifier (E6c re-review 1, blocking 1). A blacklist of
+ * group, no alternation, no other quantifier. A blacklist of
  * disagreeing atoms cannot hold that word: the class-escape list admitted `^\q`, an identity
  * escape JavaScript compiles and Python refuses at compile time, and the seed resting a `(?!.)`
  * on the Unicode line separator U+2028, which JavaScript's dot never matches (the `u` flag changes
@@ -162,8 +162,7 @@ const ABSOLUTE_END = "(?![\\s\\S])";
  * restatement of “which escapes disagree” is the boundary. The boundary is the grammar itself:
  * the digest word matches it, and both engines read every admitted pattern identically.
  *
- * The one closed end is the absolute lookahead; a `$` anchor never loads (E6c re-review 2,
- * blocking 1). JSON Schema's `pattern` is Python `re.search`, whose `$` matches before a final
+ * The one closed end is the absolute lookahead; a `$` anchor never loads. JSON Schema's `pattern` is Python `re.search`, whose `$` matches before a final
  * line feed, while JavaScript's unescaped `$` (no `m` flag) refuses that value — the same
  * split that made the core re-anchor its digest word, so the page admits no `$`-anchored word
  * at all, not even the anchored digest itself: only `(?![\s\S])` closes the grammar. */

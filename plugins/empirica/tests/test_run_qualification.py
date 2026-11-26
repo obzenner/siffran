@@ -106,8 +106,7 @@ class ImageInspects:
                 # timeout flag alone ends the read
                 return process.CommandResult.fake(
                     stdout=json.dumps(self.probe_document), timed_out=True)
-            # the projection is verified at the command boundary (re-review,
-            # non-blocking 3): the daemon is asked by the owner's exact constant, so a
+            # the projection is verified at the command boundary: the daemon is asked by the owner's exact constant, so a
             # mutant that drops the digest membership (or any other member the
             # admission reads) fails here before any fake answer can mask it
             assert argv[4] == run_owner.PROBE_IMAGE_INSPECT_FORMAT, argv
@@ -405,7 +404,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         harness.images.probe_document = probe_document([mirror])
         outcome = harness.call()
         self.assertIs(type(outcome), run_owner.RunQualificationBound)
-        # (registration review, blocking) the digest proof is the entry the daemon
+        # The digest proof is the entry the daemon
         # itself reported — the mirror's own name pinned to the observed digest,
         # never the canonical synthetic form it never observed — while the sealed
         # reference stays the pinned canonical one, the contract's requested identity
@@ -428,7 +427,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
 
     def test_a_mirror_named_local_image_is_admitted_by_its_repository_digest_when_the_pinned_name_is_absent(
             self):
-        # (drift review, non-blocking 6) the pinned name may find no image in the
+        # The pinned name may find no image in the
         # local store while the digest exists under a proxy's own name: the digest
         # is the content identity, the repository name is not (the coordinator's
         # real mirror pull witnessed it end to end). One bounded
@@ -457,7 +456,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertIs(type(outcome), run_owner.RunQualificationBound)
         commands = [call[0] for call in harness.images.calls]
         # The fallback admission itself is exactly three bounded image commands
-        # (drift review, non-blocking 6): the pinned-reference inspect, the one
+        # The pinned-reference inspect, the one
         # bounded digest listing, and the re-inspection of the located row's
         # digest-sealed reference through the ordinary content rules — the same
         # projection the pinned inspect uses, so the third command reads the same
@@ -482,8 +481,8 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                                            harness.spike_images[0]))
         self.assertEqual(len(commands), 3 + len(harness.spike_images))
         # the record seals the pinned canonical reference and the exact inspected ID;
-        # the digest proof is the entry the daemon reported for the located mirror
-        # (registration review, blocking), so both names are observations
+        # the digest proof is the entry the daemon reported for the located mirror,
+        # so both names are observations
         self.assertEqual(outcome.record["qualification_image"]["repo_digest"],
                          mirror_reference)
         self.assertEqual(outcome.record["qualification_image"]["reference"], PIN.repo_digest)
@@ -516,7 +515,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                 self.assertNoRecord(harness)
 
     def test_the_digest_listing_itself_is_bounded_at_its_declared_rows_and_bytes(self):
-        # (drift review, non-blocking 6) the fallback's one listing is a bounded
+        # The fallback's one listing is a bounded
         # read: the owner's own row cap is read from the module, never restated here,
         # and the admission keeps both of its sides — a list with a row count past the
         # cap is refused the untrusted way, never parsed further (feeding a partial
@@ -593,7 +592,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(outcome.record["qualification_image"]["reference"], PIN.repo_digest)
 
     def test_the_sealed_digest_proof_is_the_sorted_first_entry_the_daemon_reported(self):
-        # (registration review, blocking) the digest proof member is the sorted-first
+        # The digest proof member is the sorted-first
         # matching RepoDigests entry — one observation, chosen deterministically —
         # whatever order the daemon reported the entries in, while the reference
         # member stays the canonical pinned form
@@ -631,7 +630,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertNoRecord(harness)
 
     def test_a_digest_listing_that_failed_is_never_trusted_even_when_its_rows_parse(self):
-        # (drift review, non-blocking 6) the one bounded listing is trusted for the
+        # The one bounded listing is trusted for the
         # located digest-sealed reference alone and only from a successful answer:
         # a listing that exited nonzero must end the attempt the untrusted way even
         # though its stdout rows carry the pinned digest and would otherwise
@@ -657,8 +656,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
 
     def test_several_mirror_named_copies_of_the_pinned_digest_admit_through_the_sorted_first_reference(
             self):
-        # (the coordinator's real mirror evidence, drift review non-blocking 6) more
-        # than one repository may carry the pinned digest — the same content pulled
+        # more than one repository may carry the pinned digest — the same content pulled
         # through different proxies — and any of them admits; the choice must be
         # deterministic, the sorted-first repository, so the same store answers the
         # same re-inspection on every attempt: the third command names the
@@ -693,7 +691,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                          "the proof is the entry the re-inspected mirror reported")
 
     def test_a_listing_row_with_a_none_repository_is_screened_out_by_the_reference_lexeme(self):
-        # (registration review, non-blocking 1) a `<none>` repository sorts before
+        # A `<none>` repository sorts before
         # every real name, so a dangling row carrying the pin would otherwise end the
         # attempt on a reference no daemon can answer; the repo-digest lexeme on the
         # combined reference screens unusable names out before the sorted-first
@@ -751,8 +749,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         # a sealed record whose row names a platform that is not the bound runtime's,
         # or one whose image declares volumes, is refused by load_record from its
         # own published state, with the closed record error, never a leaked exception
-        # (drift review, non-blocking 4: through load_record, never a private
-        # validator).
+        # (through load_record, never a private validator).
         harness = OwnerHarness(self._fresh_cell())
         harness.manifests = [{"implementation_digest": D0}] * 32
         outcome = harness.call()
@@ -783,7 +780,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                                  outcome.record)
 
     def test_a_record_whose_digest_proof_names_another_digest_refuses_at_load(self):
-        # (registration review, blocking) the proof member may name any repository
+        # The proof member may name any repository
         # the daemon observed carrying the pinned content, but its digest part must
         # be the pinned index digest. Two refusals must hold: a plainly tampered
         # record is refused from its own published state with the closed record
@@ -842,7 +839,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             "qualification_record_digest"], model["qualification_record_digest"])
 
     def test_a_daemon_identity_the_authority_admits_is_still_sealed_and_bound(self):
-        # (registration review, non-blocking 2) the record's daemon-identifier lexeme
+        # The record's daemon-identifier lexeme
         # is the /2 authority's own rule — no C0/C1 control, at most 128 characters,
         # not all whitespace, interior, leading and trailing spaces included — so a
         # daemon the authority admits is never refused at sealing after five probes;
@@ -863,7 +860,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                 self.assertEqual(loaded["daemon_id"], daemon_id)
 
     def test_the_record_daemon_lexeme_admits_exactly_the_authoritys_daemon_identity(self):
-        # (registration review, non-blocking 2) the two owners admit one rule on one
+        # The two owners admit one rule on one
         # member, so a corpus covers their agreement — every boundary class either
         # names — and no restatement of the rule itself: both owners answer for
         # themselves, and the test holds only the equality of their verdicts
@@ -971,12 +968,11 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         for record in (base, minor_update):
             self.assertEqual(run_owner.server_version_major(record["runtime"]["server_version"]),
                              major)
-        # the real-world daemon spellings stay literal here (drift review,
-        # non-blocking 3): a vendor-suffixed and a pre-release version keep the same
+        # the real-world daemon spellings stay literal here: a vendor-suffixed and a pre-release version keep the same
         # major binding, and a same-major pair that differs only in the suffix never
         # rebinds — the derived forms alone would let a mutant that requires the whole
         # string numeric-dotted pass. A leading zero in the major is normalized away
-        # before the binding ever sees it (non-blocking 2): the invariant is numeric,
+        # before the binding ever sees it: the invariant is numeric,
         # never textual.
         self.assertEqual(run_owner.server_version_major("0" + major + ".7"), major,
                          "the major is the normalized integer, never the literal text")
@@ -1018,7 +1014,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertNoRecord(harness)
 
     def test_a_version_without_a_derivable_major_is_refused_at_the_initial_admission(self):
-        # (drift review, non-blocking 1) the major is derived once at the facts'
+        # The major is derived once at the facts'
         # admission, before the trusted probe image is ever inspected: a `dev` daemon
         # ends the attempt with the capability reason at the admission itself — never
         # after a whole probe run — and no Docker image command has run at all
@@ -1336,7 +1332,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
 
 
     def test_a_now_refusing_pinned_daemon_recovers_before_it_refuses_production(self):
-        # Re-review blocking 1, through the production inspector: the first attempt
+        # Through the production inspector: the first attempt
         # retains a journal; the same pinned daemon then stops admitting (SwapLimit
         # false); the owner's non-admitting observation still yields facts, recovery
         # runs at the pinned endpoint, and only then the capability refusal is reported.
@@ -1412,7 +1408,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
 
 
     def test_the_final_reobservation_separates_drift_result_failure_and_launch_failure(self):
-        # Re-review blocking 4 at the owner boundary: a changed capability observed by
+        # At the owner boundary: a changed capability observed by
         # the final pinned re-observation is stale-daemon; a failed daemon command
         # result is unreachable; a command-launch OSError — the hole — is normalized at
         # the observation boundary and arrives unreachable, never capability.
@@ -1522,8 +1518,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
                     self.assertFalse(records.exists() and any(records.iterdir()))
 
     def test_the_second_first_use_attempt_never_replaces_the_inode_the_first_holds(self):
-        # Sol's exact witness (re-review 2, blocking 2; re-review 3, non-blocking 1):
-        # both attempts' lock lookups are the initializer's own real `lstat` calls, and
+        # Both attempts' lock lookups are the initializer's own real `lstat` calls, and
         # both genuinely miss — the barrier runs inside the actual FileNotFoundError
         # handler, before either initializer creates. The second attempt's *missed*
         # lookup is released only after the first attempt holds the published inode, so
@@ -1548,8 +1543,8 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             # the hook runs the real lookup and observes its result; only a genuine
             # miss on the lock name is synchronized — inside the actual
             # FileNotFoundError handler — and the second's continuation is delivered
-            # once the first attempt holds the published inode (re-review 3,
-            # non-blocking 1: the old hook fabricated the miss)
+            # once the first attempt holds the published inode (a real miss, never a
+            # fabricated one)
             try:
                 return original(path)
             except FileNotFoundError:
@@ -1633,7 +1628,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
             self.assertEqual(work, harness.root / run_owner.NAMESPACE / "work")
 
     def test_the_default_effects_wiring_serves_the_pinned_endpoint(self):
-        # (re-review, non-blocking 3) the check is injected below the concrete effects
+        # The check is injected below the concrete effects
         # factory - at the real command-construction boundary - instead of replacing it,
         # so the environment the produced commands actually launch with is verified.
         harness = OwnerHarness(self._fresh_cell())
@@ -1671,7 +1666,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(cli, facts["docker_cli"])
 
     def test_the_default_recovery_effects_launch_commands_at_the_pinned_destination(self):
-        # (re-review 2, non-blocking 2) the destination witness below the concrete
+        # The destination witness below the concrete
         # effects implementation: with the production default effects factory, the
         # commands the real ConcreteGenericEffects launches — not the objects it is
         # constructed with — carry the pinned Docker CLI, the pinned endpoint and the
@@ -1777,7 +1772,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(len(list(self.store.records.iterdir())), 2)
 
     def test_changed_bodies_and_wrong_digest_paths_in_the_v3_tree_are_refused(self):
-        # (re-review, non-blocking 2) the same load verification witnesses now planted
+        # The same load verification witnesses now planted
         # in the version-three tree: a body changed at its own digest name, and a
         # valid body planted at a wrong digest path, are both refused by the /3 loader.
         cell = self._fresh_cell()
@@ -1856,7 +1851,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         # a symbolic link planted at the records directory redirects neither a load nor a
         # write: the directory is validated on load exactly as on write. The redirected
         # directory holds the exact published record, so only the directory guard can
-        # refuse it (re-review, non-blocking 2) - a removed guard would load it.
+        # refuse it - a removed guard would load it.
         foreign = self._fresh_cell() / "foreign-records"
         foreign.mkdir(mode=0o700)
         foreign.chmod(common.MODE_DIR)
@@ -2094,7 +2089,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
         super().setUp()
 
     def test_a_kernel_failure_before_a_probe_keeps_its_own_reason_and_no_probe_name(self):
-        # (re-review, non-blocking 1) the boundary never relabels a kernel failure that
+        # The boundary never relabels a kernel failure that
         # did not own a probe name as an unnamed probe failure: the owning reason
         # survives the outcome with no probe identity. The construction-time invariant
         # (a probe-failed outcome requires its owner-supplied name) is what makes the
@@ -2146,7 +2141,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(first, second)
         self.assertEqual(second.stat().st_ino, inode)   # no replacement on the retry
         self.assertEqual(len(list(store.records.iterdir())), 1)
-        # the retry re-proves the whole naming chain (re-review, blocking 2): the
+        # the retry re-proves the whole naming chain: the
         # records directory naming the file, the namespace naming records, and the
         # sandbox directory naming the namespace - all strictly synced again
         synced = sorted(Path(call.args[0]) for call in sync.call_args_list)
@@ -2163,7 +2158,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
         self.assertEqual(common.safe_file(first, cap=run_owner.MAX_RECORD_BYTES), tampered)
 
     def test_a_sync_failure_at_any_naming_level_withholds_publication(self):
-        # (re-review, blocking 2) the durable barrier covers the required parent chain
+        # The durable barrier covers the required parent chain
         # pre-created by the scaffold: the sandbox directory naming the namespace, the
         # namespace naming records, and records naming the record file. An injected
         # strict-sync failure at any of the three levels fails publication on the retry
@@ -2294,8 +2289,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
             target.symlink_to(victim, target_is_directory=True)
 
         with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
-            # an unsafe publication is the scaffolding refusal (re-review 4,
-            # non-blocking 2), never a capability one
+            # an unsafe publication is the scaffolding refusal, never a capability one
             with self.assertRaises(common.GenericScaffoldingError):
                 store.write_record(different)
         import stat as stat_module
@@ -2309,7 +2303,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
                               project_id="project-1", run_id="run-1", generation=1)
 
     def test_a_hardlinked_impostor_on_the_fresh_publication_is_refused_unmutated(self):
-        # (re-review 2, blocking 4) there is no permission change after the rename at
+        # There is no permission change after the rename at
         # all: the closed mode was fixed on the exclusive temporary descriptor before
         # the sync and rename (fsio.atomic_write), and the published entry is validated
         # without ever being mutated. A hard link to an unrelated 0644 file swapped onto
@@ -2350,8 +2344,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
             os.link(unrelated, target)
 
         with mock.patch.object(run_owner.fsio, "atomic_write", swapped_write):
-            # an unsafe publication is the scaffolding refusal (re-review 4,
-            # non-blocking 2), never a capability one
+            # an unsafe publication is the scaffolding refusal, never a capability one
             with self.assertRaises(common.GenericScaffoldingError):
                 store.write_record(different)
         self.assertEqual(stat_module.S_IMODE(unrelated.stat().st_mode), 0o644,
@@ -2364,7 +2357,7 @@ class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):
                               project_id="project-1", run_id="run-1", generation=1)
 
     def test_an_unsafe_publication_is_reported_as_sandbox_scaffolding_unsafe(self):
-        # (re-review 4, non-blocking 2) a substituted publication is a scaffolding
+        # A substituted publication is a scaffolding
         # refusal, never a capability one: the content-addressed name was never
         # proven to hold this attempt's record, so nothing binds, the attempt's only
         # outcome is the unsafe-publication reason, and the impostor is left exactly

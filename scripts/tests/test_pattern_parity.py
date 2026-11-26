@@ -3,7 +3,7 @@
 
 The parity target itself runs both engines for real (``make contract-pattern-parity``, from
 contract-check); these controls pin the logic without Node: the corpus carries the standing
-cross-engine families (blank, mixed, astral, lone-surrogate — the review's demand), every registered
+cross-engine families (blank, mixed, astral, lone-surrogate), every registered
 pattern and grammar piece is in scope, a Node verdict that disagrees with Python outside the declared
 open family is a finding, and the excusing would span a declared open anchor's trailing-terminator
 family only — the registry is empty at this head (the run/5 digest anchors healed when 07c5f66b
@@ -43,7 +43,7 @@ class CorpusTests(unittest.TestCase):
                         "a witness-seeded line-terminator suffix is present")
 
     def test_the_corpus_seeds_the_arabic_indic_digit_at_witness_ends(self):
-        """Sol's seeded cross-engine split (E6c review, blocking 2): a pattern whose final class
+        """A cross-engine split: a pattern whose final class
         complements `\\d` — `^sha256:[0-9a-f]{63}[^\\d](?![\\s\\S])` — admits the
         Arabic-Indic digit `U+0661` in JavaScript (`\\d` is ASCII-only) and refuses it in Python
         (`\\d` is Unicode-wide). The corpus must end a pattern's own witness with that digit, and

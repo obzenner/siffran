@@ -45,7 +45,7 @@
       "minLength": 1,
       "maxLength": 128,
       "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*[^\\u0000-\\u0020\\u007f-\\u009f\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000][^\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])",
-      "description": "Docker info.ID when the observed daemon reports one; present exactly when the runtime carries it, and equal to it. The lexeme is the /2 authority's own daemon-identity rule: no C0/C1 control, at most 128 characters, not all whitespace — interior, leading and trailing spaces included (registration review, non-blocking 2), so a daemon the authority admits is never refused at sealing."
+      "description": "Docker info.ID when the observed daemon reports one; present exactly when the runtime carries it, and equal to it. The lexeme is the /2 authority's own daemon-identity rule: no C0/C1 control, at most 128 characters, not all whitespace — interior, leading and trailing spaces included, so a daemon the authority admits is never refused at sealing."
     },
     "probe_image_id": {"$ref": "#/$defs/digest"},
     "qualification_image": {"$ref": "#/$defs/probeImage"},
@@ -141,7 +141,7 @@
         },
         "repo_digest": {
           "$ref": "#/$defs/repoDigest",
-          "description": "The digest proof: the RepoDigests entry the daemon itself reported for the admitted image — the sorted-first entry carrying the pinned index digest, whatever repository name it was reported under, never a synthetic value the daemon never observed. The loader checks that its digest part equals the pinned index digest; the reference member stays the canonical pinned form, the contract's requested identity (registration review, blocking)."
+          "description": "The digest proof: the RepoDigests entry the daemon itself reported for the admitted image — the sorted-first entry carrying the pinned index digest, whatever repository name it was reported under, never a synthetic value the daemon never observed. The loader checks that its digest part equals the pinned index digest; the reference member stays the canonical pinned form, the contract's requested identity."
         }
       }
     },

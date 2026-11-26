@@ -3,7 +3,7 @@
 
 The guard itself runs in check-static; these controls prove a corrupted annotation set fails with the
 finding it should name, so a future schema cannot silently walk the registered definitions out of
-alignment (the failure modes the E2a review found: an ingress member annotation quietly removed, an
+alignment (the failure modes: an ingress member annotation quietly removed, an
 ``x-core-only`` rule parked on an unannotated definition, and an annotation inside schema-valued
 ``additionalProperties`` the walk skipped).
 
@@ -50,6 +50,18 @@ def _patterned_spike_items(documents_map) -> list[dict]:
     return out
 
 
+_ADMISSIBLE = "test_a_reference_to_an_existing_test_is_admissible"
+#: A defect reference naming a committed test (the positive control below).
+GUARDED = f"test:{Path(__file__).resolve().relative_to(ROOT).as_posix()}::GuardControlTests.{_ADMISSIBLE}"
+
+
+class GeneratedMethods(unittest.TestCase):
+    """A test class whose method is attached at import, as the conformance harness generates its own."""
+
+
+GeneratedMethods.test_generated = lambda self: None
+
+
 def findings_for(mutation, documents_map=None) -> list[str]:
     loaded = copy.deepcopy(documents_map if documents_map is not None else module_documents())
     mutation(loaded)
@@ -65,8 +77,8 @@ class GuardControlTests(unittest.TestCase):
         self.assertEqual(guard.check(), [])
 
     def test_an_ingress_member_annotation_cannot_quietly_disappear(self):
-        """The review's planted removal: only ``properties.environment.x-core-validator`` went away and
-        the old guard stayed green, because history still reached the shared ``$defs``. The declared
+        """A planted removal: only ``properties.environment.x-core-validator`` goes away, and a guard
+        that only walked reachability would stay green, because history still reaches the shared ``$defs``. The declared
         ingress inventory demands its annotation."""
         def drop(documents_map):
             _state(documents_map)["properties"]["environment"].pop("x-core-validator")
@@ -146,8 +158,7 @@ class GuardControlTests(unittest.TestCase):
         self.assertTrue(any("do not derive" in line for line in found), found)
 
     def test_a_keyword_inside_schema_valued_additional_properties(self):
-        """The review found the old walk skipping schema-valued ``additionalProperties``; a smuggled
-        keyword there must be refused now the walk enters it."""
+        """The walk enters schema-valued ``additionalProperties``: a keyword smuggled there is refused."""
         def smuggle(documents_map):
             node = _state(documents_map)["$defs"]["environmentMember"]["properties"]["revision"]
             node["additionalProperties"] = {"multipleOf": 2, "type": "integer"}
@@ -162,7 +173,7 @@ class GuardControlTests(unittest.TestCase):
         self.assertTrue(any("do not derive" in line for line in findings_for(spawn)), found)
 
     def test_a_nested_validator_placement_is_reported_whatever_it_names(self):
-        """The re-review's seed: an x-core-validator under a registered closure, on an interior node,
+        """An x-core-validator under a registered closure, on an interior node,
         naming a callable that never resolved. Discovered anywhere, a placement is a registration —
         an interior one is reported even when the name itself is real."""
         def nested(documents_map):
@@ -180,8 +191,8 @@ class GuardControlTests(unittest.TestCase):
         self.assertFalse(any("names no callable" in line for line in also), also)
 
     def test_deleting_a_validator_and_its_ingress_entry_together_still_fails(self):
-        """Two independent declarations: the inventory runs both ways, so the re-review's
-        delete-both escape no longer hides an unregistered definition — the core's own declaration
+        """Two independent declarations: the inventory runs both ways, so deleting
+        both never hides an unregistered definition — the core's own declaration
         (core.contract_registry) still names it."""
         def delete_both(documents_map):
             _state(documents_map).pop("x-core-ingress")
@@ -209,19 +220,19 @@ class GuardControlTests(unittest.TestCase):
         def accepted(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "python:3.12-slim", "defect": "pr-E2c-gpt-6.2-sol.md#7"}]
+                    {"value": "python:3.12-slim", "defect": GUARDED}]
         found = findings_for(accepted)
         self.assertTrue(any("the node's Draft 2020-12 word still accepts" in line for line in found),
                         found)
 
     def test_the_draft_word_uses_search_semantics_not_fullmatch(self):
-        """The re-review 2 finding 2 example: an *unanchored* pattern ``a`` accepts ``ba`` under the
-        draft (the pattern keyword searches) — the old ``any(re.fullmatch(...))`` guard refused ``ba``
-        as a negative witness it could not refuse and accepted ``a`` when one conjunct refused it;
-        the guard's word is the draft verdict now."""
+        """An *unanchored* pattern ``a`` accepts ``ba`` under the
+        draft (the pattern keyword searches) — an ``any(re.fullmatch(...))`` guard would refuse ``ba``
+        as a negative witness it cannot refuse and accept ``a`` when one conjunct refuses it;
+        the guard's word is the draft verdict."""
         def unanchored(documents_map):
             for node in _patterned_spike_items(documents_map):
-                node["x-regression-witnesses"] = [{"value": "ba", "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+                node["x-regression-witnesses"] = [{"value": "ba", "defect": GUARDED}]
         found = findings_for(unanchored)
         self.assertTrue(any("the node's Draft 2020-12 word still accepts: 'ba'" in line for line in found),
                         found)
@@ -234,8 +245,7 @@ class GuardControlTests(unittest.TestCase):
         self.assertTrue(any("corpus must be a non-empty list" in line for line in found), found)
 
     def test_a_flooded_corpus_of_ten_thousand_is_refused(self):
-        """The re-review 2 seed: ten thousand duplicated bare entries — the old guard accepted them
-        all and every one became a candidate. The cap, the duplicates, and the shape all fire."""
+        """Ten thousand duplicated bare entries would each become a candidate. The cap, the duplicates, and the shape all fire."""
         def flooded(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = ["duplicate"] * 10000
@@ -247,7 +257,7 @@ class GuardControlTests(unittest.TestCase):
         def nine(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": f"x{index}", "defect": f"pr-E2c-gpt-6.2-sol.md#{index + 1}"}
+                    {"value": f"x{index}", "defect": GUARDED}
                     for index in range(9)]
         found = findings_for(nine)
         self.assertTrue(any("exceeds the cap of 8" in line for line in found), found)
@@ -256,8 +266,8 @@ class GuardControlTests(unittest.TestCase):
         def duplicated(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "same", "defect": "pr-E2c-gpt-6.2-sol.md#5"},
-                    {"value": "same", "defect": "commit:0123456789abcdef0123456789abcdef01234567"}]
+                    {"value": "same", "defect": GUARDED},
+                    {"value": "same", "defect": GUARDED}]
         found = findings_for(duplicated)
         self.assertTrue(any("duplicated regression entry value" in line for line in found), found)
 
@@ -276,14 +286,13 @@ class GuardControlTests(unittest.TestCase):
         self.assertTrue(any("without its evidenced defect reference" in line for line in also), also)
 
     def test_a_witness_value_over_the_cap_alone_is_refused(self):
-        """The re-review 3 finding 1: the value carried no length bound, so a hand-written case of any
-        size was banked. With the node's own maxLength gone the 256-character cap is the only ceiling:
+        """The value carries its own length bound, so no hand-written case of any size is banked. With the node's own maxLength gone the 256-character cap is the only ceiling:
         257 characters is refused, and 256 at the cap stays admissible."""
         def over(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node.pop("maxLength", None)
                 node["x-regression-witnesses"] = [
-                    {"value": "x" * 257, "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+                    {"value": "x" * 257, "defect": GUARDED}]
         found = findings_for(over)
         self.assertTrue(any("outside the node's length bounds" in line and "257" in line
                             for line in found), found)
@@ -292,7 +301,7 @@ class GuardControlTests(unittest.TestCase):
             for node in _patterned_spike_items(documents_map):
                 node.pop("maxLength", None)
                 node["x-regression-witnesses"] = [
-                    {"value": "X" * 256, "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+                    {"value": "X" * 256, "defect": GUARDED}]
         also = findings_for(at_cap)
         self.assertEqual(also, [], "a value inside the cap and refused by the draft word banked cleanly")
 
@@ -303,7 +312,7 @@ class GuardControlTests(unittest.TestCase):
         def over(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "x" * 300, "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+                    {"value": "x" * 300, "defect": GUARDED}]
         found = findings_for(over)
         self.assertTrue(any("outside the node's length bounds" in line and "(1 to 255" in line
                             for line in found), found)
@@ -311,48 +320,75 @@ class GuardControlTests(unittest.TestCase):
         def under(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "", "defect": "pr-E2c-gpt-6.2-sol.md#5"}]
+                    {"value": "", "defect": GUARDED}]
         also = findings_for(under)
         self.assertTrue(any("outside the node's length bounds" in line for line in also), also)
 
     def test_a_defect_reference_over_the_cap_is_refused(self):
         """The reference is bounded at 120 characters even when its shape is the structured form, so
-        prose of any length is no longer smuggled in through a .md suffix."""
+        prose of any length is never smuggled in through a long path."""
+        shape = "test:{}/test_x.py::A.test_b"
+        long_reference = shape.format("p" * (guard.REGRESSION_DEFECT_CAP + 3 - len(shape)))
+        self.assertEqual(len(long_reference), guard.REGRESSION_DEFECT_CAP + 1)
+
         def prose(documents_map):
             for node in _patterned_spike_items(documents_map):
-                node["x-regression-witnesses"] = [
-                    {"value": "x", "defect": "p" * 116 + ".md#1"}]
+                node["x-regression-witnesses"] = [{"value": "x", "defect": long_reference}]
         found = findings_for(prose)
-        self.assertEqual(len("p" * 116 + ".md#1"), 121)
-        self.assertTrue(any("exceeds the cap of 120" in line for line in found), found)
+        self.assertTrue(any(f"exceeds the cap of {guard.REGRESSION_DEFECT_CAP}" in line for line in found), found)
 
-    def test_an_unstructured_or_short_commit_defect_reference_is_refused(self):
-        """The reference must be structured evidence — '<review file>.md#<finding number>' or
-        'commit:<40 lowercase hex>' — never a bare word, and a short hash is not a commit."""
-        def unstructured(documents_map):
+    def test_an_unstructured_or_unresolvable_defect_reference_is_refused(self):
+        """The reference must be structured evidence — 'test:<repository path>::<Class>.<test_name>' —
+        never a bare word, and it must name a committed test: a missing file, class or test, or a
+        path leaving the repository, is refused."""
+        test_file = Path(__file__).resolve().relative_to(ROOT).as_posix()
+        for defect, finding in (
+                ("a reference", "not structured evidence"),
+                ("defects.md#5", "not structured evidence"),
+                (f"test:{test_file}::GuardControlTests", "not structured evidence"),
+                ("test:scripts/tests/test_absent.py::GuardControlTests.test_x", "naming no committed test"),
+                (f"test:{test_file}::AbsentTests.{_ADMISSIBLE}", "naming no committed test"),
+                (f"test:{test_file}::GuardControlTests.test_absent", "naming no committed test"),
+                ("test:../tests/test_x.py::GuardControlTests.test_x", "not structured evidence")):
+            def corpus(documents_map, defect=defect):
+                for node in _patterned_spike_items(documents_map):
+                    node["x-regression-witnesses"] = [{"value": "x", "defect": defect}]
+            with self.subTest(defect=defect):
+                found = findings_for(corpus)
+                self.assertTrue(any(finding in line for line in found), found)
+
+    def test_a_named_test_must_resolve_inside_the_repository(self):
+        """A link inside the repository to a test file outside it names no committed test."""
+        import tempfile
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary).resolve()
+            outside, root = base / "outside", base / "repository"
+            outside.mkdir()
+            (root / "tests").mkdir(parents=True)
+            (outside / "test_far.py").write_text(
+                "import unittest\nclass Far(unittest.TestCase):\n    def test_x(self):\n        pass\n")
+            (root / "tests" / "test_far.py").symlink_to(outside / "test_far.py")
+            (root / "tests" / "test_near.py").write_text((outside / "test_far.py").read_text())
+            original = guard.ROOT
+            guard.ROOT = root
+            try:
+                self.assertFalse(guard._named_test_exists("tests/test_far.py", "Far", "test_x"))
+                self.assertTrue(guard._named_test_exists("tests/test_near.py", "Far", "test_x"))
+                self.assertFalse(guard._named_test_exists("tests/test_near.py", "Far", "test_y"))
+            finally:
+                guard.ROOT = original
+
+    def test_a_reference_to_an_existing_test_is_admissible(self):
+        """The positive control: a reference naming a committed test banks cleanly, a generated test
+        method exactly like a hand-written one."""
+        def named(documents_map):
             for node in _patterned_spike_items(documents_map):
                 node["x-regression-witnesses"] = [
-                    {"value": "x", "defect": "a reference"}]
-        found = findings_for(unstructured)
-        self.assertTrue(any("not structured evidence" in line for line in found), found)
-
-        def short_commit(documents_map):
-            for node in _patterned_spike_items(documents_map):
-                node["x-regression-witnesses"] = [
-                    {"value": "x", "defect": "commit:abc123"}]
-        also = findings_for(short_commit)
-        self.assertTrue(any("not structured evidence" in line for line in also), also)
-
-    def test_both_admissible_defect_reference_forms_are_accepted(self):
-        """The positive control: a review-file reference and a commit reference are both admissible,
-        so the corpus entry the shape admits is exactly the two evidenced forms."""
-        def both_forms(documents_map):
-            for node in _patterned_spike_items(documents_map):
-                node["x-regression-witnesses"] = [
-                    {"value": "Python:94x", "defect": "pr-E2c-gpt-6.2-sol.md#5"},
-                    {"value": "Python:3.13", "defect": "commit:0123456789abcdef0123456789abcdef01234567"}]
-        found = findings_for(both_forms)
-        self.assertEqual(found, [], "both structured forms bank cleanly")
+                    {"value": "Python:94x", "defect": GUARDED},
+                    {"value": "Python:3.13", "defect": f"test:{Path(__file__).resolve().relative_to(ROOT).as_posix()}"
+                                                      f"::GeneratedMethods.test_generated"}]
+        found = findings_for(named)
+        self.assertEqual(found, [], "a reference to an existing test banks cleanly")
 
     def test_a_work_limit_override_must_name_bounds_the_engine_reads(self):
         def override(documents_map):

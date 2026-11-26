@@ -447,8 +447,8 @@ class ProductionProbeKernel:
         self.operation_id_factory = operation_id_factory or (
             lambda: "o-" + secrets.token_hex(16))
         self.runtime_inspector = runtime_inspector
-        # Every post-probe daemon read goes to the endpoint the runtime was pinned to
-        # (E5 review, blocking finding 1): the pinned re-observer never re-resolves the
+        # Every post-probe daemon read goes to the endpoint the runtime was pinned to:
+        # the pinned re-observer never re-resolves the
         # context, so an ambient context change mid-qualification cannot redirect a
         # postflight to a second daemon.
         self.pinned_reobserver = (authority.inspect_pinned_runtime

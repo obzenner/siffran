@@ -47,7 +47,7 @@ FAMILIES = ["", "a", "A", "0", " ", "\t", "\n", "\r", "\x0b", "\x0c", "\u00a0", 
 SUFFIX_PROBES = ["\n", "\r", "\u2028", "\u2029", "\u00a0", "\U0001F600", "\ud800"]
 #: The witness-seeded end-substitution probes: the same complement families the prefix
 #: substitutions carry, plus the digit whose `\\d` class the engines read differently — the
-#: Arabic-Indic digit U+0661 (E6c review, blocking 2): Python's `\\d` is Unicode-wide and
+#: Arabic-Indic digit U+0661: Python's `\\d` is Unicode-wide and
 #: refuses it in `[^\\d]`, JavaScript's is ASCII-only and admits it, so any registered pattern
 #: resting a class escape on its last character shows the split here (`\\w`, `\\s` and their
 #: negations included; the digits stand for the whole Nd family).

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The one parsed conditional for the engine's coupled branches (ADR-0075; E6c review, blocking 3).
+"""The one parsed conditional for the engine's coupled branches (ADR-0075).
 
 Both engines — the drawing side (`ui_view_strategies`) and the derivation side
 (`contract_strategies`' challenges and flips) — consume this module's parse, so the conditional
@@ -8,8 +8,7 @@ model refuses at parse, never guesses silently, and a refusal on one side is a r
 
 The modelled forms, exactly (Empirica 7.2 §5.1); a ``then``-less or one-side guard, a
 boolean ``if`` (``true``/``false`` — always/never applies, so no member is guarded) at the node
-level or inside ``allOf``, and any other ``if``-carrying shape refuse at parse (E6c re-review 1,
-blocking 2); a composition entry with no ``if`` key at all is not conditional and stays ignored:
+level or inside ``allOf``, and any other ``if``-carrying shape refuse at parse; a composition entry with no ``if`` key at all is not conditional and stays ignored:
 
 * the two-way value pairing — an ``allOf`` entry ``{if, then, else}`` whose ``if`` names one
   guarded member with a ``{const}`` (its ``required``, when present, names the guarded member
@@ -25,7 +24,7 @@ blocking 2); a composition entry with no ``if`` key at all is not conditional an
   member, no other shape (the run view's last failure and the public fault; a side that only
   re-declares the member with its schema is unmodelled: jsonschema never makes it required, so a
   drawing cannot be derived from it); a presence pairing's paired member also differs from its
-  own driver — a member guarding itself is unmodelled (E6c re-review 2, blocking 2) and refuses
+  own driver — a member guarding itself is unmodelled and refuses
   at parse exactly as the two-way form's same shape refusal does.
 """
 from __future__ import annotations
@@ -83,7 +82,7 @@ def parse(node: object, doc_id: str, pointer: str) -> tuple[list[Guard], list[Pa
             # a boolean (or otherwise non-object) ``if`` is conditional-shaped: JSON Schema reads
             # ``if: true`` as always applying and ``if: false`` as never, so its ``then``/``else``
             # are not a pairing this engine can draw or derive — refusing it here keeps both
-            # sides honest instead of silently guessing (E6c re-review 1, blocking 2).
+            # sides honest instead of silently guessing.
             raise ValueError(f"{doc_id}#{pointer}: an allOf condition with a boolean (non-object) "
                              "if is not this engine's conditional")
         if set(entry) == {"if", "then", "else"}:
@@ -98,7 +97,7 @@ def parse(node: object, doc_id: str, pointer: str) -> tuple[list[Guard], list[Pa
         if not isinstance(node["if"], dict):
             # the node-level twin of the allOf refusal above: a boolean ``if`` is not a presence
             # guard on one member, and ignoring it drew the guarded branch without its paired
-            # member (a document the schema itself refused, E6c re-review 1, blocking 2).
+            # member (a document the schema itself refused).
             raise ValueError(f"{doc_id}#{pointer}: a node-level boolean (non-object) if is not "
                              "this engine's conditional")
         pairings.append(_presence(node, doc_id, pointer))

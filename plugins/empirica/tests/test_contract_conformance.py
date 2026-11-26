@@ -66,8 +66,8 @@ _FUZZ = unrerandomized(2)
 
 #: The generated method names keep the document identity (the state definition's methods and the
 #: request definition's never overwrite one another) and refuse a collision: two registered keys that
-#: normalize alike raise instead of silently merging - the re-review's finding was the request
-#: definition's methods disappearing under the state definition's name.
+#: normalize alike raise instead of silently merging, so the request definition's methods never
+#: disappear under the state definition's name.
 class _Base(unittest.TestCase):
     _bases: dict[str, object] = {}
 
@@ -153,7 +153,7 @@ class BoundaryAcceptanceTests(_Base):
 
 class RegressionWitnessTests(_Base):
     """The contract's named regression-witness corpus - known-defect values (the exact spellings a
-    deleted hand-written test once held: the review's `Python:3.12` seed died only here), each placed
+    deleted hand-written test once held: the `Python:3.12` witness dies only here), each placed
     in a drawn base and refused by BOTH judges. A spelling defect that normalizes one input in the core
     is invisible to the generic probes and lives on only as a named case; the corpus is contract-owned
     (`x-regression-witnesses`), never a test-side restatement."""
