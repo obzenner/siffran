@@ -45,6 +45,8 @@ ROOT = Path(__file__).resolve().parents[1]
 UI = "plugins/empirica/ui/"
 VENV_PYTHON = ROOT / ".venv" / "bin" / "python"
 TEST_ROOTS = ("plugins/empirica/tests", "scripts/tests", "lib")
+# What every plugins/empirica Make suite puts on the path (the plugin's packages and the tests' own helpers).
+EMPIRICA_TEST_PATH = "plugins/empirica:plugins/empirica/tests"
 STRYKER_REPORT = "reports/mutation.json"  # relative to the UI, as stryker.config.json writes it
 _TEST = re.compile(r"(^|/)(tests?/|test_[^/]*\.py$)|\.test\.mjs$")
 _NEVER = re.compile(r"(^|/)(vendor|node_modules|\.venv|dist|reports)/")
@@ -260,7 +262,11 @@ def runner(tests: list[str], *, python: str) -> str:
                      f"{' '.join(v2)})")
     parts += [f"{python} -m unittest -q {shlex.quote(t)}" for t in tests if not t.startswith("plugins/empirica/tests/v2/")
               and t.startswith("scripts/")]
-    parts += [f"{python} {shlex.quote(t)}" for t in tests if not t.startswith(("plugins/empirica/tests/v2/", "scripts/"))]
+    # a plugins/empirica test imports core/adapters and its sibling helpers top-level, as its Make suite runs it
+    parts += [f"PYTHONPATH={EMPIRICA_TEST_PATH} {python} {shlex.quote(t)}" for t in tests
+              if t.startswith("plugins/empirica/") and not t.startswith("plugins/empirica/tests/v2/")]
+    parts += [f"{python} {shlex.quote(t)}" for t in tests
+              if not t.startswith(("plugins/empirica/", "scripts/"))]
     return " && ".join(parts)
 
 
@@ -273,6 +279,12 @@ def scratch_copy(repo: str, scratch: str) -> list[str]:
     """The copy mutmut edits: no history, no dependency folder, nothing linked."""
     return ["rsync", "-a", "--delete", "--exclude", ".git", "--exclude", "node_modules", "--exclude", ".venv",
             "--exclude", ".hypothesis", "--exclude", "__pycache__", f"{repo.rstrip('/')}/", f"{scratch.rstrip('/')}/"]
+
+
+def scratch_repository(scratch: str) -> list[str]:
+    """Make the copy a git work tree of its own (empty history): tests that compose the git-backed service need one,
+    and the copy never shares the worktree's ``.git``."""
+    return ["git", "init", "-q", scratch.rstrip("/")]
 
 
 def jobs(value: str | None = None, cores: int | None = None) -> int:
@@ -324,6 +336,7 @@ def _mutmut(python: dict, command: str | None) -> tuple[list[Finding], str, int]
     status = 0
     try:
         subprocess.run(scratch_copy(str(ROOT), scratch), check=True)
+        subprocess.run(scratch_repository(scratch), check=True)
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         mutmut = [str(VENV_PYTHON), "-m", "mutmut"]
         for source, ranges in python.items():
