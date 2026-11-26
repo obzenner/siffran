@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 
 import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
 import { VENDORED_CONTRACT_DIR as HOST_PROFILES_DIR } from "../src/public-tools.ts";
-import { AUDIT_LAUNCH_POLICY, HOST_APPROVAL_INGRESS, HOST_COMPATIBILITY, HOST_PROFILE_ID, SUBAGENTS_COMPATIBILITY, spellRange } from "../src/host-profile.ts";
+import { AUDIT_LAUNCH_POLICY, HOST_APPROVAL_INGRESS, HOST_COMPATIBILITY, HOST_PROFILE_ID, SUBAGENTS_COMPATIBILITY, routesToDialog, spellRange } from "../src/host-profile.ts";
 import { auditLaunchInput } from "../src/audit-launch.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { EVIDENCE_WAIT_NOTICE } from "../src/evidence-ui.ts";
@@ -767,14 +767,15 @@ for (const [name, options, reason] of OWNER_REFUSALS) {
 
 test("the environment action is mediated only where the profile's approval ingress is the Pi dialog's own", async () => {
   const action = structuredClone(ENVIRONMENT_EXAMPLE);
-  // another profile's registered ingress: the registry's own word, never a host check
-  const other = (JSON.parse(readFileSync(path.join(HOST_PROFILES_DIR, "host-profiles.json"), "utf8")).profiles as
-    Array<{ profile_id: string; approval_ingress: string }>).find(row => row.approval_ingress !== HOST_APPROVAL_INGRESS)!;
-  for (const [approvalIngress, mediated] of [[undefined, true], [other.approval_ingress, false]] as const) {
+  // every registered ingress, the registry's own words, never a host check
+  const ingresses = [...new Set((JSON.parse(readFileSync(path.join(HOST_PROFILES_DIR, "host-profiles.json"), "utf8"))
+    .profiles as Array<{ approval_ingress: string }>).map(row => row.approval_ingress))];
+  assert.ok(ingresses.includes(HOST_APPROVAL_INGRESS) && ingresses.length > 1);
+  for (const approvalIngress of ingresses) for (const hasUI of [true, false]) {
     const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
-      approvalIngress ? { approvalIngress } : {});
+      { approvalIngress });
     const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]);
-    ctx.hasUI = true; ctx.ui.custom = async () => undefined as never;
+    ctx.hasUI = hasUI; ctx.ui.custom = async () => undefined as never;
     await w.pi.sessionStart(ctx);
     const before = w.privateRequests.length;
     const out = await w.pi.tools.get("empirica_observe")!.execute("c1", { action }, new AbortController().signal,
@@ -782,7 +783,9 @@ test("the environment action is mediated only where the profile's approval ingre
     assert.equal((out.details as Result).type, "Allow");
     const operations = w.privateRequests.slice(before).map(request => request.operation)
       .filter(operation => operation.startsWith("environment_"));
-    assert.deepEqual(operations, mediated ? ["environment_admit", "environment_present"] : []);
+    const mediated = routesToDialog(approvalIngress);
+    assert.deepEqual(operations, mediated ? ["environment_admit", ...(hasUI ? ["environment_present"] : [])] : [],
+      `${approvalIngress}, ${hasUI ? "with" : "without"} a dialog surface`);
     assert.equal(w.requests.at(-1)?.command.type, "ObserveAction", "the action itself is observed once either way");
   }
 });
@@ -1095,7 +1098,7 @@ function waitingRun(overrides: Record<string, unknown> = {}, context: Record<str
     state: "pending", control_mode: controlMode, first_approval: false, prompt_error: null, human_wait: true,
     interactions_remaining: { proposal: 3, total: 128 },
     proposal: { budgets: {}, rationale: "sized" },
-    context: { ingress: "pi_ui", interactive: true, delegation: false, author: null, ...context },
+    context: { ingress: HOST_APPROVAL_INGRESS, interactive: true, delegation: false, author: null, ...context },
     ...overrides } };
 }
 

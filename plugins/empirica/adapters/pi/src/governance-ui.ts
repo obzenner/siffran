@@ -6,6 +6,7 @@ import type { Block, Response } from "./contract.ts";
 import { PROTOCOL } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
+import { APPROVAL_INGRESS_UNAVAILABLE, DIALOG_INGRESS, routesToDialog } from "./host-profile.ts";
 import { EVIDENCE_WAIT_NOTICE, evidenceConfirmationWait } from "./evidence-ui.ts";
 import { ENVIRONMENT_CONTROLS, initialState, reduce, renderEnvironmentLines, renderLines } from "./dialog-view.ts";
 import type { BoundDocument } from "./dialog-view.ts";
@@ -80,13 +81,11 @@ function stripPresentation(response: Response): Response {
   return response;
 }
 
-/** This transport's own approval ingress: the native Pi dialog. */
-export const PI_INGRESS = "pi_ui";
-
+/** The ingress the host can show now: the profile's dialog ingress where a UI is present, else the unavailable word. */
 export function piGovernanceContext(ctx: ExtensionContext): Record<string, unknown> {
   return { author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id,
                                  source: "pi-context" } : null,
-           ingress: ctx.hasUI ? PI_INGRESS : "unavailable" };
+           ingress: ctx.hasUI && DIALOG_INGRESS !== undefined ? DIALOG_INGRESS : APPROVAL_INGRESS_UNAVAILABLE };
 }
 
 export async function refreshGovernance(runId: string, ctx: ExtensionContext,
@@ -232,7 +231,7 @@ export function humanApprovalWait(result: Response["result"]): boolean {
   const g = result.run.governance as Governance | null;
   if (g === null) return false;
   const reasons = result.reasons;
-  return g.human_wait === true && g.context.ingress === PI_INGRESS
+  return g.human_wait === true && routesToDialog(g.context.ingress)
     && reasons.length === 1 && CONFIGURATION_REASONS.has(reasons[0].code);
 }
 
@@ -306,7 +305,7 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
     assertResponse(admitted, "trusted-governance");
     return admitted;
   }
-  if (!ctx.hasUI || !ctx.ui.custom || g.context.ingress === "unavailable"
+  if (!ctx.hasUI || !ctx.ui.custom || !routesToDialog(g.context.ingress)
       || signal?.aborted || Date.now() >= deadline) return unavailable(response);
   const presented = await trusted({ operation: "governance_decision", run_id: runId,
     payload: { ...mediationEnvelope, outcome: "present" } });

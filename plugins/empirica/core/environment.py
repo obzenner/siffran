@@ -319,23 +319,30 @@ def spike_prerequisite(state: object) -> str | None:
     return qualify_admission(state) or QUALIFICATION_REQUIRED
 
 
+def recorded_attempt(state: object, record_digest: object) -> tuple[int, Mapping] | None:
+    """The attempt whose record ``record_digest`` names: its one-based sequence and its row, or
+    ``None`` when no row of this run does. Only a succeeded row carries a record digest, so an
+    absent digest names no attempt; rows are append-only, so an earlier record stays resolvable
+    after a rebind."""
+    if record_digest is None:
+        return None
+    return next(((index + 1, row) for index, row in enumerate(state.qualification_attempts)
+                 if row["record_digest"] == record_digest), None)
+
+
 def active_attempt(state: object) -> tuple[int, Mapping] | None:
-    """The attempt that installed the run's active qualified binding: its one-based sequence and
-    its row, the succeeded row whose record the binding names, or ``None`` when nothing is
-    bound. Only a succeeded row carries a record digest."""
+    """The attempt that installed the run's active qualified binding (the one whose record the
+    binding names), or ``None`` when nothing is bound."""
     backend = state.spike_backend
     if spike_plan.spike_backend_kind(backend) != "qualified":
         return None
-    return next(((index + 1, row) for index, row in enumerate(state.qualification_attempts)
-                 if row["record_digest"] == backend["qualification_record_digest"]), None)
+    return recorded_attempt(state, backend["qualification_record_digest"])
 
 
 def attempt_lineage(state: object, record_digest: object) -> dict[str, int | None]:
     """The qualification a spike was sealed under (spec §7): the sequence and approved revision of
-    the attempt whose record ``record_digest`` names, each ``None`` when no row of this run does.
-    Rows are append-only, so a historical spike resolves against its own attempt after a rebind."""
-    found = next(((index + 1, row) for index, row in enumerate(state.qualification_attempts)
-                  if record_digest is not None and row["record_digest"] == record_digest), None)
+    the attempt whose record ``record_digest`` names, each ``None`` when no row of this run does."""
+    found = recorded_attempt(state, record_digest)
     return {"attempt": None if found is None else found[0],
             "revision": None if found is None else found[1]["revision"]}
 

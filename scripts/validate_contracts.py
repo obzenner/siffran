@@ -18,6 +18,7 @@ Validated:
   * in-memory negative cases: one mutation each asserting an expected
     diagnostic substring so a case cannot pass for the wrong rejection reason.
 """
+import functools
 import hashlib
 import json
 import re
@@ -820,12 +821,36 @@ def check_host_boundaries(doc: dict, errors: list[str], where: str, root: Path =
 ENVIRONMENT_REVISION_MEMBERS = ("environment", "lineage")
 
 
+def _declared_revision_paths(node: Any, path: str, out: set[str]) -> None:
+    """Collect the instance paths (array indices as ``[]``) whose object the ref-resolved schema declares a
+    ``revision`` property for, inside one of the environment members. Only ``oneOf`` branches are followed: a
+    revision declared under any other combinator stays banned, the safe direction."""
+    if not isinstance(node, dict):
+        return
+    for branch in node.get("oneOf", ()):
+        _declared_revision_paths(branch, path, out)
+    properties = node.get("properties", {})
+    if "revision" in properties and set(path.split(".")) & set(ENVIRONMENT_REVISION_MEMBERS):
+        out.add(path)
+    for name, child in properties.items():
+        _declared_revision_paths(child, f"{path}.{name}", out)
+    _declared_revision_paths(node.get("items"), f"{path}[]", out)
+
+
+@functools.cache
+def environment_revision_paths() -> frozenset[str]:
+    """The exact response paths where the closed response schema admits the environment ``revision``."""
+    schema = json.loads((V2 / "response.schema.json").read_text(encoding="utf-8"))
+    out: set[str] = set()
+    _declared_revision_paths(_resolve_refs(schema["properties"]["result"], schema.get("$defs", {})), "result", out)
+    return frozenset(out)
+
+
 def _scan_banned(obj: Any, errors: list[str], where: str, path: str) -> None:
     if isinstance(obj, dict):
+        environment_revision = re.sub(r"\[\d+\]", "[]", path) in environment_revision_paths()
         for key, value in obj.items():
-            environment_revision = key == "revision" and any(
-                f".{member}" in path for member in ENVIRONMENT_REVISION_MEMBERS)
-            if key in BANNED_RESPONSE_KEYS and not environment_revision:
+            if key in BANNED_RESPONSE_KEYS and not (key == "revision" and environment_revision):
                 errors.append(f"{where}: banned field {key!r} at {path}")
             _scan_banned(value, errors, where, f"{path}.{key}")
     elif isinstance(obj, list):
@@ -3167,18 +3192,18 @@ def main() -> int:
         check_host_profiles(host_profiles_doc, registry, v2_names, errors, "host-profiles",
                             inventory_versions(PI_COMPAT_DIR))
 
-    # #7: the Pi adapter still submits a literal approval ingress. Freeze it against the Pi
-    # profile so a profile change cannot silently strand headless/UI approval.
+    # The Pi adapter reads its approval ingress from the vendored host-profiles registry; a literal
+    # copy of the word in its governance source would be a second owner a profile change strands.
     pi_profile = next((p for p in host_profiles_doc.get("profiles", [])
                        if isinstance(p, dict) and p.get("host_id") == "pi"), None)
     governance_ui = ROOT / "plugins/empirica/adapters/pi/src/governance-ui.ts"
     if pi_profile and governance_ui.exists():
         source = governance_ui.read_text(encoding="utf-8")
         expected_ingress = pi_profile.get("approval_ingress")
-        if f'"{expected_ingress}"' not in source:
+        if f'"{expected_ingress}"' in source:
             errors.append(
-                f"pi governance-ui.ts must submit the Pi profile approval_ingress "
-                f"{expected_ingress!r}")
+                f"pi governance-ui.ts must read the Pi profile approval_ingress from the registry, "
+                f"not spell {expected_ingress!r}")
 
     digest = registry_digest(registry) if registry else ""
 
@@ -3560,6 +3585,31 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "nonce": "abc", "phase": "investigate"}}},
         e, "neg"), "banned field", "retired fields in response")
+    # The environment revision is admitted only where the response schema declares it.
+    for label, result in (
+            ("revision under a lookalike environment member",
+             {"run": {"environment_extra": {"revision": 1}}}),
+            ("revision nested inside an environment payload",
+             {"run": {"environment": {"payload": {"revision": 1}}}}),
+            ("revision nested inside a spike lineage payload",
+             {"argument": {"artifacts": [{"lineage": {"binding": {"revision": 1}}}]}})):
+        expect(lambda e, result=result: check_banned_fields(
+            {"protocol": "empirica/v2", "request_id": "x", "result": result}, e, "neg"),
+            "neg: banned field 'revision'", label)
+    declared: set[str] = set()
+    _declared_revision_paths({"properties": {"run": {"properties": {
+        "environment": {"oneOf": [{"properties": {"revision": {}, "payload": {"properties": {"kind": {}}}}}]},
+        "other": {"properties": {"revision": {}}}}}}}, "result", declared)
+    if declared != {"result.run.environment"}:
+        errors.append(f"POS environment revision paths: only a member's own declaration admits it, got {declared}")
+    declared_revisions = {"run": {"environment": {"revision": 1}},
+                          "argument": {"environment": {"revisions": [{"revision": 1}],
+                                                        "attempts": [{"revision": 1}, {"revision": 2}]},
+                                       "artifacts": [{"lineage": None}, {"lineage": {"revision": 1}}]}}
+    accepted: list[str] = []
+    check_banned_fields({"protocol": "empirica/v2", "request_id": "x", "result": declared_revisions},
+                        accepted, "pos")
+    errors.extend(f"POS declared environment revisions: unexpected rejection {problem}" for problem in accepted)
 
     # Fault probe conditional: both refusal directions, schema-owned vocabularies.
     expect(lambda e: check_fault_reason_pairing(
