@@ -575,9 +575,9 @@
     },
     "qualification_attempts": {
       "x-core-validator": "core.run.validate_qualification_attempts",
-      "description": "Append-only host qualification attempts; the sequence number is derived, never stored.",
+      "description": "Append-only host qualification attempts; the sequence number is derived, never stored. The maxItems is the one per-run ceiling of started attempts (with spike images resolved per spike and only the Docker server major version bound across a binding, requalifying is rare, so the ceiling only bounds run-state growth).",
       "type": "array",
-      "maxItems": 8,
+      "maxItems": 32,
       "items": {
         "$ref": "#/$defs/qualificationAttempt"
       }
