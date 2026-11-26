@@ -39,16 +39,22 @@ Spec: `doc/design/specs/empirica-7.2-run-scoped-environment-qualification.md` (r
 | E11 | Audit and reads: environment in `argument_digest` and `progress_basis`, per-spike lineage, turn-end obligations, author-view next calls, redaction | core, adapters/author_view, audit | E10 | M | `check-core check-evidence` |
 | E12 | Pi: environment dialog + `qualify` long-operation transport budget | Pi (TS) | E8, E9 | S | `check-pi` |
 | E13 | Claude: environment elicitation + transport budget; Codex refusal test | Claude, Codex | E8, E9 | S | `check-claude check-codex` |
-| E17 | Auditor eligibility + `auditor_selection` state + inventory model (pure; `audit_exclusions` stays the owner) | core | E2, E7 | M | `check-core`, mutate |
-| E18 | Auditor reservation binding + verdict admission expected-vs-served + re-selection obligations and turn-end | core, application | E17, E11 | M | `check-core check-evidence`, mutate |
-| E19 | Auditor wire + HITL: private approval variant with choice key, `auditor` decision kind, `auditor_reselect`, reasons, registries | contracts, core/hitl | E6, E8, E17 | M | `contract-check check-core` |
-| E20 | Approval transaction: one CAS for configuration + selection; operator snapshot at StartRun; preference store | application, adapters/state | E19 | M | `check-core`, persistence diagnostic |
-| E21 | Pi auditor: snapshot + inventory from `enabledModels`, move the model veto out of pre-StartRun preflight, launch reproduces the target, `/empirica refresh-auditors` | Pi (TS) | E20 | M | `check-pi` |
-| E22 | Pi + Claude dialogs/forms for the choice and re-selection | Pi, Claude | E21, E23 | S | `check-pi check-claude` |
-| E23 | Claude auditor: pinned-alias/override inventory with family class, launch, served-identity correlation | Claude | E20 | M | `check-claude` |
-| E14 | Observer + UI: environment step, attempts, bound/stale/failed, spike lineage, auditor selected/stale/served | observer, ui | E11, E18, E22 | M | `check-observer check-ui`, `ui-look` |
+| E17 (7.3) | Auditor eligibility + `auditor_selection` state + inventory model (pure; `audit_exclusions` stays the owner) | core | E2, E7 | M | `check-core`, mutate |
+| E18 (7.3) | Auditor reservation binding + verdict admission expected-vs-served + re-selection obligations and turn-end | core, application | E17, E11 | M | `check-core check-evidence`, mutate |
+| E19 (7.3) | Auditor wire + HITL: private approval variant with choice key, `auditor` decision kind, `auditor_reselect`, reasons, registries | contracts, core/hitl | E6, E8, E17 | M | `contract-check check-core` |
+| E20 (7.3) | Approval transaction: one CAS for configuration + selection; operator snapshot at StartRun; preference store | application, adapters/state | E19 | M | `check-core`, persistence diagnostic |
+| E21 (7.3) | Pi auditor: snapshot + inventory from `enabledModels`, move the model veto out of pre-StartRun preflight, launch reproduces the target, `/empirica refresh-auditors` | Pi (TS) | E20 | M | `check-pi` |
+| E22 (7.3) | Pi + Claude dialogs/forms for the choice and re-selection | Pi, Claude | E21, E23 | S | `check-pi check-claude` |
+| E23 (7.3) | Claude auditor: pinned-alias/override inventory with family class, launch, served-identity correlation | Claude | E20 | M | `check-claude` |
+| E14 | Observer + UI: environment step, attempts, bound/stale/failed, spike lineage, environment decisions (auditor selected/stale/served: 7.3) | observer, ui | E11, E18, E22 | M | `check-observer check-ui`, `ui-look` |
 | E15 | Removal + docs: selector, pointer, install target/script, diagnostic-only qualify target, `hosts.md`, `testing.md`, `Makefile:781`, `doc_review.json`, skill and references | sandbox, Makefile, docs, skills | E10, E11 | M | `make check`, `skills-check suites-check` |
 | E16 | Release 7.2.0: `make bump PLUGIN=empirica PART=minor`, a 7.2 section in `doc/upgrading-empirica-7.md` naming the two operator-visible breaks, ADR accepted, generated tables, native qualification evidence (A1–A5 + auditor native cases) | release | all | S | `make verify`, `release-check`, operator native qualification |
+
+**Release split (operator):** 7.2.0 is the environment step only. E17–E23 (auditor runtime selection) move to
+Empirica 7.3 as a separate stack on the 7.2 top; E14 and E16 drop their auditor parts. The 7.2 order is
+`E0 E0a E1 E3a E3b E4 E2a E2c E2b E6a E6b E6c E6d E5 E7 E7b E8 E9 E9c E10 E11 E12 E13 E14 E15 E16`. From the
+environment finish on, workers are Claude Opus 5.5 at medium thinking, nodes are accepted mechanically by the
+coordinator, and one review covers all remaining code before E16.
 
 ## 3. DAG and waves
 

@@ -1,6 +1,8 @@
 # Empirica 7.2: run-scoped environment preparation and Docker qualification
 
-Status: **r4**: operator decisions applied, auditor review folded in (ADR-0074 proposed; ADR-0060 amended). r2 folds in the independent review
+Status: **r5**: release split (operator): 7.2.0 ships the environment step only; auditor runtime selection (§4.6, the
+`auditor_reselect` action and the private approval variant in §8, the auditor acceptance items in §10, decisions 6–8
+in §11) moves unchanged to Empirica 7.3. r4: operator decisions applied, auditor review folded in (ADR-0074 proposed; ADR-0060 amended). r2 folds in the independent review
 `.review/spec-review-gpt-6.2-sol.md` (findings cited as R<n>). On acceptance it becomes ADR-0074, amending ADR-0071
 (spike authority), ADR-0063/0072 (approval, HITL document) and ADR-0073 (auto mode).
 
@@ -128,7 +130,7 @@ content-addressed under `$EMPIRICA_SANDBOX_HOME/docker-spike-qualification-v3/re
 On load, the exact digest and the run-generation lineage are verified. An orphan left by a lost CAS is inert. There
 is no pointer namespace; `/2` records and pointers are ignored.
 
-### 4.6 Auditor runtime selection (r4: review `.review/spec-review-auditor-gpt-6.2-sol.md`, findings AR<n>)
+### 4.6 Auditor runtime selection: deferred to 7.3 (r5) (r4: review `.review/spec-review-auditor-gpt-6.2-sol.md`, findings AR<n>)
 
 The auditor model is part of the run's environment. **No public author action supplies a model, candidate list,
 preference, choice key or receipt** (ADR-0060; AR2, AR11).
@@ -324,9 +326,9 @@ take their bound from the one run ceiling owner (`qualification_attempts`, 32), 
 
 ## 8. Contracts and versions (R8)
 
-- `empirica/v2` request: additive actions `environment`, `qualify` and `auditor_reselect` (model-free); a new private
-  approval variant carrying the auditor choice key, versus a new required member in the existing one (AR6); private host
-  inventory and audit-operation binding; `StartRun.spike_profile` reinterpreted as
+- `empirica/v2` request: additive actions `environment` and `qualify` (7.3 adds `auditor_reselect`, model-free, a new private
+  approval variant carrying the auditor choice key, versus a new required member in the existing one (AR6), and private host
+  inventory and audit-operation binding); `StartRun.spike_profile` reinterpreted as
   the ceiling (§4.4, explicitly documented).
 - Response: the existing `qualified` backend variant keeps its shape. It adds a closed variant `unqualified`, optional
   `environment` / `qualification` projections, and the additive reasons.
@@ -361,7 +363,7 @@ Live (operator, native qualification):
 Deterministic (no Docker): stale receipt or revision; A→B→A; failed replacement keeps the old binding; concurrent
 attempts; spike versus rebind; retagging between qualify and spike; authority drift during probes; a crash at the
 reservation, record and CAS boundaries; old-endpoint recovery; transport timeout; legacy `/4` restore; attempt
-exhaustion; Codex refusal; profile ceiling. Auditor: forged choice, stale/ABA inventory and confirmation, empty or
+exhaustion; Codex refusal; profile ceiling. Auditor (7.3): forged choice, stale/ABA inventory and confirmation, empty or
 missing `enabledModels`, excluded override, excluded remembered pick, policy or pin change mid-run, model removed
 from `enabledModels`, same class with different IDs, substitution by a distinct class, concurrent re-selection versus
 reservation, retention of an old valid verdict. Native: Pi and Claude choice → launch → observed verdict; delegated Pi
@@ -373,10 +375,10 @@ with no UI; Claude `-p` refusal as a documented limitation.
 2. No combined presentation: configuration first, then environment when needed.
 3. Probe image: one digest-pinned reference in the support contract; no image in the repository (§4.3).
 4. Profile ceiling: the existing `StartRun.spike_profile` (§4.4).
-6. Auditor model: chosen at configuration approval from host candidates (Pi: `enabledModels`), with the last pick
+6. (7.3) Auditor model: chosen at configuration approval from host candidates (Pi: `enabledModels`), with the last pick
    remembered per project as the default (§4.6).
-7. An operator override is a hard rule: the sole choice when eligible, a closed refusal otherwise (ADR-0060 already
+7. (7.3) An operator override is a hard rule: the sole choice when eligible, a closed refusal otherwise (ADR-0060 already
    says an override "is never replaced").
-8. Operator settings are snapshotted per run at `StartRun`; `/empirica refresh-auditors` is operator-typed only.
+8. (7.3) Operator settings are snapshotted per run at `StartRun`; `/empirica refresh-auditors` is operator-typed only.
 9. Claude aliases without an established family are not offered; this is noted in the upgrade notes.
 5. Version: 7.2.0, landed once at the top of the stack.
