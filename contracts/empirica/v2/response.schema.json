@@ -2947,6 +2947,7 @@
         "route_stamp",
         "investigation_stamp",
         "spike_backend",
+        "environment",
         "audit"
       ],
       "description": "Closed GetArgument projection; no generic argument extension map.",
@@ -3013,6 +3014,9 @@
         "spike_backend": {
           "$ref": "#/$defs/spikeBackend",
           "description": "The exact immutable run binding an auditor uses to interpret every admitted spike artifact. This is the run's sealed binding, never current machine readiness."
+        },
+        "environment": {
+          "$ref": "#/$defs/argumentEnvironment"
         },
         "audit": {
           "$ref": "#/$defs/auditView"
@@ -3265,7 +3269,8 @@
         "inputs",
         "backend",
         "producer_model",
-        "prerequisite_research_ids"
+        "prerequisite_research_ids",
+        "lineage"
       ],
       "properties": {
         "sequence": {
@@ -3433,6 +3438,9 @@
             "string",
             "null"
           ]
+        },
+        "lineage": {
+          "$ref": "#/$defs/spikeLineage"
         }
       },
       "description": "Immutable generic request captured and committed before effects; contains no bytes, host staging paths, lifecycle environment, credentials, or current pointer."
@@ -3461,7 +3469,8 @@
         "spike_gate",
         "result_facts",
         "supersedes",
-        "producer_model"
+        "producer_model",
+        "lineage"
       ],
       "properties": {
         "sequence": {
@@ -3772,6 +3781,9 @@
             "string",
             "null"
           ]
+        },
+        "lineage": {
+          "$ref": "#/$defs/spikeLineage"
         }
       },
       "description": "Closed generic result attestation with bounded stream digests/counts and no raw output or host paths."
@@ -5343,6 +5355,191 @@
               "$ref": "#/$defs/fault"
             }
           ]
+        }
+      }
+    },
+    "spikeLineage": {
+      "description": "The qualification a spike request and its result ran under (Empirica 7.2 §7), read from the request artifact the spike sealed, never from the current binding: the attempt that installed the binding the request recorded and that attempt's approved environment revision (each null when no attempt of this run names the binding's record), and the image ID the request resolved and created its container by.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "attempt",
+        "revision",
+        "image_id"
+      ],
+      "properties": {
+        "attempt": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 32
+            }
+          ]
+        },
+        "revision": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "integer",
+              "minimum": 1
+            }
+          ]
+        },
+        "image_id": {
+          "$ref": "#/$defs/digest256"
+        }
+      }
+    },
+    "argumentEnvironment": {
+      "description": "The environment the argument's evidence was produced under (Empirica 7.2 §7), bound by argument_digest so a proposal, a decision, an attempt or a rebind makes an earlier audit stale: the run's spike binding, every environment revision's identity and state, and every qualification attempt with its outcome. A stored history, never live health; it carries no preparation text, rationale or image reference.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding",
+        "revisions",
+        "attempts"
+      ],
+      "properties": {
+        "binding": {
+          "$ref": "#/$defs/spikeBackend"
+        },
+        "revisions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "revision",
+              "state",
+              "digest"
+            ],
+            "properties": {
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "state": {
+                "enum": [
+                  "pending",
+                  "approved",
+                  "rejected"
+                ]
+              },
+              "digest": {
+                "$ref": "#/$defs/digest256"
+              }
+            }
+          }
+        },
+        "attempts": {
+          "type": "array",
+          "maxItems": 32,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "seq",
+              "revision",
+              "outcome",
+              "record_digest",
+              "reason",
+              "probe"
+            ],
+            "properties": {
+              "seq": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 32
+              },
+              "revision": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "outcome": {
+                "enum": [
+                  "reserved",
+                  "succeeded",
+                  "failed",
+                  "superseded"
+                ],
+                "description": "reserved | succeeded | failed | superseded."
+              },
+              "record_digest": {
+                "$ref": "#/$defs/nullableDigest256"
+              },
+              "reason": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "enum": [
+                      "docker-unreachable",
+                      "probe-image-untrusted",
+                      "qualification-probe-failed",
+                      "qualification-stale-implementation",
+                      "qualification-stale-daemon",
+                      "qualification-conflict",
+                      "cleanup-unavailable",
+                      "qualification-deadline-exceeded",
+                      "network-egress-unavailable",
+                      "capability-unavailable",
+                      "resource-limits-unavailable",
+                      "sandbox-scaffolding-unsafe",
+                      "image-not-local",
+                      "image-reference-ambiguous",
+                      "image-malformed",
+                      "image-inspect-failed",
+                      "image-inspect-timeout",
+                      "image-inspect-output-limit",
+                      "image-platform-mismatch",
+                      "image-declares-volumes",
+                      "image-tool-missing",
+                      "image-uid65534-unusable",
+                      "qualification-interrupted"
+                    ]
+                  }
+                ]
+              },
+              "probe": {
+                "oneOf": [
+                  {
+                    "type": "null"
+                  },
+                  {
+                    "$ref": "#/$defs/qualificationProbeName"
+                  }
+                ]
+              }
+            },
+            "if": {
+              "properties": {
+                "reason": {
+                  "const": "qualification-probe-failed"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "probe": {
+                  "$ref": "#/$defs/qualificationProbeName"
+                }
+              }
+            },
+            "else": {
+              "properties": {
+                "probe": {
+                  "type": "null"
+                }
+              }
+            }
+          }
         }
       }
     }

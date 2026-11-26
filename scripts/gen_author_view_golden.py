@@ -21,7 +21,9 @@ sys.path.insert(0, str(PLUGIN))
 
 from adapters.author_view import render_author_view, validate_public_result  # noqa: E402
 from application.protocol import contract_result, host_profile_id, next_action_surfaces, stored, to_stored  # noqa: E402
+from core import environment  # noqa: E402
 from core.governance import human_wait, raises  # noqa: E402
+from core.run import QUALIFICATION_PROBE_FAILED_REASON, QUALIFICATION_PROBE_NAMES  # noqa: E402
 from regen_contract_fixtures import turn_end_actor_of  # noqa: E402
 from core.projection import confirmation_actions  # noqa: E402
 
@@ -58,6 +60,24 @@ def _synthetic_results() -> list[tuple[str, object]]:
         "qualification_record_digest": "sha256:" + "a" * 64,
         "execution_binding_digest": "sha256:" + "b" * 64,
     }
+    # The bound run whose later attempt failed a probe: the installed binding stays, the failure names its reason.
+    qualified_backend["run"]["environment"] = {
+        "revision": 2, "state": environment.APPROVED, "profile_id": "docker-isolated-v1",
+        "spike_image_count": 1, "digest": "sha256:" + "d" * 64}
+    qualified_backend["run"]["qualification"] = {
+        "attempts_used": 2, "attempts_max": environment.MAX_QUALIFICATION_ATTEMPTS,
+        "active": {"seq": 1, "profile_id": "docker-isolated-v1",
+                   "record_digest": qualified_backend["run"]["spike_backend"]["qualification_record_digest"]},
+        "last_failure": {"reason": QUALIFICATION_PROBE_FAILED_REASON, "probe": QUALIFICATION_PROBE_NAMES[0]}}
+    # A pending revision on a run nothing has bound yet: the step waits on the human's decision.
+    environment_pending = copy.deepcopy(bootstrap)
+    environment_pending["run"]["spike_backend"] = {"kind": "unqualified"}
+    environment_pending["run"]["environment"] = {
+        "revision": 1, "state": environment.PENDING, "profile_id": "docker-isolated-v1",
+        "spike_image_count": 1, "digest": "sha256:" + "d" * 64}
+    environment_pending["run"]["qualification"] = {
+        "attempts_used": 0, "attempts_max": environment.MAX_QUALIFICATION_ATTEMPTS,
+        "active": None, "last_failure": None}
 
     approved = json.loads((ROOT / "plugins" / "empirica" / "adapters" / "pi" / "test" /
                            "fixtures" / "approved-configure-runview.json").read_text())
@@ -327,6 +347,7 @@ def _synthetic_results() -> list[tuple[str, object]]:
          ["expected"]["result"]),
         ("all-next-actions", all_actions),
         ("qualified-spike-backend", qualified_backend),
+        ("environment-pending", environment_pending),
         ("governance-approved", approved),
         ("governance-approval-unavailable", unavailable),
         ("null", None),

@@ -309,15 +309,35 @@ def delivery_attempt_index(rows: object, delivery: object) -> int | None:
 
 
 def spike_prerequisite(state: object) -> str | None:
-    """The pure spike prerequisite (spec §5.1): on a run with no active qualified binding, ``environment-required`` when no approved
-    environment revision exists (the way on is a proposal) and ``qualification-required`` once one
-    is approved but nothing is bound (the way on is a qualification attempt)."""
+    """The pure spike prerequisite (spec §5.1): ``None`` once the run holds an active qualified
+    binding; otherwise the environment step it is missing, the ``qualify`` admission's own reason
+    (``environment-required`` with no revision, ``environment-pending`` while the human decides,
+    ``environment-rejected``, ``qualification-attempts-exhausted``) or, once a revision is
+    approved and attempts remain, ``qualification-required``."""
     if spike_plan.spike_backend_kind(state.spike_backend) == "qualified":
         return None
-    member = getattr(state, "environment", None)
-    if member is not None and member["state"] == APPROVED:
-        return QUALIFICATION_REQUIRED
-    return ENVIRONMENT_REQUIRED
+    return qualify_admission(state) or QUALIFICATION_REQUIRED
+
+
+def active_attempt(state: object) -> tuple[int, Mapping] | None:
+    """The attempt that installed the run's active qualified binding: its one-based sequence and
+    its row, the succeeded row whose record the binding names, or ``None`` when nothing is
+    bound. Only a succeeded row carries a record digest."""
+    backend = state.spike_backend
+    if spike_plan.spike_backend_kind(backend) != "qualified":
+        return None
+    return next(((index + 1, row) for index, row in enumerate(state.qualification_attempts)
+                 if row["record_digest"] == backend["qualification_record_digest"]), None)
+
+
+def attempt_lineage(state: object, record_digest: object) -> dict[str, int | None]:
+    """The qualification a spike was sealed under (spec §7): the sequence and approved revision of
+    the attempt whose record ``record_digest`` names, each ``None`` when no row of this run does.
+    Rows are append-only, so a historical spike resolves against its own attempt after a rebind."""
+    found = next(((index + 1, row) for index, row in enumerate(state.qualification_attempts)
+                  if record_digest is not None and row["record_digest"] == record_digest), None)
+    return {"attempt": None if found is None else found[0],
+            "revision": None if found is None else found[1]["revision"]}
 
 
 def bound_member(state: object) -> Mapping | None:
@@ -325,14 +345,62 @@ def bound_member(state: object) -> Mapping | None:
     revision of the attempt row whose record the binding names, read from the current member or
     the immutable history (a later revision may be pending while the binding stays active), or
     ``None`` when the run holds no such binding."""
-    backend = state.spike_backend
-    if spike_plan.spike_backend_kind(backend) != "qualified":
+    active = active_attempt(state)
+    if active is None:
         return None
-    # Only a succeeded row carries a record digest.
-    revision = next((row["revision"] for row in state.qualification_attempts
-                     if row["record_digest"] == backend["qualification_record_digest"]), None)
     return next((member for member in superseded_history(state)
-                 if member["revision"] == revision and member["state"] == APPROVED), None)
+                 if member["revision"] == active[1]["revision"]
+                 and member["state"] == APPROVED), None)
+
+
+def environment_view(state: object) -> dict[str, Any] | None:
+    """The run view's read-only environment reference (spec §7): the current revision, its state,
+    its requested profile, how many images it names and the proposal digest — never the agent's
+    preparation text, rationale or image references — or ``None`` before any proposal."""
+    member = getattr(state, "environment", None)
+    if member is None:
+        return None
+    return {"revision": member["revision"], "state": member["state"],
+            "profile_id": member["proposal"]["profile_id"],
+            "spike_image_count": len(member["proposal"]["spike_images"]),
+            "digest": member["digest"]}
+
+
+def qualification_view(state: object) -> dict[str, Any] | None:
+    """The run view's read-only qualification accounting (spec §5.1, §7), ``None`` before any
+    proposal: attempts used against the run ceiling, the installed binding (a stored reference,
+    never live health), and the latest failure since it was installed — its closed reason and
+    probe — so a read tells a historical binding from a later stale or failed attempt."""
+    if getattr(state, "environment", None) is None:
+        return None
+    rows = tuple(state.qualification_attempts)
+    active = active_attempt(state)
+    since = 0 if active is None else active[0]
+    failure = next((row for row in reversed(rows[since:]) if row["reason"] is not None), None)
+    return {
+        "attempts_used": len(rows), "attempts_max": MAX_QUALIFICATION_ATTEMPTS,
+        "active": None if active is None else {
+            "seq": active[0], "profile_id": state.spike_backend["profile_id"],
+            "record_digest": active[1]["record_digest"]},
+        "last_failure": None if failure is None else {
+            "reason": failure["reason"],
+            **({"probe": failure["probe"]} if failure["probe"] is not None else {})},
+    }
+
+
+def audit_context(state: object) -> dict[str, Any]:
+    """The environment facts an audit reviews and a progress basis binds (spec §7): the active
+    binding, every revision's identity and state, and every attempt with its outcome — so a
+    proposal, a decision, an attempt or a rebind makes an earlier audit stale."""
+    return _plain({
+        "binding": state.spike_backend,
+        "revisions": [{"revision": member["revision"], "state": member["state"],
+                       "digest": member["digest"]} for member in superseded_history(state)],
+        "attempts": [{"seq": index + 1, "revision": row["revision"], "outcome": row["outcome"],
+                      "record_digest": row["record_digest"], "reason": row["reason"],
+                      "probe": row["probe"]}
+                     for index, row in enumerate(state.qualification_attempts)],
+    })
 
 
 def spike_admission(state: object, image: str) -> str | None:

@@ -33,6 +33,7 @@ from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
 from core import environment, governance as core_governance, spike_plan  # noqa: E402
+from core.run import ATTEMPT_OUTCOMES  # noqa: E402
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
     claim_conflicted, claim_digest, evaluate_snapshot, frozen_semantic_digest, independence,
@@ -286,15 +287,21 @@ def bind_qualified_backend(coordinator, runs: Runs, *, record_digest=QUALIFICATI
     binds unqualified and reads no machine-wide authority). A test seam through the
     coordinator's own commit machinery (the manifest witness chain stays intact), never a raw
     store write."""
+    rewrite_state(coordinator, runs, lambda state: qualified_state(
+        state, profile_id=spike_plan.ISOLATED_PROFILE, record_digest=record_digest,
+        execution_binding_digest=execution_binding_digest,
+        spike_images=spike_images or [spike_action()["plan"]["image"]]))
+
+
+def rewrite_state(coordinator, runs: Runs, change) -> None:
+    """Commit ``change`` of the started run's state through the coordinator's own commit
+    machinery (the manifest witness chain stays intact), never a raw store write."""
     key = next(iter(runs.data))
     read = runs.read(key)
     state = decode_state(read.value)
     snapshot = coordinator._assemble(
         key, state, {"type": "GetRun", "run_id": encode_handle(key)}, require_graph=False)
-    coordinator._commit(key, read.revision, snapshot, qualified_state(
-        state, profile_id=spike_plan.ISOLATED_PROFILE, record_digest=record_digest,
-        execution_binding_digest=execution_binding_digest,
-        spike_images=spike_images or [spike_action()["plan"]["image"]]), ())
+    coordinator._commit(key, read.revision, snapshot, change(state), ())
 
 
 def activate_investigation(coordinator: ProductionCoordinator, run_id: str) -> None:
@@ -2494,6 +2501,35 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         self.assertEqual([item.plan.image.image_id for item in sealed],
                          ["sha256:" + "2" * 64, resolver.image_id])
         self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 2)
+
+    def test_each_spike_names_the_qualification_it_ran_under_after_a_rebind(self):
+        """Spec section 7: every spike request and result names the attempt, the approved
+        revision and the image ID of its own sealed request, and keeps naming them after the run
+        is rebound; the rebind itself is part of what the argument digest binds."""
+        resolver, harness = ImageResolver(), Harness()
+        coordinator, runs, _, _, _, _, run_id, key, action = self.ready(
+            harness, session="lineage", resolver=resolver)
+        self.assertEqual(self.spike(coordinator, run_id, action, "first")["result"]["type"], "Allow")
+        before = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "read")["result"]
+        self.rebind(coordinator, runs, "rebound")
+        resolver.image_id = "sha256:" + "7" * 64
+        self.assertEqual(self.spike(coordinator, run_id, action, "second")["result"]["type"],
+                         "Allow")
+        argument = coordinator.handle({"type": "GetArgument", "run_id": run_id},
+                                      "read")["result"]["argument"]
+        self.assertNotEqual(argument["argument_digest"], before["argument"]["argument_digest"])
+        attempts = argument["environment"]["attempts"]
+        self.assertEqual([row["outcome"] for row in attempts], [ATTEMPT_OUTCOMES[1]] * 2)
+        lineages = [(row["kind"], row["lineage"]) for row in argument["artifacts"]
+                    if row["kind"] in {"spike_request", "spike"}]
+        expected = [{"attempt": row["seq"], "revision": row["revision"], "image_id": image}
+                    for row, image in zip(attempts, ("sha256:" + "2" * 64, resolver.image_id))]
+        self.assertEqual(lineages, [("spike_request", expected[0]), ("spike", expected[0]),
+                                    ("spike_request", expected[1]), ("spike", expected[1])])
+        self.assertNotEqual(expected[0]["revision"], expected[1]["revision"])
+        protocol.schema_validator("response").validate(
+            {"protocol": "empirica/v2", "request_id": "r",
+             "result": {**before, "argument": argument}})
 
     def test_a_stale_binding_or_server_version_refuses_before_effects_or_before_the_result(self):
         stale = generic_spike.GenericUnavailableReason

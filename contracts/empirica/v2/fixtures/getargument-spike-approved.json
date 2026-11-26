@@ -162,7 +162,12 @@
               "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
             },
             "producer_model": null,
-            "operation_timeout_seconds": 210
+            "operation_timeout_seconds": 210,
+            "lineage": {
+              "attempt": 1,
+              "revision": 1,
+              "image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
           },
           {
             "sequence": 2,
@@ -239,7 +244,12 @@
               "forced_termination": false,
               "exit_code": 0
             },
-            "producer_model": null
+            "producer_model": null,
+            "lineage": {
+              "attempt": 1,
+              "revision": 1,
+              "image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+            }
           }
         ],
         "route_stamp": 1,
@@ -262,6 +272,32 @@
           "profile_id": "docker-isolated-v1",
           "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "environment": {
+          "binding": {
+            "kind": "qualified",
+            "backend": "docker",
+            "profile_id": "docker-isolated-v1",
+            "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+          },
+          "revisions": [
+            {
+              "revision": 1,
+              "state": "approved",
+              "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+            }
+          ],
+          "attempts": [
+            {
+              "seq": 1,
+              "revision": 1,
+              "outcome": "succeeded",
+              "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "reason": null,
+              "probe": null
+            }
+          ]
         }
       }
     }

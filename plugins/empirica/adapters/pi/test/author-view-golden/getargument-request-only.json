@@ -150,7 +150,12 @@
             "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
           },
           "producer_model": null,
-          "operation_timeout_seconds": 210
+          "operation_timeout_seconds": 210,
+          "lineage": {
+            "attempt": 1,
+            "revision": 1,
+            "image_id": "sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+          }
         }
       ],
       "route_stamp": 1,
@@ -173,8 +178,34 @@
         "profile_id": "docker-isolated-v1",
         "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "environment": {
+        "binding": {
+          "kind": "qualified",
+          "backend": "docker",
+          "profile_id": "docker-isolated-v1",
+          "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        "revisions": [
+          {
+            "revision": 1,
+            "state": "approved",
+            "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+          }
+        ],
+        "attempts": [
+          {
+            "seq": 1,
+            "revision": 1,
+            "outcome": "succeeded",
+            "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "reason": null,
+            "probe": null
+          }
+        ]
       }
     }
   },
-  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=needs-experiment gating=true state=approved evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim approved by a passing spike over supporting research.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>> — checked by the service\ngeneric spike evidence (read-only)\n  immutable request G0 sha256:2222222222222222222222222222222222222222222222222222222222222222\n    <<<EMPIRICA_UNTRUSTED_DATA>>>{\"sequence\":1,\"artifact_id\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"claim_id\":\"G0\",\"claim_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"spike_request\",\"statement_digest\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"harness_request_id\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"prerequisite_research_ids\":[\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"],\"draft\":{\"schema\":\"empirica.spike-plan-draft/2\",\"image\":\"example/probe@sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"argv\":[\"/usr/bin/python3\",\"/input/probe.py\"],\"inputs\":[\"src/a.py\",\"tests/a_test.py\"],\"environment\":[]},\"draft_digest\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"plan_digest\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"policy_digest\":\"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"snapshot_basis_id\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"snapshot_digest\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"inputs\":[{\"path\":\"src/a.py\",\"sha256\":\"sha256:9999999999999999999999999999999999999999999999999999999999999999\",\"bytes\":0},{\"path\":\"tests/a_test.py\",\"sha256\":\"sha256:9999999999999999999999999999999999999999999999999999999999999999\",\"bytes\":0}],\"backend\":{\"kind\":\"qualified\",\"backend\":\"docker\",\"profile_id\":\"docker-isolated-v1\",\"qualification_record_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"execution_binding_digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"producer_model\":null,\"operation_timeout_seconds\":210}<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    no result evidence admitted\nAudit status: required"
+  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=needs-experiment gating=true state=approved evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim approved by a passing spike over supporting research.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>> — checked by the service\ngeneric spike evidence (read-only)\n  immutable request G0 sha256:2222222222222222222222222222222222222222222222222222222222222222\n    <<<EMPIRICA_UNTRUSTED_DATA>>>{\"sequence\":1,\"artifact_id\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"claim_id\":\"G0\",\"claim_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"kind\":\"spike_request\",\"statement_digest\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"harness_request_id\":\"sha256:2222222222222222222222222222222222222222222222222222222222222222\",\"prerequisite_research_ids\":[\"sha256:1111111111111111111111111111111111111111111111111111111111111111\"],\"draft\":{\"schema\":\"empirica.spike-plan-draft/2\",\"image\":\"example/probe@sha256:1111111111111111111111111111111111111111111111111111111111111111\",\"argv\":[\"/usr/bin/python3\",\"/input/probe.py\"],\"inputs\":[\"src/a.py\",\"tests/a_test.py\"],\"environment\":[]},\"draft_digest\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\",\"plan_digest\":\"sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee\",\"policy_digest\":\"sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff\",\"snapshot_basis_id\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\",\"snapshot_digest\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\",\"inputs\":[{\"path\":\"src/a.py\",\"sha256\":\"sha256:9999999999999999999999999999999999999999999999999999999999999999\",\"bytes\":0},{\"path\":\"tests/a_test.py\",\"sha256\":\"sha256:9999999999999999999999999999999999999999999999999999999999999999\",\"bytes\":0}],\"backend\":{\"kind\":\"qualified\",\"backend\":\"docker\",\"profile_id\":\"docker-isolated-v1\",\"qualification_record_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"execution_binding_digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"producer_model\":null,\"operation_timeout_seconds\":210,\"lineage\":{\"attempt\":1,\"revision\":1,\"image_id\":\"sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\"}}<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n    no result evidence admitted\nEnvironment:\n  {\"binding\":{\"kind\":\"qualified\",\"backend\":\"docker\",\"profile_id\":\"docker-isolated-v1\",\"qualification_record_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"execution_binding_digest\":\"sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\"},\"revisions\":[{\"revision\":1,\"state\":\"approved\",\"digest\":\"sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd\"}],\"attempts\":[{\"seq\":1,\"revision\":1,\"outcome\":\"succeeded\",\"record_digest\":\"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\",\"reason\":null,\"probe\":null}]}\nAudit status: required"
 }
