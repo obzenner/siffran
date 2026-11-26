@@ -1119,6 +1119,15 @@ def _validation_spike_request(
 _VALIDATION_LINEAGE = {"attempt": 1, "revision": 1, "image_id": "sha256:" + "f" * 64}
 
 
+def _validation_argument_head(backend: dict, digest: str) -> dict:
+    """The members every validation spike argument shares: its root, its digests, its binding and environment."""
+    return {"root_claim_id": "G0", "argument_digest": digest, "goal": "Test goal.", "goal_digest": digest,
+            "frozen_scope_digest": None, "deferred_scope_digest": digest,
+            "spike_backend": backend, "environment": _validation_environment(backend),
+            "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
+                                     "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"}}
+
+
 def _validation_environment(backend: dict) -> dict:
     """A validation argument's environment: the qualified binding the run's one succeeded attempt installed."""
     return {"binding": dict(backend),
@@ -4045,12 +4054,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         result = _validation_spike_result(
             sequence=3, artifact_id=P1, request=request, claim_digest=d64,
             exit_code=0, active=True, supersedes=None)
-        value = {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
-            "goal_digest": d64,
-            "frozen_scope_digest": None, "deferred_scope_digest": d64,
-            "spike_backend": backend, "environment": _validation_environment(backend),
-            "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
-                "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
+        value = {**_validation_argument_head(backend, d64),
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,
                 "kind": "needs-experiment", "state": "approved", "gating": True, "evidence_digest": _ed,
                 "active_evidence_ids": [R1, R2, P1]}],
@@ -4259,12 +4263,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         result1 = _validation_spike_result(
             sequence=4, artifact_id=P1, request=request2, claim_digest=d64,
             exit_code=0, active=True, supersedes=P0)
-        return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
-            "goal_digest": d64,
-            "frozen_scope_digest": None, "deferred_scope_digest": d64,
-            "spike_backend": backend, "environment": _validation_environment(backend),
-            "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
-                "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
+        return {**_validation_argument_head(backend, d64),
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,
                 "kind": "needs-experiment", "state": "approved", "gating": True, "evidence_digest": _ed,
                 "active_evidence_ids": [R1, P1]}],
