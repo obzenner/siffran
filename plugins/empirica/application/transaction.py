@@ -349,13 +349,10 @@ class Coordinator:
             return command["type"] == "GetArgument" or (
                 command["type"] == "EvaluateRun" and state.selected_graph_artifact_id is not None)
 
-        for _ in range(8):
+        for assembled in self._assembled_reads(key, command, request_id, require_graph=require_graph,
+                                             inactive_ok=True, admit=admit):
             # Read-only legacy (ADR-0074): a previous-family document is refused for every
             # command except StartRun, which starts a fresh generation instead of resuming it.
-            assembled = self._load_assembled(key, command, request_id, require_graph=require_graph,
-                                             inactive_ok=True, admit=admit)
-            if assembled is RETRY:
-                continue
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -466,24 +463,17 @@ class Coordinator:
         key = decode_handle(run_id)
         if key is None:
             return self._inert(request_id)
-        for _ in range(8):
-            assembled = self._load_assembled(key, {"type": "GetRun", "run_id": run_id}, request_id)
-            if assembled is RETRY:
-                continue
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             if state.invocation["human_surface"] == payload["surface"]:
                 return self._inert_with_run(request_id, snapshot)
             changed = replace(state, invocation={**_plain(state.invocation), "human_surface": payload["surface"]})
-            try:
-                committed, _, _, planned = self._commit(key, read.revision, snapshot, changed, ())
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-            self.last_state = committed
-            return self._allow(request_id, planned)
+            allowed = self._commit_and_allow(key, read, snapshot, changed, (), request_id)
+            if allowed is RETRY:
+                continue
+            return allowed
         return self._fault(request_id, "conflict")
 
     def _human_batch(self, run_id: str, payload: dict[str, Any], plan: Any,
@@ -491,10 +481,7 @@ class Coordinator:
         key = decode_handle(run_id)
         if key is None:
             return self._inert(request_id)
-        for _ in range(8):
-            assembled = self._load_assembled(key, {"type": "GetRun", "run_id": run_id}, request_id)
-            if assembled is RETRY:
-                continue
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -524,15 +511,10 @@ class Coordinator:
                     if document is not None:
                         response["result"]["document"] = document
                 return response
-            try:
-                committed, _, _, planned = self._commit(
-                    key, read.revision, snapshot, state, decision.intent.artifacts)
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-            self.last_state = committed
-            return self._allow(request_id, planned)
+            allowed = self._commit_and_allow(key, read, snapshot, state, decision.intent.artifacts, request_id)
+            if allowed is RETRY:
+                continue
+            return allowed
         return self._fault(request_id, "conflict")
 
     def _trusted_artifact(self, run_id: str, kind: str, payload: dict[str, Any], request_id: str,
@@ -540,10 +522,7 @@ class Coordinator:
         key = decode_handle(run_id)
         if key is None:
             return self._inert(request_id)
-        for _ in range(8):
-            assembled = self._load_assembled(key, {"type": "GetRun", "run_id": run_id}, request_id)
-            if assembled is RETRY:
-                continue
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -597,15 +576,10 @@ class Coordinator:
                              first_terminal_fingerprint=planned_artifact["artifact_id"])
                 children[index] = child
                 next_state = replace(state, children=tuple(children))
-            try:
-                committed, _, _, planned = self._commit(
-                    key, read.revision, snapshot, next_state, (planned_artifact,))
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-            self.last_state = committed
-            return self._allow(request_id, planned)
+            allowed = self._commit_and_allow(key, read, snapshot, next_state, (planned_artifact,), request_id)
+            if allowed is RETRY:
+                continue
+            return allowed
         return self._fault(request_id, "conflict")
 
     def trusted_audit_verdict(self, run_id: str, child_id: str, payload: dict[str, Any],
@@ -626,10 +600,7 @@ class Coordinator:
                  ("pending", "completed"),
                  ("pending", "failed"), ("pending", "cancelled"),
                  ("pending", "timed_out"), ("pending", "orphaned")}
-        for _ in range(8):
-            assembled = self._load_assembled(key, {"type": "GetRun", "run_id": run_id}, request_id)
-            if assembled is RETRY:
-                continue
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -731,10 +702,7 @@ class Coordinator:
         prior_binding = None
         lease = None
         with ExitStack() as held:
-            for _ in range(8):
-                assembled = self._load_assembled(key, command, request_id)
-                if assembled is RETRY:
-                    continue
+            for assembled in self._assembled_reads(key, command, request_id):
                 if isinstance(assembled, dict):
                     return assembled
                 read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -889,14 +857,11 @@ class Coordinator:
         conflict = False
         failed = None
         planned = None
-        for _ in range(8):
+        for assembled in self._assembled_reads(
+                key, {"type": "GetRun", "run_id": command["run_id"]}, request_id,
+                inactive_ok=True):
             # An unreadable or vanished run records and binds nothing on a guess; a stopped run
             # is read as it stands (its own open row closes superseded below).
-            assembled = self._load_assembled(
-                key, {"type": "GetRun", "run_id": command["run_id"]}, request_id,
-                inactive_ok=True)
-            if assembled is RETRY:
-                continue
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -1096,11 +1061,8 @@ class Coordinator:
                 return self._safe_block(key, request_id, "run.corrupt")  # the binding is immutable persisted state
             return None
 
-        for _ in range(8):
-            assembled = self._load_assembled(key, command, request_id, require_graph=True,
-                                             admit=admit_result)
-            if assembled is RETRY:
-                continue
+        for assembled in self._assembled_reads(key, command, request_id, require_graph=True,
+                                             admit=admit_result):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -1211,6 +1173,28 @@ class Coordinator:
         except ObservationUnavailable:
             return self._fault(request_id, "unavailable")
         return Assembled(read, state, snapshot)
+
+    def _assembled_reads(self, key: RunKey, command: dict[str, Any], request_id: str,
+                         **options: Any) -> Any:
+        """The reads of one compare-and-set loop: at most eight :meth:`_load_assembled` reads, each
+        an :class:`Assembled` read or the closed response to return; a read that raced a commit is
+        read again within the same bound. A caller's ``continue`` spends one read."""
+        for _ in range(8):
+            assembled = self._load_assembled(key, command, request_id, **options)
+            if assembled is not RETRY:
+                yield assembled
+
+    def _commit_and_allow(self, key: RunKey, read: Any, snapshot: EvaluationSnapshot,
+                          next_state: OperationalState, artifacts: tuple[dict[str, Any], ...],
+                          request_id: str) -> dict[str, Any] | object:
+        """Commit one planned state against the read's revision and allow the committed run:
+        :data:`RETRY` when another commit won the revision, a closed unavailable Fault otherwise."""
+        try:
+            committed, _, _, planned = self._commit(key, read.revision, snapshot, next_state, artifacts)
+        except Exception as exc:
+            return RETRY if self._is_conflict(exc) else self._fault(request_id, "unavailable")
+        self.last_state = committed
+        return self._allow(request_id, planned)
 
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,
                 next_state: OperationalState, domain: tuple[dict[str, Any], ...],

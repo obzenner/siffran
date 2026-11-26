@@ -453,50 +453,34 @@ def _inspect_runtime(
         raise CapabilityRefused(str(exc)) from exc
 
 
-def inspect_observed_runtime(
-    recorded_runtime: Mapping[str, Any], *, deadline: float,
-    runner: process.Runner | None = None,
-    clock: Callable[[], float] = time.monotonic,
-    host_facts: tuple[str, str] | None = None,
-    **_: Any,
-) -> GenericRuntimeInspection:
-    """Discover the endpoint once and return the raw facts without admission.
-
-    Journal recovery runs on these facts before the new attempt's admission decides the
-    capability, so a capability refusal seen here is an observation to recover on, never
-    a boundary error that would skip recovery.
-    """
-    return _inspect_runtime(recorded_runtime, pinned=False, admit=False, deadline=deadline,
-                            runner=runner, clock=clock, host_facts=host_facts)
+def _inspector(name: str, *, pinned: bool, admit: bool, doc: str) -> PassiveGenericRuntimeInspector:
+    """One public inspector: :func:`_inspect_runtime` with its endpoint source and admission fixed."""
+    def inspect(recorded_runtime: Mapping[str, Any], *, deadline: float,
+                runner: process.Runner | None = None,
+                clock: Callable[[], float] = time.monotonic,
+                host_facts: tuple[str, str] | None = None,
+                **_: Any) -> GenericRuntimeInspection:
+        return _inspect_runtime(recorded_runtime, pinned=pinned, admit=admit, deadline=deadline,
+                                runner=runner, clock=clock, host_facts=host_facts)
+    inspect.__name__ = inspect.__qualname__ = name
+    inspect.__doc__ = doc
+    return inspect
 
 
-def inspect_current_runtime(
-    recorded_runtime: Mapping[str, Any], *, deadline: float,
-    runner: process.Runner | None = None,
-    clock: Callable[[], float] = time.monotonic,
-    host_facts: tuple[str, str] | None = None,
-    **_: Any,
-) -> GenericRuntimeInspection:
-    """Discover the endpoint once and admit the facts; a refusal is :class:`CapabilityRefused`."""
-    return _inspect_runtime(recorded_runtime, pinned=False, admit=True, deadline=deadline,
-                            runner=runner, clock=clock, host_facts=host_facts)
+inspect_observed_runtime = _inspector("inspect_observed_runtime", pinned=False, admit=False, doc="""\
+Discover the endpoint once and return the raw facts without admission.
 
+Journal recovery runs on these facts before the new attempt's admission decides the
+capability, so a capability refusal seen here is an observation to recover on, never
+a boundary error that would skip recovery.""")
+inspect_current_runtime = _inspector("inspect_current_runtime", pinned=False, admit=True, doc="""\
+Discover the endpoint once and admit the facts; a refusal is :class:`CapabilityRefused`.""")
+inspect_pinned_runtime = _inspector("inspect_pinned_runtime", pinned=True, admit=False, doc="""\
+Re-observe an already-discovered daemon at its recorded endpoint, without admission.
 
-def inspect_pinned_runtime(
-    recorded_runtime: Mapping[str, Any], *, deadline: float,
-    runner: process.Runner | None = None,
-    clock: Callable[[], float] = time.monotonic,
-    host_facts: tuple[str, str] | None = None,
-    **_: Any,
-) -> GenericRuntimeInspection:
-    """Re-observe an already-discovered daemon at its recorded endpoint, without admission.
-
-    Fresh facts that no longer admit are a changed observation of the same pinned daemon
-    (:func:`validate_reobserved_runtime`), never a fresh capability refusal and never a
-    collapsed read failure.
-    """
-    return _inspect_runtime(recorded_runtime, pinned=True, admit=False, deadline=deadline,
-                            runner=runner, clock=clock, host_facts=host_facts)
+Fresh facts that no longer admit are a changed observation of the same pinned daemon
+(:func:`validate_reobserved_runtime`), never a fresh capability refusal and never a
+collapsed read failure.""")
 
 
 def validate_reobserved_runtime(pinned: Mapping[str, Any], observed: object) -> dict[str, Any]:
