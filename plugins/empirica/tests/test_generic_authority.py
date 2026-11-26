@@ -400,6 +400,159 @@ class RuntimeCapabilityTests(unittest.TestCase):
             authority.validate_record(changed)
 
 
+
+_SERVER = {"Version": "27", "Os": "linux", "Arch": "x86_64", "PlatformName": "Docker Engine - Community"}
+_INFO = {"OSType": "linux", "Architecture": "x86_64", "OperatingSystem": "Ubuntu 24.04",
+         "SecurityOptions": ["name=cgroupns", "name=seccomp,profile=default"],
+         "MemoryLimit": True, "SwapLimit": True, "CpuCfsQuota": True, "PidsLimit": True,
+         "NCPU": 8, "MemTotal": 123, "CgroupVersion": "2", "CgroupDriver": "systemd"}
+#: The bounded reads of each endpoint source, in order: discovery resolves the endpoint itself,
+#: a pinned re-observation reads only at the endpoint the recorded runtime carries.
+_DISCOVERY_READS = ("Docker context read", "Docker endpoint read", "Docker client version read",
+                    "Docker server version read", "Docker info read")
+_PINNED_READS = _DISCOVERY_READS[2:]
+
+
+def _answers(*, pinned, server=_SERVER, info=_INFO, context="default"):
+    reads = [process.CommandResult.fake(stdout='"27.5.1"'),
+             process.CommandResult.fake(stdout=json.dumps(server)),
+             process.CommandResult.fake(stdout=json.dumps(info))]
+    if pinned:
+        return reads
+    return [process.CommandResult.fake(stdout=context),
+            process.CommandResult.fake(stdout='"unix:///var/run/docker.sock"'), *reads]
+
+
+class RaisingQueueRunner(QueueRunner):
+    def run(self, argv, **kwargs):
+        answer = super().run(argv, **kwargs)
+        if isinstance(answer, BaseException):
+            raise answer
+        return answer
+
+
+class RuntimeInspectionTests(unittest.TestCase):
+    """The one bounded observation owner behind the discovering, the admitting and the pinned
+    inspectors: one closed error per read failure, the endpoint source and the admission."""
+
+    SOURCES = (("observed", authority.inspect_observed_runtime, False, _DISCOVERY_READS),
+               ("pinned", authority.inspect_pinned_runtime, True, _PINNED_READS))
+
+    def inspect(self, inspector, answers, *, recorded=None, clock=time.monotonic, deadline=None):
+        runner = RaisingQueueRunner(answers)
+        observed = inspector(runtime() if recorded is None else recorded,
+                             deadline=clock() + 10 if deadline is None else deadline,
+                             runner=runner, clock=clock, host_facts=("Linux", "x86_64"))
+        return observed, runner
+
+    def test_each_read_failure_is_one_closed_error_naming_its_read_and_daemon(self):
+        failures = (
+            ("timed out", process.CommandResult.fake(stdout="x", timed_out=True), " failed"),
+            ("output limited", process.CommandResult.fake(stdout="x", output_limited=True), " failed"),
+            ("nonzero", process.CommandResult.fake(returncode=1, stdout="x"), " failed"),
+            ("not UTF-8", process.CommandResult.fake(stdout=b"\xff"), " is not UTF-8"),
+            ("empty", process.CommandResult.fake(stdout="  "), " is empty"),
+            ("unlaunchable", OSError("spawn refused"), None),
+        )
+        for daemon, inspector, pinned, reads in self.SOURCES:
+            for index, label in enumerate(reads):
+                for name, failed, suffix in failures:
+                    answers = _answers(pinned=pinned)
+                    answers[index] = failed
+                    expected = (label + suffix if suffix is not None
+                                else f"{label} could not be launched at the {daemon} daemon")
+                    with self.subTest(daemon=daemon, read=label, failure=name):
+                        with self.assertRaises(authority.GenericQualificationError) as caught:
+                            self.inspect(inspector, answers)
+                        self.assertEqual(str(caught.exception), expected)
+
+    def test_an_expired_deadline_reads_nothing_and_any_time_left_is_the_read_bound(self):
+        for daemon, inspector, pinned, reads in self.SOURCES:
+            with self.subTest(daemon=daemon):
+                runner = RaisingQueueRunner(_answers(pinned=pinned))
+                with self.assertRaises(authority.GenericQualificationError) as caught:
+                    inspector(runtime(), deadline=100.0, runner=runner, clock=lambda: 100.0)
+                self.assertEqual(str(caught.exception), "passive verification deadline expired")
+                self.assertEqual(runner.calls, [])
+                _, runner = self.inspect(inspector, _answers(pinned=pinned),
+                                         clock=lambda: 100.0, deadline=100.5)
+                self.assertEqual([call[1]["timeout_seconds"] for call in runner.calls],
+                                 [0.5] * len(reads))
+
+    def test_the_pinned_source_reads_at_the_recorded_endpoint_and_inherits_its_discovery(self):
+        recorded = {**runtime(), "endpoint": "unix:///run/pinned.sock", "context": "pinned"}
+        observed, runner = self.inspect(authority.inspect_pinned_runtime,
+                                        _answers(pinned=True), recorded=recorded)
+        self.assertEqual([call[0][1:3] for call in runner.calls],
+                         [("version", "--format"), ("version", "--format"), ("info", "--format")])
+        self.assertTrue(all(call[1]["env"] == {"LANG": "C", "LC_ALL": "C",
+                                               "DOCKER_HOST": "unix:///run/pinned.sock"}
+                            for call in runner.calls))
+        for member in ("endpoint", "context", "discovery_reads", "docker_cli"):
+            self.assertEqual(observed.runtime[member], recorded[member], member)
+        with self.assertRaises(authority.GenericQualificationError) as caught:
+            self.inspect(authority.inspect_pinned_runtime, _answers(pinned=True),
+                         recorded={**recorded, "discovery_reads": 4})
+        self.assertEqual(str(caught.exception), "the recorded pinned runtime is malformed")
+
+    def test_the_discovering_source_refuses_a_malformed_context_or_projection(self):
+        for answers, message in (
+                (_answers(pinned=False, context="bad context"), "Docker context is malformed"),
+                (_answers(pinned=False, server=["not", "an", "object"]),
+                 "Docker version/info projection is malformed")):
+            with self.subTest(message=message), \
+                    self.assertRaises(authority.GenericQualificationError) as caught:
+                self.inspect(authority.inspect_observed_runtime, answers)
+            self.assertEqual(str(caught.exception), message)
+
+    def test_a_read_that_is_not_json_names_its_own_document(self):
+        for index, document in ((1, "Docker endpoint"), (2, "Docker client version"),
+                                (3, "Docker server version"), (4, "Docker info")):
+            answers = _answers(pinned=False)
+            answers[index] = process.CommandResult.fake(stdout="{not json")
+            with self.subTest(document=document), \
+                    self.assertRaises(authority.GenericQualificationError) as caught:
+                self.inspect(authority.inspect_observed_runtime, answers)
+            self.assertEqual(str(caught.exception), document + " is malformed JSON")
+
+    def test_omitted_diagnostic_strings_project_as_empty(self):
+        server = {key: value for key, value in _SERVER.items() if key not in ("Version", "PlatformName")}
+        info = {key: value for key, value in _INFO.items() if key != "OperatingSystem"}
+        observed, _ = self.inspect(authority.inspect_observed_runtime,
+                                   _answers(pinned=False, server=server, info=info))
+        self.assertEqual([observed.runtime[member] for member in
+                          ("server_version", "platform_name", "operating_system")], ["", "", ""])
+
+    def test_the_server_answer_wins_and_info_fills_only_what_the_server_omits(self):
+        server = {key: value for key, value in _SERVER.items() if key not in ("Os", "Arch")}
+        info = {**_INFO, "CgroupVersion": None, "CgroupDriver": None}
+        observed, _ = self.inspect(authority.inspect_observed_runtime,
+                                   _answers(pinned=False, server=server, info=info))
+        self.assertEqual((observed.runtime["server_raw_os"], observed.runtime["server_raw_architecture"]),
+                         (_INFO["OSType"], _INFO["Architecture"]))
+        self.assertEqual((observed.runtime["cgroup_version"], observed.runtime["cgroup_driver"]), ("", ""))
+        info = {**_INFO, "OSType": "windows", "Architecture": "arm64"}
+        observed, _ = self.inspect(authority.inspect_observed_runtime,
+                                   _answers(pinned=False, info=info))
+        self.assertEqual((observed.runtime["server_raw_os"], observed.runtime["server_raw_architecture"]),
+                         (_SERVER["Os"], _SERVER["Arch"]))
+        self.assertEqual((observed.runtime["cgroup_version"], observed.runtime["cgroup_driver"]),
+                         (_INFO["CgroupVersion"], _INFO["CgroupDriver"]))
+
+    def test_only_the_admitting_inspector_refuses_capability_and_it_names_the_refusal(self):
+        info = {**_INFO, "SwapLimit": False}
+        observed, _ = self.inspect(authority.inspect_observed_runtime, _answers(pinned=False, info=info))
+        self.assertFalse(observed.runtime["swap_limit"])
+        with self.assertRaises(authority.GenericQualificationError) as expected:
+            authority.validate_runtime(observed.runtime)
+        with self.assertRaises(authority.CapabilityRefused) as caught:
+            self.inspect(authority.inspect_current_runtime, _answers(pinned=False, info=info))
+        self.assertEqual(str(caught.exception), str(expected.exception))
+        admitted, _ = self.inspect(authority.inspect_current_runtime, _answers(pinned=False))
+        self.assertEqual(admitted.runtime, authority.validate_runtime(admitted.runtime))
+        pinned, _ = self.inspect(authority.inspect_pinned_runtime, _answers(pinned=True, info=info))
+        self.assertFalse(pinned.runtime["swap_limit"])
+
 class HistoricalResolutionTests(unittest.TestCase):
     def setUp(self):
         common._loaded_release = None
