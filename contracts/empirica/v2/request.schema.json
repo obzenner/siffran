@@ -115,6 +115,13 @@
         "delegation": {
           "type": "boolean"
         },
+        "spike_profile": {
+          "description": "The run's host profile ceiling, bound once at StartRun and never author action data (Empirica 7.2 §4.4, an explicit wire reinterpretation of the StartRun member of the same name): docker-isolated-v1 permits only the isolated environment profile, docker-networked-v1 permits both. The application binds only the StartRun command member into state; a provenance copy never decides anything. Absent means the isolated ceiling, on the wire as in state, and no later action can raise it.",
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
         "host_runtime": {
           "description": "Optional host-observed facts about the runtime that executes this host's foreground audit, recorded once with the run (Pi: the pi-subagents owner). Validated at the application boundary against the host profile's subagents_compatibility range, persisted opaquely, and read by the core only for `reviewed` (a version with no checked-in compat record is recorded `reviewed: false` and shown in the run view; it is admitted by what the adapter observed of it, ADR-0069).",
           "type": "object",
@@ -790,7 +797,7 @@
       }
     },
     "actionEnvironment": {
-      "description": "Coming with run-scoped environment qualification: submit one closed empirica.environment-proposal/1 body (profile, spike images, preparation, rationale) as a new revision for this run. Not yet available in this release: in every active run state the core refuses the action with the closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact (an invalid frozen scope still blocks first); a terminal run is Inert, and nothing is recorded in either case.",
+      "description": "Admitted after configuration approval and investigation admission (Empirica 7.2 §5): submit one closed empirica.environment-proposal/1 body (profile, spike images, preparation, rationale) as a new revision for this run. A profile above the host's StartRun.spike_profile ceiling is refused with the closed reason profile-not-allowed. Every submission is a new revision numbered monotonically per run: a new revision supersedes one still pending, and an A-B-A sequence is three revisions, so an approval of one never covers a replay. A deliberative run's revision is pending until its human's receipt approves or rejects it (the admission is E7's; the HITL document kind and the dialogs are E8); an auto run derives approval from the configuration or delegation provenance and fabricates no receipt. A terminal run is Inert; an invalid frozen scope still blocks first (graph.invalid).",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -808,7 +815,7 @@
       "x-core-validator": "core.environment.validate_action_environment"
     },
     "actionQualify": {
-      "description": "Coming with run-scoped environment qualification: request one host qualification attempt of the latest approved environment revision. Carries no payload; the host owns the attempt, its journalling and its binding. Not yet available in this release: in every active run state the core refuses the qualify action with the closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact (an invalid frozen scope still blocks first); a terminal run is Inert, and no attempt is started in either case.",
+      "description": "Request one host qualification attempt of the latest approved environment revision. Carries no payload; the host owns the attempt, its journalling and its binding. The admission decision is the core's (Empirica 7.2 §5): it is admissible only for the latest approved revision with attempts remaining (bounded per run), and otherwise the closed reason is environment-required (no approved revision while none was ever submitted), environment-pending (still on the human), environment-rejected, or qualification-attempts-exhausted. The host attempt itself, its charging and its binding are a later node's: while the effect is missing, an admissible qualify still refuses with the one closed reason environment.not_available and nothing is attempted; a terminal run is Inert.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1963,11 +1970,68 @@
         }
       },
       "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
+    },
+    "environmentDecisionPayload": {
+      "x-core-validator": "core.environment.validate_decision",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "run_id",
+        "receipt_id",
+        "revision",
+        "proposal_digest",
+        "outcome",
+        "document_digest"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "receipt_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "The host's receipt id: present records it as the presentation receipt, and the finalizing approve or reject names that same presentation id (ADR-0072's write-first discipline)."
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The environment revision this receipt names; a receipt for an earlier revision never decides a later one.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 1.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
+        },
+        "proposal_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
+        },
+        "outcome": {
+          "enum": [
+            "present",
+            "approve",
+            "reject"
+          ],
+          "description": "present records that the human was shown the pending revision; approve and reject finalize it. Cancel, timeout, a missing surface and stale replies are never decisions: they arrive as no outcome and leave the revision pending."
+        },
+        "document_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+          "description": "The digest of the immutable environment HITL document this presentation or decision was shown against: the present records it and the finalizing decision must name the same one. The document kind itself is built by the core (E8); this receipt is only its binding discipline, and an approval under auto provenance has no receipt at all."
+        }
+      },
+      "description": "Private host ingress only: one deliberative environment receipt, bound to the run, the revision, its presentation id and the document digest (Empirica 7.2 §5). Never a public author action; an auto run derives its approvals from provenance and fabricates no receipt."
     }
   },
   "x-core-ingress": [
     "/$defs/actionEnvironment",
     "/$defs/actionQualify",
-    "/$defs/environmentProposal"
+    "/$defs/environmentProposal",
+    "/$defs/environmentDecisionPayload"
   ]
 }

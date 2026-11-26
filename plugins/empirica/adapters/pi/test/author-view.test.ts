@@ -34,7 +34,7 @@ test("author-view loads every next-action surface from the public contract", () 
   const contract = JSON.parse(readFileSync(contractPath, "utf8"));
   const golden = JSON.parse(readStoredText(
     path.join(GOLDEN_DIR, "all-next-actions.json"), "utf8"));
-  assert.equal(Object.keys(contract.next_actions).length, 17);
+  assert.equal(Object.keys(contract.next_actions).length, 19);
   assert.deepEqual(golden.result.run.next_actions, Object.keys(contract.next_actions));
   for (const row of Object.values(contract.next_actions) as { surface: Record<string, string> }[]) {
     const value = row.surface;

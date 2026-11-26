@@ -102,7 +102,7 @@
           },
           {
             "id": "environment/actions",
-            "title": "Environment qualification (coming)"
+            "title": "Environment qualification"
           }
         ],
         "reasons": [
@@ -472,6 +472,54 @@
             "sections": [
               "environment/actions"
             ]
+          },
+          {
+            "code": "profile-not-allowed",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "environment-required",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "environment-pending",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "environment-rejected",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "environment-revisions-exhausted",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "environment-presentations-exhausted",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "qualification-attempts-exhausted",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
+            "code": "qualification-required",
+            "sections": [
+              "environment/actions"
+            ]
           }
         ],
         "next_actions": [
@@ -542,10 +590,18 @@
           {
             "id": "convergence.report",
             "description": "Report convergence with the default intent. The host first looks for a human it can ask; when there is one it shows them the pending research records and, in deliberative mode, decisions in one dialog, and when there is none the response says so."
+          },
+          {
+            "id": "environment.propose",
+            "description": "Submit one closed environment proposal (a Docker profile under the host's StartRun.spike_profile ceiling, 1-16 already-local spike image references, 1-8 unverified preparation steps, a nonblank rationale) as a new revision: a deliberative run's human then approves or rejects it, and an auto run derives the approval from provenance and fabricates no receipt."
+          },
+          {
+            "id": "qualification.request",
+            "description": "Request one host qualification attempt of the latest approved environment revision; admissible only while that revision is approved and attempts remain, and the host owns the attempt, its charging and its binding."
           }
         ]
       }
     }
   },
-  "text": "Contract\ncore — Core concepts\nroles — Role authority\nrun/lifecycle — Run lifecycle\nclaims/graph — Argument graph\nclaims/residuals — Claim residuals\nclaims/refutation — Refutation and conflict\nevidence/research — Research evidence\nevidence/spike — Spike evidence\nevidence/order — Evidence ordering\nevidence/freshness — Evidence freshness\naudit — Audit\naudit/independence — Audit independence\nchildren — Child lifecycle\nbudget — Budget\nroute — Route\nfreeze — Freeze\nterminal — Terminal behavior\nhosts/capabilities — Host capabilities\ntrusted/ingress — Trusted ingress payloads\nrecovery — Recovery and restore\nprotocol — Protocol identity\npresentation/selector — Presentation selector\ngovernance — Governed initialization\nenvironment/actions — Environment qualification (coming)"
+  "text": "Contract\ncore — Core concepts\nroles — Role authority\nrun/lifecycle — Run lifecycle\nclaims/graph — Argument graph\nclaims/residuals — Claim residuals\nclaims/refutation — Refutation and conflict\nevidence/research — Research evidence\nevidence/spike — Spike evidence\nevidence/order — Evidence ordering\nevidence/freshness — Evidence freshness\naudit — Audit\naudit/independence — Audit independence\nchildren — Child lifecycle\nbudget — Budget\nroute — Route\nfreeze — Freeze\nterminal — Terminal behavior\nhosts/capabilities — Host capabilities\ntrusted/ingress — Trusted ingress payloads\nrecovery — Recovery and restore\nprotocol — Protocol identity\npresentation/selector — Presentation selector\ngovernance — Governed initialization\nenvironment/actions — Environment qualification"
 }

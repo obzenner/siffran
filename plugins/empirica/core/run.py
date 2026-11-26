@@ -83,7 +83,7 @@ def _sequence(value: Any, where: str, limit: int) -> list | tuple:
 # State-bound vocabularies the pure core owns for the run/5 members (spec §4.2).
 ENVIRONMENT_STATES = ("pending", "approved", "rejected")
 ATTEMPT_OUTCOMES = ("reserved", "succeeded", "failed", "superseded")
-_ENVIRONMENT_MEMBER_FIELDS = ("revision", "proposal", "digest", "state", "receipt_id")
+_ENVIRONMENT_MEMBER_FIELDS = ("revision", "proposal", "digest", "state", "receipt_id", "receipts")
 _QUALIFICATION_ATTEMPT_FIELDS = ("attempt_id", "revision", "started_stamp", "outcome",
                                  "record_digest", "reason", "probe")
 # The attempt's closed reason lexeme, exactly as the state contract writes it (core.contract_bounds).
@@ -123,6 +123,11 @@ def validate_environment_member(value: Any, where: str = "environment member") -
     receipt = value["receipt_id"]
     if receipt is not None and (type(receipt) is not str or not receipt):
         raise ValueError(f"run/5 {where} receipt id is malformed")
+    rows = value["receipts"]
+    if type(rows) not in (list, tuple) or len(rows) > environment.MAX_MEMBER_RECEIPTS:
+        raise ValueError(f"run/5 {where} receipts are malformed")
+    for row in rows:
+        environment.validate_receipt(governance.plain(row))
     return value
 
 

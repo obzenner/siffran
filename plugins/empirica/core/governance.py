@@ -407,6 +407,27 @@ def resolve_submission(governance: Mapping, submission: Mapping,
     return resolved, None
 
 
+def replay_verdict(fingerprint: str, prior: Mapping, outcome: str, presented: str,
+                   replay: str) -> str | None:
+    """The one replay classification every private receipt engine shares (ADR-0072, PR 07's
+    write-first discipline — governance decisions and environment decisions are one engine by
+    this word): the fingerprint is the canonical digest of the receipt's entire reply, the row
+    ``prior`` is the one its id recorded, and ``presented`` is the same reply's digest with its
+    outcome forced to ``present``. An exact replay — of the stored decision, or of the
+    presentation its id recorded — is ``inert`` and reopens nothing. A reply whose present-form
+    differs from the fingerprint its id recorded refuses as ``replay`` (each engine names its
+    own refusal word), binding the whole reply: a decision is exactly its own presentation with
+    another outcome, changed by nothing. ``None`` falls through as a first decision to the
+    caller's admission checks, which hold the named presentation against the member it was
+    recorded for."""
+    if fingerprint in {prior["fingerprint"], prior["presentation_fingerprint"]}:
+        return "inert"
+    if (prior["outcome"] != "present" or outcome == "present"
+            or presented != prior["presentation_fingerprint"]):
+        return replay
+    return None
+
+
 def decision_error(run_id: str, governance: Mapping, decision: Mapping,
                    confirmations: int, budgets: Mapping) -> str | None:
     """Validate one governance decision against current policy (``budgets``: the ceilings in force, which say whether the
@@ -416,17 +437,18 @@ def decision_error(run_id: str, governance: Mapping, decision: Mapping,
     prior = next((r for r in governance["receipts"] if r["id"] == decision["receipt_id"]), None)
     if prior:
         # A receipt's approval_kind is immutable; finalizing a human reservation with an
-        # auto decision (or vice versa) fails closed.
+        # auto decision (or vice versa) fails closed. The replay binding and classification
+        # themselves are the one shared engine (replay_verdict): the entire reply, digest
+        # included, equals its own recorded presentation or its own recorded decision.
         if prior["approval_kind"] != decision["approval_kind"]:
             return "governance.receipt_replay"
-        if fingerprint in {prior["fingerprint"], prior["presentation_fingerprint"]}:
-            return "inert"
         presentation = {k: v for k, v in decision.items()
                         if k not in {"amendment", "submission"}}
         presentation["outcome"] = "present"
-        if (prior["outcome"] != "present" or outcome == "present" or
-                canonical_digest(presentation) != prior["presentation_fingerprint"]):
-            return "governance.receipt_replay"
+        verdict = replay_verdict(fingerprint, prior, outcome, canonical_digest(presentation),
+                                 "governance.receipt_replay")
+        if verdict is not None:
+            return verdict
     # Exact historical replay is settled above. The placeholder otherwise refuses every
     # new decision shape, including a submission without an outcome field.
     if not sized(governance):

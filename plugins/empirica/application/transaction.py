@@ -12,7 +12,8 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              active_spike_heads as captured_heads, audit_binding,
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
-                             preflight_spike_request, plan_spike_request, plan_spike_result, valid_attribution)
+                             preflight_spike_request, plan_spike_request,
+                             plan_spike_result, valid_attribution)
 from core import confirmation, hitl, spike_plan, spike_plan_draft
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
@@ -137,7 +138,12 @@ class Coordinator:
         ceilings = effective_ceilings(command, limits)
         budgets = {**ceilings, "passes_used": 0, "spawns_used": 0,
                    "audit_spawns_used": 0}
-        invocation = command["invocation"]
+        # The host profile ceiling (Empirica 7.2 §4.4) is bound here and nowhere else: StartRun's own
+        # spike_profile member is the one wire word, a provenance copy never decides anything, and
+        # absent means the isolated ceiling — exactly what core.environment.profile_ceiling reads.
+        invocation = {k: v for k, v in command["invocation"].items() if k != "spike_profile"}
+        if (ceiling := command.get("spike_profile")) is not None:
+            invocation["spike_profile"] = ceiling
         envelope = ceilings if delegated_auto(command) else None
         return OperationalState(
             protocol=_proto.protocol_id(), state_schema=_proto.state_schema_id(),
