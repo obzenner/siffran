@@ -460,31 +460,18 @@ class Coordinator:
         The latest observation counts; an unchanged one is ``Inert``. Evidence presented under an earlier
         observation stays presented, so a change of surface never invalidates a key."""
         request_id = "trusted-surface"
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert(request_id)
-        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
-            if isinstance(assembled, dict):
-                return assembled
-            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
+
+        def observe(state: OperationalState, snapshot: EvaluationSnapshot) -> Any:
             if state.invocation["human_surface"] == payload["surface"]:
                 return self._inert_with_run(request_id, snapshot)
             changed = replace(state, invocation={**_plain(state.invocation), "human_surface": payload["surface"]})
-            allowed = self._commit_and_allow(key, read, snapshot, changed, (), request_id)
-            if allowed is RETRY:
-                continue
-            return allowed
-        return self._fault(request_id, "conflict")
+            return changed, ()
+
+        return self._trusted_run(run_id, request_id, observe)
 
     def _human_batch(self, run_id: str, payload: dict[str, Any], plan: Any,
                      request_id: str) -> dict[str, Any]:
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert(request_id)
-        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
-            if isinstance(assembled, dict):
-                return assembled
-            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
+        def settle(state: OperationalState, snapshot: EvaluationSnapshot) -> Any:
             decision = plan(snapshot, payload)
             if decision.result_type == "Fault":
                 return self._fault_with_run(request_id, snapshot)
@@ -492,7 +479,7 @@ class Coordinator:
                 return self._inert_with_run(request_id, snapshot)
             if decision.result_type == "Block":
                 response = self._response(request_id, snapshot, decision)
-                # ADR-0072 (PR 10): the document fetch for an evidence step is the mismatch
+                # ADR-0072: the document fetch for an evidence step is the mismatch
                 # refusal itself — its private result carries the core-rendered pair for the
                 # batch the call named, so no adapter re-renders a dict. The presentation names
                 # its ``key``; a confirmation asks for the batch its own presentation recorded.
@@ -503,7 +490,7 @@ class Coordinator:
                     if key is None:
                         shown = confirmation.presentation(snapshot, payload.get("receipt_id"))
                         key = shown["key"] if shown is not None else None
-                    # m10 (review 2): the fetch renders with the snapshot's own run id, the same
+                    # The fetch renders with the snapshot's own run id, the same
                     # value the recompute in ``core.evaluation`` uses — the two are equal only
                     # because ``decode_handle`` is canonical, so the one source of the fact is the
                     # snapshot, never the caller's handle spelling.
@@ -511,21 +498,13 @@ class Coordinator:
                     if document is not None:
                         response["result"]["document"] = document
                 return response
-            allowed = self._commit_and_allow(key, read, snapshot, state, decision.intent.artifacts, request_id)
-            if allowed is RETRY:
-                continue
-            return allowed
-        return self._fault(request_id, "conflict")
+            return state, decision.intent.artifacts
+
+        return self._trusted_run(run_id, request_id, settle)
 
     def _trusted_artifact(self, run_id: str, kind: str, payload: dict[str, Any], request_id: str,
                           child_id: str | None = None) -> dict[str, Any]:
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert(request_id)
-        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
-            if isinstance(assembled, dict):
-                return assembled
-            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
+        def record(state: OperationalState, snapshot: EvaluationSnapshot) -> Any:
             planned_body = {"kind": kind, **payload, "route_stamp": state.route_stamp,
                             "investigation_stamp": state.investigation_stamp}
             planned_artifact = {"artifact_id": digest(planned_body), "body": planned_body}
@@ -576,11 +555,9 @@ class Coordinator:
                              first_terminal_fingerprint=planned_artifact["artifact_id"])
                 children[index] = child
                 next_state = replace(state, children=tuple(children))
-            allowed = self._commit_and_allow(key, read, snapshot, next_state, (planned_artifact,), request_id)
-            if allowed is RETRY:
-                continue
-            return allowed
-        return self._fault(request_id, "conflict")
+            return next_state, (planned_artifact,)
+
+        return self._trusted_run(run_id, request_id, record)
 
     def trusted_audit_verdict(self, run_id: str, child_id: str, payload: dict[str, Any],
                               request_id: str = "trusted-ingress") -> dict[str, Any]:
@@ -1173,6 +1150,25 @@ class Coordinator:
         except ObservationUnavailable:
             return self._fault(request_id, "unavailable")
         return Assembled(read, state, snapshot)
+
+    def _trusted_run(self, run_id: str, request_id: str,
+                     step: Callable[[OperationalState, EvaluationSnapshot], Any]) -> dict[str, Any]:
+        """One trusted compare-and-set transaction over a run: ``step`` reads the assembled run and
+        returns a closed response, or the ``(next state, artifacts)`` to commit; a commit that lost
+        the revision reads again within the bound. An undecodable handle is ``Inert``."""
+        key = decode_handle(run_id)
+        if key is None:
+            return self._inert(request_id)
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
+            if isinstance(assembled, dict):
+                return assembled
+            planned = step(assembled.state, assembled.snapshot)
+            if isinstance(planned, dict):
+                return planned
+            allowed = self._commit_and_allow(key, assembled.read, assembled.snapshot, *planned, request_id)
+            if allowed is not RETRY:
+                return allowed
+        return self._fault(request_id, "conflict")
 
     def _assembled_reads(self, key: RunKey, command: dict[str, Any], request_id: str,
                          **options: Any) -> Any:
