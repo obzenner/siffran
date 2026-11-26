@@ -1852,6 +1852,7 @@
       "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
     },
     "environmentProposal": {
+      "x-core-validator": "core.environment.validate_proposal",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1877,7 +1878,20 @@
             "minLength": 1,
             "maxLength": 255,
             "pattern": "^(?:(?:sha256:)?[0-9a-f]{12,64}|(?:[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*|(?:(?:(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?|[a-z0-9]+(?:(?:_|__|-+)[a-z0-9]+)*)(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+))(?:@sha256:[0-9a-f]{64}|(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?))(?![\\s\\S])",
-            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound."
+            "x-grammar": {
+              "bare-digest": "^(?:sha256:)?[0-9a-f]{12,64}(?![\\s\\S])",
+              "repo-digest": "^([^\\n]+)@sha256:[0-9a-f]{64}(?![\\s\\S])",
+              "tag": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}(?![\\s\\S])",
+              "name-component": "^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?![\\s\\S])",
+              "registry-domain": "^(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?(?![\\s\\S])"
+            },
+            "x-regression-witnesses": [
+              {
+                "value": "Python:3.12",
+                "defect": "pr-E2c-gpt-6.2-sol.md#5"
+              }
+            ],
+            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound. The x-grammar pieces are that same admission's own decomposition — the one lexer core.spike_plan reuses from the generated contract constants (bound to this word by the conformance harness) — never a second owner. The x-regression-witnesses list is the named corpus of evidenced defects: at most eight entries, unique, each a value at most 256 characters and inside this member's own length bounds, with a short structured defect reference at most 120 characters ('<review file>.md#<finding number>' or 'commit:<40 hex>'), each refused by this word — and the conformance harness feeds each through both judges, so a core that normalizes one input dies there and nowhere else. The guard checks the bounds and the reference's shape; code review controls what a reference names. Ordinary shape probes live in the generated challenges, not here; only demonstrated regressions do."
           }
         },
         "preparation": {
@@ -1888,20 +1902,20 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "pattern": "\\S",
+            "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
             "allOf": [
               {
                 "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
               }
             ],
-            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set."
+            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set. Blank itself means the explicit cross-host whitespace set this member's own pattern writes (U+FEFF included, where JavaScript's \\S says blank and Python's strip does not); no host language's \\s or strip decides."
           }
         },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "maxLength": 600,
-          "pattern": "\\S",
+          "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
           "allOf": [
             {
               "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
@@ -1912,5 +1926,8 @@
       },
       "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
     }
-  }
+  },
+  "x-core-ingress": [
+    "/$defs/environmentProposal"
+  ]
 }

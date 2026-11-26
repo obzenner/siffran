@@ -242,7 +242,10 @@ def shown(diff: str, tests: int) -> Finding | None:
 
 
 def tests_for(source: str) -> list[str]:
-    """The test files that import ``source``'s module (``import m``, ``from pkg.m import``, ``from pkg import m``)."""
+    """The test files that import ``source``'s module (``import m``, ``from pkg.m import``, ``from pkg import m``) —
+    and, for a core module the contracts name in an ``x-core-validator`` annotation, the conformance harness,
+    which exercises the module through the declaration (the contract is the coupling: it says which validator
+    is the core of each registered node; the harness imports tests, never the module directly (ADR-0075))."""
     stem = re.escape(Path(source).stem)
     pattern = re.compile(rf"^\s*(import\s+[\w.]*\b{stem}\b|from\s+[\w.]*\b{stem}\b|from\s+[\w.]+\s+import\s+.*\b{stem}\b)", re.M)
     found = []
@@ -250,7 +253,64 @@ def tests_for(source: str) -> list[str]:
         for test in sorted((ROOT / root).rglob("test_*.py")):
             if pattern.search(test.read_text(encoding="utf-8", errors="replace")):
                 found.append(str(test.relative_to(ROOT)))
+    harness = "plugins/empirica/tests/test_contract_conformance.py"
+    if declared_core_validator(source) and harness not in found:
+        found.append(harness)
     return found
+
+
+def _declared_validators() -> set[str]:
+    """Every ``x-core-validator`` name the v2 contracts declare, dotted (``core.environment.validate_proposal``)."""
+    names: set[str] = set()
+    for document in sorted((ROOT / "contracts" / "empirica" / "v2").glob("*.json")):
+        try:
+            loaded = json.loads(document.read_text(encoding="utf-8"))
+        except (ValueError, OSError):
+            continue
+
+        def collect(node) -> None:
+            if isinstance(node, dict):
+                for key, value in node.items():
+                    if key == "x-core-validator" and isinstance(value, str):
+                        names.add(value)
+                    collect(value)
+            elif isinstance(node, list):
+                for item in node:
+                    collect(item)
+
+        collect(loaded)
+    return names
+
+
+#: A core module's relative imports (``from .x import …``, ``from . import x``): the delegation graph
+#: a declared validator closes over — the modules the harness reaches *through* a contract declaration.
+_REACHES = re.compile(r"^from \.[A-Za-z_0-9]+ import|^from \. import [A-Za-z_0-9]+", re.M)
+
+
+def declared_core_validator(source: str) -> bool:
+    """Is a core module one the conformance harness covers — the validators the contracts declare, and the
+    core modules they reach through their relative imports (``verify`` delegates to ``run``'s helpers the
+    same way ``environment`` delegates its images to ``spike_plan``, and the harness reaches both)?"""
+    if not source.removeprefix("plugins/empirica/").startswith("core/"):
+        return False
+    dotted = "core." + Path(source).stem
+    reach = {name.rpartition(".")[0] for name in _declared_validators()}
+    reach = {module for module in reach if module.startswith("core.")}
+    while True:
+        grown = set(reach)
+        for module in reach:
+            module_file = ROOT / "plugins" / "empirica" / "core" / (module.rpartition(".")[2] + ".py")
+            if not module_file.is_file():
+                continue
+            for statement in _REACHES.findall(module_file.read_text(encoding="utf-8")):
+                if statement.startswith("from . import "):
+                    grown.add("core." + statement.split()[-1])
+                else:
+                    grown.add("core." + statement.split()[1].lstrip("."))
+        if grown == reach:
+            break
+        reach = grown
+    return dotted in reach
 
 
 def runner(tests: list[str], *, python: str) -> str:

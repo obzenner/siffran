@@ -139,7 +139,7 @@ check-ci: ## Fast contributor gate except Pi and UI (PI_CHECKS=1 includes them),
 	@$(call RUN_SUITES,$(CI_SUITES))
 	@printf '\n$(BOLD)CI checks passed.$(RESET)\n'
 
-check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check lifecycle-gates-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
+check-static: lint validate docs-check adr-check empirica-architecture-check empirica-architecture-unit-check contract-check contract-annotations-check empirica-docker-support-contract-check empirica-manifest-check obligations-check vendor-check activation-check empirica-claude-mcp-log-unit-check empirica-run-census-unit-check empirica-context-economy-unit-check claude-subagent-models-unit-check pi-canary-unit-check lifecycle-gates-unit-check pi-validator-unit-check skills-check suites-check ## Lint, manifests, skills, suite ownership, docs, ADRs, architecture validator and its tests, contracts, Docker support contract, vendor copies, activation, canary config
 	@printf '$(BOLD)==> static suite ok$(RESET)\n'
 
 check-core: empirica-author-view-golden empirica-governance-dialog-golden empirica-bridge-composition-check empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check empirica-generic-harness-check empirica-generic-execution-check empirica-run5-check dev-python ## Fast host-neutral contracts, malformed input, state, bridge, governance, composition, and generic sandbox boundaries
@@ -155,6 +155,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_author_view
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(PYTHON) -m unittest -q test_context_economy
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_hitl_document
+	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_contract_conformance
 	@cd $(PLUGINS_DIR)/empirica/tests && PYTHONPATH=.. $(DEV_PYTHON) -m unittest -q test_evidence_document_binding
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_AUDIT_PROTOCOL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_IDENTITY_TESTS)
@@ -358,7 +359,7 @@ adr-check: ## Check ADR link health and numbering (adrs doctor; fails when adrs 
 		printf 'error: adrs not installed (install it, or set EMPIRICA_ALLOW_SKIP=1 to skip the ADR check explicitly)\n' >&2; exit 1; \
 	fi
 
-.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits empirica-manifest-check
+.PHONY: contract-check contract-fixtures contract-schemas contract-schema-generator-unit-check registry-doc empirica-docker-support-contract-check empirica-spike-limits empirica-manifest-check contract-bounds contract-annotations-check contract-pattern-parity
 contract-fixtures: ## Regenerate the Empirica wire-fixture fields (contracts/empirica/v2/fixtures, from the real service), and the observer fixtures from build_store's FIXTURE_SCENARIOS through the real service and observer, into contracts/empirica-ui-view/v1/fixtures and its byte copy plugins/empirica/vendor/contracts/empirica-ui-view/v1/fixtures (the built-in demo)
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py
@@ -368,6 +369,19 @@ registry-doc: ## Rewrite the generated data regions of doc/design/empirica-host-
 
 contract-schemas: ## Regenerate shared Empirica schema definitions and local embeddings
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py
+
+contract-bounds: dev-python ## Regenerate the core bounds module from the annotated run-state definitions (core/contract_bounds.py)
+	@$(DEV_PYTHON) $(SCRIPTS)/gen_contract_bounds.py
+
+contract-pattern-parity: ## Run every registered contract pattern and grammar piece through Python re and JavaScript RegExp/u on one corpus (node); fail on any verdict either engine keeps to itself
+	@$(DEV_PYTHON) $(SCRIPTS)/check_pattern_parity.py
+
+contract-annotations-check: dev-python ## Guard the x-core-validator/x-core-only/x-grammar annotations: reachable definitions annotated, names exist, nothing orphaned, no unsupported keyword; unit controls for the strategies engine, the Pattern parity scope builder, and the generator's ownership refusal
+	@$(DEV_PYTHON) $(SCRIPTS)/check_core_annotations.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_check_core_annotations.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_gen_contract_bounds.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_pattern_parity.py
+	@$(DEV_PYTHON) -m unittest -q $(SCRIPTS)/tests/test_contract_strategies.py
 
 contract-schema-generator-unit-check: ## Check shared-schema drift, near-match, collision, and stale-definition handling
 	@$(PYTHON) -m unittest -q $(SCRIPTS)/tests/test_sync_schema_defs.py
@@ -392,7 +406,9 @@ empirica-probe-image-pin: ## Pin the Docker qualification probe image (an offici
 contract-check: dev-python ## Validate schemas, shared definitions, wire fixtures and conformance; the observer fixtures: both copies byte-equal, no drift from a regeneration, the UI-view validator, the schema-derived generator (every declared enum value producible), and the contract id equal to its folder
 	@printf '$(BOLD)==> contracts$(RESET)\n'
 	@$(PYTHON) $(SCRIPTS)/sync_schema_defs.py --check
+	@$(DEV_PYTHON) $(SCRIPTS)/gen_contract_bounds.py --check
 	@$(MAKE) --no-print-directory contract-schema-generator-unit-check
+	@$(MAKE) --no-print-directory contract-pattern-parity
 	@$(PYTHON) $(SCRIPTS)/regen_contract_fixtures.py --check
 	@$(PYTHON) $(SCRIPTS)/validate_contracts.py
 	@$(PYTHON) $(SCRIPTS)/regen_ui_view_fixtures.py --check

@@ -1810,84 +1810,15 @@ def check_state_schema_mirror(state_schema: dict, contract: dict, request_schema
     if fingerprint_required != reg_terminal:
         errors.append(f"{where}: state terminal-fingerprint branches {sorted(fingerprint_required)} "
                       f"!= registry terminal_states {sorted(reg_terminal)}")
-    # run/5 environment members (spec §4.2, node E2): required, closed, bounded — and the bounds
-    # mirror the pure core owners, core.environment (E1) for the proposal body and core.run for
-    # the member vocabularies, so the persisted schema cannot drift from the model. The closed
-    # `unqualified` backend variant must be present in the state oneOf and in the public
-    # response oneOf alike: the runView projection copies the binding byte-for-byte.
+    # run/5: the persisted discriminator is exact (E2a); the environment member shapes under it are
+    # generated testing, not a mirrored comparison (ADR-0075): their definitions carry x-core-validator
+    # annotations, plugins/empirica/tests/test_contract_conformance.py draws and derives from their
+    # keywords in both directions, and make contract-bounds regenerates their bounds into
+    # core/contract_bounds.py — the parity block this replaced is gone by design.
     if props.get("state_schema", {}).get("const") != "empirica.run/5":
         errors.append(f"{where}: state_schema const must be empirica.run/5")
-    for member in ("environment", "environment_history", "qualification_attempts"):
-        if member not in state_schema.get("required", []):
-            errors.append(f"{where}: state must require '{member}' (run/5)")
-    from core import environment as environment_model
-    from core.run import ATTEMPT_OUTCOMES, ENVIRONMENT_STATES
-    from core.spike_plan import MAX_IMAGE_REFERENCE_BYTES, NETWORK_PROFILES
-    defs = state_schema.get("$defs", {})
-    member_def = defs.get("environmentMember", {})
-    if (member_def.get("additionalProperties") is not False
-            or set(member_def.get("required", [])) != {
-                "revision", "proposal", "digest", "state", "receipt_id"}):
-        errors.append(f"{where}: environmentMember must be the closed five-field member "
-                      "(revision, proposal, digest, state, receipt_id)")
-    member_props = member_def.get("properties", {})
-    if member_props.get("revision", {}).get("minimum") != 1:
-        errors.append(f"{where}: environmentMember revision must be an integer of at least 1")
-    if set(member_props.get("state", {}).get("enum", [])) != set(ENVIRONMENT_STATES):
-        errors.append(f"{where}: environmentMember state enum {sorted(member_props.get('state', {}).get('enum', []))} "
-                      f"!= core.run.ENVIRONMENT_STATES {sorted(ENVIRONMENT_STATES)}")
-    if (member_props.get("digest", {}).get("pattern") != r"^sha256:[0-9a-f]{64}(?![\s\S])"
-            or member_props.get("proposal", {}).get("$ref") != "#/$defs/environmentProposal"):
-        errors.append(f"{where}: environmentMember digest must be digest256 and its proposal must be "
-                      "the shared environmentProposal definition")
-    if member_props.get("receipt_id", {}).get("type") != ["string", "null"]:
-        errors.append(f"{where}: environmentMember receipt_id must be a string or null")
-    proposal = defs.get("environmentProposal", {})
-    proposal_items = proposal.get("properties", {})
-    if (set(proposal.get("required", [])) != {
-            "profile_id", "spike_images", "preparation", "rationale"}
-            or proposal.get("additionalProperties") is not False
-            or set(proposal_items.get("profile_id", {}).get("enum", [])) != set(NETWORK_PROFILES)
-            or proposal_items.get("spike_images", {}).get("minItems") != 1
-            or proposal_items.get("spike_images", {}).get("maxItems") != environment_model.MAX_SPIKE_IMAGES
-            or proposal_items.get("spike_images", {}).get("uniqueItems") is not True
-            or proposal_items.get("spike_images", {}).get("items", {}).get("maxLength")
-            != MAX_IMAGE_REFERENCE_BYTES
-            or proposal_items.get("preparation", {}).get("minItems") != 1
-            or proposal_items.get("preparation", {}).get("maxItems") != environment_model.MAX_PREPARATION_STEPS
-            or proposal_items.get("preparation", {}).get("items", {}).get("maxLength") != environment_model.MAX_PREPARATION_CHARS
-            or proposal_items.get("rationale", {}).get("maxLength") != environment_model.MAX_RATIONALE_CHARS):
-        errors.append(f"{where}: environmentProposal must mirror core.environment's closed body and bounds "
-                      "(profiles, 1..{environment_model.MAX_SPIKE_IMAGES} unique images of at most "
-                      f"{MAX_IMAGE_REFERENCE_BYTES} characters, 1..{environment_model.MAX_PREPARATION_STEPS} "
-                      f"preparation steps of at most {environment_model.MAX_PREPARATION_CHARS} characters, "
-                      f"a nonblank rationale of at most {environment_model.MAX_RATIONALE_CHARS})")
-    history = props.get("environment_history", {})
-    if (history.get("maxItems") != environment_model.MAX_ENVIRONMENT_HISTORY
-            or history.get("items", {}).get("$ref") != "#/$defs/environmentMember"):
-        errors.append(f"{where}: environment_history must be bounded at "
-                      f"core.environment.MAX_ENVIRONMENT_HISTORY ({environment_model.MAX_ENVIRONMENT_HISTORY}) "
-                      "items of environmentMember")
-    attempts = props.get("qualification_attempts", {})
-    attempt_def = defs.get("qualificationAttempt", {})
-    attempt_props = attempt_def.get("properties", {})
-    if (attempts.get("maxItems") != environment_model.MAX_QUALIFICATION_ATTEMPTS
-            or attempts.get("items", {}).get("$ref") != "#/$defs/qualificationAttempt"):
-        errors.append(f"{where}: qualification_attempts must be bounded at "
-                      f"core.environment.MAX_QUALIFICATION_ATTEMPTS ({environment_model.MAX_QUALIFICATION_ATTEMPTS}) "
-                      "items of qualificationAttempt")
-    if (attempt_def.get("additionalProperties") is not False
-            or set(attempt_def.get("required", [])) != {
-                "attempt_id", "revision", "started_stamp", "outcome", "record_digest", "reason"}
-            or set(attempt_props.get("outcome", {}).get("enum", [])) != set(ATTEMPT_OUTCOMES)
-            or attempt_props.get("reason", {}).get("pattern") != "^[a-z][a-z0-9-]{0,63}(?![\\s\\S])"
-            or attempt_props.get("record_digest", {}).get("pattern") != r"^sha256:[0-9a-f]{64}(?![\s\S])"
-            or attempt_props.get("revision", {}).get("minimum") != 1
-            or attempt_props.get("started_stamp", {}).get("minimum") != 0
-            or attempt_props.get("attempt_id", {}).get("maxLength") != 128):
-        errors.append(f"{where}: qualificationAttempt must be the closed six-field attempt mirroring "
-                      "core.run (outcome enum {sorted(ATTEMPT_OUTCOMES)}, a bounded closed reason, "
-                      "digest256-or-null record, revision >= 1, stamp >= 0, attempt id of at most 128)")
+    # The closed `unqualified` backend variant must be present in the state oneOf and the public
+    # response oneOf alike: the runView projection copies the binding byte-for-byte (E2a).
     state_kinds = sorted(branch.get("properties", {}).get("kind", {}).get("const")
                          for branch in props.get("spike_backend", {}).get("oneOf", []))
     response_kinds = sorted(branch.get("properties", {}).get("kind", {}).get("const")
@@ -5072,21 +5003,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         document_member["type"] = "string"
         expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
                "string-or-null", "state: receipts document member stops admitting null")
-        # run/5 environment-member drift (E2): a schema that stops requiring one of the members
-        bad_ss = copy.deepcopy(state_schema)
-        bad_ss["required"].remove("environment")
-        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
-               "must require 'environment'", "state: run/5 drops a required environment member")
-        # run/5 environment-member drift: the proposal bounds stop mirroring core.environment
-        bad_ss = copy.deepcopy(state_schema)
-        bad_ss["$defs"]["environmentProposal"]["properties"]["spike_images"]["maxItems"] = 17
-        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
-               "core.environment's closed body and bounds", "state: environmentProposal bounds drift")
-        # run/5 attempt drift: the attempts ceiling stops mirroring the core bound
-        bad_ss = copy.deepcopy(state_schema)
-        bad_ss["properties"]["qualification_attempts"]["maxItems"] = 9
-        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
-               "MAX_QUALIFICATION_ATTEMPTS (8)", "state: qualification attempts ceiling drift")
         # run/5 binding-variant drift: the state oneOf loses the closed unqualified variant
         bad_ss = copy.deepcopy(state_schema)
         bad_ss["properties"]["spike_backend"]["oneOf"].pop(
@@ -5095,11 +5011,6 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
                 if branch.get("properties", {}).get("kind", {}).get("const") == "unqualified"))
         expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
                "must equal the public response spikeBackend kinds", "state: unqualified variant drifts")
-        # run/5 attempt drift: the outcome enum stops mirroring core.run
-        bad_ss = copy.deepcopy(state_schema)
-        bad_ss["$defs"]["qualificationAttempt"]["properties"]["outcome"]["enum"].remove("superseded")
-        expect(lambda e: check_state_schema_mirror(bad_ss, registry, req_schema, res_schema, e, "neg"),
-               "closed six-field attempt", "state: attempt outcome enum drifts")
     bad_state = {"budgets": {"max_passes": 1, "passes_used": 5,
                             "max_spawns": 0, "spawns_used": 0}}
     expect(lambda e: check_state_invariants(bad_state, e, "neg"),

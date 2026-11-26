@@ -11,6 +11,14 @@ from enum import Enum
 from typing import Any, Mapping
 
 from .canonical import canonical_digest
+from .contract_bounds import (
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_GRAMMAR_BARE_DIGEST as _GRAMMAR_BARE_DIGEST,
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_GRAMMAR_NAME_COMPONENT as _GRAMMAR_NAME_COMPONENT,
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_GRAMMAR_REGISTRY_DOMAIN as _GRAMMAR_REGISTRY_DOMAIN,
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_GRAMMAR_REPO_DIGEST as _GRAMMAR_REPO_DIGEST,
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_GRAMMAR_TAG as _GRAMMAR_TAG,
+    ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_MAX_LENGTH as _GRAMMAR_IMAGE_MAX_LENGTH,
+)
 from .freshness import is_digest256, validate_digest256, validate_relative_posix_path
 
 PLAN_SCHEMA = "empirica.spike-plan/2"
@@ -21,7 +29,10 @@ MAX_ENVIRONMENT = 128
 MAX_ARGV = 256
 MAX_TEXT_BYTES = 4096
 MAX_PATH_BYTES = 1024
-MAX_IMAGE_REFERENCE_BYTES = 255
+# The image-grammar constants are contract-owned (the environmentProposal spike-image lexeme wrote them
+# once in shared-defs.json's x-grammar; make contract-bounds regenerated them here) — the core consumes
+# the contract's word, it never keeps a second copy (E2c review finding 6: one owner for a grammar).
+MAX_IMAGE_REFERENCE_BYTES = _GRAMMAR_IMAGE_MAX_LENGTH
 MAX_STAGING_FILES = 256
 MAX_STAGING_BYTES = 64 * 1024 * 1024
 MAX_FILE_SIZE_BYTES = 64 * 1024 * 1024
@@ -49,13 +60,11 @@ QUALIFIED_BACKEND_FIELDS = frozenset({
 })
 
 _ARCHITECTURE_ALIASES = {"aarch64": "arm64", "x86_64": "amd64"}
-_IMAGE_PREFIX = re.compile(r"^(?:sha256:)?[0-9a-f]{12,64}$")
-_REPO_DIGEST = re.compile(r"^(.+)@sha256:[0-9a-f]{64}$")
-_TAG = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$")
-_NAME_COMPONENT = re.compile(r"^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*$")
-_DOMAIN = re.compile(
-    r"^(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?$"
-)
+_IMAGE_PREFIX = re.compile(_GRAMMAR_BARE_DIGEST)
+_REPO_DIGEST = re.compile(_GRAMMAR_REPO_DIGEST)
+_TAG = re.compile(_GRAMMAR_TAG)
+_NAME_COMPONENT = re.compile(_GRAMMAR_NAME_COMPONENT)
+_DOMAIN = re.compile(_GRAMMAR_REGISTRY_DOMAIN)
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 
 

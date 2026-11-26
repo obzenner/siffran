@@ -553,6 +553,7 @@
       }
     },
     "environment": {
+      "x-core-validator": "core.run.validate_environment",
       "description": "The run's latest environment proposal revision; null while none exists. Earlier revisions are immutable history in environment_history.",
       "oneOf": [
         {
@@ -564,6 +565,7 @@
       ]
     },
     "environment_history": {
+      "x-core-validator": "core.run.validate_environment_history",
       "description": "Immutable earlier environment revisions; the latest lives in environment.",
       "type": "array",
       "maxItems": 64,
@@ -572,6 +574,7 @@
       }
     },
     "qualification_attempts": {
+      "x-core-validator": "core.run.validate_qualification_attempts",
       "description": "Append-only host qualification attempts; the sequence number is derived, never stored.",
       "type": "array",
       "maxItems": 8,
@@ -1056,6 +1059,13 @@
       "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])"
     },
     "environmentMember": {
+      "x-core-validator": "core.run.validate_environment_member",
+      "x-core-only": [
+        {
+          "rule": "The member's digest equals the canonical digest of its own proposal body, as core.environment.proposal_digest recomputes it over the thawed proposal: the schema can only see the digest's shape, never the binding to the member it rides in (ADR-0075).",
+          "test": "plugins/empirica/tests/test_run5_binding.py::Run5EnvironmentStateTests.test_the_environments_digest_is_the_canonical_proposal_digest"
+        }
+      ],
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1069,7 +1079,14 @@
         "revision": {
           "type": "integer",
           "minimum": 1,
-          "description": "Monotonic per-run proposal revision."
+          "description": "Monotonic per-run proposal revision.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "proposal": {
           "$ref": "#/$defs/environmentProposal"
@@ -1098,6 +1115,7 @@
       }
     },
     "qualificationAttempt": {
+      "x-core-validator": "core.run.validate_qualification_attempt",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1117,12 +1135,26 @@
         "revision": {
           "type": "integer",
           "minimum": 1,
-          "description": "The approved revision this attempt qualifies."
+          "description": "The approved revision this attempt qualifies.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "started_stamp": {
           "type": "integer",
           "minimum": 0,
-          "description": "stamp_seq value when the attempt was reserved."
+          "description": "stamp_seq value when the attempt was reserved.",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "outcome": {
           "enum": [
@@ -1152,6 +1184,7 @@
       }
     },
     "environmentProposal": {
+      "x-core-validator": "core.environment.validate_proposal",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -1177,7 +1210,20 @@
             "minLength": 1,
             "maxLength": 255,
             "pattern": "^(?:(?:sha256:)?[0-9a-f]{12,64}|(?:[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*|(?:(?:(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?|[a-z0-9]+(?:(?:_|__|-+)[a-z0-9]+)*)(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+))(?:@sha256:[0-9a-f]{64}|(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?))(?![\\s\\S])",
-            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound."
+            "x-grammar": {
+              "bare-digest": "^(?:sha256:)?[0-9a-f]{12,64}(?![\\s\\S])",
+              "repo-digest": "^([^\\n]+)@sha256:[0-9a-f]{64}(?![\\s\\S])",
+              "tag": "^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}(?![\\s\\S])",
+              "name-component": "^[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*(?![\\s\\S])",
+              "registry-domain": "^(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?(?![\\s\\S])"
+            },
+            "x-regression-witnesses": [
+              {
+                "value": "Python:3.12",
+                "defect": "pr-E2c-gpt-6.2-sol.md#5"
+              }
+            ],
+            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound. The x-grammar pieces are that same admission's own decomposition — the one lexer core.spike_plan reuses from the generated contract constants (bound to this word by the conformance harness) — never a second owner. The x-regression-witnesses list is the named corpus of evidenced defects: at most eight entries, unique, each a value at most 256 characters and inside this member's own length bounds, with a short structured defect reference at most 120 characters ('<review file>.md#<finding number>' or 'commit:<40 hex>'), each refused by this word — and the conformance harness feeds each through both judges, so a core that normalizes one input dies there and nowhere else. The guard checks the bounds and the reference's shape; code review controls what a reference names. Ordinary shape probes live in the generated challenges, not here; only demonstrated regressions do."
           }
         },
         "preparation": {
@@ -1188,20 +1234,20 @@
             "type": "string",
             "minLength": 1,
             "maxLength": 200,
-            "pattern": "\\S",
+            "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
             "allOf": [
               {
                 "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
               }
             ],
-            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set."
+            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set. Blank itself means the explicit cross-host whitespace set this member's own pattern writes (U+FEFF included, where JavaScript's \\S says blank and Python's strip does not); no host language's \\s or strip decides."
           }
         },
         "rationale": {
           "type": "string",
           "minLength": 1,
           "maxLength": 600,
-          "pattern": "\\S",
+          "pattern": "[^ \t\n\r\f\u000b   -     　﻿]",
           "allOf": [
             {
               "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
@@ -1212,5 +1258,10 @@
       },
       "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
     }
-  }
+  },
+  "x-core-ingress": [
+    "/properties/environment",
+    "/properties/environment_history",
+    "/properties/qualification_attempts"
+  ]
 }

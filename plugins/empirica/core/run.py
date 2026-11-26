@@ -7,6 +7,10 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from . import environment, governance, spike_plan
+from .contract_bounds import (
+    QUALIFICATION_ATTEMPT_ATTEMPT_ID_MAX_LENGTH,
+    QUALIFICATION_ATTEMPT_REASON_PATTERNS,
+)
 
 
 def delegated_auto(command: Mapping[str, Any]) -> bool:
@@ -82,33 +86,29 @@ ATTEMPT_OUTCOMES = ("reserved", "succeeded", "failed", "superseded")
 _ENVIRONMENT_MEMBER_FIELDS = ("revision", "proposal", "digest", "state", "receipt_id")
 _QUALIFICATION_ATTEMPT_FIELDS = ("attempt_id", "revision", "started_stamp", "outcome",
                                  "record_digest", "reason")
+# The attempt's closed reason lexeme, exactly as the state contract writes it (core.contract_bounds).
+_ATTEMPT_REASON_PATTERN = QUALIFICATION_ATTEMPT_REASON_PATTERNS[0]
 
 
-def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Mapping[str, Any]:
-    """The closed {revision, proposal, digest, state, receipt_id} member.
-
-    The bounds mirror ``core.environment``; the digest is the member's own coherence check —
-    it must equal the canonical digest of the exact proposal body it carries. ``nullable``: only
-    the current member may be null \"none exists yet\"; a history row is always an object."""
-    if value is None:
-        if nullable:
-            return None
-        raise ValueError(f"run/5 {where} must be an environment member, not null")
+def validate_environment_member(value: Any, where: str = "environment member") -> Mapping[str, Any]:
+    """One run/5 environment member's closed shape — the contract-conformance harness's validator
+    (``x-core-validator``, ADR-0075): bounds, vocabularies and patterns exactly as state.schema.json
+    writes them. The member's digest is held to its shape here; its coherence with the member's own
+    proposal body stays core-only (the schema cannot speak it), pinned by the contract's one named test."""
     if not isinstance(value, Mapping) or set(value) != set(_ENVIRONMENT_MEMBER_FIELDS):
         raise ValueError(f"run/5 {where} is malformed")
     revision = value["revision"]
     if type(revision) is not int or revision < 1:
         raise ValueError(f"run/5 {where} revision is malformed")
-    proposal = value["proposal"]
     try:
-        if not spike_plan.is_digest256(value["digest"]):
-            raise environment.EnvironmentProposalError("digest shape")
-        # A replace() passes the frozen member back in: thaw it to the plain form the ingress
-        # validator requires instead of loosening that validator.
-        if environment.proposal_digest(governance.plain(proposal)) != value["digest"]:
-            raise environment.EnvironmentProposalError("digest coherence")
+        # A replace() passes the frozen member back in; the core's one plain() (governance.plain,
+        # the reuse E2a's review demanded — never a second copy in this module) thaws it to the
+        # plain dict/list shapes the ingress validator requires.
+        environment.validate_proposal(governance.plain(value["proposal"]))
     except environment.EnvironmentProposalError as exc:
         raise ValueError(f"run/5 {where} proposal or digest is malformed") from exc
+    if not spike_plan.is_digest256(value["digest"]):
+        raise ValueError(f"run/5 {where} proposal or digest is malformed")
     if value["state"] not in ENVIRONMENT_STATES:
         raise ValueError(f"run/5 {where} state is unknown")
     receipt = value["receipt_id"]
@@ -117,8 +117,23 @@ def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Map
     return value
 
 
-def _qualification_attempt(value: Any) -> Mapping[str, Any]:
-    """One closed host qualification attempt; shape only — sequence and admission are derived."""
+def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Mapping[str, Any]:
+    """The closed {revision, proposal, digest, state, receipt_id} member with its digest coherence —
+    it must equal the canonical digest of the exact proposal body it carries. ``nullable``: only
+    the current member may be null \"none exists yet\"; a history row is always an object."""
+    if value is None:
+        if nullable:
+            return None
+        raise ValueError(f"run/5 {where} must be an environment member, not null")
+    validate_environment_member(value, where)
+    if environment.proposal_digest(governance.plain(value["proposal"])) != value["digest"]:
+        raise ValueError(f"run/5 {where} proposal or digest is malformed")
+    return value
+
+
+def validate_qualification_attempt(value: Any) -> Mapping[str, Any]:
+    """One closed host qualification attempt — the contract-conformance harness's validator for the
+    annotated ``qualificationAttempt`` definition (ADR-0075); shape only, sequence and admission are derived."""
     if not isinstance(value, Mapping) or set(value) != set(_QUALIFICATION_ATTEMPT_FIELDS):
         raise ValueError("run/5 qualification attempt is malformed")
     if type(value["revision"]) is not int or value["revision"] < 1:
@@ -132,11 +147,40 @@ def _qualification_attempt(value: Any) -> Mapping[str, Any]:
         raise ValueError("run/5 qualification attempt record digest is malformed")
     reason = value["reason"]
     if reason is not None and (type(reason) is not str
-                               or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", reason)):
+                               or not re.fullmatch(_ATTEMPT_REASON_PATTERN, reason)):
         raise ValueError("run/5 qualification attempt reason is malformed")
-    if type(value["attempt_id"]) is not str or not value["attempt_id"] or len(value["attempt_id"]) > 128:
+    if (type(value["attempt_id"]) is not str or not value["attempt_id"]
+            or len(value["attempt_id"]) > QUALIFICATION_ATTEMPT_ATTEMPT_ID_MAX_LENGTH):
         raise ValueError("run/5 qualification attempt id is malformed")
     return value
+
+
+def validate_environment(value: Any) -> Mapping[str, Any] | None:
+    """The run's current environment member — harness validator for the annotated ``environment`` state
+    member: null \"none exists yet\", or one member of the closed shape (its digest coherence stays
+    core-only, pinned by the member definition's one named test)."""
+    if value is None:
+        return None
+    return validate_environment_member(value, "environment")
+
+
+def validate_environment_history(value: Any) -> list | tuple:
+    """The run's immutable earlier revisions — harness validator for ``environment_history``: a real
+    bounded sequence (never a mapping, never an unsized iterable), each row a shaped member. The rows'
+    digest coherence stays core-only, pinned by the member definition's one named test."""
+    rows = _sequence(value, "environment history", environment.MAX_ENVIRONMENT_HISTORY)
+    for row in rows:
+        validate_environment_member(row, "environment history")
+    return rows
+
+
+def validate_qualification_attempts(value: Any) -> list | tuple:
+    """The run's append-only host qualification attempts — harness validator for
+    ``qualification_attempts``: a real bounded sequence of shaped attempts."""
+    rows = _sequence(value, "qualification attempts", environment.MAX_QUALIFICATION_ATTEMPTS)
+    for row in rows:
+        validate_qualification_attempt(row)
+    return rows
 
 
 @dataclass(frozen=True)
@@ -178,7 +222,7 @@ class OperationalState:
                         for item in history_rows)
         attempt_rows = _sequence(self.qualification_attempts, "qualification attempts",
                                  environment.MAX_QUALIFICATION_ATTEMPTS)
-        attempts = tuple(_immutable(_qualification_attempt(item)) for item in attempt_rows)
+        attempts = tuple(_immutable(validate_qualification_attempt(item)) for item in attempt_rows)
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))

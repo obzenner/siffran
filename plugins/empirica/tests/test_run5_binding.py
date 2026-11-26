@@ -17,6 +17,7 @@ from application.generic_spike import GenericQualifiedBackend
 from application.ports import SpikesUnavailable
 from application.transaction import Coordinator
 from core import environment
+from core.run import ATTEMPT_OUTCOMES as ENVIRONMENT_RUN_ATTEMPT_OUTCOMES
 from core import spike_plan
 from core.records import Conflict, Present, Revision, RunKey
 
@@ -466,29 +467,6 @@ class Run5EnvironmentStateTests(unittest.TestCase):
                 self.assertFalse(protocol.schema_validator("state").is_valid(missing))
                 self.assertEqual(run_state.classify_and_decode(missing).kind, "current_corrupt")
 
-    def test_environment_member_is_closed_and_bounded(self):
-        bad_members = {
-            "extra key": {**_environment_member(), "attempt": 1},
-            "missing key": {k: v for k, v in _environment_member().items() if k != "receipt_id"},
-            "zero revision": _environment_member(revision=0),
-            "boolean revision": _environment_member(revision=True),
-            "unknown state": _environment_member(state="bound"),
-            "empty receipt id": _environment_member(receipt_id=""),
-            "numeric receipt id": _environment_member(receipt_id=7),
-            "unknown profile": _environment_member(profile_id="docker-rust-v1"),
-            "no spike images": _environment_member(spike_images=[]),
-            "duplicated images": _environment_member(spike_images=["python:3.12", "python:3.12"]),
-            "whitespace image": _environment_member(spike_images=["python: 3"]),
-            "no preparation": _environment_member(preparation=[]),
-            "blank preparation": _environment_member(preparation=["   "]),
-            "blank rationale": _environment_member(rationale=" "),
-        }
-        for label, member in bad_members.items():
-            candidate = self._valid_document(environment=member)
-            with self.subTest(member=label):
-                self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
-                self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
-
     def test_the_environments_digest_is_the_canonical_proposal_digest(self):
         # the schema only sees a sha256, so this coherence check is the core's alone
         member = _environment_member()
@@ -503,23 +481,11 @@ class Run5EnvironmentStateTests(unittest.TestCase):
                     replace(run_state.classify_and_decode(self.fixture).state,
                             environment=_environment_member(digest=impostor))
 
-    def test_environment_history_is_bounded_at_the_last_smaller_size(self):
-        maximum = environment.MAX_ENVIRONMENT_HISTORY
-        for count, valid in ((maximum, True), (maximum + 1, False)):
-            candidate = self._valid_document(history=[
-                _environment_member(revision=index + 1, state="rejected")
-                for index in range(count)])
-            with self.subTest(history=count):
-                self.assertEqual(protocol.schema_validator("state").is_valid(candidate), valid)
-                if not valid:
-                    self.assertEqual(run_state.classify_and_decode(candidate).kind,
-                                     "current_corrupt")
-
     def test_operational_state_bounds_the_two_arrays_itself(self):
         state = run_state.classify_and_decode(self.fixture).state
         history = tuple(_environment_member(revision=index + 1, state="rejected")
                        for index in range(environment.MAX_ENVIRONMENT_HISTORY))
-        outcomes = ("reserved", "succeeded", "failed", "superseded")
+        outcomes = tuple(ENVIRONMENT_RUN_ATTEMPT_OUTCOMES)
         attempts = tuple(
             _attempt_member(attempt_id=f"qualification-{index + 1}", started_stamp=index + 1,
                             outcome=outcomes[index % len(outcomes)])
@@ -610,37 +576,6 @@ class Run5EnvironmentStateTests(unittest.TestCase):
                     replace(state, **{field: b"rows"})
         replace(state, environment_history=[], qualification_attempts=())
         replace(state, environment_history=plain_history, qualification_attempts=plain_attempts)
-
-    def test_qualification_attempts_are_closed_bounded_and_pattern_checked(self):
-        maximum = environment.MAX_QUALIFICATION_ATTEMPTS
-        candidate = self._valid_document(attempts=[
-            _attempt_member(attempt_id=f"qualification-{index + 1}", started_stamp=index + 1)
-            for index in range(maximum)])
-        protocol.schema_validator("state").validate(candidate)
-        self.assertEqual(run_state.classify_and_decode(candidate).kind, "valid")
-        over = self._valid_document(attempts=[
-            _attempt_member(attempt_id=f"qualification-{index + 1}", started_stamp=index + 1)
-            for index in range(maximum + 1)])
-        self.assertFalse(protocol.schema_validator("state").is_valid(over))
-        bad_attempts = {
-            "empty attempt id": _attempt_member(attempt_id=""),
-            "boolean stamp": _attempt_member(started_stamp=True),
-            "string revision": _attempt_member(revision="1"),
-            "unknown outcome": _attempt_member(outcome="orphaned"),
-            "blank reason": _attempt_member(reason=""),
-            "uppercase reason": _attempt_member(reason="Environment-Required"),
-            "spaced reason": _attempt_member(reason="environment required"),
-            "malformed record digest": _attempt_member(record_digest="bad"),
-        }
-        base_ok_reason = _attempt_member(reason="environment-required")
-        protocol.schema_validator("state").validate(self._valid_document(
-            attempts=[base_ok_reason]))
-        for label, attempt in bad_attempts.items():
-            candidate = self._valid_document(attempts=[attempt])
-            with self.subTest(attempt=label):
-                self.assertFalse(protocol.schema_validator("state").is_valid(candidate))
-                self.assertEqual(run_state.classify_and_decode(candidate).kind, "current_corrupt")
-
 
 class StartSelectionTests(unittest.TestCase):
     def coordinator(self, selector, *, workspace=None, harness=None, runs=None, artifacts=None):
