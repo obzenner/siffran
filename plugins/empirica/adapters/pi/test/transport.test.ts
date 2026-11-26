@@ -19,16 +19,18 @@ import {
   ROOT_OPTIONAL_KEYS,
   ROOT_REQUIRED_KEYS,
   SPIKE_ACTION_OPTIONAL_KEYS,
+  QUALIFY_ACTION_OPTIONAL_KEYS,
+  QUALIFY_ACTION_REQUIRED_KEYS,
   SPIKE_ACTION_REQUIRED_KEYS,
   SPIKE_BRIDGE_TIMEOUT_MS,
   bridgeProcessConfig,
   bridgeTimeoutMs,
   createStdioBridgeDispatch,
   defaultBridgeConfig,
-  isExactSpikeRequest,
+  isLongOperationRequest,
 } from "../src/stdio-transport.ts";
 import { createPrivateIngress, type PrivateOperation } from "../src/private-transport.ts";
-import { resolveRunRequest } from "../src/translate.ts";
+import { observeActionRequest, resolveRunRequest } from "../src/translate.ts";
 import { GuardError } from "../src/guard.ts";
 import { contractProfileId } from "./fakes.ts";
 
@@ -141,7 +143,7 @@ test("only an exact closed generic spike envelope gets 300s; Python owns deep pl
   };
   assert.equal(ORDINARY_BRIDGE_TIMEOUT_MS, 30_000);
   assert.equal(SPIKE_BRIDGE_TIMEOUT_MS, 300_000);
-  assert.equal(isExactSpikeRequest(spike), true);
+  assert.equal(isLongOperationRequest(spike), true);
   // Deliberately incomplete beyond the schema discriminator: TypeScript classifies only the closed
   // outer action for transport time; the Python request/core validators remain authoritative.
   assert.equal(bridgeTimeoutMs(spike, defaultBridgeConfig()), 300_000);
@@ -149,7 +151,7 @@ test("only an exact closed generic spike envelope gets 300s; Python owns deep pl
   const deepPlanNearMiss = { ...spike, command: { ...spike.command, action: {
     ...spike.command.action, plan: { ...spike.command.action.plan, framework_ceiling: 1 },
   } } };
-  assert.equal(isExactSpikeRequest(deepPlanNearMiss), true,
+  assert.equal(isLongOperationRequest(deepPlanNearMiss), true,
     "deep closed-plan validation belongs only to the Python request/core boundary");
 
   const nearMisses = [
@@ -168,9 +170,59 @@ test("only an exact closed generic spike envelope gets 300s; Python owns deep pl
       plan: { schema: "empirica.spike-plan/1" } } } },
   ];
   for (const request of nearMisses) {
-    assert.equal(isExactSpikeRequest(request), false);
+    assert.equal(isLongOperationRequest(request), false);
     assert.equal(bridgeProcessConfig(defaultBridgeConfig(), request).timeoutMs, 30_000);
   }
+});
+
+/** The contract's own exact qualify action: the bootstrap example the public contract carries. */
+function qualifyRequest(): Record<string, unknown> {
+  const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const contract = JSON.parse(readFileSync(join(plugin, "vendor/contracts/empirica/v2/public-contract.json"), "utf8"));
+  return observeActionRequest("er2.run", contract.bootstrap.actions.qualify.example, "qualify-1") as never;
+}
+
+test("the exact qualify action joins the long-operation class; any near miss keeps the ordinary margin", () => {
+  const qualify = qualifyRequest();
+  assert.equal(isLongOperationRequest(qualify), true);
+  assert.equal(bridgeProcessConfig(defaultBridgeConfig(), qualify).timeoutMs, SPIKE_BRIDGE_TIMEOUT_MS);
+  const command = qualify.command as Record<string, unknown>;
+  const action = command.action as Record<string, unknown>;
+  const nearMisses = [
+    { ...qualify, extra: true },
+    { ...qualify, command: { ...command, type: `${command.type}s` } },
+    { ...qualify, command: { ...command, action: { ...action, extra: true } } },
+    { ...qualify, command: { ...command, action: { ...action, kind: `${action.kind}s` } } },
+    { ...qualify, command: { ...command, action: { ...action, claim_id: "C0" } } },
+  ];
+  for (const request of nearMisses) {
+    assert.equal(isLongOperationRequest(request), false);
+    assert.equal(bridgeProcessConfig(defaultBridgeConfig(), request).timeoutMs, ORDINARY_BRIDGE_TIMEOUT_MS);
+  }
+});
+
+test("the qualify classifier mirrors the canonical request schema's closed qualify action", () => {
+  const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const request = JSON.parse(readFileSync(join(plugin, "../../contracts/empirica/v2/request.schema.json"), "utf8"));
+  const qualify = request.$defs.actionQualify;
+  assert.ok(request.$defs.action.oneOf.some(
+    (item: { $ref?: string }) => item.$ref === "#/$defs/actionQualify"));
+  assert.equal(qualify.additionalProperties, false);
+  assert.deepEqual(QUALIFY_ACTION_REQUIRED_KEYS, qualify.required);
+  assert.deepEqual(QUALIFY_ACTION_OPTIONAL_KEYS,
+    Object.keys(qualify.properties).filter((key) => !qualify.required.includes(key)));
+  assert.equal(isLongOperationRequest(observeActionRequest("er2.run", { kind: qualify.properties.kind.const },
+    "qualify-2")), true);
+});
+
+test("the core's qualify deadline fits inside the long outer transport margin", () => {
+  const plugin = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+  const source = readFileSync(join(plugin, "adapters/sandbox/run_qualification.py"), "utf8");
+  const match = source.match(/^DEFAULT_QUALIFICATION_SECONDS = ([0-9.]+)$/m);
+  assert.ok(match, "missing DEFAULT_QUALIFICATION_SECONDS");
+  assert.ok(Number(match[1]) * 1000 < SPIKE_BRIDGE_TIMEOUT_MS);
+  assert.ok(ORDINARY_BRIDGE_TIMEOUT_MS < Number(match[1]) * 1000,
+    "the ordinary margin alone could not hold one qualification attempt");
 });
 
 test("timeout classifier mirrors every duplicated canonical request-schema semantic", () => {

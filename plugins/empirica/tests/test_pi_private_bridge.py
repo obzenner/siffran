@@ -34,8 +34,9 @@ import private_bridge  # noqa: E402
 from adapters import bridge, confirmation  # noqa: E402
 from adapters.state.hitl import DocumentMismatch  # noqa: E402
 from application import protocol as _proto  # noqa: E402
-from core import hitl as core_hitl  # noqa: E402
+from core import environment as core_environment, hitl as core_hitl  # noqa: E402
 from governance_setup import approve_current, invocation_for  # noqa: E402
+from test_environment_actions import ENVIRONMENT_ACTION, QUALIFY_ACTION  # noqa: E402
 from test_governance import GRAPH  # noqa: E402
 
 PI_PROFILE = _proto.host_profile_id("pi")
@@ -392,6 +393,148 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
         self.assertEqual(document["residuals"], len(written["terminal"]["residuals"]),
                          "the count is the written document's own, read after the write")
         self.assertGreater(document["residuals"], 0, "the fixture leaves something unresolved")
+
+
+class PiEnvironmentBridgeTests(unittest.TestCase):
+    """The Pi private legs of one environment approval (Empirica 7.2 §5/§6, ADR-0072 write-first):
+    the public ``environment`` action admitted in the bridge's own process with its private
+    admission beside the response, the admitted revision's document written before its one present
+    receipt through the shared environment mediation, and the decision naming the written
+    document. Everything runs on an isolated machine home and repository."""
+
+    def setUp(self):
+        self.machine_root = Path(tempfile.mkdtemp(prefix="pi-bridge-environment-"))
+        self.addCleanup(shutil.rmtree, self.machine_root, ignore_errors=True)
+        self.machine_home = self.machine_root / "home"
+        self.machine_home.mkdir(parents=True)
+        self.repo = self.machine_root / "repo"
+        os.makedirs(self.repo, exist_ok=True)
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, capture_output=True)
+        self._env = patch.dict(os.environ, {"EMPIRICA_HOME": str(self.machine_home),
+                                            "EMPIRICA_REPO_DIR": str(self.repo)})
+        self._env.start()
+        self.addCleanup(self._env.stop)
+        self.service = bridge.build_service(PI_PROFILE)
+        self.sequence = 0
+        self.run_id = self._dispatch({"type": "StartRun", "control_mode": "deliberative",
+                                      "goal": "pi approves its environment",
+                                      "invocation": invocation_for(PI_PROFILE),
+                                      "selector": {"project": "pi-environment", "session": "governed"}})["run"]["id"]
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                        "action": {"kind": "graph", "payload": copy.deepcopy(GRAPH)}})
+        approve_current(self.service._coordinator, self.run_id)
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id,
+                        "action": {"kind": "route", "reason": "supplied context"}})
+        self._dispatch({"type": "ObserveAction", "run_id": self.run_id, "action": {"kind": "investigate"}})
+
+    def _dispatch(self, command: dict) -> dict:
+        self.sequence += 1
+        response = self.service.dispatch({**PROTOCOL_REQUEST, "request_id": f"setup-{self.sequence}",
+                                          "command": command})
+        self.assertEqual(response["result"]["type"], "Allow", response["result"])
+        return response["result"]
+
+    def _admit(self, request_id: str = "environment-1") -> dict:
+        request = {**PROTOCOL_REQUEST, "request_id": request_id, "command": {
+            "type": "ObserveAction", "run_id": self.run_id, "action": copy.deepcopy(ENVIRONMENT_ACTION)}}
+        return private_bridge._environment_admit(PI_PROFILE, {"operation": "environment_admit"},
+                                                 {"request": request})
+
+    def _row(self) -> dict:
+        self._dispatch({"type": "GetRun", "run_id": self.run_id})
+        from core.governance import plain
+        return plain(self.service._coordinator.last_snapshot.state.environment)
+
+    def _documents(self) -> list[Path]:
+        return sorted(self.machine_home.rglob("hitl/*.json"))
+
+    def _present(self, revision: int) -> dict:
+        return private_bridge._environment_present(
+            PI_PROFILE, {"operation": "environment_present", "run_id": self.run_id}, {"revision": revision})
+
+    def test_the_admission_rides_beside_the_public_response_never_inside_it(self):
+        admitted = self._admit()
+        self.assertEqual(admitted["type"], "environment_admitted")
+        self.assertEqual(admitted["admission"], {"run_id": self.run_id, "revision": self._row()["revision"]})
+        self.assertTrue(_proto.validate_public_result(admitted["response"]["result"]),
+                        "the response is the public one, carrying no admission")
+        self.assertEqual(self._documents(), [], "admitting writes no document")
+
+    def test_the_public_response_is_the_public_bridges_own_for_the_same_input(self):
+        """The private leg answers with exactly what the public stdio bridge's ``handle`` (the
+        function its ``main`` writes out) returns for the same request; the admission is never in
+        it. A state-free invalid request answers byte-identically on both paths."""
+        request = {**PROTOCOL_REQUEST, "request_id": "environment-same", "command": {
+            "type": "ObserveAction", "run_id": self.run_id, "action": copy.deepcopy(ENVIRONMENT_ACTION)}}
+        real, public = bridge.handle, []
+
+        def spy(observed, profile, admission=None):
+            public.append((copy.deepcopy(observed), json.dumps(real(observed, profile, admission))))
+            return json.loads(public[-1][1])
+        with patch.object(bridge, "handle", spy):
+            admitted = private_bridge._environment_admit(PI_PROFILE, {"operation": "environment_admit"},
+                                                         {"request": copy.deepcopy(request)})
+        self.assertEqual(public[0][0], request)
+        self.assertEqual(json.dumps(admitted["response"]), public[0][1])
+        self.assertNotIn("admission", public[0][1])
+        invalid = {**request, "request_id": "environment-invalid", "command": {**request["command"], "action": {
+            **copy.deepcopy(ENVIRONMENT_ACTION), "payload": {}}}}
+        self.assertEqual(
+            json.dumps(private_bridge._environment_admit(PI_PROFILE, {"operation": "environment_admit"},
+                                                         {"request": copy.deepcopy(invalid)})["response"]),
+            json.dumps(bridge.handle(copy.deepcopy(invalid), PI_PROFILE)))
+
+    def test_every_other_public_action_is_refused_before_dispatch(self):
+        for action in (copy.deepcopy(QUALIFY_ACTION), {}, None):
+            request = {**PROTOCOL_REQUEST, "request_id": "not-environment", "command": {
+                "type": "ObserveAction", "run_id": self.run_id, "action": action}}
+            with patch.object(bridge, "handle_admitting") as admitting, self.assertRaises(ValueError):
+                private_bridge._environment_admit(PI_PROFILE, {"operation": "environment_admit"},
+                                                  {"request": request})
+            admitting.assert_not_called()
+        for request in ({**PROTOCOL_REQUEST, "command": {"type": "GetRun", "run_id": self.run_id}}, None, []):
+            with self.assertRaises(ValueError):
+                private_bridge._environment_admit(PI_PROFILE, {"operation": "environment_admit"},
+                                                  {"request": request})
+
+    def test_the_document_is_written_before_its_present_and_the_decision_names_it(self):
+        revision = self._admit()["admission"]["revision"]
+        real = bridge.trusted_environment_decision
+        seen = []
+
+        def probe(profile, run_id, payload):
+            seen.append((payload["outcome"], [path.name for path in self._documents()]))
+            return real(profile, run_id, payload)
+        with patch.object(bridge, "trusted_environment_decision", probe):
+            shown = self._present(revision)
+        self.assertEqual(shown["type"], "environment_presentation", shown)
+        (path,) = self._documents()
+        data = path.read_bytes()
+        self.assertEqual(seen, [("present", [path.name])], "the file exists before the present receipt")
+        self.assertEqual(shown["document"], {"digest": core_hitl.digest(data), "path": str(path)})
+        written = json.loads(data)
+        self.assertEqual(shown["environment"], {name: written[name] for name in shown["environment"]},
+                         "every fact the dialog shows is the written document's own")
+        self.assertEqual(shown["environment"]["revision"], revision)
+        self.assertEqual(shown["response"]["result"]["type"], "Allow")
+        self.assertNotIn("presentation", shown["response"]["result"])
+        decided = private_bridge._environment_decision(
+            PI_PROFILE, {"operation": "environment_decision", "run_id": self.run_id},
+            {"run_id": self.run_id, "receipt_id": shown["receipt_id"], "revision": revision,
+             "proposal_digest": shown["environment"]["proposal_digest"], "outcome": "approve",
+             "document_digest": shown["document"]["digest"]})
+        self.assertEqual(decided["result"]["type"], "Allow", decided)
+        row = self._row()
+        self.assertEqual(row["state"], core_environment.APPROVED)
+        self.assertEqual({receipt["document_digest"] for receipt in row["receipts"]}, {shown["document"]["digest"]})
+
+    def test_a_revision_other_than_the_admitted_one_is_refused_before_any_write(self):
+        revision = self._admit()["admission"]["revision"]
+        refused = self._present(revision + 1)
+        self.assertEqual(refused["type"], "environment_refused")
+        self.assertEqual(self._documents(), [], "a document of another revision is never written")
+        self.assertEqual(self._row()["receipts"], [], "nothing is presented")
+        self.assertEqual(self._row()["state"], core_environment.PENDING)
 
 
 if __name__ == "__main__":

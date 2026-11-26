@@ -38,6 +38,8 @@ export interface HostProfiles {
   readonly host_compatibility: ReadonlyMap<string, VersionRange>;
   readonly audit_launch_policies: ReadonlyMap<string, AuditLaunchPolicy>;
   readonly subagents_compatibility: ReadonlyMap<string, SubagentsCompatibility>;
+  /** Each profile's approval ingress word (`approval_ingress`): how its host can put a question to a human. */
+  readonly approval_ingress: ReadonlyMap<string, string>;
 }
 
 const MAX_TIMER_MS = 2_147_483_647;
@@ -154,6 +156,7 @@ export function parseHostProfiles(document: unknown): HostProfiles {
   const policies = new Map<string, AuditLaunchPolicy>();
   const compatibilities = new Map<string, SubagentsCompatibility>();
   const hosts = new Map<string, VersionRange>();
+  const ingresses = new Map<string, string>();
   doc.profiles.forEach((row, index) => {
     const profile = record(row, `profiles[${index}]`);
     if (typeof profile.profile_id !== "string" || profile.profile_id === "")
@@ -162,12 +165,17 @@ export function parseHostProfiles(document: unknown): HostProfiles {
       hosts.set(profile.profile_id, versionRange(profile.compatibility, `${profile.profile_id}.compatibility`));
     if ("audit_launch_policy" in profile)
       policies.set(profile.profile_id, auditLaunchPolicy(profile.audit_launch_policy, `${profile.profile_id}.audit_launch_policy`));
+    if ("approval_ingress" in profile) {
+      if (typeof profile.approval_ingress !== "string" || !/^[a-z]+(_[a-z]+)*$/.test(profile.approval_ingress))
+        throw new Error(`host-profiles: ${profile.profile_id}.approval_ingress must be a lowercase word`);
+      ingresses.set(profile.profile_id, profile.approval_ingress);
+    }
     if ("subagents_compatibility" in profile)
       compatibilities.set(profile.profile_id,
         subagentsCompatibility(profile.subagents_compatibility, `${profile.profile_id}.subagents_compatibility`));
   });
   return { thinking_levels: Object.freeze([...levels] as string[]), host_compatibility: hosts, audit_launch_policies: policies,
-    subagents_compatibility: compatibilities };
+    subagents_compatibility: compatibilities, approval_ingress: ingresses };
 }
 
 /** The audit launch policy of `profileId`; throws when the profile declares none (fail closed). */
@@ -182,6 +190,13 @@ export function hostCompatibilityFor(profiles: HostProfiles, profileId: string):
   const range = profiles.host_compatibility.get(profileId);
   if (range === undefined) throw new Error(`host-profiles: ${profileId} declares no compatibility`);
   return range;
+}
+
+/** The approval ingress of `profileId`; throws when the profile declares none (fail closed). */
+export function approvalIngressFor(profiles: HostProfiles, profileId: string): string {
+  const ingress = profiles.approval_ingress.get(profileId);
+  if (ingress === undefined) throw new Error(`host-profiles: ${profileId} declares no approval_ingress`);
+  return ingress;
 }
 
 /** The external-runtime policy of `profileId`; throws when the profile declares none (fail closed). */
@@ -230,3 +245,6 @@ export const HOST_COMPATIBILITY: VersionRange = hostCompatibilityFor(PROFILES, H
 
 /** The external audit runtime of this adapter's host profile: its version range and the policy id. */
 export const SUBAGENTS_COMPATIBILITY: SubagentsCompatibility = subagentsCompatibilityFor(PROFILES, HOST_PROFILE_ID);
+
+/** How this adapter's host profile can put a question to a human (contract `approval_ingress`). */
+export const HOST_APPROVAL_INGRESS: string = approvalIngressFor(PROFILES, HOST_PROFILE_ID);

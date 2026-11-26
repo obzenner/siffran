@@ -2,6 +2,7 @@ import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 
 import type { Response } from "./contract.ts";
+import type { EnvironmentFacts } from "./dialog-view.ts";
 import { runJsonProcess } from "./process-transport.ts";
 import { HOST_PROFILE_ID } from "./host-profile.ts";
 
@@ -16,6 +17,9 @@ export type PrivateOperation =
   | "classify_identity"
   | "governance_context"
   | "governance_decision"
+  | "environment_admit"
+  | "environment_present"
+  | "environment_decision"
   | "audit_prepare"
   | "audit_reject"
   | "audit_start"
@@ -100,6 +104,17 @@ type EvidencePresentationResponse =
 type EvidenceConfirmationResponse =
   | Readonly<{ type: "evidence_receipt"; result: Record<string, unknown> }>
   | Readonly<{ type: "evidence_none" }>;
+/** The public `environment` action dispatched in the private bridge's own process, with the private admission its
+ * transaction recorded (the run and the revision it admitted) beside the response, never inside it. */
+type EnvironmentAdmittedResponse = Readonly<{ type: "environment_admitted"; response: Response;
+  admission: { run_id: string; revision: number } | null }>;
+/** The admitted revision's document is written and one present receipt recorded (`environment_presentation`: the
+ * written file's identity and the document's own facts, read from its bytes), or a private leg refused it
+ * (`environment_refused`, its response unchanged, or `null` when there is none). */
+type EnvironmentPresentResponse =
+  | Readonly<{ type: "environment_presentation"; receipt_id: string; document: { digest: string; path: string };
+      environment: EnvironmentFacts; response: Response }>
+  | Readonly<{ type: "environment_refused"; response: Response | null }>;
 type AuditVerdictResponse = Readonly<{ type: "audit_verdict"; admitted: boolean }>;
 type AuditStartedResponse = Readonly<{ type: "audit_started" }>;
 type AuditIdentityResponse = Readonly<{ type: "audit_identity" }>;
@@ -109,6 +124,9 @@ export interface PrivateResponses {
   classify_identity: IdentityResponse;
   governance_context: Response;
   governance_decision: Response;
+  environment_admit: EnvironmentAdmittedResponse;
+  environment_present: EnvironmentPresentResponse;
+  environment_decision: Response;
   audit_prepare: AuditPlanResponse | AuditRefusedResponse | AuditExcludedResponse;
   audit_reject: AuditTerminalResponse;
   audit_start: AuditStartedResponse;
@@ -162,11 +180,40 @@ function governanceEnvelope(value: unknown): boolean {
     && Object.values(priors).every(prior => typeof prior === "number"));
 }
 
+const positive = (value: unknown): value is number => Number.isSafeInteger(value) && (value as number) >= 1;
+const strings = (value: unknown, minimum: number) => Array.isArray(value) && value.length >= minimum
+  && value.every(string);
+
+/** The environment document's facts the dialog shows, exactly as the written `empirica.hitl/1` document carries them. */
+function environmentFacts(value: unknown): value is EnvironmentFacts {
+  if (!object(value)) return false;
+  const binding = value.previous_active_binding;
+  return positive(value.revision) && typeof value.proposal_digest === "string"
+    && GOVERNANCE_DIGEST.test(value.proposal_digest) && string(value.goal) && string(value.profile_id)
+    && typeof value.networked === "boolean" && string(value.rationale) && strings(value.preparation, 1)
+    && Array.isArray(value.spike_images) && value.spike_images.length >= 1
+    && value.spike_images.every(row => object(row) && string(row.reference)
+      && (row.image_id === null || string(row.image_id)))
+    && (binding === null || (object(binding) && typeof binding.record_digest === "string"
+      && GOVERNANCE_DIGEST.test(binding.record_digest) && positive(binding.revision)));
+}
+
 /** Shape predicate per private operation; this table is the sole private-response validator. */
 const PRIVATE_SHAPES: { readonly [Op in PrivateOperation]: (value: unknown) => boolean } = {
   classify_identity: (value) => value === null || (object(value) && string(value.identity)),
   governance_context: governanceEnvelope,
   governance_decision: governanceEnvelope,
+  environment_admit: (value) => object(value) && value.type === "environment_admitted" && envelope(value.response)
+    && (value.admission === null || (object(value.admission) && string(value.admission.run_id)
+      && positive(value.admission.revision))),
+  environment_present: (value) => object(value) && (
+    (value.type === "environment_presentation" && string(value.receipt_id) && envelope(value.response)
+      && object(value.document) && typeof value.document.digest === "string"
+      && GOVERNANCE_DIGEST.test(value.document.digest)
+      && typeof value.document.path === "string" && value.document.path.startsWith("/")
+      && !("text" in value.document) && environmentFacts(value.environment))
+    || (value.type === "environment_refused" && (value.response === null || envelope(value.response)))),
+  environment_decision: envelope,
   audit_prepare: (value) => object(value) && (
     (value.type === "audit_refused" && value.reason === "runtime_changed")
     || (value.type === "audit_excluded" && string(value.message) && Array.isArray(value.identities)

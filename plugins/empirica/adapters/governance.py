@@ -386,16 +386,8 @@ class HostEnvironment:
         # the admitted action's own run view keeps saying the revision is pending
         if self.elicit is None or not isinstance(admission, Mapping) or admission.get("run_id") != run["id"]:
             return result
-        # the identity every fetched document must carry before anything is written, on each
-        # attempt: this run, the kind, and the revision the action admitted
-        expect = {"run_id": run["id"], "kind": core_hitl.ENVIRONMENT, "revision": admission["revision"]}
-        for _ in range(2):  # the present, and one re-presentation of the same revision
-            shown, response = self._present(run["id"], expect, result)
-            if shown is not None:
-                break
-            if not _is_document_mismatch(response):
-                return response
-        else:
+        shown, response = self.present(run["id"], admission["revision"], result)
+        if shown is None:
             return response
         published, receipt_id = shown
         # the observer projects no environment decision yet (E11 owns that row), so no decision
@@ -414,7 +406,20 @@ class HostEnvironment:
             "document_digest": published.digest}) or {}).get("result")
         return decided if isinstance(decided, dict) else response
 
-    def _present(self, run_id: str, expect: Mapping[str, object], fallback: dict):
+    def present(self, run_id: str, revision: int, fallback: dict | None):
+        """The write-first presentation of the admitted ``revision`` of ``run_id``: the present,
+        and one re-presentation of the same revision after a document mismatch. Every fetched
+        document must name this run, the environment kind and that revision before anything is
+        written. ``((published, receipt_id), presented)`` when the form may be shown, else
+        ``(None, the response to return)``."""
+        expect = {"run_id": run_id, "kind": core_hitl.ENVIRONMENT, "revision": revision}
+        for _ in range(2):
+            shown, response = self._present(run_id, expect, fallback)
+            if shown is not None or not _is_document_mismatch(response):
+                break
+        return shown, response
+
+    def _present(self, run_id: str, expect: Mapping[str, object], fallback: dict | None):
         """One write-first present: fetch the pair, publish it once under the expected identity,
         present one receipt. ``((published, receipt_id), presented)`` when the form may be shown,
         else ``(None, the response to return)`` — every refusal of a private leg unchanged."""
