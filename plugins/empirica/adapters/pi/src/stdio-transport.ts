@@ -25,9 +25,11 @@ import { runJsonProcess, type JsonProcessConfig } from "./process-transport.ts";
 /** Ordinary public bridge calls must finish within this outer transport bound. */
 export const ORDINARY_BRIDGE_TIMEOUT_MS = 30_000;
 /**
- * An exact public spike request gets this outer transport margin. It is not a
- * workload budget: the Docker backend keeps its 120 s workload hard limit and
- * 210 s whole-operation bound, which reserves cleanup and postflight time.
+ * An exact public long operation (a spike request or a qualify) gets this outer
+ * transport margin. It is not a workload budget: the Docker backend keeps its
+ * 120 s workload hard limit and 210 s whole-operation bound, which reserves
+ * cleanup and postflight time, and the core bounds one qualification attempt
+ * by its own deadline.
  */
 export const SPIKE_BRIDGE_TIMEOUT_MS = 300_000;
 
@@ -40,6 +42,8 @@ export const SPIKE_ACTION_REQUIRED_KEYS = [
   "kind", "claim_id", "plan",
 ] as const;
 export const SPIKE_ACTION_OPTIONAL_KEYS: readonly string[] = [];
+export const QUALIFY_ACTION_REQUIRED_KEYS = ["kind"] as const;
+export const QUALIFY_ACTION_OPTIONAL_KEYS: readonly string[] = [];
 export const CLAIM_ID_PATTERN = "^[A-Za-z0-9][A-Za-z0-9._-]{0,63}(?![\\s\\S])";
 const CLAIM_ID = new RegExp(CLAIM_ID_PATTERN);
 
@@ -55,7 +59,7 @@ export interface StdioBridgeConfig {
   env?: NodeJS.ProcessEnv;
   /** Test-only ordinary-call override; a positive integer no greater than 30 s. */
   timeoutMs?: number;
-  /** Test-only exact-spike override; a positive integer no greater than 300 s. */
+  /** Test-only long-operation override; a positive integer no greater than 300 s. */
   spikeTimeoutMs?: number;
 }
 
@@ -84,8 +88,23 @@ function exactKeys(value: Record<string, unknown>, required: readonly string[], 
     && keys.every((key) => allowed.includes(key));
 }
 
-/** Pure, closed classifier for the one request shape allowed the long outer margin. */
-export function isExactSpikeRequest(value: unknown): boolean {
+/** The exact closed spike request action: Python owns the deep plan validation. */
+function isSpikeAction(action: Record<string, unknown>): boolean {
+  return exactKeys(action, SPIKE_ACTION_REQUIRED_KEYS, SPIKE_ACTION_OPTIONAL_KEYS)
+    && action.kind === "spike_request"
+    && typeof action.claim_id === "string"
+    && CLAIM_ID.test(action.claim_id)
+    && object(action.plan)
+    && action.plan.schema === "empirica.spike-plan-draft/2";
+}
+
+/** The exact payload-free qualify action. */
+function isQualifyAction(action: Record<string, unknown>): boolean {
+  return exactKeys(action, QUALIFY_ACTION_REQUIRED_KEYS, QUALIFY_ACTION_OPTIONAL_KEYS) && action.kind === "qualify";
+}
+
+/** Pure, closed classifier for the request shapes allowed the long outer margin: an exact spike request or qualify. */
+export function isLongOperationRequest(value: unknown): boolean {
   if (!object(value) || !exactKeys(value, ROOT_REQUIRED_KEYS, ROOT_OPTIONAL_KEYS)
       || value.protocol !== "empirica/v2"
       || typeof value.request_id !== "string" || value.request_id.length === 0
@@ -97,14 +116,7 @@ export function isExactSpikeRequest(value: unknown): boolean {
       || (Object.hasOwn(command, "observed_at")
         && command.observed_at !== null && typeof command.observed_at !== "string")
       || !object(command.action)) return false;
-  const action = command.action;
-  if (!exactKeys(action, SPIKE_ACTION_REQUIRED_KEYS, SPIKE_ACTION_OPTIONAL_KEYS)
-      || action.kind !== "spike_request"
-      || typeof action.claim_id !== "string"
-      || !CLAIM_ID.test(action.claim_id)
-      || !object(action.plan)
-      || action.plan.schema !== "empirica.spike-plan-draft/2") return false;
-  return true;
+  return isSpikeAction(command.action) || isQualifyAction(command.action);
 }
 
 function admittedOverride(value: number | undefined, maximum: number, name: string): number {
@@ -118,7 +130,7 @@ function admittedOverride(value: number | undefined, maximum: number, name: stri
 export function bridgeTimeoutMs(request: unknown, config: StdioBridgeConfig): number {
   const ordinary = admittedOverride(config.timeoutMs, ORDINARY_BRIDGE_TIMEOUT_MS, "timeoutMs");
   const spike = admittedOverride(config.spikeTimeoutMs, SPIKE_BRIDGE_TIMEOUT_MS, "spikeTimeoutMs");
-  return isExactSpikeRequest(request) ? spike : ordinary;
+  return isLongOperationRequest(request) ? spike : ordinary;
 }
 
 /** Pure process config used by the dispatch and inspected by transport regressions. */

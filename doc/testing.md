@@ -72,8 +72,9 @@ multi-container, qualification-procedure loader, translation, or host fallback i
 Timeouts are four distinct limits, not one extensible workload allowance. The container workload hard
 limit is 120 seconds. The Docker backend's 210-second whole-operation limit reserves bounded cleanup
 and postflight phases after effects. Pi grants only an exact schema-shaped public
-`ObserveAction`/`spike_request` a 300-second **outer transport margin**; every near-miss and ordinary
-public operation remains at 30 seconds. Claude MCP's 360-second tool ceiling is likewise an outer
+`ObserveAction`/`spike_request` or `ObserveAction`/`qualify` a 300-second **outer transport margin** (the core
+bounds one qualification attempt by its own shorter deadline); every near-miss and ordinary public operation
+remains at 30 seconds. Claude MCP's 360-second tool ceiling is likewise an outer
 transport margin. Neither 300 nor 360 seconds can extend the 120-second workload. The authoritative
 `workload_output_limit_bytes` is 1 MiB **per stream**: stdout and stderr are counted and retained
 separately, and either stream exceeding its ceiling is output-limited (it is not a 1 MiB aggregate
@@ -90,7 +91,8 @@ declared beside it in `IMPLEMENTATION_ROOTS`:
 - the host entry points: `.mcp.json` (it owns the Claude MCP ceiling), `adapters/mcp_server.py`, the shared bridge
   `adapters/bridge.py`, the Claude and Codex transports `adapters/claude/transport.py` and
   `adapters/codex/transport.py`, the Pi stdio target `adapters/pi/bridge.py`, and the Pi
-  extension `adapters/pi/src/index.ts`;
+  extension `adapters/pi/src/index.ts`, with the Pi private bridge `adapters/pi/private_bridge.py` (its private
+  ingress carries exactly one public action, the environment proposal, through the shared admitting dispatch);
 - `adapters/sandbox/generic_qualification.py`, the module the qualify and install scripts are thin argument adapters
   over;
 - `adapters/sandbox/probe_image.py`, the digest-pinned probe-image reader, with the vendored Docker
@@ -113,9 +115,6 @@ bound. Because `index.ts` imports the whole Pi extension and the Claude and Code
 qualification. No file is excluded by name; a file is outside the manifest only because no root reaches it. That
 covers:
 
-- `adapters/pi/private_bridge.py`, which `private-transport.ts` spawns: it dispatches only the private ingress
-  operations and refuses any other, so it cannot carry a public `ObserveAction`, and every module it imports is
-  already bound;
 - the observer process (`adapters/observer/` — except `adapters/observer/discovery.py`, which PR 16 made
   bound code because the host forms import it to link the observer UI — `application/observer*.py`, `core/observer.py`,
   `core/spike_observer.py`) and the web UI (`plugins/empirica/ui/`), which display the already-persisted binding;
@@ -143,13 +142,15 @@ it is a root: `getattr`/`__builtins__`/`sys.modules` lookups, `pkgutil`/`pydoc` 
 `process.getBuiltinModule`, `new Worker(new URL(…))`, constructed paths, a `require` hidden after a `//` or `/*`
 inside a string or template literal (the `require` scan removes comments without knowing strings, and a `/*` hides
 text up to the next `*/`, across lines; the `import`/`import()` patterns scan the raw text), and spawned processes (of those,
-`adapters/pi/bridge.py`, spawned by `stdio-transport.ts`, is a root, while `private_bridge.py`, spawned by
-`private-transport.ts`, and `adapters/observer/cli.py`, spawned by `observer-ui.ts`, are not). Bound code also reads data
+`adapters/pi/bridge.py`, spawned by `stdio-transport.ts`, and `private_bridge.py`, spawned by
+`private-transport.ts`, are roots, while `adapters/observer/cli.py`, spawned by `observer-ui.ts`, is not). Bound code also reads data
 files from the plugin tree that are not authority inputs and are not bound: the auditor agent
 `agents/empirica-auditor.md`, the `plugin.json` versions, and `skills/empirica/SKILL.md`. Root contract duplicates
 are not runtime inputs: `make vendor-check` owns their byte identity with the vendored copies.
 
-Pi's private ingress (`private-transport.ts`, `private_bridge.py`) carries no public `ObserveAction` request and
+Pi's private ingress (`private-transport.ts`, `private_bridge.py`) carries exactly one public action, the
+environment proposal, through the shared admitting dispatch (`adapters.bridge.handle_admitting`), refuses every other
+public request, and
 keeps the ordinary 30-second bound. Claude and Codex public entry adapters
 converge on `adapters.bridge.handle`; Pi converges through `adapters/pi/bridge.py` to the same bridge. None owns
 or can select a weaker harness.

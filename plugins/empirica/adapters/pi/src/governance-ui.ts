@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
 import type { ExtensionContext } from "./pi-types.ts";
 import type { PrivateIngress } from "./private-transport.ts";
+import { assertPrivateResponse } from "./private-transport.ts";
 import type { Block, Response } from "./contract.ts";
 import { PROTOCOL } from "./contract.ts";
 import { assertResponse } from "./guard.ts";
 import { PUBLIC_TOOLS } from "./public-tools.ts";
 import { EVIDENCE_WAIT_NOTICE, evidenceConfirmationWait } from "./evidence-ui.ts";
-import { initialState, reduce, renderLines } from "./dialog-view.ts";
+import { ENVIRONMENT_CONTROLS, initialState, reduce, renderEnvironmentLines, renderLines } from "./dialog-view.ts";
 import type { BoundDocument } from "./dialog-view.ts";
 import type { Dialog, DialogDecision, DialogState, DialogTheme } from "./dialog-view.ts";
 
@@ -79,10 +80,13 @@ function stripPresentation(response: Response): Response {
   return response;
 }
 
+/** This transport's own approval ingress: the native Pi dialog. */
+export const PI_INGRESS = "pi_ui";
+
 export function piGovernanceContext(ctx: ExtensionContext): Record<string, unknown> {
   return { author: ctx.model ? { provider_id: ctx.model.provider, model_id: ctx.model.id,
                                  source: "pi-context" } : null,
-           ingress: ctx.hasUI ? "pi_ui" : "unavailable" };
+           ingress: ctx.hasUI ? PI_INGRESS : "unavailable" };
 }
 
 export async function refreshGovernance(runId: string, ctx: ExtensionContext,
@@ -159,15 +163,18 @@ interface DialogComponent {
   handleInput(data: string): void;
 }
 
-/** Run one native custom component with shared deadline and abort handling. */
-async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: number,
-                          confirmation: boolean, signal?: AbortSignal,
-                          document?: BoundDocument, raise?: Record<string, number>): Promise<DialogDecision> {
+/** One screen of the shared dialog frame for the current state and the time left. */
+type Screen = (state: DialogState, width: number, theme: DialogTheme, timeoutMs: number) => string[];
+
+/** Run one native custom component with shared deadline and abort handling: `controls` are the editable rows the
+ * keys move over, `screen` draws the frame. */
+async function showDialog(ctx: ExtensionContext, controls: Pick<Dialog, "budgets">, deadline: number,
+                          confirmation: boolean, screen: Screen, signal?: AbortSignal): Promise<DialogDecision> {
   if (!ctx.ui.custom) return { type: "dismiss" };
   // Pi's RPC mode reports hasUI=true yet its `custom()` is `async () => undefined` (no component
   // can be shown; 1.0.0 and 1.1.0 alike): "nothing was presented" is a dismissal, never an approval.
   const decision = await ctx.ui.custom<DialogDecision | undefined>((tui, hostTheme, _keybindings, done) => {
-    let state: DialogState = initialState(dialog, confirmation);
+    let state: DialogState = initialState(controls, confirmation);
     let closed = false;
     let timer: ReturnType<typeof setTimeout>;
     const abort = () => finish({ type: "dismiss" });
@@ -189,11 +196,10 @@ async function showDialog(ctx: ExtensionContext, dialog: Dialog, deadline: numbe
     signal?.addEventListener("abort", abort, { once: true });
     if (signal?.aborted) abort(); // an abort that landed before the listener existed
     const component: DialogComponent = {
-      render: width => renderLines(dialog, state, width, theme,
-        { confirmation, document, raise, timeoutMs: Math.max(0, deadline - Date.now()) }),
+      render: width => screen(state, width, theme, Math.max(0, deadline - Date.now())),
       invalidate: () => {},
       handleInput: data => {
-        const outcome = reduce(state, data, dialog, confirmation);
+        const outcome = reduce(state, data, controls, confirmation);
         if ("done" in outcome) finish(outcome.done);
         else { state = outcome.state; tui.requestRender(); }
       },
@@ -226,7 +232,7 @@ export function humanApprovalWait(result: Response["result"]): boolean {
   const g = result.run.governance as Governance | null;
   if (g === null) return false;
   const reasons = result.reasons;
-  return g.human_wait === true && g.context.ingress === "pi_ui"
+  return g.human_wait === true && g.context.ingress === PI_INGRESS
     && reasons.length === 1 && CONFIGURATION_REASONS.has(reasons[0].code);
 }
 
@@ -316,7 +322,8 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
   const confirm = bound !== undefined && bound.question === "confirm_amendment";
   // a raise is shown as one, beside the ceilings the run approved (the view's own, never recomputed here)
   const raise = !confirm && g.raises === true ? g.budgets : undefined;
-  const selected = await showDialog(ctx, dialog, deadline, confirm, signal, bound, raise);
+  const selected = await showDialog(ctx, dialog, deadline, confirm, (state, width, theme, timeoutMs) =>
+    renderLines(dialog, state, width, theme, { confirmation: confirm, document: bound, raise, timeoutMs }), signal);
   if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return dismiss();
   const action = selected.type === "reject" ? "reject" : "approve";
   const configuration = selected.type === "approve" ? selected.configuration
@@ -337,4 +344,52 @@ async function mediateGovernance(response: Response, runId: string, ctx: Extensi
       { revision: next.plan_revision, digest: next.proposal_digest }, deadline);
   }
   return admitted;
+}
+
+/** The private admission of one public `environment` action: the run and the revision its transaction admitted. */
+export interface EnvironmentAdmission { run_id: string; revision: number }
+
+/**
+ * Mediate the human approval of the environment revision this very action admitted (Empirica 7.2 §5/§6,
+ * ADR-0072 write-first): the private bridge writes the revision's document and records one present receipt, the
+ * shared dialog frame shows the document's own facts, and the decision receipt names the written document's digest
+ * and the admitted revision. Approve and reject decide; Esc, a timeout, an abort or a surface that shows nothing
+ * leave the revision pending with only the presentation row. Every refusal of a private leg returns unchanged; a
+ * response that is not an admission, an admission of another run, or a failing private leg returns the admitted
+ * response as it came.
+ */
+export async function governEnvironment(response: Response, admission: EnvironmentAdmission | null,
+                                        ctx: ExtensionContext, trusted: PrivateIngress, signal?: AbortSignal,
+                                        deadline = Date.now() + governanceTimeout()): Promise<Response> {
+  try { return await mediateEnvironment(response, admission, ctx, trusted, signal, deadline); }
+  catch { return response; }
+}
+
+async function mediateEnvironment(response: Response, admission: EnvironmentAdmission | null,
+                                  ctx: ExtensionContext, trusted: PrivateIngress, signal: AbortSignal | undefined,
+                                  deadline: number): Promise<Response> {
+  const result = response.result;
+  if (result.type !== "Allow" || !("run" in result) || !result.run || admission?.run_id !== result.run.id)
+    return response;
+  if (!ctx.hasUI || !ctx.ui.custom || signal?.aborted || Date.now() >= deadline) return response;
+  const runId = result.run.id;
+  const shown = assertPrivateResponse("environment_present", await trusted({ operation: "environment_present",
+    run_id: runId, payload: { revision: admission.revision } }));
+  if (shown.type === "environment_refused") return checked(shown.response ?? response);
+  const presented = checked(shown.response);
+  // the receipt names the admitted revision only: a document of any other revision is never decided on
+  if (shown.environment.revision !== admission.revision) return presented;
+  const selected = await showDialog(ctx, ENVIRONMENT_CONTROLS, deadline, false, (state, width, theme, timeoutMs) =>
+    renderEnvironmentLines(shown.environment, shown.document, state, width, theme, timeoutMs), signal);
+  if (signal?.aborted || Date.now() >= deadline || selected.type === "dismiss") return presented;
+  const decided = await trusted({ operation: "environment_decision", run_id: runId, payload: {
+    run_id: runId, receipt_id: shown.receipt_id, revision: shown.environment.revision,
+    proposal_digest: shown.environment.proposal_digest, outcome: selected.type,
+    document_digest: shown.document.digest } });
+  return checked(decided as Response);
+}
+
+function checked(response: Response): Response {
+  assertResponse(response, "trusted-environment");
+  return response;
 }

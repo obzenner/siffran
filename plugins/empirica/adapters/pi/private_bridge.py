@@ -12,7 +12,7 @@ if str(PLUGIN) not in sys.path:
     sys.path.insert(0, str(PLUGIN))
 
 from adapters import bridge, confirmation  # noqa: E402
-from application import host_runtime  # noqa: E402
+from application import host_runtime, protocol  # noqa: E402
 from adapters.audit_protocol import (  # noqa: E402
     AuditLaunchPlan, AuditorExcluded, AuditProtocol, IdentityObservation,
 )
@@ -128,6 +128,55 @@ def _governance_decision(profile: str, raw: dict, payload: dict):
     return bridge.trusted_governance_decision(profile, raw["run_id"], payload)
 
 
+#: The written environment document's own members the Pi dialog shows and the decision receipt
+#: names; read from the verified bytes, never from adapter state.
+_ENVIRONMENT_FACTS = ("revision", "proposal_digest", "goal", "profile_id", "networked",
+                      "spike_images", "preparation", "rationale", "previous_active_binding")
+
+
+def _envelope(result: object) -> dict | None:
+    """A private environment leg's result in the envelope the trusted service answers with."""
+    if not isinstance(result, dict):
+        return None
+    return {"protocol": protocol.protocol_id(), "request_id": "trusted-environment",
+            "result": result}
+
+
+def _environment_admit(profile: str, _raw: dict, payload: dict):
+    """Dispatch the one public action this private ingress carries — the ``environment`` proposal
+    ObserveAction — through the shared admitting dispatch, so the private admission its transaction
+    recorded (the run and the revision it admitted) is handed back beside the public response,
+    never inside it. Any other public request is refused before anything is dispatched."""
+    request = payload.get("request")
+    command = request.get("command") if isinstance(request, dict) else None
+    action = command.get("action") if isinstance(command, dict) else None
+    if (not isinstance(command, dict) or command.get("type") != "ObserveAction"
+            or not isinstance(action, dict) or action.get("kind") != "environment"):
+        raise ValueError("the private ingress carries only the environment proposal action")
+    response, admission = bridge.handle_admitting(request, profile)
+    return {"type": "environment_admitted", "response": response, "admission": admission}
+
+
+def _environment_present(profile: str, raw: dict, payload: dict):
+    """The write-first presentation of the admitted revision through the one environment
+    mediation owner (``adapters.governance.HostEnvironment.present``): the document is written
+    and one present receipt recorded before the adapter shows anything. The answer names the
+    written file by digest and path and carries the document's own facts for the dialog."""
+    from adapters.governance import HostEnvironment, _strip_presentation
+    shown, response = HostEnvironment(profile).present(raw["run_id"], payload["revision"], None)
+    if shown is None:
+        return {"type": "environment_refused", "response": _envelope(_strip_presentation(response))}
+    published, receipt_id = shown
+    return {"type": "environment_presentation", "receipt_id": receipt_id,
+            "document": {"digest": published.digest, "path": str(published.path)},
+            "environment": {name: published.parsed[name] for name in _ENVIRONMENT_FACTS},
+            "response": _envelope(_strip_presentation(response))}
+
+
+def _environment_decision(profile: str, raw: dict, payload: dict):
+    return bridge.trusted_environment_decision(profile, raw["run_id"], payload)
+
+
 def _audit_prepare(profile: str, raw: dict, payload: dict):
     # The runtime is recorded once at StartRun; a reload or resume may since have put another package
     # behind the `subagent` tool. Admit the audit only when the adapter's runtime observed *now* is the
@@ -238,6 +287,9 @@ _HANDLERS = {
     "classify_identity": _classify,
     "governance_context": _governance_context,
     "governance_decision": _governance_decision,
+    "environment_admit": _environment_admit,
+    "environment_present": _environment_present,
+    "environment_decision": _environment_decision,
     "audit_prepare": _audit_prepare,
     "audit_reject": _audit_reject,
     "audit_start": _audit_start,

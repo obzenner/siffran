@@ -23,7 +23,9 @@ import { isTerminalBatch, type Dispatch, type EvaluateIntent, type HostFailure, 
 import { assertResponse } from "./guard.ts";
 import type { RetrievalKind } from "./audit-retrieval.ts";
 import { canPresent, confirmEvidence, sessionLocator, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
-import { govern, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice } from "./governance-ui.ts";
+import {
+  govern, governEnvironment, governanceTimeout, piGovernanceContext, PI_INGRESS, refreshGovernance, settlementNotice,
+} from "./governance-ui.ts";
 import type {
   ExtensionAPI,
   ExtensionContext,
@@ -43,7 +45,7 @@ import {
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { HOST_COMPATIBILITY, HOST_PROFILE_ID, checkHostVersion } from "./host-profile.ts";
+import { HOST_APPROVAL_INGRESS, HOST_COMPATIBILITY, HOST_PROFILE_ID, checkHostVersion } from "./host-profile.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import { renderAuthorView } from "./author-view.ts";
 import {
@@ -289,6 +291,8 @@ export interface EmpiricaPiDeps {
   subagentToolName?: string;
   /** Adapter-private trusted ingress; production uses the private Python bridge. */
   privateIngress?: PrivateIngress;
+  /** The host profile's registered approval ingress (default: the contract's `approval_ingress` of this profile). */
+  approvalIngress?: string;
   /** Side-effect-free pi-subagents launch-contract resolution, given the bound owner's preflight. */
   resolveAuditContract?: AuditContractResolver;
   /** File-system reads for owner resolution (default: the real file system). */
@@ -415,6 +419,9 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   // Read once at load: a malformed EMPIRICA_GOVERNANCE_TIMEOUT_SECONDS fails extension load with its message
   // instead of surfacing mid-run inside a configure_run that already dispatched.
   const governanceTimeoutMs = governanceTimeout();
+  // The environment approval is mediated only where the profile's registered approval ingress is this transport's
+  // own (the Pi dialog); any other profile dispatches the action as every other one and asks nobody.
+  const environmentMediated = (deps.approvalIngress ?? HOST_APPROVAL_INGRESS) === PI_INGRESS;
 
   return function empiricaExtension(pi: ExtensionAPI): void {
     let runHandle: string | null = null;
@@ -800,12 +807,24 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
                 details: refusal };
             }
           }
-          // Take the lock before the first await so concurrent configure_run observes cannot both open a dialog.
-          const owns = action.kind === "configure_run";
+          // Take the lock before the first await so concurrent configure_run or environment observes cannot both open
+          // a dialog.
+          const environmental = action.kind === "environment" && environmentMediated;
+          const owns = action.kind === "configure_run" || environmental;
           if (owns) governanceDialog = true;
           try {
-            let response = await dispatch(observeActionRequest(
-              runHandle, action as { kind: string; [key: string]: unknown }, randomUUID()));
+            const request = observeActionRequest(
+              runHandle, action as { kind: string; [key: string]: unknown }, randomUUID());
+            let response: Response;
+            if (environmental) {
+              // the private admission rides beside the response, never in it
+              const admitted = await trusted({ operation: "environment_admit", payload: { request } });
+              assertResponse(admitted.response, request.request_id, request.command.type);
+              response = await governEnvironment(admitted.response, admitted.admission, ctx, trusted, signal,
+                Date.now() + governanceTimeoutMs);
+            } else {
+              response = await dispatch(request);
+            }
             if (action.kind === "configure_run" && response.result.type === "Allow") {
               response = await govern(runHandle, ctx, trusted, signal, undefined,
                 Date.now() + governanceTimeoutMs, response);

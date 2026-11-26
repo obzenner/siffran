@@ -8,7 +8,7 @@ import assert from "node:assert/strict";
 
 import { PROTOCOL, type InvocationProvenance, type Request, type Response, type Result } from "../src/contract.ts";
 import { VENDORED_CONTRACT_DIR as HOST_PROFILES_DIR } from "../src/public-tools.ts";
-import { AUDIT_LAUNCH_POLICY, HOST_COMPATIBILITY, HOST_PROFILE_ID, SUBAGENTS_COMPATIBILITY, spellRange } from "../src/host-profile.ts";
+import { AUDIT_LAUNCH_POLICY, HOST_APPROVAL_INGRESS, HOST_COMPATIBILITY, HOST_PROFILE_ID, SUBAGENTS_COMPATIBILITY, spellRange } from "../src/host-profile.ts";
 import { auditLaunchInput } from "../src/audit-launch.ts";
 import { REPORT_CONVERGENCE_TOOL, SUBAGENT_TOOL } from "../src/translate.ts";
 import { EVIDENCE_WAIT_NOTICE } from "../src/evidence-ui.ts";
@@ -39,6 +39,9 @@ import type { PrivateIngressRequest } from "../src/private-transport.ts";
 const AUTHOR_LABELS = PUBLIC_TOOLS.author_view.labels as Readonly<Record<string, string>>;
 
 const HANDLE = "run-handle-1";
+/** The contract's own environment action example (the public contract's bootstrap row). */
+const ENVIRONMENT_EXAMPLE = JSON.parse(readFileSync(join(HOST_PROFILES_DIR, "public-contract.json"), "utf8"))
+  .bootstrap.actions.environment.example as { kind: string; [key: string]: unknown };
 const UNAVAILABLE_SPIKES = { kind: "spikes_unavailable" } as const;
 
 test("Pi auditor model follows host settings precedence; identity policy owns equivalence", () => {
@@ -248,6 +251,8 @@ interface WireOptions {
   hostVersion?: () => unknown;
   /** What the fake preflight reports the auditor can retrieve (default: workspace and local files). */
   auditRetrieval?: readonly ("local" | "web" | "workspace")[];
+  /** The host profile's registered approval ingress (default: the contract's for the Pi profile). */
+  approvalIngress?: string;
 }
 
 async function wire(
@@ -316,6 +321,16 @@ async function wire(
           path: "/Users/amelia.dvn/empirica-projects/p-3f9c2a81b7d4/r-5e0a91c88f2b7e/gen-1/hitl/"
             + `${"9".repeat(64)}.json`, url: null, run12: "9".repeat(12) } };
       if (request.operation === "evidence_confirmation") return { type: "evidence_receipt", result: { type: "Allow" } };
+      // the environment action admitted in the private bridge's own process: the public response is the fake core's,
+      // the admission beside it names this run
+      if (request.operation === "environment_admit") {
+        const observed = (request.payload as { request: Request }).request;
+        requests.push(observed);
+        return { type: "environment_admitted", admission: { run_id: HANDLE, revision: 1 },
+          response: { ...await responder(observed), request_id: observed.request_id } };
+      }
+      if (request.operation === "environment_present")
+        return { type: "environment_refused", response: null };
       if (request.operation === "audit_verdict")
         return { type: "audit_verdict", admitted: true };
       if (request.operation === "audit_start") return { type: "audit_started" };
@@ -332,6 +347,7 @@ async function wire(
     ...(options.kickoffStartMs ? { kickoffStartMs: options.kickoffStartMs } : {}),
     ...(options.inventoryFor ? { inventoryFor: options.inventoryFor } : {}),
     ...(options.subagentToolName ? { subagentToolName: options.subagentToolName } : {}),
+    ...(options.approvalIngress ? { approvalIngress: options.approvalIngress } : {}),
     resolveAuditContract: options.resolveAudit ?? (async (input, _ctx, runtime) => {
       // Which package's preflight the adapter handed over: the owner's own sentinel answer.
       const answer = await runtime.preflight.resolveSubagentLaunchContract({}) as { ok: boolean; message?: string };
@@ -748,6 +764,28 @@ for (const [name, options, reason] of OWNER_REFUSALS) {
       "no ObserveAction (and so no governance dialog) may be dispatched");
   });
 }
+
+test("the environment action is mediated only where the profile's approval ingress is the Pi dialog's own", async () => {
+  const action = structuredClone(ENVIRONMENT_EXAMPLE);
+  // another profile's registered ingress: the registry's own word, never a host check
+  const other = (JSON.parse(readFileSync(path.join(HOST_PROFILES_DIR, "host-profiles.json"), "utf8")).profiles as
+    Array<{ profile_id: string; approval_ingress: string }>).find(row => row.approval_ingress !== HOST_APPROVAL_INGRESS)!;
+  for (const [approvalIngress, mediated] of [[undefined, true], [other.approval_ingress, false]] as const) {
+    const w = await wire(() => envelope({ type: "Allow", converged: false, run: run() }), true, undefined,
+      approvalIngress ? { approvalIngress } : {});
+    const ctx = fakeCtx("/work", [{ customType: "empirica.run", data: { runHandle: HANDLE } }]);
+    ctx.hasUI = true; ctx.ui.custom = async () => undefined as never;
+    await w.pi.sessionStart(ctx);
+    const before = w.privateRequests.length;
+    const out = await w.pi.tools.get("empirica_observe")!.execute("c1", { action }, new AbortController().signal,
+      () => {}, ctx);
+    assert.equal((out.details as Result).type, "Allow");
+    const operations = w.privateRequests.slice(before).map(request => request.operation)
+      .filter(operation => operation.startsWith("environment_"));
+    assert.deepEqual(operations, mediated ? ["environment_admit", "environment_present"] : []);
+    assert.equal(w.requests.at(-1)?.command.type, "ObserveAction", "the action itself is observed once either way");
+  }
+});
 
 test("the fake host is faithful to Pi: two loaded copies yield one subagent tool but two package commands", () => {
   const pi = new FakePi();

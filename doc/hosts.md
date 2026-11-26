@@ -45,7 +45,15 @@ cancel or a timeout leave the revision pending; a digest the host cannot recompu
 reason and the host re-presents the same revision once. The mediation is composed only for a profile whose
 approval ingress is the transport's own (MCP elicitation), and the private fetch and decision read nothing and record nothing for a host whose ingress is
 not the one the run recorded.
-Pi's environment dialog is E12's and nothing is claimed for it yet.
+Pi: the exact `environment` action is admitted in the private bridge's own process through the same admitting
+dispatch, so the admission rides beside the public response; the private bridge writes the admitted revision's
+document through the same environment mediation and records one present receipt, then the configuration dialog's
+shared frame shows the document's own facts — the profile with the networked call-out, the image references, the
+agent's plan labelled not verified, the rationale, the installed binding, the short digest and the exact path (no
+Details link). Approve and Reject decide with a receipt naming the written document's digest and the admitted
+revision; Esc, a timeout or an abort leave the revision pending. The mediation is composed only where the profile's
+registered approval ingress is the Pi dialog's own. The exact `qualify` action gets Pi's long outer transport margin
+beside the spike request; the core's own deadline bounds the attempt.
 
 ## Empirica 7 spike authority
 

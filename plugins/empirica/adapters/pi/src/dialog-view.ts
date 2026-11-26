@@ -32,13 +32,13 @@ export interface DialogTheme {
 }
 
 /** Return immutable initial values focused on the first editable row. */
-export function initialState(dialog: Dialog, confirmation = false): DialogState {
+export function initialState(dialog: Pick<Dialog, "budgets">, confirmation = false): DialogState {
   return { focus: confirmation ? dialog.budgets.length : 0,
     values: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])),
     editing: null, approve: true };
 }
 
-function configuration(dialog: Dialog, state: DialogState): Approve["configuration"] {
+function configuration(dialog: Pick<Dialog, "budgets">, state: DialogState): Approve["configuration"] {
   return {
     budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, state.values[row.key] as number])),
   };
@@ -47,7 +47,7 @@ function configuration(dialog: Dialog, state: DialogState): Approve["configurati
 export interface RangeError { row: BudgetControl; message: string }
 
 /** Return the first invalid budget value, independent of input history. */
-export function rangeError(dialog: Dialog, values: DialogState["values"]): RangeError | null {
+export function rangeError(dialog: Pick<Dialog, "budgets">, values: DialogState["values"]): RangeError | null {
   const inRange = (row: BudgetControl, value: unknown) =>
     Number.isInteger(value) && (value as number) >= row.minimum && (value as number) <= row.maximum;
   const row = dialog.budgets.find(item => !inRange(item, values[item.key]));
@@ -60,7 +60,7 @@ function edited(state: DialogState, row: BudgetControl, raw: string): DialogStat
 }
 
 /** Reduce one native key into a new state or a typed terminal decision. */
-export function reduce(state: DialogState, key: string, dialog: Dialog,
+export function reduce(state: DialogState, key: string, dialog: Pick<Dialog, "budgets">,
                        confirmation = false): Reduction {
   const fields = dialog.budgets.length;
   if (matchesKey(key, Key.escape)) return { done: { type: "dismiss" } };
@@ -137,7 +137,13 @@ export interface RenderOptions {
   confirmation: boolean; timeoutMs: number; document?: BoundDocument; raise?: Record<string, number>;
 }
 
-/** Title on the left and run facts on the right; the facts move to their own line if narrow. */
+/** Title on the left and facts on the right; the facts move to their own line if narrow. */
+function titleLines(title: string, facts: string, width: number, theme: DialogTheme): string[] {
+  const gap = width - visibleWidth(title) - visibleWidth(facts);
+  return gap >= 2 ? [title + " ".repeat(gap) + theme.muted(facts)] : [title, theme.muted(facts)];
+}
+
+/** The configuration dialog's title and run facts. */
 function header(dialog: Dialog, options: RenderOptions, width: number, theme: DialogTheme): string[] {
   const title = options.confirmation
     ? "Empirica · confirm edited configuration"
@@ -146,13 +152,12 @@ function header(dialog: Dialog, options: RenderOptions, width: number, theme: Di
   const facts = [`epoch ${dialog.epoch}`,
     ...(options.confirmation ? [] : [`${reviews} ${reviews === 1 ? "review" : "reviews"} left`]),
     duration(options.timeoutMs)].join(" · ");
-  const gap = width - visibleWidth(title) - visibleWidth(facts);
-  return gap >= 2 ? [title + " ".repeat(gap) + theme.muted(facts)] : [title, theme.muted(facts)];
+  return titleLines(title, facts, width, theme);
 }
 
 /** The goal's first line, quoted and bounded so the controls always stay on screen (ADR-0072
  * "What the forms keep": the full detail lives in the document). */
-function goalLines(dialog: Dialog, width: number): string[] {
+function goalLines(dialog: Pick<Dialog, "goal">, width: number): string[] {
   const first = `"${dialog.goal.split("\n")[0]}"`;
   const gap = width - "Goal  ".length;
   const shown = visibleWidth(first) <= gap ? first : truncateToWidth(first, gap - 1, "…") + "\"";
@@ -221,13 +226,18 @@ export function hardWrapLines(token: string, width: number, prefix = ""): string
  * first line), exactly as before minus nothing. */
 function documentLines(document: BoundDocument | undefined, width: number): string[] {
   if (!document) return [];
-  const short = `Document ${document.digest.slice(0, "sha256:".length + SHORT_BODY)}`;
+  const short = shortDigest(document.digest);
   if (document.url !== null) {
     return [...(visibleWidth(`Details: ${document.url}`) <= width
       ? [`Details: ${document.url}`] : hardWrapLines(`Details: ${document.url}`, width)), short];
   }
   const details = fallbackDetails(document.run12, Math.max(10, width));
   return [...details, short, ...hardWrapLines(document.path, width, "File: ")];
+}
+
+/** The `Document sha256:<12 hex>` line naming a bound document by its short digest (ADR-0072 Q4). */
+function shortDigest(digest: string): string {
+  return `Document ${digest.slice(0, "sha256:".length + SHORT_BODY)}`;
 }
 
 /** The fallback Details arrow line — follow-up review 16-1: `Details: <command> → run <12 hex>
@@ -303,7 +313,8 @@ function controlLines(dialog: Dialog, state: DialogState, options: RenderOptions
 }
 
 /** The two buttons; the pointer marks the chosen one while the button row has focus. */
-function buttonLine(dialog: Dialog, state: DialogState, options: RenderOptions, theme: DialogTheme): string {
+function buttonLine(dialog: Pick<Dialog, "budgets">, state: DialogState, options: Pick<RenderOptions, "confirmation">,
+                    theme: DialogTheme): string {
   const focused = state.focus === dialog.budgets.length;
   const labels = options.confirmation ? ["Approve", "Keep pending"] : ["Approve", "Reject"];
   const button = (label: string, chosen: boolean) =>
@@ -313,9 +324,12 @@ function buttonLine(dialog: Dialog, state: DialogState, options: RenderOptions, 
 
 /** The key legend, keeping as many hints as fit the width (most important first). */
 function legendLine(options: RenderOptions, width: number, theme: DialogTheme): string {
-  const hints = options.confirmation
+  return hintLine(options.confirmation
     ? ["enter confirm", "←→ choose", "esc keep pending"]
-    : ["↑↓ move", "type to edit", "←→ choose", "enter confirm", "esc later"];
+    : ["↑↓ move", "type to edit", "←→ choose", "enter confirm", "esc later"], width, theme);
+}
+
+function hintLine(hints: readonly string[], width: number, theme: DialogTheme): string {
   const fitting = hints.filter((_, index) =>
     visibleWidth(hints.slice(0, index + 1).join(" · ")) <= width);
   return theme.muted(fitting.join(" · "));
@@ -339,5 +353,82 @@ export function renderLines(dialog: Dialog, state: DialogState, width: number, t
     "",
     buttonLine(dialog, state, options, theme),
     legendLine(options, width, theme),
+  ].map(line => truncate(line, width));
+}
+
+/** The facts of one environment approval (Empirica 7.2 §6), read by the private bridge from the written
+ * `empirica.hitl/1` document's own bytes — every free text display-escaped by the core — never recomputed here. */
+export interface EnvironmentFacts {
+  revision: number;
+  proposal_digest: string;
+  goal: string;
+  profile_id: string;
+  networked: boolean;
+  spike_images: Array<{ reference: string; image_id: string | null }>;
+  preparation: string[];
+  rationale: string;
+  previous_active_binding: { record_digest: string; revision: number } | null;
+}
+/** The written environment document: its full digest and absolute path. The observer projects no environment
+ * decision, so no Details link is ever built for it; the path is the one way to the document. */
+export interface DocumentFile { digest: string; path: string }
+
+/** The environment approval asks a take-it-or-leave-it question: no editable control, only the buttons. */
+export const ENVIRONMENT_CONTROLS: Pick<Dialog, "budgets"> = Object.freeze({ budgets: [] });
+/** The label the agent's preparation is shown under (`preparation_source`: the agent's own, unverified). */
+export const PLAN_LABEL = "The agent's plan — not verified";
+/** The label the rationale is shown under (`rationale_source`: the author's own, unverified). */
+export const RATIONALE_LABEL = "Rationale — the author's own, unverified";
+const PLAN_STEP_LINES = 2;
+const RATIONALE_LINES = 3;
+
+/** `text` after `marker`, wrapped under a hanging indent to `width`, at most `limit` lines, the last one closed with
+ * an ellipsis when more was cut. */
+function boundedLines(text: string, width: number, limit: number, marker: string): string[] {
+  const indent = " ".repeat(visibleWidth(marker));
+  const room = Math.max(10, width - indent.length);
+  const lines = wrapTextWithAnsi(text, room);
+  const shown = lines.slice(0, limit);
+  if (lines.length > limit) shown[limit - 1] = truncateToWidth(`${shown[limit - 1]} …`, room, "…");
+  return shown.map((line, index) => (index === 0 ? marker : indent) + line);
+}
+
+/** The profile line: the networked container profile is called out, in the warning colour, as network egress. */
+function profileLine(facts: EnvironmentFacts, theme: DialogTheme): string {
+  return facts.networked
+    ? theme.warning(`Profile  ${facts.profile_id} · NETWORK EGRESS ENABLED`)
+    : `Profile  ${facts.profile_id} · no network`;
+}
+
+function bindingLine(facts: EnvironmentFacts): string {
+  const binding = facts.previous_active_binding;
+  return binding === null ? "Previous binding  none"
+    : `Previous binding  record ${binding.record_digest.slice(0, "sha256:".length + SHORT_BODY)}`
+      + ` · environment revision ${binding.revision}`;
+}
+
+/** Render the environment approval through the configuration dialog's frame: the title with the revision and the
+ * time left, the goal's first line, the profile with the networked call-out, the image references (an observed ID
+ * only as a diagnostic), the agent's plan and the rationale under their unverified labels, the installed binding
+ * this revision replaces, the document's short digest and exact path, then the buttons and the key legend. */
+export function renderEnvironmentLines(facts: EnvironmentFacts, document: DocumentFile, state: DialogState,
+                                       width: number, theme: DialogTheme, timeoutMs: number): string[] {
+  return [
+    ...titleLines(`Empirica · approve environment revision ${facts.revision}`, duration(timeoutMs), width, theme),
+    ...goalLines(facts, width),
+    profileLine(facts, theme),
+    "Spike images",
+    ...facts.spike_images.map(row => row.image_id === null ? `  · ${row.reference}`
+      : `  · ${row.reference} (observed ${row.image_id})`),
+    PLAN_LABEL,
+    ...facts.preparation.flatMap((step, index) => boundedLines(step, width, PLAN_STEP_LINES, `  ${index + 1}. `)),
+    RATIONALE_LABEL,
+    ...boundedLines(facts.rationale, width, RATIONALE_LINES, "  "),
+    bindingLine(facts),
+    shortDigest(document.digest),
+    ...hardWrapLines(document.path, width, "File: "),
+    "",
+    buttonLine(ENVIRONMENT_CONTROLS, state, { confirmation: false }, theme),
+    hintLine(["←→ choose", "enter confirm", "esc later"], width, theme),
   ].map(line => truncate(line, width));
 }
