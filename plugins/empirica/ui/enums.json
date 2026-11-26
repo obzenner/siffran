@@ -16,7 +16,8 @@
     "decide_claim",
     "confirm_source",
     "consent_stop",
-    "freeze_scope"
+    "freeze_scope",
+    "approve_environment"
   ],
   "run": [
     "active",
@@ -184,6 +185,8 @@
     "claim_rejected",
     "run_ended",
     "run_continued",
+    "environment_approved",
+    "environment_rejected",
     "none"
   ],
   "document": [
@@ -192,6 +195,23 @@
     "mismatch",
     "too_large",
     "unreadable"
+  ],
+  "qualification": [
+    "unbound",
+    "bound",
+    "stale",
+    "failed"
+  ],
+  "environment_revision": [
+    "pending",
+    "approved",
+    "rejected"
+  ],
+  "attempt": [
+    "reserved",
+    "succeeded",
+    "failed",
+    "superseded"
   ],
   "profile": [
     "docker-isolated-v1",

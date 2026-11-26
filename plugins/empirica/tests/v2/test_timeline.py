@@ -120,7 +120,7 @@ class TimelineCodecTests(unittest.TestCase):
         self.assertEqual(path, FilesystemRunRepository(self.home).generation_dir(KEY) / tl.TIMELINE)
         self.assertEqual(path.parent / "run.json", FilesystemRunRepository(self.home)._doc_path(KEY))
         entries = self.timeline.read(KEY)
-        none = {"plan_revision": None, "proposal_digest": None, "receipts": None}
+        none = {"plan_revision": None, "proposal_digest": None, "receipts": None, "environment": None}
         self.assertEqual(entries, (
             {"seq": 1, "previous_revision": None, "revision": "rev-1", "artifact_head": _doc(1)["committed_artifact_head_id"],
              "status": "active", "at": 10.5, **none},
@@ -141,6 +141,31 @@ class TimelineCodecTests(unittest.TestCase):
         for bad in ({"plan_revision": "2"}, {"proposal_digest": 7}, {"receipts": ["r", 3]}):
             raw = tl.encode([{**entry, **bad}])
             self.assertIsNone(tl.parse(raw), bad)
+
+    def test_an_entry_records_the_environment_the_write_left(self):
+        """The current environment revision and digest, and the fingerprint of every receipt row, superseded
+        revisions' first, so a reader can tell which write proposed a revision or recorded, then answered, its
+        presentation; an entry an earlier writer recorded without the member reads as none, and a malformed one makes
+        the timeline unknown."""
+        def member(revision, *fingerprints):
+            return {"revision": revision, "digest": f"sha256:{revision:064x}",
+                    "receipts": [{"id": f, "fingerprint": f} for f in fingerprints]}
+        doc = {**_doc(1), "environment": member(2, "f-3"), "environment_history": [member(1, "f-1", "f-2")]}
+        self.timeline.append(KEY, None, "rev-1", doc, 1.0)
+        entry = self.timeline.read(KEY)[0]
+        self.assertEqual(entry["environment"],
+                         {"revision": 2, "digest": f"sha256:{2:064x}", "receipts": ["f-1", "f-2", "f-3"]})
+        self.timeline.append(KEY, "rev-1", "rev-2", {**doc, "environment": None}, 2.0)
+        self.assertEqual(self.timeline.read(KEY)[1]["environment"],
+                         {"revision": None, "digest": None, "receipts": ["f-1", "f-2"]})
+        earlier = {key: value for key, value in entry.items() if key != "environment"}
+        self.assertIsNone(tl.parse(tl.encode([earlier]))[0]["environment"])
+        for bad in ({"revision": "2"}, {"digest": 7}, {"receipts": ["f", 3]}, {"extra": 1}):
+            self.assertIsNone(tl.parse(tl.encode([{**entry, "environment": {**entry["environment"], **bad}}])), bad)
+        # a state whose environment members it cannot read leaves no environment on its entry, never a guess
+        for unreadable in ({"environment_history": None}, {"environment_history": [{**member(1), "receipts": None}]},
+                           {"environment_history": ["f-1"]}):
+            self.assertIsNone(tl.entry(3, None, "rev-3", {**doc, **unreadable}, 3.0)["environment"], unreadable)
 
     def test_each_generation_has_its_own_timeline(self):
         self.timeline.append(KEY, None, "a", _doc(1), 1.0)

@@ -358,8 +358,11 @@ def environment_view(state: object) -> dict[str, Any] | None:
     its requested profile, how many images it names and the proposal digest — never the agent's
     preparation text, rationale or image references — or ``None`` before any proposal."""
     member = getattr(state, "environment", None)
-    if member is None:
-        return None
+    return None if member is None else member_view(member)
+
+
+def member_view(member: Mapping) -> dict[str, Any]:
+    """One revision's read-only reference, current or superseded: ``environment_view``'s shape."""
     return {"revision": member["revision"], "state": member["state"],
             "profile_id": member["proposal"]["profile_id"],
             "spike_image_count": len(member["proposal"]["spike_images"]),

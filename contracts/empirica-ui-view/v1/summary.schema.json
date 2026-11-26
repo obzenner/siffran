@@ -360,7 +360,8 @@
       "decide_claim",
       "confirm_source",
       "consent_stop",
-      "freeze_scope"
+      "freeze_scope",
+      "approve_environment"
      ],
      "properties": {
       "approve_configuration": {
@@ -500,6 +501,29 @@
          "minimum": 0
         }
        }
+      },
+      "approve_environment": {
+       "type": "object",
+       "additionalProperties": false,
+       "required": [
+        "runs",
+        "facts",
+        "untimed"
+       ],
+       "properties": {
+        "runs": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "facts": {
+         "type": "integer",
+         "minimum": 0
+        },
+        "untimed": {
+         "type": "integer",
+         "minimum": 0
+        }
+       }
       }
      },
      "description": "The human answers counted in decisions (every answer but later, from the one owner core.observer.decisions), by what was asked: the read runs with one inside the window, how many are inside, and how many were left out for want of a time."
@@ -538,6 +562,7 @@
        "confirm_source",
        "consent_stop",
        "freeze_scope",
+       "approve_environment",
        null
       ],
       "description": "What a human is asked about an active run (core.observer.ask), read from the item the core presents; null when nothing is asked or the run was not read."

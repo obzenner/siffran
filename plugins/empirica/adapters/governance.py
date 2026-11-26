@@ -317,12 +317,12 @@ def environment_form(document: Mapping[str, Any], timeout: float) -> tuple[str, 
     The decision is take-it-or-leave-it, so no fields ride the schema, and the form stays short:
     the full texts (the agent's plan, the rationale, the image references, the previous binding)
     live in the bound document. The visible lines are the heading, the profile with its
-    network-egress call-out and the document's ``File:`` reference; the observer projects no
-    environment decision yet, so no ``Details:`` link is built (E11 adds that row and its link)."""
+    network-egress call-out and the document's reference: a live observer's ``Details:`` link to
+    the decision's row, else the document's exact ``File:`` path (``document_details``)."""
     doc = document["parsed"]
     profile = (f"Profile: {doc['profile_id']} · NETWORK EGRESS ENABLED" if doc["networked"]
                else f"Profile: {doc['profile_id']} · no network")
-    reference, *document_tail = _document_lines(document, linked=False)
+    reference, *document_tail = _document_lines(document, linked=bool(document.get("url")))
     message = "\n".join((
         *_visible(
             _line(f"Empirica · approve environment revision {doc['revision']}"
@@ -390,9 +390,10 @@ class HostEnvironment:
         if shown is None:
             return response
         published, receipt_id = shown
-        # the observer projects no environment decision yet (E11 owns that row), so no decision
-        # link is ever built for this kind: the document's own path is the one way to it
+        # one Details link per presentation: a live observer's link to the decision row, else the path
+        from adapters.observer.discovery import document_details  # lazy, as the configuration form's
         document = {"digest": published.digest, "path": str(published.path), "parsed": published.parsed}
+        document = {**document, **document_details(getattr(self.documents, "home", None), run["id"], document)}
         message, schema = environment_form(document, governance_timeout())
         outcome = environment_decision(self.elicit(message, schema))
         if outcome is None:

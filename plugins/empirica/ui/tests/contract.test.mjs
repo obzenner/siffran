@@ -32,7 +32,7 @@ test("every state vocabulary is keyed by exactly the values of one contract list
 
 test("every list the contract defines is either presented (states.json) or worded by copy families the audit expands", () => {
   const presented = new Set(own(states));
-  const copyOnly = ["independence", "kind", "who", "where", "record_class", "mode", "approval", "budgets", "spike", "spike_outcome", "ask", "effect", "flag", "step_standing", "profile"];
+  const copyOnly = ["independence", "kind", "who", "where", "record_class", "mode", "approval", "budgets", "spike", "spike_outcome", "ask", "effect", "flag", "step_standing", "profile", "environment_revision", "attempt"];
   for (const name of [...Object.keys(PATHS), "budgets"]) assert.ok(presented.has(name) || copyOnly.includes(name), `${name} has neither a presentation nor a copy family`);
 });
 

@@ -17,7 +17,9 @@ the same facts and each owned here (the UI reads them and decides nothing):
 * ``standing``: the one word a run is filed under, from ``attention``, its status, the audit and drift (``STANDINGS``);
 * ``ask``: what a human is asked (``ASKS``), read from the item the core presents, and the artifact that recorded it;
 * ``audits``, ``dropped`` and ``decisions``: every audit verdict, every claim the run no longer stands on and why (the
-  gate's own claim-state rule, ``evaluation.claim_state_cause``), and every answer a human gave.
+  gate's own claim-state rule, ``evaluation.claim_state_cause``), and every answer a human gave;
+* ``environment``: the run's environment step, its revisions, attempts and binding (``core.environment``'s reads), with
+  the binding's ``standing`` (``QUALIFICATION_STANDINGS``).
 
 No I/O, no clock and no presentation: labels, colours and layout belong to the UI.
 """
@@ -27,13 +29,13 @@ import re
 from collections.abc import Mapping
 from typing import Any
 
-from . import citations, confirmation, governance, spike_observer
+from . import citations, confirmation, environment, governance, spike_observer
 from .evaluation import (LATER, ClaimDerivation, EvaluationSnapshot, Requirement, active_evidence,
                          audit_acceptance, audit_attributions, audit_passes, audit_verdicts, claim_blockers,
                          claim_digest, claim_state_cause, confirmation_batch, deferred_unresolved, derive_claims_for_projection,
                          effective_scope_ids, evidence_digest, identity_pair, independence_then, latest_audit_verdict,
                          pending_decisions, report_requirements)
-from .projection import governance_facts, project_runview
+from .projection import governance_facts, project_runview, spike_lineage
 
 #: ``evidence`` values, strongest first, and the other vocabularies this module owns
 #: (``contracts/empirica-ui-view/v1`` mirrors them; ``scripts/validate_ui_view.py`` holds it).
@@ -60,6 +62,10 @@ CLAIM_STANDING = ("current", "replaced", "gone")
 #: History kinds that record how the run was kept, not what it came to: a page folds them away by default.
 BOOKKEEPING_KINDS = ("observation_basis", "attribution")
 SPIKE_STATES = ("requested", "current", "stale", "superseded")
+#: The run's binding against its latest qualification attempt: ``unbound`` (nothing bound, nothing failed), ``bound`` (the
+#: installed binding is the latest outcome), ``stale`` (a later attempt failed: the binding stays installed, a stored
+#: reference the latest observation does not repeat) or ``failed`` (nothing bound, the latest attempt failed).
+QUALIFICATION_STANDINGS = ("unbound", "bound", "stale", "failed")
 #: The view's name for each budget ceiling ``governance.BUDGETS`` declares (``max_passes`` -> ``passes``).
 BUDGET_NAMES = {ceiling: ceiling.removeprefix("max_") for ceiling in governance.BUDGETS}
 
@@ -247,8 +253,24 @@ def _spikes(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], claim_id_dig
         if result_artifact is not None:
             result = spike_observer.result(result_artifact, context)
             result["producer_model"] = identity_pair(result_artifact.get("producer"))
-        projected.append({"request": request, "result": result, "state": state})
+        projected.append({"request": request, "result": result, "state": state,
+                          "lineage": spike_lineage(snapshot.state, request_artifact)})
     return projected
+
+
+def environment_step(state: Any) -> dict[str, Any] | None:
+    """The run's environment step, ``None`` before any proposal: every revision (``core.environment.member_view``,
+    oldest first), every qualification attempt with its outcome (``audit_context``), the installed binding and the
+    attempt ceiling (``qualification_view``), and the binding's ``standing`` against the latest failure since it was
+    installed. Stored references only: nothing here says the binding is healthy now."""
+    view = environment.qualification_view(state)
+    if view is None:
+        return None
+    standing = (("stale" if view["last_failure"] else "bound") if view["active"]
+                else "failed" if view["last_failure"] else "unbound")
+    return {"revisions": [environment.member_view(m) for m in environment.superseded_history(state)],
+            "attempts": environment.audit_context(state)["attempts"],
+            "attempts_max": view["attempts_max"], "active": view["active"], "standing": standing}
 
 
 def governance_view(value: Mapping[str, Any]) -> dict[str, Any]:
@@ -309,8 +331,11 @@ def attention(status: str, items: list[Mapping[str, Any]]) -> str:
 STANDINGS = ("unreadable", "needs_human", "audit_pending", "changed_since_audit", "not_ended", "proven",
              "stopped_residual", "stopped_budget", "stopped_frozen")
 #: What a human is asked: approve the run's configuration, approve a revision of it, decide a ``needs-decision``
-#: claim, confirm a source the service cannot check, agree to stop, or agree to end with the scope frozen.
-ASKS = ("approve_configuration", "approve_revision", "decide_claim", "confirm_source", "consent_stop", "freeze_scope")
+#: claim, confirm a source the service cannot check, agree to stop, agree to end with the scope frozen, or approve an
+#: environment revision for qualification.
+ENVIRONMENT_ASK = "approve_environment"
+ASKS = ("approve_configuration", "approve_revision", "decide_claim", "confirm_source", "consent_stop", "freeze_scope",
+        ENVIRONMENT_ASK)
 #: The asks a run's configuration raises (recorded in its state, timed by the write that proposed it).
 GOVERNANCE_ASKS = ("approve_configuration", "approve_revision")
 #: Why a claim no longer counts (``dropped``): the gate's cause, or a regraph that removed it with no evidence against it.
@@ -318,7 +343,8 @@ DROP_REASONS = ("refuted", "spike_failed", "rejected", "removed")
 #: A human's answer (``decisions``) and what the core recorded it to do.
 ANSWERS = ("approve", "reject", "later")
 EFFECTS = ("configuration_approved", "configuration_amended", "configuration_rejected", "record_confirmed",
-           "record_rejected", "claim_approved", "claim_rejected", "run_ended", "run_continued", "none")
+           "record_rejected", "claim_approved", "claim_rejected", "run_ended", "run_continued", "environment_approved",
+           "environment_rejected", "none")
 AUDIT_OUTCOMES = ("passed", "failed")
 
 
@@ -366,6 +392,7 @@ def ask(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
     * the configuration, when its requirement is the human's (``governance.human_wait``: the agent asked and a host can
       show it): ``approve_revision`` for any governance ask after the first approval (6.0.0 does not record whether a
       revision raised a ceiling, so a raise is not counted), else ``approve_configuration``;
+    * an environment revision pending on its human (``environment-pending``): ``approve_environment``;
     * the first human requirement of the report (``report_requirements``): its batch (``confirmation_batch``) asks to
       ``decide_claim`` when it holds a decision, else to ``confirm_source``; the terminal stage asks ``freeze_scope``
       (unless the human declined it: then the agent acts, and nobody is asked).
@@ -379,6 +406,8 @@ def ask(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | None,
     human = next((r for r in requirements if r.actor == "human"), None)
     if human is not None and human.stage == "setup":
         return ("approve_revision" if state.governance["first_approval"] else "approve_configuration"), None
+    if human is not None and human.reason == environment.ENVIRONMENT_PENDING:
+        return ENVIRONMENT_ASK, None
     if derivation is None or snapshot.graph is None or human is None:
         return None
     if human.stage == "terminal":
@@ -453,6 +482,9 @@ _GOVERNANCE_ANSWERS = {"approve": ("approve", "configuration_approved"), "amend"
 #: The receipt outcomes that answer a configuration ask (a later one supersedes the presentation of the same ask:
 #: the ask, not the dialog, is what the pending row names; ``dismiss`` closes that dialog but answers nothing).
 _GOVERNANCE_ANSWER_OUTCOMES = ("approve", "amend", "reject")
+#: An environment receipt row's answer and effect: its decision rewrites the presentation row it answers in place.
+ENVIRONMENT_ANSWERS = {"approve": ("approve", "environment_approved"), "reject": ("reject", "environment_rejected"),
+                        "present": ("later", "none")}
 
 
 def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
@@ -460,7 +492,9 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
               documents: Mapping[str, Mapping[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Every answer a human gave the run: its configuration's receipts from a host's dialog (an ``auto`` approval is
     nobody's answer), in the order the state records them (``at``: the write that recorded each, from ``receipts_at``),
-    then, in history order, each recorded confirmation and each item a host showed
+    then its environment revisions' receipts, oldest revision first (``environment``: the revision; a presentation its
+    revision's answer superseded is not listed; ``at`` by the row's ``fingerprint``, which its answer rewrites), then,
+    in history order, each recorded confirmation and each item a host showed
     that its human left for later. Each says what was asked (``ASKS``), what it is attached to (``claim``: the claim
     decided, or the claim a confirmed source supports; ``source``: that source; ``plan``: the configuration's plan
     revision; none of them for the run's end), the answer (``ANSWERS``) and the effect the core records for it
@@ -489,7 +523,8 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
         if r["approval_kind"] == "host_ui" and r["outcome"] in _GOVERNANCE_ANSWERS:
             answer, effect = _GOVERNANCE_ANSWERS[r["outcome"]]
             rows.append({"asked": "approve_revision" if approved else "approve_configuration",
-                         "claim": None, "source": None, "plan": r["plan_revision"], "answer": answer, "effect": effect,
+                         "claim": None, "source": None, "plan": r["plan_revision"], "environment": None,
+                         "answer": answer, "effect": effect,
                          "at": (receipts_at or {}).get(r["id"]), "document": _shown(r["document_digest"])})
         elif (r["approval_kind"] == "host_ui" and r["outcome"] == "present"
               and answered_at_revision.get(r["plan_revision"], -1) < position):
@@ -498,10 +533,19 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
             # the document that showing bound, so an open dialog is never presented as though
             # a human had decided. Superseded by a later answer at the same revision it is not.
             rows.append({"asked": "approve_revision" if approved else "approve_configuration",
-                         "claim": None, "source": None, "plan": r["plan_revision"], "answer": "later", "effect": "none",
+                         "claim": None, "source": None, "plan": r["plan_revision"], "environment": None,
+                         "answer": "later", "effect": "none",
                          "at": (receipts_at or {}).get(r["id"]), "document": _shown(r["document_digest"])})
         approved = approved or r["outcome"] in {"approve", "amend"}  # the first approval; every later ask is a revision
         position += 1
+    for member in environment.superseded_history(snapshot.state):
+        for r in member["receipts"]:
+            if member["receipt_id"] is not None and r["id"] != member["receipt_id"]:
+                continue  # a presentation the revision's own answer superseded
+            answer, effect = ENVIRONMENT_ANSWERS[r["outcome"]]
+            rows.append({"asked": ENVIRONMENT_ASK, "claim": None, "source": None, "plan": None,
+                         "environment": member["revision"], "answer": answer, "effect": effect,
+                         "at": (receipts_at or {}).get(r["fingerprint"]), "document": _shown(r["document_digest"])})
     records = {a["artifact_id"]: a for a in snapshot.history if a.get("kind") == "research"}
     answered: dict[str, set[str]] = {}
     for a in snapshot.history:
@@ -521,7 +565,7 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
                 effect = "record_confirmed" if yes else "record_rejected"
             else:
                 asked, claim, effect = "decide_claim", a["claim_id"], "claim_approved" if yes else "claim_rejected"
-            rows.append({"asked": asked, "claim": claim, "source": source, "plan": None,
+            rows.append({"asked": asked, "claim": claim, "source": source, "plan": None, "environment": None,
                          "answer": "approve" if yes else "reject", "effect": effect, "at": when,
                          "document": _shown(a.get("document_digest"))})
         elif a.get("kind") == confirmation.PRESENTATION:
@@ -532,13 +576,13 @@ def decisions(snapshot: EvaluationSnapshot, at: Mapping[str, float | None],
                     asked = (("freeze_scope" if c["claim_id"] == "stopped_frozen" else "consent_stop") if terminal
                              else "decide_claim")
                     rows.append({"asked": asked, "claim": None if terminal else c["claim_id"], "source": None, "plan": None,
-                                 "answer": "later", "effect": "none", "at": when,
+                                 "environment": None, "answer": "later", "effect": "none", "at": when,
                                  "document": _shown(a.get("document_digest"))})
             for record_id in a.get("record_ids", []):
                 if record_id not in done:
                     record = records.get(record_id, {})
                     rows.append({"asked": "confirm_source", "claim": record.get("claim_id"),
-                                 "source": record.get("source_ref"), "plan": None,
+                                 "source": record.get("source_ref"), "plan": None, "environment": None,
                                  "answer": "later", "effect": "none", "at": when,
                                  "document": _shown(a.get("document_digest"))})
     return rows
@@ -583,7 +627,8 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
 
     ``times`` gives each history artifact's recorded time, aligned with ``snapshot.history`` (a label the adapter recorded
     beside the run, ADR-0070); it is copied into the steps and decides nothing. ``configured`` gives, the same way, the time
-    of the write that proposed the current configuration (``proposal``) and of each receipt (``receipts``, by id)."""
+    of the write that proposed the current configuration (``proposal``) and of each receipt (``receipts``, by id), and of
+    the write that proposed the current environment revision (``environment``)."""
     view = project_runview(snapshot)
     verdict = latest_audit_verdict(snapshot)
     graph = snapshot.graph
@@ -625,6 +670,7 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
         "standing": standing(snapshot.state.status, attention_value, audit_row, drift),
         "ask": asked[0] if asked else None,
         "asked_at": (None if asked is None else configured["proposal"] if asked[0] in GOVERNANCE_ASKS
+                     else configured.get("environment") if asked[0] == ENVIRONMENT_ASK
                      else at.get(asked[1]) if asked[1] is not None else None),
         "flags": {"failed_audit": any(v["verdict"] == "failed" for v in recorded_audits),
                   "refuted": any(d["why"] in {"refuted", "spike_failed"} for d in lost),
@@ -662,6 +708,7 @@ def project(snapshot: EvaluationSnapshot, reasons: Mapping[str, Any], *, stopped
         # Public immutable StartRun binding only. The observer never consults qualification
         # authority, current.json, Docker, or local diagnostics.
         "spike_backend": view["spike_backend"],
+        "environment": environment_step(snapshot.state),
         "governance": governance_view(governance_facts(snapshot.state, confirmation.interactions(snapshot))),
         "audit": {"findings": list(audit["findings"])},
         "stop": stop,

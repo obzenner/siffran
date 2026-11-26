@@ -6,12 +6,16 @@ One JSON line per successful write of that generation's ``run.json``, appended b
 landed (``adapters.bridge._RecordingRuns``)::
 
     {"seq": 1, "previous_revision": null, "revision": "<sha256 of run.json>", "artifact_head": "<manifest id>",
-     "status": "active", "plan_revision": 0, "proposal_digest": "<sha256>", "receipts": [], "at": 1790586000.0}
+     "status": "active", "plan_revision": 0, "proposal_digest": "<sha256>", "receipts": [],
+     "environment": {"revision": 1, "digest": "<sha256>", "receipts": ["<sha256>"]}, "at": 1790586000.0}
 
 ``seq`` counts the entries from 1; ``previous_revision`` is the revision the write replaced (``null`` for the create);
 ``artifact_head`` is the new state's ``committed_artifact_head_id``, the manifest that write committed; ``plan_revision``,
 ``proposal_digest`` and ``receipts`` are the configuration the written state holds (its governance revision, the digest
-of its proposal and its receipt ids); ``at`` is the writer's wall clock in UTC epoch seconds.
+of its proposal and its receipt ids); ``environment`` is its current environment revision and digest (``null`` for
+either before a proposal) and the fingerprint of every environment receipt row, superseded revisions' first (a decision
+rewrites its presentation's row and so its fingerprint), or ``null`` when the document holds none; an entry an earlier
+writer recorded without it reads as ``null``; ``at`` is the writer's wall clock in UTC epoch seconds.
 
 The timeline is display data. It is machine-local, never in a Git ref, never read by a run's decisions and never part of
 a digest: a time is a label (unsigned, it may skew or go backwards), and ordering stays on ``stamp_seq`` and history
@@ -33,7 +37,29 @@ from .repository import FilesystemRunRepository, empirica_home
 
 TIMELINE = "timeline.jsonl"
 KEYS = frozenset({"seq", "previous_revision", "revision", "artifact_head", "status", "plan_revision", "proposal_digest",
-                  "receipts", "at"})
+                  "receipts", "environment", "at"})
+#: The members an entry may lack: an earlier writer recorded none of them.
+OPTIONAL = frozenset({"environment"})
+
+
+def _strings(value: Any) -> bool:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _environment(doc: Mapping) -> dict[str, Any] | None:
+    """The environment facts of a written state document (``entry``), ``None`` when it holds none readable."""
+    member, history = doc.get("environment"), doc.get("environment_history")
+    members = [*(history if isinstance(history, list) else ()), *([member] if isinstance(member, Mapping) else ())]
+    if not isinstance(history, list) or not all(isinstance(m, Mapping) and isinstance(m.get("receipts"), list)
+                                                for m in members):
+        return None
+    receipts = [r.get("fingerprint") for m in members for r in m["receipts"] if isinstance(r, Mapping)]
+    if not _strings(receipts):
+        return None
+    current = member if isinstance(member, Mapping) else {}
+    revision, digest = current.get("revision"), current.get("digest")
+    return {"revision": revision if type(revision) is int else None,
+            "digest": digest if isinstance(digest, str) else None, "receipts": receipts}
 
 
 def entry(seq: int, previous: str | None, revision: str, value: Any, at: float) -> dict[str, Any]:
@@ -51,7 +77,7 @@ def entry(seq: int, previous: str | None, revision: str, value: Any, at: float) 
             "status": status if isinstance(status, str) else None,
             "plan_revision": plan if type(plan) is int else None,
             "proposal_digest": proposal if isinstance(proposal, str) else None,
-            "receipts": ids, "at": float(at)}
+            "receipts": ids, "environment": _environment(doc), "at": float(at)}
 
 
 def _token(value: Any) -> str | None:
@@ -63,6 +89,7 @@ def _token(value: Any) -> str | None:
 def _valid(item: Any, seq: int) -> bool:
     if not isinstance(item, dict) or set(item) != KEYS:
         return False
+    environment = item["environment"]
     at, previous = item["at"], item["previous_revision"]
     return (type(item["seq"]) is int and item["seq"] == seq
             and (previous is None or (isinstance(previous, str) and previous != ""))
@@ -71,8 +98,12 @@ def _valid(item: Any, seq: int) -> bool:
             and (item["status"] is None or isinstance(item["status"], str))
             and (item["plan_revision"] is None or type(item["plan_revision"]) is int)
             and (item["proposal_digest"] is None or isinstance(item["proposal_digest"], str))
-            and (item["receipts"] is None or (isinstance(item["receipts"], list)
-                                              and all(isinstance(r, str) for r in item["receipts"])))
+            and (item["receipts"] is None or _strings(item["receipts"]))
+            and (environment is None or (isinstance(environment, dict)
+                                         and set(environment) == {"revision", "digest", "receipts"}
+                                         and (environment["revision"] is None or type(environment["revision"]) is int)
+                                         and (environment["digest"] is None or isinstance(environment["digest"], str))
+                                         and _strings(environment["receipts"])))
             and type(at) in (int, float) and math.isfinite(at))
 
 
@@ -95,6 +126,8 @@ def parse(raw: bytes | None) -> tuple[dict[str, Any], ...] | None:
             item = json.loads(line.decode("utf-8"), parse_constant=_reject_constant)
         except (UnicodeDecodeError, ValueError):
             return None
+        if isinstance(item, dict):
+            item = {**dict.fromkeys(OPTIONAL), **item}
         if not _valid(item, seq):
             return None
         entries.append(item)

@@ -93,10 +93,12 @@ function auditsHtml({ row, detail, now }) {
   return `${same ? "" : lead}${list(verdicts.map(one))}`;
 }
 
-/** What a decision is attached to, in words: the claim (a link to it in this sheet), the source, or the plan. */
+/** What a decision is attached to, in words: the claim (a link to it in this sheet), the source, the plan, or the
+ * environment revision. */
 function decidedHtml(d, { row, href }) {
   if (d.claim) return `<span class="text-xs" data-decision-claim="${esc(d.claim)}">${claimLink(row, d.claim, href) || esc(d.claim)}${d.source ? " · " : ""}${d.source ? `<ev-copy text="${esc(d.source)}" quiet=""></ev-copy>` : ""}</span>`;
   if (d.source) return `<ev-copy text="${esc(d.source)}" quiet=""></ev-copy>`;
+  if (d.environment !== null) return `<span class="text-xs text-muted-foreground">${t("decision.environment", { revision: d.environment })}</span>`;
   return d.plan === null ? "" : `<span class="text-xs text-muted-foreground">${t("decision.plan", { plan: d.plan })}</span>`;
 }
 
@@ -114,12 +116,29 @@ const pointed = (ctx, decisions) => {
   return documents.length === 1 ? documents[0] : null;
 };
 
+/** The environment kind's own facts (`core.hitl.environment_document`): the revision, the profile with its network
+ * called out, each image reference (with the ID a qualification observed, once known), the agent's plan and rationale
+ * under their unverified labels, and the binding the revision replaces. */
+function environmentFacts(body) {
+  const images = list(body.spike_images.map((i) => `<span class="flex min-w-0 flex-col gap-3xs"><ev-copy text="${esc(i.reference)}" quiet=""></ev-copy>${i.image_id ? `<span class="text-xs text-muted-foreground">${t("document.environment.image_id")} ${identifierChip(i.image_id)}</span>` : ""}</span>`));
+  const previous = body.previous_active_binding;
+  return [
+    fact(t("document.question"), t("document.environment.question")),
+    fact(t("document.environment.revision"), num(body.revision)),
+    fact(t("document.environment.profile"), joined(t(`spike.profile.${body.profile_id}`), `<strong>${t(body.networked ? "document.environment.networked" : "document.environment.isolated")}</strong>`)),
+    fact(t("document.environment.images"), images),
+    fact(t("document.environment.preparation"), list(body.preparation.map((step) => `<span class="text-s"><ev-more text="${step}"></ev-more></span>`))),
+    fact(t("document.environment.rationale"), `<ev-more text="${body.rationale}"></ev-more>`),
+    fact(t("document.environment.previous"), previous ? joined(t("environment.revision", { revision: num(previous.revision) }), identifierChip(previous.record_digest)) : t("document.environment.previous.none")),
+  ].join("");
+}
+
 /** The fact rows a document body names: its discriminator, its goal, the plan revision and the proposal it binds. */
 function documentFacts(body) {
   const parts = [];
-  if (body.question !== undefined) parts.push(fact(t("document.question"), t(`document.question.${body.question}`)));
+  if (body.question !== undefined && body.kind !== "environment") parts.push(fact(t("document.question"), t(`document.question.${body.question}`)));
   if (body.goal !== undefined) parts.push(fact(t("document.goal"), `<ev-more text="${body.goal}"></ev-more>`));
-  if (body.rationale) parts.push(fact(t("document.rationale"), `<ev-more text="${body.rationale}"></ev-more>`));
+  if (body.rationale && body.kind !== "environment") parts.push(fact(t("document.rationale"), `<ev-more text="${body.rationale}"></ev-more>`));
   if (body.plan_revision !== undefined) parts.push(fact(t("document.plan"), num(body.plan_revision)));
   if (body.proposal_digest !== undefined) parts.push(fact(t("document.proposal"), `<ev-copy text="${esc(body.proposal_digest)}" label="document.proposal" quiet=""></ev-copy>`));
   if (body.run_id !== undefined) parts.push(fact(t("document.run_id"), `<ev-copy text="${esc(body.run_id)}" label="document.run_id" quiet=""></ev-copy>`));
@@ -143,6 +162,8 @@ function documentBodyHtml(body) {
   const common = documentFacts(body);
   if (body.kind === "configuration")
     return `<div class="flex flex-col gap-s">${common ? `<dl class="flex flex-col gap-3xs">${common}</dl>` : ""}${body.budgets ? budgetRows(body) : ""}</div>`;
+  if (body.kind === "environment")
+    return `<div class="flex flex-col gap-s" data-document-environment><dl class="flex flex-col gap-3xs">${environmentFacts(body)}${common}</dl></div>`;
   const parts = [];
   if (body.terminal) {
     parts.push(fact(t("document.terminal"), stateHtml("run", body.terminal.status)));
@@ -185,6 +206,22 @@ function decisionsHtml(decisions, ctx) {
   if (!decisions.length) return `<p class="text-s text-muted-foreground">${t("decisions.none")}</p>`;
   const pointed_at = pointed(ctx, decisions);
   return list(decisions.map((d) => `<span class="flex flex-col gap-3xs" data-decision ${pointed_at !== null && d.document?.digest === pointed_at ? "data-decision-match" : ""}><span class="flex flex-wrap items-center gap-xs"><span class="text-s font-medium">${t(`ask.${d.asked}`)}</span>${chip("answer", d.answer)}<span class="text-xs text-muted-foreground">${joined(t(`effect.${d.effect}`), ago(d.at, ctx.now))}</span></span>${decidedHtml(d, ctx)}${documentHtml(d, ctx, pointed_at)}</span>`));
+}
+
+/** The run's environment step (spec 7.2 §7), as the observer serves it: the binding against its latest attempt, the
+ * installed binding (a stored reference, never live health), every qualification attempt with its outcome and closed
+ * reason, and every revision with its state. */
+function environmentHtml(e) {
+  const active = e.active
+    ? `<span class="flex min-w-0 flex-wrap items-center gap-xs"><span>${joined(t("environment.active", { seq: num(e.active.seq) }), t(`spike.profile.${e.active.profile_id}`))}</span>${identifierChip(e.active.record_digest)}</span>`
+    : `<span class="text-muted-foreground">${t("environment.active.none")}</span>`;
+  const attempt = (a) => `<span class="flex min-w-0 flex-wrap items-center gap-xs" data-environment-attempt><span class="text-s">${t("environment.attempt", { seq: num(a.seq), revision: num(a.revision) })}</span><span class="text-xs text-muted-foreground">${t(`qualification.attempt.${a.outcome}`)}</span>${a.reason ? `<code class="ev-id text-xs" title="${esc(plain("qualification.reason"))}">${esc(a.reason)}</code>` : ""}${a.probe ? `<span class="text-xs text-muted-foreground">${t("qualification.probe", { probe: esc(a.probe) })}</span>` : ""}</span>`;
+  const revision = (r) => `<span class="flex min-w-0 flex-wrap items-center gap-xs" data-environment-revision><span class="text-s">${t("environment.revision", { revision: num(r.revision) })}</span><span class="text-xs text-muted-foreground">${joined(t(`environment.revision.${r.state}`), t(`spike.profile.${r.profile_id}`), count("environment.revision.images", r.spike_image_count))}</span>${identifierChip(r.digest)}</span>`;
+  const attempts = e.attempts.length ? list(e.attempts.map(attempt)) : `<span class="text-muted-foreground">${t("environment.attempts.none")}</span>`;
+  return `<div class="flex flex-col gap-xs" data-environment>
+    <p class="flex flex-wrap items-center gap-xs">${chip("qualification", e.standing)}<span class="text-xs text-muted-foreground">${t("environment.note")}</span></p>
+    <dl class="ev-facts flex flex-col gap-xs">${fact(t("environment.binding"), active)}${fact(joined(t("environment.attempts"), t("environment.attempts.count", { used: num(e.attempts.length), max: num(e.attempts_max) })), attempts)}${fact(t("environment.revisions"), list(e.revisions.map(revision)))}</dl>
+  </div>`;
 }
 
 /** The attempts at this run side by side: only published values are set next to each other; whether an attempt is a retry of
@@ -231,6 +268,7 @@ export function sheetHtml(ctx) {
     ${noticeHtml(ctx.notice)}
     ${nowHtml(ctx)}
     ${section("audit", t("audit.title"), auditsHtml(ctx), { count: detail?.audits ? num(detail.audits.length) : null })}
+    ${detail?.environment ? section("environment", t("environment.title"), environmentHtml(detail.environment)) : ""}
     ${section("claims", t("claims.title"), claims, { count: row.claims ? num(row.claims.length) : null })}
     ${section("dropped", t("dropped.title"), dropped === undefined ? loading(ctx) : droppedHtml(dropped, ctx.now), { count: dropped ? num(dropped.length) : null, open: Boolean(dropped?.length) })}
     ${section("decisions", t("decisions.title"), detail ? decisionsHtml(detail.decisions, ctx) : loading(ctx), { count: detail?.decisions ? num(detail.decisions.length) : null, open: Boolean(ctx.decision) })}
