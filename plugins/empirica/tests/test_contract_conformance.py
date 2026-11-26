@@ -339,7 +339,8 @@ class CoreOnlyRulesTests(_Base):
         """The core-only rule the contract declares for its integer members (``x-core-only`` entries
         with ``case: float-for-int``): a JSON number with a zeroed fraction is an integer to draft
         2020-12 and must not be one to the core — the member, the history rows and the attempt rows
-        alike."""
+        alike, and (E6c) the response projections' own integers: the environment revision and image
+        count, the attempts used, the fixed attempt ceiling and the installed binding's sequence."""
         member = self.canonical("state#/$defs/environmentMember")
         attempt = self.canonical("state#/$defs/qualificationAttempt")
         for key, document, terminals in (
@@ -347,15 +348,49 @@ class CoreOnlyRulesTests(_Base):
                 ("state#/properties/environment_history", [copy.deepcopy(member)], ("revision",)),
                 ("state#/$defs/qualificationAttempt", attempt, ("revision", "started_stamp")),
                 ("state#/properties/qualification_attempts", [copy.deepcopy(attempt)],
-                 ("revision", "started_stamp"))):
+                 ("revision", "started_stamp")),
+                ("response#/$defs/environmentView",
+                 self.canonical("response#/$defs/environmentView"), ("revision", "spike_image_count")),
+                ("response#/$defs/qualificationView",
+                 self.canonical("response#/$defs/qualificationView"),
+                 ("attempts_used", "attempts_max")),
+                ("response#/$defs/qualificationView",
+                 {**self.canonical("response#/$defs/qualificationView")},
+                 ("active/seq",))):
             for terminal in terminals:
                 candidate = copy.deepcopy(document)
-                row = candidate if isinstance(candidate, dict) else candidate[0]
-                row[terminal] = float(row[terminal])  # 1 becomes 1.0: an integer to JSON, not to Python
+                if terminal == "active/seq":
+                    # a full draw never takes the null alternative, so the canonical base always
+                    # holds an installed binding whose sequence can carry the zeroed fraction.
+                    candidate["active"]["seq"] = float(candidate["active"]["seq"])
+                else:
+                    row = candidate if isinstance(candidate, dict) else candidate[0]
+                    row[terminal] = float(row[terminal])  # 8 becomes 8.0: an integer to JSON only
                 with self.subTest(key=key, member=terminal):
                     self.assertTrue(_CONTRACT.accepts(key, candidate),
                                     "draft 2020-12 must admit the float — the schema cannot say else")
                     self.assertRefused(key, candidate, f"a zeroed-fraction {terminal}")
+
+    def test_the_fixed_attempt_ceiling_derives_its_float_exception_and_sol_seed_is_pinned(self):
+        """The E6c review's seeded disagreement (blocking 1): for a valid view with nothing used,
+        nothing bound and no failure, an ``attempts_max`` of ``8.0`` is an integer to draft 2020-12
+        (a numeric ``const`` compares equal) and never one to the application's Python validator.
+        The strict Python integer rule stays; the plan must derive the ceiling's float-for-int
+        candidate and the entry declare it, exactly the way the other view integers do."""
+        document = {"attempts_used": 0, "attempts_max": 8, "active": None, "last_failure": None}
+        self.assertTrue(_CONTRACT.accepts("response#/$defs/qualificationView", document),
+                        "the seed base must be schema-valid on both sides")
+        self.assertRefused("response#/$defs/qualificationView",
+                           {**document, "attempts_max": 8.0},
+                           "a zeroed-fraction attempts_max")
+        planned = [case for case in _CONTRACT.cases("response#/$defs/qualificationView")
+                   if case.kind == "float-for-int"
+                   and case.node_id.endswith("properties/attempts_max")]
+        self.assertTrue(planned, "the ceiling's float-for-int candidate must be planned (the "
+                                 "explicit integer type carries it)")
+        for case in planned:
+            derived = _CONTRACT.derive(document, "response#/$defs/qualificationView", case)
+            self.assertTrue(derived, "the planned ceiling case must fire on the seed base")
 
 
 if __name__ == "__main__":

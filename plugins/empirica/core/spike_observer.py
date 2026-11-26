@@ -12,7 +12,9 @@ from typing import Any
 
 from .canonical import canonical_digest
 
-_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+# The one digest form, re-anchored absolutely (ADR-0075): the word equals freshness.DIGEST256_PATTERN
+# under the pin, and fullmatch keeps the admitted set identical to the `$` form it replaces.
+_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}(?![\s\S])")
 _IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENVIRONMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
 _PROFILES = {"docker-isolated-v1", "docker-networked-v1"}

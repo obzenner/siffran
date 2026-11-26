@@ -42,6 +42,26 @@ class CorpusTests(unittest.TestCase):
         self.assertTrue(any(case.startswith("a") and case.endswith("\r") for case in corpus),
                         "a witness-seeded line-terminator suffix is present")
 
+    def test_the_corpus_seeds_the_arabic_indic_digit_at_witness_ends(self):
+        """Sol's seeded cross-engine split (E6c review, blocking 2): a pattern whose final class
+        complements `\\d` — `^sha256:[0-9a-f]{63}[^\\d](?![\\s\\S])` — admits the
+        Arabic-Indic digit `U+0661` in JavaScript (`\\d` is ASCII-only) and refuses it in Python
+        (`\\d` is Unicode-wide). The corpus must end a pattern's own witness with that digit, and
+        a pattern wearing the class must show the split as a finding through the two engines."""
+        seed = "^sha256:[0-9a-f]{63}[^\\d](?![\\s\\S])"
+        corpus = parity.corpus_for(seed)
+        ending = "sha256:" + "a" * 63 + "\u0661"
+        self.assertTrue(any(case == ending for case in corpus),
+                        "the witness+digit ending is in the seeded pattern's corpus")
+        records = [{"pattern": seed, "cases": corpus}]
+        from_python = parity.python_verdicts(records)
+        from_node = parity.node_verdicts(records)
+        if from_node is None:  # a machine without Node may neither fake nor require the split
+            self.skipTest("no Node on PATH")
+        self.assertTrue(any(from_python[(seed, ending)] != from_node[(seed, ending)]
+                            for ending_probe in {(seed, ending)} if ending_probe in from_node),
+                        "the two engines must disagree on the Arabic-Indic digit ending")
+
     def test_every_registered_pattern_and_piece_is_in_scope(self):
         contract = Contract(documents=module_documents())
         patterns, open_patterns = parity.patterns_of(contract)

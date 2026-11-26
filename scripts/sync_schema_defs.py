@@ -66,7 +66,11 @@ def _qualification_probe_names() -> list[str]:
 
 def _shared_definitions() -> dict[str, dict]:
     shared = copy.deepcopy(_load("shared-defs.json")["$defs"])
+    # The ADR-0075 registration rides the definition itself: the annotation names the one core
+    # callable that validates a probe word (both target copies register through it), while the
+    # enumeration stays the support contract's own generated word, never re-owned here.
     shared["qualificationProbeName"] = {
+        "x-core-validator": "core.run.validate_qualification_probe_name",
         "enum": _qualification_probe_names(),
         "description": ("The qualification probe names, owned by the Docker spike support "
                         "contract (contracts/empirica-docker-spike/v1, its only copy): the "
@@ -276,7 +280,11 @@ def _bound_qualification_view(response: dict, state: dict) -> None:
                                     "qualification accounting projection")
     members["attempts_used"]["maximum"] = ceiling
     fixed = members["attempts_max"]
-    fixed.pop("type", None)
+    # The ceiling stays a fixed numeric const — and an explicit integer type rides it (E6c
+    # review, blocking 1): a value like 8.0 is equal to draft 2020-12 (integer, const compares
+    # equal) while the application's Python validator demands an int object, so the conformance
+    # engine derives the member's float-for-int candidate from the type and the entry declares it.
+    fixed["type"] = "integer"
     fixed.pop("minimum", None)
     fixed.pop("maximum", None)
     fixed["const"] = ceiling

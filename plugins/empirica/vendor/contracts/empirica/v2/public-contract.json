@@ -646,7 +646,7 @@
               },
               "observed_content_digest": {
                 "type": "string",
-                "pattern": "^sha256:[0-9a-f]{64}$"
+                "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
               },
               "spike_unavailable": {
                 "type": "string",
@@ -1245,7 +1245,7 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "pattern": "^sha256:[0-9a-f]{64}$"
+              "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
             }
           }
         }
@@ -1856,7 +1856,7 @@
           },
           "deferred_scope_digest": {
             "type": "string",
-            "pattern": "^sha256:[0-9a-f]{64}$"
+            "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
           }
         }
       },
@@ -2246,7 +2246,7 @@
             "uniqueItems": true,
             "items": {
               "type": "string",
-              "pattern": "^sha256:[0-9a-f]{64}$"
+              "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])"
             }
           },
           "claim_ids": {

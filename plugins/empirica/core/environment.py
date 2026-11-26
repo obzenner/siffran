@@ -115,6 +115,28 @@ def validate_proposal(value: object) -> dict[str, Any]:
     }
 
 
+def validate_action_environment(value: object) -> dict[str, object]:
+    """The closed ``environment`` author action wrapper — the contract-conformance harness's validator
+    (``x-core-validator``, ADR-0075): exactly ``{kind: "environment", payload: <proposal body>}``
+    with the payload the closed ``empirica.environment-proposal/1`` body at its own word."""
+    if type(value) is not dict or frozenset(value) != frozenset(("kind", "payload")):
+        raise EnvironmentProposalError("environment action is not closed")
+    if type(value["kind"]) is not str or value["kind"] != "environment":
+        raise EnvironmentProposalError("environment action kind is not environment")
+    validate_proposal(value["payload"])
+    return value
+
+
+def validate_action_qualify(value: object) -> dict[str, object]:
+    """The closed ``qualify`` author action wrapper — the contract-conformance harness's validator
+    (``x-core-validator``, ADR-0075): exactly ``{kind: "qualify"}``, carrying no payload."""
+    if type(value) is not dict or frozenset(value) != frozenset(("kind",)):
+        raise EnvironmentProposalError("qualify action is not closed")
+    if type(value["kind"]) is not str or value["kind"] != "qualify":
+        raise EnvironmentProposalError("qualify action kind is not qualify")
+    return value
+
+
 def canonical_proposal(value: object) -> dict[str, Any]:
     """The validated proposal with an order-insensitive ``spike_images`` member (sorted, as given)."""
     body = validate_proposal(value)

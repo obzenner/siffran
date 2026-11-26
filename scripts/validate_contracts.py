@@ -2080,6 +2080,39 @@ def _child_relation_mutations(state: str, d64: str, reg_terminal: set):
         yield ("first_terminal_fingerprint", None)
 
 
+def check_fault_reason_pairing(fault: dict, res_schema: dict, errors: list[str],
+                               where: str) -> None:
+    """The Fault probe conditional (E6b re-review, E6c corpus): the response schema's own ``fault``
+    definition owns the guarded word (its ``if`` const) and the probe enumeration (via the shared
+    ``qualificationProbeName`` definition) — never restated here. A refusal names its failed probe
+    exactly when its reason is the guarded word: the word demands the probe, the probe demands the
+    word, and the named probe is one of the schema's own probe words."""
+    if not isinstance(fault, dict) or not isinstance(res_schema, dict):
+        return
+    fault_def = res_schema.get("$defs", {}).get("fault")
+    if not isinstance(fault_def, dict):
+        return
+    conditional = fault_def.get("if")
+    guarded = None
+    if isinstance(conditional, dict):
+        reason = conditional.get("properties", {}).get("reason")
+        if isinstance(reason, dict) and isinstance(reason.get("const"), str):
+            guarded = reason["const"]
+    probes = res_schema.get("$defs", {}).get("qualificationProbeName", {}).get("enum")
+    if guarded is None or not isinstance(probes, list):
+        errors.append(f"{where}: the fault definition no longer declares its probe conditional")
+        return
+    reason = fault.get("reason")
+    probe = fault.get("probe")
+    if reason == guarded and probe is None:
+        errors.append(f"{where}: a {guarded!r} fault must name its failed probe")
+    if probe is not None:
+        if reason != guarded:
+            errors.append(f"{where}: a fault names a probe without the {guarded!r} reason")
+        if probe not in probes:
+            errors.append(f"{where}: a fault names a probe outside the schema's own enumeration")
+
+
 def check_state_invariants(state: dict, errors: list[str], where: str) -> None:
     """Procedural invariants not expressible in JSON Schema (D6 section 4).
 
@@ -2380,6 +2413,10 @@ def check_trusted_payload(request: dict, result: dict, registry: dict,
 _ANNOTATION_KEYS = frozenset({
     "title", "description", "default", "deprecated", "readOnly", "writeOnly",
     "examples", "$comment", "$id", "$schema",
+    # ADR-0075 registration annotations ride the schema side (the registry's literal params
+    # cannot carry them); they say who validates, never what the value is, so the mirror
+    # comparison strips them like any other nonsemantic key.
+    "x-core-validator", "x-core-only", "x-grammar", "x-core-ingress",
 })
 
 
@@ -2908,6 +2945,7 @@ def main() -> int:
         "invalid-child-branch", "invalid-deadline-nan", "invalid-refund-mismatch",
         "invalid-budget-reconciliation", "invalid-governance-unknown-field",
         "invalid-receipt-kind", "invalid-approved-placeholder",
+        "valid-qualification-probe-failed", "invalid-probe-unguarded",
     }
     state_names = {p.name.removesuffix(".json") for p in state_fixture_paths}
     for name in sorted(REQUIRED_STATE_FIXTURES - state_names):
@@ -2930,6 +2968,9 @@ def main() -> int:
         "invalid-governance-unknown-field": (False, "first_approval"),
         "invalid-receipt-kind": (False, "unknown_kind"),
         "invalid-approved-placeholder": (False, "approved placeholder"),
+        "valid-qualification-probe-failed": (True, None),
+        # the else side of the run/5 pairing: a probe named beside an unguarded reason is refused
+        "invalid-probe-unguarded": (False, "is not of type 'null'"),
     }
     for path in state_fixture_paths:
         name = path.name.removesuffix(".json")
@@ -3035,6 +3076,9 @@ def main() -> int:
         "observe-attribution-auditor",
         "observe-audit-verdict", "observe-audit-verdict-frozen",
         "observe-evidence-leaf",
+        # E6c: the Fault probe conditional's wire witness — reason qualification-probe-failed
+        # carries its failed probe (and the schema refuses a probe without that reason).
+        "spike-fault-probe-failed",
     }
     v2_fixture_paths = sorted((V2 / "fixtures").glob("*.json"))
     v2_names = {p.name.removesuffix(".json") for p in v2_fixture_paths}
@@ -3107,6 +3151,8 @@ def main() -> int:
                 and (not isinstance(run_backend, dict) or run_backend.get("kind") != "qualified")):
             errors.append(f"{where}: claim.spike_* reason requires a qualified fixture spike_backend")
         check_allow_cross_field(result, errors, f"{where}:expected")
+        if result.get("type") == "Fault":
+            check_fault_reason_pairing(result, res_schema, errors, f"{where}:expected")
         check_response_reasons(result, registry, errors, f"{where}:expected")
         check_run_view_fields(result, registry, errors, f"{where}:expected")
         check_stale_freshness_match(result, errors, f"{where}:expected")
@@ -3440,6 +3486,49 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "version": REGISTRY_VERSION, "digest": d64, "relevant_sections": []},
          "nonce": "abc", "phase": "investigate"}}},
         e, "neg"), "banned field", "retired fields in response")
+
+    # Fault probe conditional (E6b re-review): both refusal directions, schema-owned vocabularies.
+    expect(lambda e: check_fault_reason_pairing(
+        {"type": "Fault", "code": "unavailable", "fail_direction": "closed",
+         "reason": res_schema["$defs"]["fault"]["if"]["properties"]["reason"]["const"]},
+        res_schema, e, "neg"),
+        "must name its failed probe", "probe failure without a probe")
+    expect(lambda e: check_fault_reason_pairing(
+        {"type": "Fault", "code": "unavailable", "fail_direction": "closed",
+         "reason": "docker-unreachable",
+         "probe": res_schema["$defs"]["qualificationProbeName"]["enum"][0]},
+        res_schema, e, "neg"),
+        "names a probe without the", "probe beside an unguarded reason")
+    expect(lambda e: check_fault_reason_pairing(
+        {"type": "Fault", "code": "unavailable", "fail_direction": "closed",
+         "reason": res_schema["$defs"]["fault"]["if"]["properties"]["reason"]["const"],
+         "probe": "bogus-probe"},
+        res_schema, e, "neg"),
+        "outside the schema's own enumeration", "unknown probe named in a fault")
+    # the schema itself must refuse the two presence breaches the procedural check refuses:
+    # the guarded reason without its probe, and a probe beside an unguarded reason
+    fx = {"type": "Fault", "code": "unavailable", "fail_direction": "closed",
+          "reason": res_schema["$defs"]["fault"]["if"]["properties"]["reason"]["const"]}
+
+    def schema_expect(mutated: dict, expected: str, label: str) -> None:
+        # ``validate_schema`` appends to the shared error list: capture its slice, then decide.
+        before = len(errors)
+        validate_schema({"protocol": "empirica/v2", "request_id": "neg", "result": mutated},
+                        "empirica/v2", "response", "neg")
+        produced = errors[before:]
+        del errors[before:]
+        if not produced:
+            errors.append(f"NEG {label}: expected rejection but none produced")
+        elif not any(expected in e for e in produced):
+            errors.append(f"NEG {label}: rejected but no diagnostic contains "
+                          f"{expected!r}; got {produced}")
+
+    schema_expect(dict(fx), "is not valid under any of the given schemas",
+                  "schema: the guarded reason without its probe")
+    schema_expect({**fx, "reason": "docker-unreachable",
+                   "probe": res_schema["$defs"]["qualificationProbeName"]["enum"][0]},
+                  "is not valid under any of the given schemas",
+                  "schema: a probe beside an unguarded reason")
 
     # Protocol identity.
     expect(lambda e: check_protocol_identity(

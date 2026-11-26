@@ -142,17 +142,48 @@ export function schemaBoolean(schema: Schema | undefined): boolean {
   return schema.const;
 }
 
+/** The semantic keys a string-pattern schema may carry; `x-`-prefixed extension members (ADR-0075
+ * registration annotations, vendor documentation) carry no validation meaning and are nonsemantic. */
 const PATTERN_KEYS = new Set(["type", "pattern", "description"]);
 
-/**
- * The anchored pattern a string schema admits; any other admission keyword (`format`, `enum`, ...),
- * an unanchored pattern, or a top-level alternation (`|`, which `^...$` would not anchor) refuses to load.
+/** The absolute-end lookahead the re-anchored contract word uses — its `\s`/`\S` are part of the
+ * one atom the page may serve, so the atom itself is allowlisted, not its classes. */
+const ABSOLUTE_END = "(?![\\s\\S])";
+
+/** The positive bounded grammar this page's one pattern caller (the digest guard) may serve,
+ * after `^` is stripped and the absolute end taken off: a literal prefix of `[a-z0-9:]` characters,
+ * then exactly one `[0-9a-f]` class with a fixed positive count — no escape class, no dot, no
+ * group, no alternation, no other quantifier (E6c re-review 1, blocking 1). A blacklist of
+ * disagreeing atoms cannot hold that word: the class-escape list admitted `^\q`, an identity
+ * escape JavaScript compiles and Python refuses at compile time, and the seed resting a `(?!.)`
+ * on the Unicode line separator U+2028, which JavaScript's dot never matches (the `u` flag changes
+ * neither that nor dot semantics) while Python's does — the engines' `\d`/`\w`/`\s` families
+ * apart, their whitespace sets are simply *different*, not a Unicode-versus-ASCII split, so no
+ * restatement of “which escapes disagree” is the boundary. The boundary is the grammar itself:
+ * the digest word matches it, and both engines read every admitted pattern identically.
+ *
+ * The one closed end is the absolute lookahead; a `$` anchor never loads (E6c re-review 2,
+ * blocking 1). JSON Schema's `pattern` is Python `re.search`, whose `$` matches before a final
+ * line feed, while JavaScript's unescaped `$` (no `m` flag) refuses that value — the same
+ * split that made the core re-anchor its digest word, so the page admits no `$`-anchored word
+ * at all, not even the anchored digest itself: only `(?![\s\S])` closes the grammar. */
+const BOUNDED_WORD = /^[a-z0-9:]*\[0-9a-f\]\{[1-9][0-9]*\}$/;
+
+/** The anchored pattern a string schema serves: exactly the bounded digest-guard word — `^`,
+ * that literal prefix, the one fixed-count class, and the one closed end, the absolute
+ * `(?![\s\S])` lookahead. Any other admission keyword (`format`, `enum`, ...), an unanchored,
+ * escaped or dollar end, a top-level alternation (`|`, which `^...` would not anchor) refuses to
+ * load.
  */
 export function schemaPattern(schema: Schema | undefined): RegExp {
   const pattern = schema?.pattern;
-  if (schema?.type !== "string" || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key))
-      || typeof pattern !== "string" || !pattern.startsWith("^") || !pattern.endsWith("$")
-      || pattern.endsWith("\\$") || pattern.includes("|"))
+  const body = typeof pattern !== "string" ? undefined
+    : pattern.endsWith(ABSOLUTE_END) ? pattern.slice(0, -ABSOLUTE_END.length)
+    : undefined;
+  if (schema?.type !== "string"
+      || !Object.keys(schema).every((key) => PATTERN_KEYS.has(key) || key.startsWith("x-"))
+      || typeof pattern !== "string" || typeof body !== "string" || !pattern.startsWith("^")
+      || !BOUNDED_WORD.test(body.slice(1)))
     throw new Error(`contract schema is not a closed anchored string pattern: ${JSON.stringify(schema)}`);
   return new RegExp(pattern);
 }

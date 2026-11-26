@@ -98,8 +98,71 @@ def _install_fixture_validator(accepts=None, crashes=False):
     conditional_validator.honest = staticmethod(_honest_conditional)
     module.conditional_validator = conditional_validator
     module.two_way_validator = _two_way_validator
+    module.presence_validator = _presence_validator
     sys.modules["conformance_fixtures"] = module
     return module
+
+
+def _presence_validator(value):
+    """The honest core of the synthetic presence fixtures (a required- and an optional-driver row):
+    the probe is present exactly when the reason is the guarded word - and an absent reason falls to
+    the else side, so a reasonless row may not carry a probe at all."""
+    if not isinstance(value, dict):
+        raise ValueError("malformed")
+    exhausted = set(value) - {"reason", "probe", "message"}
+    if exhausted:
+        raise ValueError("malformed")
+    guarded = value.get("reason") == "qualification-probe-failed"
+    if guarded:
+        if "probe" not in value or value["probe"] not in PRESENCE["$defs"]["probeName"]["enum"]:
+            raise ValueError("probe missing or unknown")
+    elif "probe" in value:
+        raise ValueError("probe forbidden without the guarded reason")
+    if "reason" in value:
+        if value["reason"] not in PRESENCE["$defs"]["wire"]["properties"]["reason"]["enum"]:
+            raise ValueError("reason unknown")
+        if value["reason"] is None:
+            raise ValueError("a present reason is a word, never null")
+    if "message" in value and (not isinstance(value["message"], str) or len(value["message"]) > 40):
+        raise ValueError("message")
+    return value
+
+
+PRESENCE = {  # the node-level if/then/else presence pairing the views carry (E6c: last_failure, fault)
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "$id": "https://siffran.test/presence",
+    "type": "object",
+    "x-core-ingress": ["/$defs/looking", "/$defs/wire"],
+    "properties": {"looking": {"$ref": "#/$defs/looking"}, "wire": {"$ref": "#/$defs/wire"}},
+    "required": ["looking"],
+    "$defs": {
+        "probeName": {"enum": ["realization", "timeout"]},
+        "looking": {  # the last_failure mirror: a required reason carries or forbids the probe
+            "x-core-validator": "conformance_fixtures.presence_validator",
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["reason"],
+            "properties": {"reason": {"enum": ["docker-unreachable", "qualification-probe-failed",
+                                               "qualification-conflict"]},
+                           "probe": {"$ref": "#/$defs/probeName"}},
+            "if": {"properties": {"reason": {"const": "qualification-probe-failed"}}},
+            "then": {"required": ["probe"]},
+            "else": {"not": {"required": ["probe"]}},
+        },
+        "wire": {  # the fault mirror: an optional reason falls to the else side when absent
+            "x-core-validator": "conformance_fixtures.presence_validator",
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {"reason": {"enum": ["docker-unreachable", "qualification-probe-failed",
+                                               "qualification-conflict"]},
+                           "probe": {"$ref": "#/$defs/probeName"},
+                           "message": {"type": "string", "maxLength": 40}},
+            "if": {"properties": {"reason": {"const": "qualification-probe-failed"}},
+                   "required": ["reason"]},
+            "then": {"required": ["probe"]},
+            "else": {"not": {"required": ["probe"]}},
+        }},
+}
 
 
 def _two_way_validator(value):
@@ -158,6 +221,36 @@ class RealContractTests(unittest.TestCase):
         self.assertIn("state#/$defs/environmentProposal", self.contract.registered)
         self.assertIn("request#/$defs/environmentProposal", self.contract.registered,
                       "the request surface registers by its own declaration")
+
+    def test_the_e6_registration_set_lands_by_declaration(self):
+        """The E6c registration: the environment and qualify request wrappers, the two read
+        projections, the shared probe-name enumeration (both its copies) and the shared digest form
+        register by the contracts' own declarations — never by a harness change."""
+        for key in ("request#/$defs/actionEnvironment", "request#/$defs/actionQualify",
+                    "response#/$defs/environmentView", "response#/$defs/qualificationView",
+                    "response#/$defs/qualificationProbeName", "state#/$defs/qualificationProbeName",
+                    "response#/$defs/digest256"):
+            self.assertIn(key, self.contract.registered, key)
+        self.assertNotIn("response#/$defs/fault", self.contract.registered,
+                         "the fault def's run-view closure belongs to the migration node")
+
+    def test_the_attempt_row_and_view_pairings_derive_breaches_both_judges_refuse(self):
+        """The conditional pairings the wire carries (E6b re-review's own handoff): the run/5
+        attempt row's two-way value pairing and the view's last-failure presence pairing each derive
+        their guard flips — every breach refused by both judges on every drawn side."""
+        for key in ("state#/$defs/qualificationAttempt", "response#/$defs/qualificationView"):
+            flips = [case for case in self.contract.cases(key) if case.kind == "pairing flip"]
+            self.assertTrue(flips, f"{key} derives no pairing flip")
+            fired = []
+            for flip in flips:
+                fired += self.contract.derive(self._derived_base(key), key, flip)
+            self.assertTrue(fired, f"{key} flips never fired")
+            for derived in fired:
+                self.assertEqual(self.contract.adjudicate(key, derived), "agree-refused",
+                                 f"{key}: {derived.label}")
+
+    def _derived_base(self, key: str):
+        return find(self.contract.drawn(key, full=True), lambda document: True, settings=DRY)
 
     def test_the_real_attempt_row_draws_both_directions_of_its_pairing(self):
         """E6b re-review: the run/5 attempt row's two-way conditional (a probe named exactly on the
@@ -776,6 +869,16 @@ class TwoWayFormTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     _two_way_validator(breach)
 
+    def test_the_pairing_flips_breach_both_directions_and_both_judges_refuse(self):
+        key = "two-way#/$defs/attempt"
+        flips = [item for item in self.contract.cases(key) if item.kind == "pairing flip"]
+        self.assertTrue(flips, "the two-way pairing must derive its own breaches")
+        for base in (self._branch(True), self._branch(False)):
+            for flip in flips:
+                for derived in self.contract.derive(base, key, flip):
+                    self.assertEqual(self.contract.adjudicate(key, derived), "agree-refused",
+                                     derived.label)
+
     def test_shapes_the_engine_does_not_model_stay_refused_never_guessed(self):
         import copy
         for bad in (
@@ -794,6 +897,187 @@ class TwoWayFormTests(unittest.TestCase):
             mutant = Contract({"two-way": document})
             with self.assertRaises(ValueError):
                 mutant.drawn("two-way#/$defs/attempt")
+
+
+    def test_a_boolean_if_inside_allof_stays_refused(self):
+        """Sol's seed (E6c re-review 1, blocking 2): replacing a two-way guard's ``if`` with a
+        boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies (its
+        ``then`` names the probe on every reason, a boolean is no const on a member), and the old
+        parse silently ignored the entry, so the drawing drew a null probe the schema refused and
+        the plan yielded zero pairing flips. An ``if`` key this engine cannot model refuses at
+        parse, on both engines, in drawing and derivation alike."""
+        for boolean in (True, False):
+            with self.subTest(if_=boolean):
+                document = copy.deepcopy(TWO_WAY)
+                document["$defs"]["attempt"]["allOf"][0]["if"] = boolean
+                mutant = Contract({"two-way": document})
+                with self.assertRaises(ValueError):
+                    mutant.drawn("two-way#/$defs/attempt")
+                with self.assertRaises(ValueError):
+                    mutant.cases("two-way#/$defs/attempt")
+
+    def test_a_multi_key_if_required_with_an_optional_member_stays_refused(self):
+        """Sol's seed (E6c review, blocking 3): a two-way conditional whose ``if`` demands the
+        guarded member *and* an optional sibling loads today and draws a document the schema itself
+        refuses — the drawing honors only the driver's const, and the sibling may legally stay
+        absent, so ``if.required`` fires. The form is unmodelled: both engines refuse it at parse."""
+        document = copy.deepcopy(TWO_WAY)
+        attempt = document["$defs"]["attempt"]
+        attempt["properties"]["other"] = {"type": "string", "maxLength": 16}
+        attempt["allOf"] = [{
+            "if": {"properties": {"reason": {"const": "qualification-probe-failed"}},
+                   "required": ["reason", "other"]},
+            "then": {"properties": {"probe": {"$ref": "#/$defs/probeName"}}},
+            "else": {"properties": {"probe": {"type": "null"}}}}]
+        mutant = Contract({"two-way": document})
+        with self.assertRaises(ValueError):
+            mutant.drawn("two-way#/$defs/attempt")
+        with self.assertRaises(ValueError):
+            mutant.cases("two-way#/$defs/attempt")
+
+
+class PresenceFormTests(unittest.TestCase):
+    """The node-level ``if``/``then``/``else`` presence pairing the views declare (E6c):
+    the guarded word carries the paired member, every other word - and, on the wire form, an absent
+    driver too - forbids it. The drawing engine must draw every direction, the pairing must derive
+    its own breaches, and a gated member's own challenges must still fire against a base that drew
+    the complementary side (the guard is placed for them, never guessed away)."""
+
+    def test_a_presence_conditional_pairing_a_member_with_itself_stays_refused(self):
+        """Sol's seed (E6c re-review 2, blocking 2): leaving the optional-reason fixture's guard
+        on ``reason`` but pointing both branches at ``reason`` too yields a schema-valid
+        conditional the old parse accepted — and the drawing then drew ``{'reason':
+        'docker-unreachable'}`` the schema itself refuses, while the first pairing flip derived
+        ``{}``, which the schema accepts. A member guarding itself is unmodelled (the two-way
+        value parse already refuses it): both engines refuse the seed at parse."""
+        document = copy.deepcopy(PRESENCE)
+        which = "wire"
+        node = document["$defs"][which]
+        node["then"] = {"required": ["reason"]}
+        node["else"] = {"not": {"required": ["reason"]}}
+        mutant = Contract({"presence": document})
+        with self.assertRaises(ValueError):
+            mutant.drawn(f"presence#/$defs/{which}")
+        with self.assertRaises(ValueError):
+            mutant.cases(f"presence#/$defs/{which}")
+
+    def test_a_boolean_if_at_the_node_level_stays_refused(self):
+        """Sol's seed (E6c re-review 1, blocking 2): replacing a presence guard's ``if`` with a
+        boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies
+        (its ``then`` demands the probe on every reason, ``else`` never fires), and the old parse
+        silently ignored the node's ``if``, so the drawing drew the guarded reason without its
+        probe (a document the schema itself refused) and the plan yielded zero pairing flips. Any
+        ``if`` key this engine cannot model refuses at parse, on both engines, both sides."""
+        for boolean in (True, False):
+            for which in ("looking", "wire"):
+                with self.subTest(if_=boolean, node=which):
+                    document = copy.deepcopy(PRESENCE)
+                    document["$defs"][which]["if"] = boolean
+                    mutant = Contract({"presence": document})
+                    with self.assertRaises(ValueError):
+                        mutant.drawn(f"presence#/$defs/{which}")
+                    with self.assertRaises(ValueError):
+                        mutant.cases(f"presence#/$defs/{which}")
+
+    def test_a_presence_side_that_only_redeclares_properties_stays_refused(self):
+        """Sol's seed (E6c review, blocking 3): a ``then`` that only re-declares the paired member
+        with its schema does not make it required to jsonschema, but the old presence parser read
+        that as a presence demand — every draw supplied the member and the schema-valid member-free
+        branch was silently unreachable. Unmodelled: both engines refuse it at parse."""
+        for which in ("looking", "wire"):
+            document = copy.deepcopy(PRESENCE)
+            document["$defs"][which]["then"] = {"properties": {
+                "probe": {"$ref": "#/$defs/probeName"}}}
+            mutant = Contract({"presence": document})
+            with self.assertRaises(ValueError):
+                mutant.drawn(f"presence#/$defs/{which}")
+            with self.assertRaises(ValueError):
+                mutant.cases(f"presence#/$defs/{which}")
+
+    def setUp(self):
+        _install_fixture_validator()
+        self.contract = Contract({"presence": copy.deepcopy(PRESENCE)})
+        self.probes = sorted(PRESENCE["$defs"]["probeName"]["enum"])
+
+    def tearDown(self):
+        sys.modules.pop("conformance_fixtures", None)
+
+    def _draw(self, key: str, guarded: bool, *, driver_absent: bool = False):
+        strategy = self.contract.drawn(key, full=True).filter(
+            lambda document: (document.get("reason") == "qualification-probe-failed") is guarded
+            and ("reason" in document) is not driver_absent)
+        return find(strategy, lambda document: True, settings=DRY)
+
+    def test_every_direction_of_the_pairing_is_drawn_and_agrees(self):
+        for key in ("presence#/$defs/looking", "presence#/$defs/wire"):
+            guarded = self._draw(key, True)
+            self.assertIn(guarded["probe"], self.probes)
+            self.assertTrue(self.contract.accepts(key, guarded))
+            _presence_validator(guarded)
+            complementary = self._draw(key, False)
+            self.assertNotIn("probe", complementary)
+            self.assertTrue(self.contract.accepts(key, complementary))
+            _presence_validator(complementary)
+        # an absent driver only a non-full draw takes (a full draw keeps every optional member):
+        # it falls to the else side, so the reasonless row may not carry a probe at all.
+        reasonless = find(self.contract.drawn("presence#/$defs/wire").filter(
+            lambda document: "reason" not in document), lambda document: True, settings=DRY)
+        self.assertNotIn("probe", reasonless, "an absent driver falls to the else side")
+        self.assertTrue(self.contract.accepts("presence#/$defs/wire", reasonless))
+        _presence_validator(reasonless)
+
+    def test_direct_pairing_breaches_are_refused_by_both_judges(self):
+        key = "presence#/$defs/wire"
+        breaches = [
+            {k: v for k, v in self._draw(key, True).items() if k != "probe"},   # guarded, probe gone
+            {**self._draw(key, False), "probe": self.probes[0]},                # other reason, probe kept
+            {k: v for k, v in self._draw(key, True, driver_absent=False).items()
+             if k != "reason"},                                                 # reasonless, probe kept
+        ]
+        breaches[-1]["probe"] = self.probes[0]
+        for breach in breaches:
+            with self.subTest(breach=breach):
+                self.assertFalse(self.contract.accepts(key, breach))
+                with self.assertRaises(ValueError):
+                    _presence_validator(breach)
+
+    def test_the_pairing_flips_breach_every_direction_and_both_judges_refuse(self):
+        for key in ("presence#/$defs/looking", "presence#/$defs/wire"):
+            flips = [item for item in self.contract.cases(key) if item.kind == "pairing flip"]
+            self.assertTrue(flips, f"{key} must derive its pairing breaches")
+            labels = {item.label for item in flips}
+            if key.endswith("/wire"):
+                self.assertTrue(any("driverless" in label for label in labels),
+                                "the wire form derives the reasonless-with-probe breach")
+            else:
+                self.assertFalse(any("driverless" in label for label in labels),
+                                 "a required driver has no driverless breach to derive")
+            for flip in flips:
+                fired = []
+                for guarded in (True, False):
+                    base = self._draw(key, guarded)
+                    fired += self.contract.derive(base, key, flip)
+                self.assertTrue(fired, f"{flip.label} never fired")
+                for derived in fired:
+                    self.assertEqual(self.contract.adjudicate(key, derived), "agree-refused",
+                                     derived.label)
+
+    def test_the_gated_members_own_challenges_fire_on_the_complementary_side(self):
+        """A base that drew the else side carries no probe at all, yet the probe member's own
+        plan cases (its enumeration and its kinds) must still fire: the guard is placed for them,
+        so each candidate lands inside the guarded branch with only the challenged keyword wronged
+        - and both judges refuse it."""
+        key = "presence#/$defs/wire"
+        base = self._draw(key, False)
+        self.assertNotIn("probe", base)
+        fired = [item for item in (self.contract.derive(base, key, case)
+                                  for case in self.contract.cases(key))]
+        fired = [item for group in fired for item in group]
+        gated = [item for item in fired
+                 if isinstance(item.value, dict) and "probe" in item.value]
+        self.assertTrue(gated, "the gated probe member's own challenges must still fire")
+        for derived in gated:
+            self.assertEqual(self.contract.adjudicate(key, derived), "agree-refused", derived.label)
 
 
 class ConditionalFormTests(unittest.TestCase):

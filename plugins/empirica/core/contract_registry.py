@@ -20,10 +20,17 @@ from __future__ import annotations
 #: the data the static guard compares with the contracts' ``x-core-ingress`` + ``x-core-validator``
 #: inventory (its callers write it ``"<document>#<local pointer>"``).
 REGISTERED_DEFINITIONS: tuple[tuple[str, str], ...] = (
+    ("request", "/$defs/actionEnvironment"),
+    ("request", "/$defs/actionQualify"),
     ("request", "/$defs/environmentProposal"),
+    ("response", "/$defs/digest256"),
+    ("response", "/$defs/environmentView"),
+    ("response", "/$defs/qualificationProbeName"),
+    ("response", "/$defs/qualificationView"),
     ("state", "/$defs/environmentMember"),
     ("state", "/$defs/environmentProposal"),
     ("state", "/$defs/qualificationAttempt"),
+    ("state", "/$defs/qualificationProbeName"),
     ("state", "/properties/environment"),
     ("state", "/properties/environment_history"),
     ("state", "/properties/qualification_attempts"),

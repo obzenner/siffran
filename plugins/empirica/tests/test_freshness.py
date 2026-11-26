@@ -366,13 +366,20 @@ class CoreFactsImmutability(unittest.TestCase):
         self.assertEqual(shared["$defs"]["claimId"],
                          {"type": "string", "pattern": fr.CLAIM_ID_PATTERN})
 
-    def test_core_digest_pattern_is_every_vendored_schema_digest256(self):
+    def test_core_digest_pattern_is_the_unregistered_vendored_copies(self):
+        """The hand-written shape pin keeps only the copies registration does not cover
+        (E6c review, blocking 4): the response's digest256 is registered — the annotation guard
+        and the contract conformance differential own it there — while the request and state
+        copies keep the one word until their run-view closure joins at migration node T1."""
         vendored = PLUGIN / "vendor" / "contracts" / "empirica" / "v2"
-        for name in ("state", "request", "response"):
+        for name in ("state", "request"):
             with self.subTest(schema=name):
                 schema = json.loads((vendored / f"{name}.schema.json").read_text(encoding="utf-8"))
-                self.assertEqual(schema["$defs"]["digest256"],
-                                 {"type": "string", "pattern": fr.DIGEST256_PATTERN})
+                digest = schema["$defs"]["digest256"]
+                self.assertEqual(digest["type"], "string")
+                self.assertEqual(digest["pattern"], fr.DIGEST256_PATTERN)
+                self.assertNotIn("x-core-validator", digest,
+                                 "an unregistered copy never carries a registration annotation")
 
     def test_is_digest256_accepts_only_the_exact_lowercase_form_of_a_plain_string(self):
         class Text(str):

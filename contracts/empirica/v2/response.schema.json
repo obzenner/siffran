@@ -79,7 +79,14 @@
       "properties": {
         "revision": {
           "type": "integer",
-          "minimum": 1
+          "minimum": 1,
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "state": {
           "enum": [
@@ -97,12 +104,20 @@
         "spike_image_count": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 16
+          "maximum": 16,
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "digest": {
           "$ref": "#/$defs/digest256"
         }
-      }
+      },
+      "x-core-validator": "application.wire_views.validate_environment_view"
     },
     "qualificationView": {
       "description": "The run's qualification accounting, projected read-only: attempts used against the per-run ceiling, the installed binding reference (the last successful attempt's sequence and record digest — it stays set while a newer attempt runs or fails and is null only when nothing was ever bound in this run) and the last failure with its closed reason, naming the failed probe exactly when one failed. Nothing here binds or unbinds the spike backend by itself.",
@@ -118,11 +133,26 @@
         "attempts_used": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 8
+          "maximum": 8,
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "attempts_max": {
           "const": 8,
-          "description": "The fixed per-run attempt ceiling, generated from the one owner (the run's qualification_attempts bound) — not a sometimes-smaller limit."
+          "description": "The fixed per-run attempt ceiling, generated from the one owner (the run's qualification_attempts bound) — not a sometimes-smaller limit.",
+          "type": "integer",
+          "x-core-only": [
+            {
+              "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 8.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+              "case": "float-for-int",
+              "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+            }
+          ]
         },
         "active": {
           "oneOf": [
@@ -142,7 +172,14 @@
                 "seq": {
                   "type": "integer",
                   "minimum": 1,
-                  "maximum": 8
+                  "maximum": 8,
+                  "x-core-only": [
+                    {
+                      "rule": "A JSON integer member lands as a Python int in the core, never a float with a zeroed fraction (draft 2020-12 admits 2.0 for an integer) — the schema cannot say which Python class a number arrives as.",
+                      "case": "float-for-int",
+                      "test": "plugins/empirica/tests/test_contract_conformance.py::CoreOnlyRulesTests.test_json_floats_with_a_zeroed_fraction_are_not_python_ints"
+                    }
+                  ]
                 },
                 "profile_id": {
                   "enum": [
@@ -210,7 +247,8 @@
             }
           ]
         }
-      }
+      },
+      "x-core-validator": "application.wire_views.validate_qualification_view"
     },
     "obligations": {
       "type": "object",
@@ -2731,7 +2769,8 @@
     },
     "digest256": {
       "type": "string",
-      "pattern": "^sha256:[0-9a-f]{64}$"
+      "pattern": "^sha256:[0-9a-f]{64}(?![\\s\\S])",
+      "x-core-validator": "core.freshness.validate_digest256"
     },
     "nullableDigest256": {
       "type": [
@@ -5019,6 +5058,7 @@
       "description": "Closed single-container spike intent. The author supplies no authority, profile, resources, timeout, user, workdir, network, topology, service, alias, or Docker option."
     },
     "qualificationProbeName": {
+      "x-core-validator": "core.run.validate_qualification_probe_name",
       "enum": [
         "realization",
         "natural-125",
@@ -5029,5 +5069,8 @@
       "description": "The qualification probe names, owned by the Docker spike support contract (contracts/empirica-docker-spike/v1, its only copy): the run's qualification rows, its last failure and a refusal that names a probe reuse this enumeration, never a second spelling."
     }
   },
-  "x-core-ingress": []
+  "x-core-ingress": [
+    "/$defs/environmentView",
+    "/$defs/qualificationView"
+  ]
 }
