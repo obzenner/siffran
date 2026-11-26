@@ -43,20 +43,26 @@ PI_PROFILE = _proto.host_profile_id("pi")
 PROTOCOL_REQUEST = {"protocol": "empirica/v2", "request_id": "pi-private-bridge"}
 
 
+def isolate_machine(test: unittest.TestCase, prefix: str) -> None:
+    """A real machine home (run store and sidecar) and a real git repository (knowledge plane)
+    under one temporary root, both bound into the environment for the test's lifetime: nothing
+    reaches the developer's real home."""
+    test.machine_root = Path(tempfile.mkdtemp(prefix=prefix))
+    test.addCleanup(shutil.rmtree, test.machine_root, ignore_errors=True)
+    test.machine_home = test.machine_root / "home"
+    test.machine_home.mkdir(parents=True)
+    test.repo = test.machine_root / "repo"
+    os.makedirs(test.repo, exist_ok=True)
+    subprocess.run(["git", "init", "-q", str(test.repo)], check=True, capture_output=True)
+    environment = patch.dict(os.environ, {"EMPIRICA_HOME": str(test.machine_home),
+                                          "EMPIRICA_REPO_DIR": str(test.repo)})
+    environment.start()
+    test.addCleanup(environment.stop)
+
+
 class PiPrivateBridgeDocumentTests(unittest.TestCase):
     def setUp(self):
-        self.machine_root = Path(tempfile.mkdtemp(prefix="pi-bridge-home-"))
-        self.addCleanup(shutil.rmtree, self.machine_root, ignore_errors=True)
-        # a real machine home for the run store and the sidecar, a real git repo for the knowledge plane
-        self.machine_home = self.machine_root / "home"
-        self.machine_home.mkdir(parents=True)
-        self.repo = self.machine_root / "repo"
-        os.makedirs(self.repo, exist_ok=True)
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, capture_output=True)
-        environment = {"EMPIRICA_HOME": str(self.machine_home), "EMPIRICA_REPO_DIR": str(self.repo)}
-        self._env = patch.dict(os.environ, environment)
-        self._env.start()
-        self.addCleanup(self._env.stop)
+        isolate_machine(self, "pi-bridge-home-")
         # the real production composition for the profile, over the isolated machine home
         self.service = bridge.build_service(PI_PROFILE)
         self.run_id = self._dispatch({"type": "StartRun", "control_mode": "deliberative",
@@ -236,17 +242,7 @@ class PiEvidenceWriteFirstTests(unittest.TestCase):
     """
 
     def setUp(self):
-        self.machine_root = Path(tempfile.mkdtemp(prefix="pi-bridge-evidence-"))
-        self.addCleanup(shutil.rmtree, self.machine_root, ignore_errors=True)
-        self.machine_home = self.machine_root / "home"
-        self.machine_home.mkdir(parents=True)
-        self.repo = self.machine_root / "repo"
-        os.makedirs(self.repo, exist_ok=True)
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, capture_output=True)
-        environment = {"EMPIRICA_HOME": str(self.machine_home), "EMPIRICA_REPO_DIR": str(self.repo)}
-        self._env = patch.dict(os.environ, environment)
-        self._env.start()
-        self.addCleanup(self._env.stop)
+        isolate_machine(self, "pi-bridge-evidence-")
         self.service = bridge.build_service(PI_PROFILE)
         self.run_id = self._dispatch({"type": "StartRun", "control_mode": "deliberative",
                                       "goal": "pi writes its evidence document first",
@@ -403,17 +399,7 @@ class PiEnvironmentBridgeTests(unittest.TestCase):
     document. Everything runs on an isolated machine home and repository."""
 
     def setUp(self):
-        self.machine_root = Path(tempfile.mkdtemp(prefix="pi-bridge-environment-"))
-        self.addCleanup(shutil.rmtree, self.machine_root, ignore_errors=True)
-        self.machine_home = self.machine_root / "home"
-        self.machine_home.mkdir(parents=True)
-        self.repo = self.machine_root / "repo"
-        os.makedirs(self.repo, exist_ok=True)
-        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, capture_output=True)
-        self._env = patch.dict(os.environ, {"EMPIRICA_HOME": str(self.machine_home),
-                                            "EMPIRICA_REPO_DIR": str(self.repo)})
-        self._env.start()
-        self.addCleanup(self._env.stop)
+        isolate_machine(self, "pi-bridge-environment-")
         self.service = bridge.build_service(PI_PROFILE)
         self.sequence = 0
         self.run_id = self._dispatch({"type": "StartRun", "control_mode": "deliberative",
