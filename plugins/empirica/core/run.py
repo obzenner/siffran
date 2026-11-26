@@ -85,9 +85,18 @@ ENVIRONMENT_STATES = ("pending", "approved", "rejected")
 ATTEMPT_OUTCOMES = ("reserved", "succeeded", "failed", "superseded")
 _ENVIRONMENT_MEMBER_FIELDS = ("revision", "proposal", "digest", "state", "receipt_id")
 _QUALIFICATION_ATTEMPT_FIELDS = ("attempt_id", "revision", "started_stamp", "outcome",
-                                 "record_digest", "reason")
+                                 "record_digest", "reason", "probe")
 # The attempt's closed reason lexeme, exactly as the state contract writes it (core.contract_bounds).
 _ATTEMPT_REASON_PATTERN = QUALIFICATION_ATTEMPT_REASON_PATTERNS[0]
+# Empirica 7.2 §5.1, the probe-name decision: the attempt row keeps its failed probe durably and
+# never in message prose. The wire vocabulary owners are the Docker spike support contract (the
+# five probe names) and the application reason set (generic_spike's qualification-probe-failed);
+# both mirrors are pinned equal to those owners by empirica-docker-support-contract-check, and
+# registering the shared qualificationProbeName definition with the conformance harness replaces
+# the names with generated core constants.
+QUALIFICATION_PROBE_NAMES = ("realization", "natural-125", "output-overflow", "timeout",
+                             "network-profile")
+QUALIFICATION_PROBE_FAILED_REASON = "qualification-probe-failed"
 
 
 def validate_environment_member(value: Any, where: str = "environment member") -> Mapping[str, Any]:
@@ -152,6 +161,12 @@ def validate_qualification_attempt(value: Any) -> Mapping[str, Any]:
     if (type(value["attempt_id"]) is not str or not value["attempt_id"]
             or len(value["attempt_id"]) > QUALIFICATION_ATTEMPT_ATTEMPT_ID_MAX_LENGTH):
         raise ValueError("run/5 qualification attempt id is malformed")
+    probe = value["probe"]
+    if probe is not None and probe not in QUALIFICATION_PROBE_NAMES:
+        raise ValueError("run/5 qualification attempt probe is unknown")
+    if (reason == QUALIFICATION_PROBE_FAILED_REASON) != (probe is not None):
+        raise ValueError("run/5 qualification attempt names its failed probe exactly when its "
+                         "reason is the probe-failure reason, never otherwise")
     return value
 
 

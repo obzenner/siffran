@@ -23,6 +23,16 @@ class GenericPreparationReason(str, Enum):
     CAPTURE_INVALID = "capture-invalid"
     # The run is bound to `spikes_unavailable`; raised by the transaction, never by preparation.
     SPIKES_UNAVAILABLE = "spikes-unavailable"
+    # Empirica 7.2 §5.1 admission/transaction reasons (E6b): declared on the wire with no producer
+    # yet; the transaction raises them once the environment step lands (E7/E9/E10).
+    ENVIRONMENT_REQUIRED = "environment-required"
+    ENVIRONMENT_PENDING = "environment-pending"
+    ENVIRONMENT_REJECTED = "environment-rejected"
+    QUALIFICATION_REQUIRED = "qualification-required"
+    IMAGE_NOT_QUALIFIED = "image-not-qualified"
+    PROFILE_NOT_ALLOWED = "profile-not-allowed"
+    QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
+    SUPERSEDED_BINDING = "superseded-binding"
 
 
 class GenericPreparationUnavailable(ValueError):
@@ -388,11 +398,40 @@ class GenericUnavailableReason(str, Enum):
     LIFECYCLE_UNAVAILABLE = "lifecycle-unavailable"
     CLEANUP_UNAVAILABLE = "cleanup-unavailable"
     POSTFLIGHT_CHANGED = "postflight-changed"
+    # Empirica 7.2 §5.1 substrate/attempt reasons (E6b): the qualification attempt facts, declared
+    # on the wire with no producer yet; an attempt reports one once it lands (E7/E9).
+    QUALIFICATION_STALE_IMPLEMENTATION = "qualification-stale-implementation"
+    QUALIFICATION_STALE_DAEMON = "qualification-stale-daemon"
+    PROBE_IMAGE_UNTRUSTED = "probe-image-untrusted"
+    QUALIFICATION_PROBE_FAILED = "qualification-probe-failed"
+    DOCKER_UNREACHABLE = "docker-unreachable"
+    QUALIFICATION_CONFLICT = "qualification-conflict"
+    # Empirica 7.2 §5.1 kept, uncollapsed attempt failures: the /2 deadline, network-egress and
+    # cleanup causes generic_qualification owns stay representable as one closed attempt failure
+    # each (R12), spelled exactly as their owner spells them, never collapsed into a shorter set.
+    QUALIFICATION_DEADLINE_EXCEEDED = "qualification-deadline-exceeded"
+    NETWORK_EGRESS_UNAVAILABLE = "network-egress-unavailable"
 
 
 # The closed agent-visible spike Fault `reason` vocabulary (public-contract `evidence/spike/limits`).
 SPIKE_FAULT_REASONS = tuple(item.value for item in GenericPreparationReason) + tuple(
     item.value for item in GenericUnavailableReason)
+
+
+# The run view's qualification.last_failure closed reason set (Empirica 7.2 §5.1): every attempt
+# failure from the reason table plus the kept /2 deadline, egress and cleanup failures — never an
+# admission reason (a refusal that never starts an attempt is not an attempt failure), never a
+# shorter list. Mirrored exactly by the response schema (validate_docker_spike_contract).
+QUALIFICATION_FAILURE_REASONS = tuple(member.value for member in (
+    GenericUnavailableReason.DOCKER_UNREACHABLE,
+    GenericUnavailableReason.PROBE_IMAGE_UNTRUSTED,
+    GenericUnavailableReason.QUALIFICATION_PROBE_FAILED,
+    GenericUnavailableReason.QUALIFICATION_STALE_IMPLEMENTATION,
+    GenericUnavailableReason.QUALIFICATION_STALE_DAEMON,
+    GenericUnavailableReason.QUALIFICATION_CONFLICT,
+    GenericUnavailableReason.CLEANUP_UNAVAILABLE,
+    GenericUnavailableReason.QUALIFICATION_DEADLINE_EXCEEDED,
+    GenericUnavailableReason.NETWORK_EGRESS_UNAVAILABLE))
 
 
 @dataclass(frozen=True, slots=True)

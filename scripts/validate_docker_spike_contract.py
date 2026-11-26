@@ -43,6 +43,24 @@ REASON_HINTS = {
     "lifecycle-unavailable": "the container did not reach one admissible natural exit (exit 137, OOM, timeout, output overflow, or a staging, network-create, start, inspect, or static-policy failure); narrow the workload, or retry once if the cause was host-side (staging, network create, or static policy)",
     "cleanup-unavailable": "the next spike retries recovery automatically; if it persists, ask the operator (private operation ID)",
     "postflight-changed": "the Docker authority changed during the spike; request again after it is stable",
+    # Empirica 7.2 §5.1 environment/qualification reasons (E6b): declared on the wire with no
+    # producer yet; the next-call wording mirrors the spec's reason table.
+    "environment-required": "a spike was requested with no binding and no approved environment revision; submit an environment proposal",
+    "environment-pending": "the environment revision is pending on the human; nothing for the agent to do until they answer",
+    "environment-rejected": "the latest environment revision was rejected; submit a revised environment proposal",
+    "qualification-required": "an approved revision has nothing bound; request qualification",
+    "qualification-stale-implementation": "the loaded release differs from the binding; request qualification again",
+    "qualification-stale-daemon": "the Docker endpoint, daemon identity, version or capability differs from the binding; prepare, then request qualification again",
+    "image-not-qualified": "the spike's image is not one of the binding's sealed image IDs; submit an environment proposal that names it",
+    "probe-image-untrusted": "the local probe image does not match the pinned probe image digest; pull the pinned reference the refusal renders, then request qualification again",
+    "qualification-probe-failed": "a qualification probe failed (the separate probe field names it, never the reason); prepare, then request qualification again",
+    "qualification-deadline-exceeded": "the qualification attempt missed the one deadline covering recovery, inspection, the probes, cleanup and publication; nothing bound; request qualification again once the host is steady",
+    "network-egress-unavailable": "the qualification could not establish the networked profile's outbound egress; prepare (check the daemon's network access), then request qualification again",
+    "docker-unreachable": "no Docker daemon is reachable at the endpoint; prepare, then request qualification again",
+    "profile-not-allowed": "the requested profile is above the host ceiling; propose one within the ceiling",
+    "qualification-attempts-exhausted": "the run's qualification attempts are spent; continue on the current binding, stop, or start a fresh run",
+    "qualification-conflict": "the attempt lost the binding race or another attempt is running; request qualification again",
+    "superseded-binding": "the spike request outlived its binding; resubmit the spike request under the new binding",
 }
 
 
@@ -115,6 +133,16 @@ def render_limits() -> str:
         "Refusals | an unavailable spike Fault carries one closed reason whenever the cause is "
         "attributable; a Fault without a reason is an internal host failure: retry once, then "
         "ask the operator",
+        "Environment step | coming: a spike becomes admissible only through the run's own "
+        "environment cycle (environment proposes, the human or the approval provenance approves, "
+        "prepare, qualify binds) with the attempts a run may start bounded in the run view; until "
+        "the cycle lands, in every active run state every environment and qualify action refuses "
+        "with the closed reason environment.not_available (a terminal run is inert instead, and an "
+        "invalid frozen scope still blocks first) and the run keeps its current spike backend",
+        "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
+        "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
+        "it, admission requires the pinned digest in the image's repository digests, and a probe "
+        "image that is not the pinned one is refused as untrusted, never silently accepted",
     ]
     rows.extend(f"reason {name} | {REASON_HINTS[name]}" for name in fault_reasons)
     return "\n".join(rows)
@@ -144,6 +172,17 @@ def check_limits() -> None:
     fault = schema["$defs"]["fault"]["properties"]["reason"]["enum"]
     require(fault == list(generic_spike.SPIKE_FAULT_REASONS),
             "response.schema.json fault.reason differs from SPIKE_FAULT_REASONS")
+    require(set(generic_spike.QUALIFICATION_FAILURE_REASONS)
+            <= set(generic_spike.SPIKE_FAULT_REASONS),
+            "the closed qualification failure set must stay a subset of the Fault reasons")
+    last_failure = schema["$defs"]["qualificationView"]["properties"]["last_failure"]
+    failed = next(branch for branch in last_failure["oneOf"]
+                  if branch.get("properties") and "reason" in branch["properties"])
+    require(failed["properties"]["reason"]["enum"]
+            == list(generic_spike.QUALIFICATION_FAILURE_REASONS),
+            "response.schema.json qualification.last_failure.reason differs from the closed "
+            "attempt-failure set (Empirica 7.2 §5.1: every attempt failure plus the kept deadline, "
+            "egress and cleanup reasons, never an admission reason)")
 
 
 def check_stale_text(root_dir: Path = ROOT) -> None:
@@ -180,6 +219,12 @@ def check_support_contract() -> None:
     require(profiles == sorted(spike_plan.NETWORK_PROFILES), "profiles differ")
     require(contract["qualification"]["probes"] == list(generic_qualification.PROBE_ORDER),
             "qualification probes differ")
+    from core import run as core_run
+    require(core_run.QUALIFICATION_PROBE_NAMES == generic_qualification.PROBE_ORDER,
+            "core.run's mirrored probe names differ from the qualification probe order")
+    require(core_run.QUALIFICATION_PROBE_FAILED_REASON
+            == generic_spike.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value,
+            "core.run's mirrored probe-failure reason differs from its application owner")
     require(generic_qualification.TOTAL_QUALIFICATION_SECONDS
             == contract["qualification"]["deadline_seconds"], "qualification deadline differs")
 

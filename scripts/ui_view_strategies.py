@@ -133,14 +133,43 @@ class Strategies:
             return self._object(node, doc, pointer)
         raise ValueError(f"{doc['$id']}#{pointer}: type {kind}")
 
-    def _string(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
-        """A string node: its pattern (and every plain pattern its ``allOf`` adds, Draft-2020-12 ``search`` semantics)
-        within its length bounds. A string node's ``allOf`` may only add patterns; anything else is refused."""
+    @staticmethod
+    def _string_patterns(node: dict, doc: dict, pointer: str) -> list[str]:
+        """A string node's patterns: its own ``pattern``, then every plain pattern its ``allOf`` adds in
+        document order (Draft 2020-12 ``search`` semantics). A string node's ``allOf`` may only add
+        patterns; anything else is refused."""
         patterns = [node["pattern"]] if "pattern" in node else []
         for entry in node.get("allOf", ()):
             if set(entry) != {"pattern"}:
                 raise ValueError(f"{doc['$id']}#{pointer}: an allOf entry this generator does not derive: {sorted(entry)}")
             patterns.append(entry["pattern"])
+        return patterns
+
+    def _admits(self, node: dict, value: Any) -> bool:
+        """Whether the driver node's own keywords admit a coupled rule's guard word - only such a
+        word joins the driver's pinned arm, so a conditional can never grow the guarded member's own
+        declared shape. A free-text driver would never draw its guarded word otherwise, and the
+        guarded side of the pairing would be unreachable, not merely rare."""
+        if "const" in node:
+            return value == node["const"]
+        if "enum" in node:
+            return value in node["enum"]
+        if not isinstance(value, str):
+            return False
+        types = node.get("type")
+        types = types if isinstance(types, list) else [types]
+        if types and "string" not in types:
+            return False
+        doc, pointer = {"$id": "<the guarded member>"}, "<the guarded member>"
+        if not all(re.search(pattern, value) for pattern in self._string_patterns(node, doc, pointer)):
+            return False
+        low, high = node.get("minLength", 0), node.get("maxLength")
+        return low <= len(value) and (high is None or len(value) <= high)
+
+    def _string(self, node: dict, doc: dict, pointer: str) -> st.SearchStrategy:
+        """A string node: its pattern (and every plain pattern its ``allOf`` adds, Draft-2020-12 ``search`` semantics)
+        within its length bounds. A string node's ``allOf`` may only add patterns; anything else is refused."""
+        patterns = self._string_patterns(node, doc, pointer)
         low, high = node.get("minLength", 0), node.get("maxLength")
         if not patterns:
             return st.text(st.characters(codec="utf-8", exclude_categories=("Cs",)), min_size=low,
@@ -155,16 +184,43 @@ class Strategies:
         return drawn
 
     def _implications(self, node: dict, doc: dict, pointer: str) -> list[tuple[str, str, Any, str, dict]]:
-        """The member-to-member couplings this node's ``allOf`` states, as one derivation rule set:
-        each entry must be the contract's one conditional form - ``if`` a ``{const}`` or a
-        ``{not: {const}}`` on one required member, ``then`` a schema for exactly one other member.
-        The contract uses it for the coupling the served document must never break (PR 15, A7):
-        ``status == verified`` carries a parsed ``empirica.hitl/1`` body, every other status a
-        null one. Any other `if`/`then` shape is refused, never guessed: the guards cover every
-        value the guarded member's own enumeration can draw, or a drawing would be unsatisfiable.
+        """The member-to-member couplings this node's ``allOf`` states, as one derivation rule set.
+        Each entry must be a conditional form this engine fully models, exactly one of:
+
+        * the one-way form: ``if`` a ``{const}`` or a ``{not: {const}}`` on one required member,
+          ``then`` a schema for exactly one other member. The contract uses it for the coupling the
+          served document must never break (PR 15, A7): ``status == verified`` carries a parsed
+          ``empirica.hitl/1`` body, every other status a null one.
+        * the two-way form: one entry whose ``if`` carries a ``{const}`` on one member (its
+          ``required`` key may stay absent - the row itself requires the driver, so absence never
+          happens), with one paired member's schema for ``then`` and the same member's schema for
+          ``else``: the paired value is named exactly on the guard's word, and the ``else`` schema
+          holds otherwise (the run/5 attempt row's probe presentation, Empirica 7.2 §5.1). The pair
+          is derived as two rules sharing one driver - the const rule for the ``then`` side, its
+          complement for the ``else`` side - so the coupled drawing covers both directions.
+
+        Any other ``if``/``then`` shape is refused, never guessed: the guards cover every value the
+        guarded member's own keywords can draw, or a drawing would be unsatisfiable.
         """
         rules: list[tuple[str, str, Any, str, dict]] = []
         for entry in node.get("allOf", ()):
+            if set(entry) == {"if", "then", "else"} and set(entry["if"]) in (
+                    {"properties"}, {"properties", "required"}):
+                cond, then, otherwise = entry["if"], entry["then"], entry["else"]
+                if (len(cond.get("properties", {})) != 1
+                        or set(then) != {"properties"} or len(then["properties"]) != 1
+                        or set(otherwise) != {"properties"} or len(otherwise["properties"]) != 1):
+                    raise ValueError(f"{doc['$id']}#{pointer}: a two-way conditional names one guarded "
+                                     "member and one paired member per side, exactly")
+                (driver, guard), = cond["properties"].items()
+                (named, when_schema), = then["properties"].items()
+                (unquoted, else_schema), = otherwise["properties"].items()
+                if set(guard) != {"const"} or named != unquoted or named == driver:
+                    raise ValueError(f"{doc['$id']}#{pointer}: a two-way guard is a const on one member "
+                                     "naming the same paired member on both of its sides")
+                rules.append((driver, "const", guard["const"], named, when_schema))
+                rules.append((driver, "not", guard["const"], named, else_schema))
+                continue
             if set(entry) != {"if", "then"}:
                 raise ValueError(f"{doc['$id']}#{pointer}: an allOf entry that is not this contract's conditional")
             cond, then = entry["if"], entry["then"]
@@ -201,6 +257,12 @@ class Strategies:
             optional = {k: self.node(v, doc, f"{pointer}/properties/{k}") for k, v in others.items() if k not in required}
             rest = st.fixed_dictionaries({**fixed, **optional}) if self.full else st.fixed_dictionaries(fixed, optional=optional)
             driven = self.node(props[driver], doc, f"{pointer}/properties/{driver}")
+            # every guard word a rule names is pinned into the driver's arm alongside its own draw,
+            # so both directions of the pairing stay reachable on a free-text driver too.
+            guarded = [rule[2] for rule in rules
+                       if rule[1] == "const" and self._admits(props[driver], rule[2])]
+            if guarded:
+                driven = st.one_of(driven, st.sampled_from(guarded))
 
             def _coupled(when: tuple[Any, dict[str, Any]]) -> dict:
                 a_value, rest_values = when

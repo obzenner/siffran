@@ -432,7 +432,7 @@ def _environment_member(**changes):
 
 def _attempt_member(**changes):
     row = {"attempt_id": "qualification-1", "revision": 1, "started_stamp": 1,
-           "outcome": "reserved", "record_digest": None, "reason": None}
+           "outcome": "reserved", "record_digest": None, "reason": None, "probe": None}
     row.update(changes)
     return row
 

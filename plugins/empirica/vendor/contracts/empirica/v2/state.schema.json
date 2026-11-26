@@ -1124,7 +1124,8 @@
         "started_stamp",
         "outcome",
         "record_digest",
-        "reason"
+        "reason",
+        "probe"
       ],
       "properties": {
         "attempt_id": {
@@ -1180,8 +1181,44 @@
           ],
           "pattern": "^[a-z][a-z0-9-]{0,63}(?![\\s\\S])",
           "description": "Closed cause on failure, null otherwise; nothing may follow the lexeme — a trailing newline is not part of it."
+        },
+        "probe": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/qualificationProbeName"
+            }
+          ],
+          "description": "The probe that failed when this attempt ended in qualification-probe-failed, and null otherwise: a later read reproduces the failed probe from here, never from message prose."
         }
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "qualification-probe-failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "probe": {
+                "$ref": "#/$defs/qualificationProbeName"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "probe": {
+                "type": "null"
+              }
+            }
+          }
+        }
+      ]
     },
     "environmentProposal": {
       "x-core-validator": "core.environment.validate_proposal",
@@ -1257,6 +1294,16 @@
         }
       },
       "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
+    },
+    "qualificationProbeName": {
+      "enum": [
+        "realization",
+        "natural-125",
+        "output-overflow",
+        "timeout",
+        "network-profile"
+      ],
+      "description": "The qualification probe names, owned by the Docker spike support contract (contracts/empirica-docker-spike/v1, its only copy): the run's qualification rows, its last failure and a refusal that names a probe reuse this enumeration, never a second spelling."
     }
   },
   "x-core-ingress": [
