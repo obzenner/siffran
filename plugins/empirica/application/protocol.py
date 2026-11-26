@@ -205,6 +205,12 @@ def host_profile(profile_id: str) -> Mapping[str, Any]:
     return copy.deepcopy(_PROFILES[profile_id])
 
 
+def approval_ingress(profile_id: str) -> str | None:
+    """The ingress through which a host profile can put a question to a human, ``None`` when it has none."""
+    ingress = _PROFILES[profile_id]["approval_ingress"]
+    return None if ingress == "unavailable" else ingress
+
+
 def governance_decisions() -> tuple[tuple[str, Mapping[str, Any]], ...]:
     """Return the canonical governance decision rows."""
     return tuple((name, MappingProxyType(row)) for name, row in _GOVERNANCE_DECISIONS)
@@ -273,6 +279,22 @@ def validate_public_result(result: object) -> bool:
     envelope = {"protocol": _PROTOCOL, "request_id": "author-view", "result": result}
     try:
         schema_validator("response").validate(envelope)
+    except (jsonschema.ValidationError, TypeError):
+        return False
+    return True
+
+
+def validate_private_environment_response(response: object) -> bool:
+    """Validate one application-private environment response against the private-response
+    definition (E8: the fetch leg's Allow may carry the environment document presentation;
+    every presentation or decision receipt alternative must carry none).
+
+    The public response schema forbids a ``presentation`` key, so private environment
+    responses are validated here, never on the public wire. A mismatch lets the caller fail
+    closed with the same Fault shape ``dispatch_request`` produces.
+    """
+    try:
+        schema_validator("response", "privateEnvironmentResponse").validate(response)
     except (jsonschema.ValidationError, TypeError):
         return False
     return True

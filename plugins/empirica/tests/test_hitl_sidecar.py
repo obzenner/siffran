@@ -350,6 +350,11 @@ class TestPublish(_Isolated):
     def published_file(self) -> list[Path]:
         return sorted(self.store.dir(self.KEY).glob("*.json"))
 
+    def assert_refused(self, document: dict, message: str, **expect) -> None:
+        """The document's core-rendered pair publishes nothing, and nothing is on disk."""
+        self.assertIsNone(hitl_sidecar.publish(self.store, self.HANDLE, hitl.rendered_pair(document), **expect))
+        self.assertEqual(self.published_file(), [], message)
+
     def test_a_malformed_pair_writes_nothing(self):
         # Everything checked before the write: a pair that is not a mapping, that lacks a member,
         # whose members are mistyped, whose digest is not a document identity, whose run id
@@ -389,11 +394,32 @@ class TestPublish(_Isolated):
                          {"schema": hitl.SCHEMA_ID, "kind": hitl.CONFIGURATION,
                           "question": "other"}):
             with self.subTest(question=document.get("question", "<missing>")):
-                data = hitl.render(document)
-                self.assertIsNone(hitl_sidecar.publish(
-                    self.store, self.HANDLE,
-                    {"text": data.decode("utf-8"), "digest": hitl.digest(data)}))
-                self.assertEqual(self.published_file(), [], "no question, no write")
+                self.assert_refused(document, "no question, no write")
+
+    def test_an_environment_document_carries_only_its_own_question(self):
+        """E8's X3 twin: the environment kind's one question is the approve of a revision — a
+        document claiming that kind with the configuration's amendment question (or none) is
+        digest-consistent JSON that no environment flow may ever show, so the shared helper
+        refuses it before the write, exactly as the configuration's own question check does."""
+        for document in ({"schema": hitl.SCHEMA_ID, "kind": hitl.ENVIRONMENT},
+                         {"schema": hitl.SCHEMA_ID, "kind": hitl.ENVIRONMENT,
+                          "question": hitl.CONFIRM_AMENDMENT}):
+            with self.subTest(question=document.get("question", "<missing>")):
+                self.assert_refused(document, "no approve question, no write")
+
+    def test_a_document_that_misses_the_expected_identity_writes_nothing(self):
+        """A valid, self-consistent document of another run, kind or revision is refused BEFORE
+        the write when the caller names the identity it expects: every named member must match,
+        and the same pair publishes once all do."""
+        document = {"schema": hitl.SCHEMA_ID, "kind": hitl.ENVIRONMENT, "question": hitl.APPROVE,
+                    "run_id": self.HANDLE, "revision": 2}
+        pair = hitl.rendered_pair(document)
+        expected = {name: document[name] for name in ("run_id", "kind", "revision")}
+        for name, other in (("run_id", "another-run"), ("kind", hitl.CONFIGURATION), ("revision", 1)):
+            with self.subTest(member=name):
+                self.assert_refused(document, f"a different {name} writes nothing", expect={**expected, name: other})
+        self.assertIsNotNone(hitl_sidecar.publish(self.store, self.HANDLE, pair, expect=expected))
+        self.assertEqual(len(self.published_file()), 1)
 
     def test_a_digest_mismatch_writes_nothing(self):
         # Well-formed identity, wrong bytes: the text is real JSON, the digest names another

@@ -45,6 +45,29 @@ def validate_environment_view(value: Any) -> Mapping[str, Any]:
     return value
 
 
+_ENVIRONMENT_PRESENTATION_FIELDS = frozenset(("document",))
+_ENVIRONMENT_PAIR_FIELDS = frozenset(("text", "digest"))
+
+
+def validate_environment_presentation(value: Any) -> Mapping[str, Any]:
+    """The private environment fetch presentation (``response#/$defs/environmentPresentation``,
+    E8): exactly ``{document: {text, digest}}`` — the pending revision's core-rendered
+    ``empirica.hitl/1`` document pair, never re-rendered by any host. The digest form is the
+    shared owner's; the pairing of the two members is the member's own word below."""
+    if not isinstance(value, Mapping) or frozenset(value) != _ENVIRONMENT_PRESENTATION_FIELDS:
+        raise ValueError("environment presentation is not the closed projection")
+    document = value["document"]
+    if not isinstance(document, Mapping) or frozenset(document) != _ENVIRONMENT_PAIR_FIELDS:
+        raise ValueError("environment presentation document is not the closed pair")
+    digest = document["digest"]
+    if not isinstance(digest, str):
+        raise ValueError("environment presentation digest is malformed")
+    freshness.validate_digest256(digest)
+    if not isinstance(document["text"], str) or not document["text"]:
+        raise ValueError("environment presentation text is malformed")
+    return document
+
+
 def validate_qualification_view(value: Any) -> Mapping[str, Any]:
     """The run's read-only qualification accounting (``response#/$defs/qualificationView``): the
     attempts used against the one per-run ceiling, the installed binding reference, and the last

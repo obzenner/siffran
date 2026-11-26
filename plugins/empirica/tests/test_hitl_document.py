@@ -445,6 +445,171 @@ class EvidenceGoldenTests(unittest.TestCase):
         self.assertIn("\\u202e", data.decode("utf-8"))  # the escaper's textual form, never the character
 
 
+# --------------------------------------------------------------------------- #
+# The environment documents (E8, spec §5/§6, ADR-0072): one pending revision rendered from
+# the real E7 admission writer (``core.environment.revision_member`` over the public contract's
+# own sample proposal), published write-first before the host presents anything.
+# --------------------------------------------------------------------------- #
+ENVIRONMENT_RUN_ID = "run-fx-env"
+_ENVIRONMENT_ACTION = json.loads(
+    (ROOT / "contracts" / "empirica" / "v2" / "public-contract.json").read_text("utf-8")
+)["bootstrap"]["actions"]["environment"]["example"]
+
+
+def environment_member(revision: int = 1, proposal_overrides: dict | None = None):
+    """One pending member as E7's own admission writes it (the public contract's sample payload);
+    the document builders never re-derive its revision or digest."""
+    from core import environment
+    payload = copy.deepcopy(_ENVIRONMENT_ACTION["payload"])
+    payload.update(proposal_overrides or {})
+    return environment.revision_member(payload, revision=revision, approved=False)
+
+
+def environment_document(member=None, *, goal: str = "Qualify the run's environment "
+                       "from supplied context.", previous_binding=None) -> dict:
+    member = environment_member() if member is None else member
+    return hitl.environment_document(
+        run_id=ENVIRONMENT_RUN_ID, revision=member["revision"],
+        proposal_digest=member["digest"], goal=goal, proposal=member["proposal"],
+        invocation=INVOCATION, previous_binding=previous_binding)
+
+
+class EnvironmentGoldenTests(unittest.TestCase):
+    """The environment golden comes from E7's real admission writer; its bytes reproduce the
+    fixture and its digest is the identity the receipt binds."""
+
+    def test_approve_reproduces_the_fixture(self):
+        self.assertEqual(hitl.render(environment_document()),
+                         fixture_bytes("valid-environment-approve"))
+
+    def test_the_built_document_is_schema_valid(self):
+        assert_schema(environment_document(), "environment/approve")
+
+    def test_the_document_binds_the_members_own_identity(self):
+        member = environment_member()
+        document = environment_document(member)
+        self.assertEqual(document["revision"], member["revision"])
+        self.assertEqual(document["proposal_digest"], member["digest"])
+
+    def test_the_networked_profile_is_called_out_exactly(self):
+        """The networked container profile is called out through its own derived member: an
+        isolated revision says ``networked: false``, a networked one says ``true`` — the two-way
+        pair the schema pins, so a human approving egress never reads an isolated form."""
+        isolated = environment_document(environment_member(
+            proposal_overrides={"profile_id": "docker-isolated-v1"}))
+        self.assertFalse(isolated["networked"])
+        networked = environment_document(environment_member(
+            proposal_overrides={"profile_id": "docker-networked-v1"}))
+        self.assertTrue(networked["networked"])
+        assert_schema(isolated, "environment/isolated")
+        assert_schema(networked, "environment/networked")
+
+    def test_the_previous_binding_is_carried_whole(self):
+        record = "sha256:" + "7" * 64
+        document = environment_document(previous_binding={"record_digest": record, "revision": 3})
+        self.assertEqual(document["previous_active_binding"], {"record_digest": record, "revision": 3})
+        assert_schema(document, "environment/bound")
+        self.assertIsNone(environment_document()["previous_active_binding"])
+
+    def test_hostile_text_never_reaches_the_bytes(self):
+        """Bidi overrides, zero-width characters and backslashes in the goal, a preparation
+        step or the rationale — everything free-text the human judges — is escaped by the
+        core's one escaper, and the labels say who wrote the unverified parts."""
+        hostile = "goal \u202e reversed \u200b hidden \\ slashed"
+        document = environment_document(environment_member(
+            proposal_overrides={"rationale": hostile,
+                                "preparation": ["step \u202e reversed"]}), goal=hostile)
+        self.assertEqual(document["goal"], safe_text(hostile))
+        self.assertEqual(document["rationale"], safe_text(hostile))
+        self.assertEqual(document["preparation"], [safe_text("step \u202e reversed")])
+        self.assertEqual(document["preparation_source"], hitl.AGENT_UNVERIFIED)
+        self.assertEqual(document["rationale_source"], hitl.AUTHOR_UNVERIFIED)
+        data = hitl.render(document)
+        for raw in ("\u202e", "\u200b"):
+            self.assertNotIn(raw.encode("utf-8"), data)
+        self.assertIn("\\u202e", data.decode("utf-8"))  # the escaper's textual form
+
+    def test_fail_closed_on_every_wrong_input(self):
+        member = environment_member()
+        for payload in (
+            {"run_id": "", "revision": 1, "proposal_digest": member["digest"],
+             "goal": "g", "proposal": member["proposal"], "invocation": INVOCATION},
+            {"run_id": ENVIRONMENT_RUN_ID, "revision": 0,
+             "proposal_digest": member["digest"], "goal": "g",
+             "proposal": member["proposal"], "invocation": INVOCATION},
+            {"run_id": ENVIRONMENT_RUN_ID, "revision": 1, "proposal_digest": "not-a-digest",
+             "goal": "g", "proposal": member["proposal"], "invocation": INVOCATION},
+            {"run_id": ENVIRONMENT_RUN_ID, "revision": 1, "proposal_digest": member["digest"],
+             "goal": "g", "proposal": {"profile_id": "docker-isolated-v1"},
+             "invocation": INVOCATION},
+            {"run_id": ENVIRONMENT_RUN_ID, "revision": 1, "proposal_digest": member["digest"],
+             "goal": "g", "proposal": member["proposal"], "invocation": {"host": "test"}},
+        ):
+            with self.assertRaises((ValueError, Exception)):
+                hitl.environment_document(**payload)
+        with self.assertRaises(ValueError):
+            environment_document(previous_binding={"record_digest": "sha256:" + "1" * 64})
+
+    def test_a_previous_binding_is_never_compared_with_the_proposal_digest(self):
+        """A qualification record and a proposal are different objects: sharing a digest value
+        is no reason to refuse the document, so it is carried."""
+        member = environment_member()
+        document = environment_document(
+            member, previous_binding={"record_digest": member["digest"], "revision": 1})
+        self.assertEqual(document["previous_active_binding"]["record_digest"], member["digest"])
+
+    def test_maximum_size_proposals_that_expand_under_escaping_stay_schema_valid(self):
+        """The document's escaped free text is bounded by the proposal's own bound times the
+        escaper's longest expansion — read here from the request schema's owner and measured from
+        the escaper, never restated: a maximum-size proposal whose every character expands
+        (backslashes, the zero-width and bidi characters the escaper rewrites) renders to more
+        characters than the proposal admits and must still be a valid document, while the
+        proposal itself is accepted whole — never tightened, never truncated. Controls in the
+        goal expand too, and the goal carries no bound."""
+        request = json.loads((ROOT / "contracts" / "empirica" / "v2" / "request.schema.json"
+                              ).read_text("utf-8"))["$defs"]["environmentProposal"]["properties"]
+        step_max = request["preparation"]["items"]["maxLength"]
+        steps_max = request["preparation"]["maxItems"]
+        rationale_max = request["rationale"]["maxLength"]
+        widest = max((chr(code) for code in range(0x10000)), key=lambda c: len(safe_text(c)))
+        for expanding in ("\\", widest):
+            with self.subTest(character=ascii(expanding)):
+                step = "a" + expanding * (step_max - 1)
+                rationale = "a" + expanding * (rationale_max - 1)
+                member = environment_member(proposal_overrides={
+                    "preparation": [step] * steps_max, "rationale": rationale})
+                self.assertEqual(member["proposal"]["rationale"], rationale)  # accepted whole
+                document = environment_document(member, goal="goal\n\u202e\x07" * 50)
+                self.assertGreater(len(document["rationale"]), rationale_max)
+                self.assertGreater(len(document["preparation"][0]), step_max)
+                assert_schema(document, "environment/expanded")
+        self.assertGreater(len(safe_text(widest)), len(safe_text("\\")))  # the widest really is wider
+
+
+class SharedPairTests(unittest.TestCase):
+    """One pair construction and one write-first verification for every kind: the pair is the
+    document's exact rendered bytes and their digest, and the verification admits exactly that
+    digest — and, where a recorded row exists, its own."""
+
+    def test_the_pair_is_the_rendered_bytes_and_their_digest(self):
+        document = environment_document()
+        pair = hitl.rendered_pair(document)
+        self.assertEqual(pair["text"].encode("utf-8"), hitl.render(document))
+        self.assertEqual(pair["digest"], hitl.document_digest(document))
+        self.assertEqual(set(pair), {"text", "digest"})
+
+    def test_the_verification_binds_the_rendered_digest_and_the_recorded_row(self):
+        document = environment_document()
+        given = hitl.document_digest(document)
+        self.assertTrue(hitl.document_bound(given, document))
+        self.assertFalse(hitl.document_bound(given, {**document, "goal": "another"}))
+        self.assertFalse(hitl.document_bound("sha256:" + "0" * 64, document))
+        self.assertFalse(hitl.document_bound(None, document))
+        self.assertTrue(hitl.document_bound(given, document, recorded={"document_digest": given}))
+        self.assertFalse(hitl.document_bound(given, document, recorded={"document_digest": "sha256:" + "0" * 64}))
+        self.assertFalse(hitl.document_bound(given, document, recorded={"document_digest": None}))
+
+
 class QuestionTests(unittest.TestCase):
     """``question_of`` is the ADR's discriminator: the receipts witness an amendment, the state word
     cannot (review-1 finding 2)."""

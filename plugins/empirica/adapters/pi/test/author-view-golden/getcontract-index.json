@@ -510,6 +510,12 @@
             ]
           },
           {
+            "code": "environment.document_mismatch",
+            "sections": [
+              "environment/actions"
+            ]
+          },
+          {
             "code": "qualification-attempts-exhausted",
             "sections": [
               "environment/actions"

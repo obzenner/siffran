@@ -16,7 +16,7 @@ from adapters.confirmation import CLAUDE_VISIBLE_LINES
 from adapters.state.fsio import SymlinkRefused
 from adapters.state.hitl import (DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish)
 from application import protocol
-from core import hitl as core_hitl
+from core import environment as core_environment, hitl as core_hitl
 from core.governance import expected_approval_kind
 
 #: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's
@@ -158,15 +158,20 @@ def _visible(*lines: str) -> tuple[str, ...]:
     return tuple(lines)
 
 
-def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
+def _document_lines(document: Mapping[str, Any], *, linked: bool = True) -> tuple[str, ...]:
     """The bound document's Details (PR 16, ADR-0072 Q5's amendment): a live observer's link to
     the decision's row in the UI — plus the document's own short digest — or, when no observer of
     this home answers, the honest fallback that keeps the document's exact absolute path (O5,
     as decided: the path is dropped only when a verified link is shown). Presentation only: the
     URL is built by the discovery helper beside the store, once per presentation, and the core
     never sees it. The ``File:`` line keeps its copy-paste guarantee: never shortened,
-    never ``~-``shortened, never wrapped (Q4's one exempt line, new spelling)."""
+    never ``~-``shortened, never wrapped (Q4's one exempt line, new spelling). A document the
+    observer projects no row for (``linked=False``) is named by its ``File:`` line alone, then
+    its short digest."""
     short = f"Document {document['digest'][:7 + _SHORT_BODY]}"
+    path = f"File: {document['path']}"
+    if not linked:
+        return (path, short)
     url = document.get("url")
     if isinstance(url, str) and url:
         return (f"Details: {url}", short)
@@ -178,7 +183,7 @@ def _document_lines(document: Mapping[str, Any]) -> tuple[str, ...]:
              if run12 else f"{_UI_COMMAND} → Human decisions")
     return (*textwrap.wrap(f"Details: {where}", width=72, break_long_words=False,
                            break_on_hyphens=False),
-            short, f"File: {document['path']}")
+            short, path)
 
 def review_form(dialog: Mapping[str, Any], document: Mapping[str, Any], timeout: float, *,
                 approved: Mapping[str, Any] | None = None) -> tuple[str, dict]:
@@ -303,6 +308,153 @@ def _strip_presentation(result: dict) -> dict:
     if isinstance(result, dict) and "presentation" in result:
         return {key: value for key, value in result.items() if key != "presentation"}
     return result
+
+
+def environment_form(document: Mapping[str, Any], timeout: float) -> tuple[str, dict]:
+    """Map the published environment document to Claude's buttons-only approval form (ADR-0072).
+
+    The decision is take-it-or-leave-it, so no fields ride the schema, and the form stays short:
+    the full texts (the agent's plan, the rationale, the image references, the previous binding)
+    live in the bound document. The visible lines are the heading, the profile with its
+    network-egress call-out and the document's ``File:`` reference; the observer projects no
+    environment decision yet, so no ``Details:`` link is built (E11 adds that row and its link)."""
+    doc = document["parsed"]
+    profile = (f"Profile: {doc['profile_id']} · NETWORK EGRESS ENABLED" if doc["networked"]
+               else f"Profile: {doc['profile_id']} · no network")
+    reference, *document_tail = _document_lines(document, linked=False)
+    message = "\n".join((
+        *_visible(
+            _line(f"Empirica · approve environment revision {doc['revision']}"
+                  f" · {_duration(timeout)}"),
+            _line(profile),
+            reference),
+        _line(f'Goal: "{doc["goal"]}"', closing='"'),
+        f"Spike images: {len(doc['spike_images'])} · the agent's plan and rationale: in the document",
+        *document_tail,
+        "Accept = approve this revision for qualification",
+        "Decline = reject · Esc = decide later",
+    ))
+    return message, {"type": "object", "properties": {}, "required": []}
+
+
+def environment_decision(answer: object) -> bool | None:
+    """Validate one MCP answer to the environment form: ``True`` approves the revision as shown,
+    ``False`` deliberately rejects it, ``None`` is a non-decision (dismiss) that changes nothing
+    — the revision stays pending, decided by nobody."""
+    if not isinstance(answer, dict):
+        return None
+    action = answer.get("action")
+    if action == "accept":
+        return True
+    if action == "decline":
+        return False
+    return None
+
+
+class HostEnvironment:
+    """The Claude mediation for one pending environment revision (E8, spec §5/§6): the public
+    action admitted the revision, then the host completes the human approval the core waits on —
+    write-first through the same bound sidecar helper, one present receipt, one elicit form, one
+    decision receipt. Every refusal of the private legs is returned unchanged (the revision
+    stays pending and the run's own recovery says what to do); nothing a host cannot show is
+    ever fabricated (ADR-0072 never held for less)."""
+
+    def __init__(self, profile: str, *, elicit=None, admit=None, fetch=None, decide=None, documents=None):
+        self.profile, self.elicit = profile, elicit
+        self.admit = admit if admit is not None else bridge.handle_admitting
+        self.fetch = fetch if fetch is not None else bridge.trusted_environment_document
+        self.decide = decide if decide is not None else bridge.trusted_environment_decision
+        # the same write-first sidecar store (ADR-0072 PR 08): the environment document is
+        # published once under the real $EMPIRICA_HOME before any form is shown
+        self.documents = documents if documents is not None else HitlDocuments()
+
+    def __call__(self, result: dict, admission: Mapping[str, Any] | None = None) -> dict:
+        """Mediate one admitted environment action; no failure may change a typed result.
+        ``admission`` is the private fact the admitting transaction recorded (the run and the
+        revision it admitted): no other revision is ever mediated."""
+        try:
+            return _strip_presentation(self._mediate(result, admission))
+        except Exception:
+            return _strip_presentation(result)
+
+    def _mediate(self, result: dict, admission: Mapping[str, Any] | None) -> dict:
+        run = result.get("run") if isinstance(result, dict) else None
+        if result.get("type") != "Allow" or not isinstance(run, dict):
+            return result
+        # a host surface without a form (the initialize capability says none) asks nobody:
+        # the admitted action's own run view keeps saying the revision is pending
+        if self.elicit is None or not isinstance(admission, Mapping) or admission.get("run_id") != run["id"]:
+            return result
+        # the identity every fetched document must carry before anything is written, on each
+        # attempt: this run, the kind, and the revision the action admitted
+        expect = {"run_id": run["id"], "kind": core_hitl.ENVIRONMENT, "revision": admission["revision"]}
+        for _ in range(2):  # the present, and one re-presentation of the same revision
+            shown, response = self._present(run["id"], expect, result)
+            if shown is not None:
+                break
+            if not _is_document_mismatch(response):
+                return response
+        else:
+            return response
+        published, receipt_id = shown
+        # the observer projects no environment decision yet (E11 owns that row), so no decision
+        # link is ever built for this kind: the document's own path is the one way to it
+        document = {"digest": published.digest, "path": str(published.path), "parsed": published.parsed}
+        message, schema = environment_form(document, governance_timeout())
+        outcome = environment_decision(self.elicit(message, schema))
+        if outcome is None:
+            return response  # nobody decided: the revision stays pending, its allowance
+            # untouched (a dismissed form spends no presentation row)
+        decided = (self.decide(self.profile, run["id"], {
+            "run_id": run["id"], "receipt_id": receipt_id,
+            "revision": published.parsed["revision"],
+            "proposal_digest": published.parsed["proposal_digest"],
+            "outcome": "approve" if outcome else "reject",
+            "document_digest": published.digest}) or {}).get("result")
+        return decided if isinstance(decided, dict) else response
+
+    def _present(self, run_id: str, expect: Mapping[str, object], fallback: dict):
+        """One write-first present: fetch the pair, publish it once under the expected identity,
+        present one receipt. ``((published, receipt_id), presented)`` when the form may be shown,
+        else ``(None, the response to return)`` — every refusal of a private leg unchanged."""
+        fetched = (self.fetch(self.profile, run_id, {}) or {}).get("result")
+        if (not isinstance(fetched, dict) or fetched.get("type") != "Allow"
+                or not isinstance(fetched.get("presentation"), Mapping)
+                or not isinstance(fetched.get("run"), dict)):
+            return None, fetched if isinstance(fetched, dict) else fallback
+        # the fetch, the action and the document all name one run — before any write
+        if fetched["run"]["id"] != run_id:
+            return None, fallback
+        # write-first: publish the fetched pair once, through the one bound helper, under the
+        # expected run, kind and admitted revision; a document this state cannot bind (or a
+        # storage refusal) is never a fabricated form
+        try:
+            published = publish(self.documents, run_id, fetched["presentation"].get("document"),
+                                expect=expect)
+        except (DocumentMismatch, SymlinkRefused, HardLinkUnsupported, OSError, ValueError):
+            return None, fallback
+        if published is None:
+            return None, fallback
+        receipt_id = uuid4().hex
+        # the full receipt shape the member validates (E7): its revision and proposal digest come
+        # from the bound document itself — the very bytes just written whose digest the receipt
+        # names — so the mediation never carries state facts from anywhere but the write it owns
+        presented = (self.decide(self.profile, run_id, {
+            "run_id": run_id, "receipt_id": receipt_id,
+            "revision": published.parsed["revision"],
+            "proposal_digest": published.parsed["proposal_digest"],
+            "outcome": "present", "document_digest": published.digest}) or {}).get("result")
+        if not isinstance(presented, dict) or presented.get("type") != "Allow":
+            return None, presented if isinstance(presented, dict) else fallback
+        return (published, receipt_id), presented
+
+
+def _is_document_mismatch(response: object) -> bool:
+    """Whether a private leg refused with the closed document-mismatch reason: the one refusal
+    whose recovery is a same-revision re-present (fetch the document again, present again)."""
+    return (isinstance(response, dict) and response.get("type") == "Block"
+            and any(isinstance(row, dict) and row.get("code") == core_environment.DOCUMENT_MISMATCH
+                    for row in response.get("reasons", ())))
 
 
 class HostGovernance:

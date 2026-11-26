@@ -133,7 +133,8 @@ class Published:
     parsed: Mapping[str, Any]
 
 
-def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published | None:
+def publish(store: "HitlDocuments", run_id: object, pair: object, *,
+            expect: Mapping[str, object] | None = None) -> Published | None:
     """Verify one core-rendered ``{text, digest}`` pair, publish its bytes exactly once through
     the write-once store, and give the bound document back (review-2 m1, 7d — the one helper
     Claude's governance and evidence flows and Pi's bridge leg all bind through).
@@ -150,7 +151,12 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     :class:`fsio.SymlinkRefused`, :class:`HardLinkUnsupported`, any :class:`OSError` — are the
     caller's to translate: the flows differ in what their host must answer (``None``, an
     ``unavailable`` result, a typed fault). The published digest equals the pair's own identity,
-    answered and never assumed."""
+    answered and never assumed.
+
+    When the caller names ``expect``, every named member of the document (for an environment,
+    its ``run_id``, ``kind`` and ``revision``) must equal the document's own, else ``None`` with
+    nothing written: a stale or substituted fetch never leaves a sidecar. A caller that names
+    nothing publishes exactly as before."""
     from application.location import decode_handle  # lazy: the caller keeps its import-chain cost
     if not isinstance(pair, Mapping):
         return None
@@ -179,12 +185,16 @@ def publish(store: "HitlDocuments", run_id: object, pair: object) -> Published |
     # never presents a form chosen from an unverifiable discrimination: the mediation answers
     # ``governance.approval_unavailable`` before any present, nothing spent, nothing written.
     # An evidence document carries no ``question`` and keeps publishing unchanged.
+    if any(parsed.get(name) != value for name, value in (expect or {}).items()):
+        return None
     kind = parsed.get("kind")
-    if kind not in (core_hitl.CONFIGURATION, core_hitl.EVIDENCE):
+    if kind not in (core_hitl.CONFIGURATION, core_hitl.EVIDENCE, core_hitl.ENVIRONMENT):
         return None
     if (kind == core_hitl.CONFIGURATION
             and parsed.get("question") not in (core_hitl.APPROVE, core_hitl.CONFIRM_AMENDMENT)):
         return None
+    if kind == core_hitl.ENVIRONMENT and parsed.get("question") != core_hitl.APPROVE:
+        return None  # the environment form's one question (E8): approve this revision
     path, written = store.write(key, data)
     if written != digest or path.name != f"{name}.json":  # defensive: the write answers its name
         return None

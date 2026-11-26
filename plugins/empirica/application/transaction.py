@@ -102,6 +102,10 @@ class Coordinator:
         self.image_resolver = image_resolver if image_resolver is not None else NullLocalImageResolver()
         self.last_state: OperationalState | None = None
         self.last_snapshot: EvaluationSnapshot | None = None
+        # the private fact of the environment admission the dispatch in progress committed: (request id, run
+        # handle — it names the generation — and admitted revision). Every dispatch starts without one and a
+        # read consumes it, so it can only reach the caller of the dispatch that made it.
+        self.environment_admission: tuple[str, str, int] | None = None
         self.injected_run_ids: set[str] = set()
 
     @staticmethod
@@ -255,7 +259,13 @@ class Coordinator:
             return self._inert(request_id)
         return self._read_response(key, loaded.read, command, request_id)
 
+    def take_environment_admission(self, request_id: str) -> tuple[str, int] | None:
+        """Hand out, once, the (run handle, revision) the dispatch of ``request_id`` admitted."""
+        admitted, self.environment_admission = self.environment_admission, None
+        return admitted[1:] if admitted is not None and admitted[0] == request_id else None
+
     def handle(self, command: dict[str, Any], request_id: str) -> dict[str, Any]:
+        self.environment_admission = None
         if command["type"] == "GetContract":
             value = _proto.contract_result(command["target"], command.get("section_id"))
             if value is None:
@@ -278,6 +288,7 @@ class Coordinator:
                 return self._inert(request_id)
         if command["type"] == "ObserveAction" and command["action"]["kind"] == "spike_request":
             return self._spike(key, command, request_id)
+        environmental = command["type"] == "ObserveAction" and command["action"]["kind"] == "environment"
         for _ in range(8):
             loaded = self._load(key)
             if isinstance(loaded, CorruptLoad):
@@ -353,6 +364,8 @@ class Coordinator:
                     continue
                 return self._fault(request_id, "unavailable")
             self.last_state = state
+            if environmental:
+                self.environment_admission = (request_id, snapshot.run_id, state.environment["revision"])
             return self._response(request_id, committed,
                                   replace(decision, intent=replace(decision.intent, state=state)))
         return self._fault(request_id, "conflict")

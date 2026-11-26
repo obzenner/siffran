@@ -31,14 +31,17 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from application.location import decode_handle
 from application import protocol
+from application.governance import host_ingress_admitted
 from application.run_state import classify_and_decode
 from application.transaction import Coordinator
 from core import environment
 from core.canonical import canonical_digest
 from core.evaluation import ENVIRONMENT_NOT_AVAILABLE
-from test_d7_transactions import Runs
-from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, QUALIFY_ACTION, ServiceEnv,
-                                       approve_current)
+from core.governance import plain
+from application.v2 import compose
+from test_d7_transactions import Harness, Runs, Workspace
+from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, PROFILE, QUALIFY_ACTION, ServiceEnv,
+                                       _networked_payload, _request, approve_current)
 
 _V2 = Path(__file__).resolve().parents[3] / "contracts/empirica/v2"
 _RECEIPT_ID_MAX = json.loads((_V2 / "request.schema.json").read_text(encoding="utf-8"))[
@@ -96,7 +99,24 @@ class DeliberationEnv(ServiceEnv):
         _submit(self, copy.deepcopy(ENVIRONMENT_ACTION["payload"]))
         self.member = self.state().environment
         self.receipt_id = _new_receipt_id()
-        self.digest = _document_digest("present")
+        # E8: the only digest a present may name is the core-rendered document's own — the
+        # write-first fetch leg returns the pair the host writes before it presents, and the
+        # receipt transaction recomputes and checks exactly that digest. Auto runs derive
+        # their approvals and fetch no document (the leg reads Inert), so their receipts are
+        # refused on the engine's own words whatever digest a caller fabricates.
+        self.digest = _document_digest("no-document-fetched")
+        if (document := self.fetch_document()) is not None:
+            self.digest = document["digest"]
+
+    def fetch_document(self):
+        """The private fetch leg's document pair for the current pending revision (E8), or
+        ``None`` where the leg reads Inert (no pending human decision: an auto run derives its
+        approvals, a decided revision has no form)."""
+        result = self.service.trusted_environment_document(run_id=self.run_id)["result"]
+        if result["type"] == "Inert":
+            return None
+        assert result["type"] == "Allow", result
+        return result["presentation"]["document"]
 
     def present(self, *, digest=None):
         result = self.service.trusted_environment_decision(
@@ -121,7 +141,10 @@ class DeliberationEnv(ServiceEnv):
     def submit_revision(self):
         response = _submit(self, _revise(ENVIRONMENT_ACTION["payload"]))
         assert response["type"] == "Allow", response
-        return self.state().environment
+        self.member = self.state().environment
+        self.receipt_id = _new_receipt_id()
+        self.digest = self.fetch_document()["digest"]
+        return self.member
 
 
 class ReceiptTests(unittest.TestCase):
@@ -347,6 +370,85 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(member["state"], environment.PENDING)
         self.assertIsNone(member["receipt_id"])
 
+    def test_a_terminal_run_fetches_no_document_and_a_memberless_run_reads_inert(self):
+        """The fetch leg is a plain read: a terminal run (and one whose revision never was
+        pending a human) has no document to show, and the leg reads Inert — never a refusal,
+        never a form, never a spend, whatever the store now holds for the stopped run."""
+        env = ServiceEnv().start()
+        stopped = env.request({"type": "EvaluateRun", "run_id": env.run_id, "intent": "stop"})
+        self.assertEqual(stopped["type"], "Allow", stopped)
+        fetched = env.service.trusted_environment_document(run_id=env.run_id)["result"]
+        self.assertEqual(fetched["type"], "Inert", fetched)
+        self.assertNotIn("presentation", fetched)
+        # a fresh run before any proposal fetches the same honest nothing, run unnamed
+        proposed = ServiceEnv().start().fully_approved()
+        fetched = proposed.service.trusted_environment_document(run_id=proposed.run_id)["result"]
+        self.assertEqual(fetched["type"], "Inert", fetched)
+        self.assertNotIn("presentation", fetched)
+
+    def test_an_impostor_document_digest_refuses_the_presentation_and_spends_nothing(self):
+        """E8's write-first binding, the present leg: the only digest a fresh presentation may
+        name is the document the core renders for this revision (the pair the private fetch
+        returned, which the host writes before it presents). Any other digest is the human's
+        stale fetch — the closed reason with its own recovery — refused before a single row is
+        written. A decision that names a digest its own recorded presentation did not record
+        keeps being the engine's fail-closed replay refusal, which wins before this gate."""
+        env = DeliberationEnv()
+        row = protocol.public_contract()["reasons"]["environment.document_mismatch"]
+        impostor = _receipt(env.member, env.run_id, "present", _new_receipt_id(),
+                            _document_digest("impostor-document"))
+        blocked = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=impostor)["result"]
+        self.assertEqual(blocked["type"], "Block", blocked)
+        reason = blocked["reasons"][0]
+        self.assertEqual(reason["code"], "environment.document_mismatch")
+        self.assertEqual(reason["message"], row["message"])
+        self.assertEqual(reason["next_actions"], row["next_actions"])
+        after = env.state().environment
+        self.assertEqual(len(tuple(after["receipts"])), 0)  # nothing written, no allowance spent
+        self.assertEqual(after["state"], environment.PENDING)
+        self.assertIsNone(after["receipt_id"])
+        # the honest present under the fetched document's digest is unaffected
+        self.assertEqual(env.present()["type"], "Allow")
+        self.assertEqual(len(tuple(env.state().environment["receipts"])), 1)
+
+    def test_a_reject_under_the_current_document_closes_the_revision(self):
+        """The same binding admits the decline of the very document the form showed: a reject
+        that names the current document's digest closes the revision, and the run keeps the
+        whole receipt row as its record."""
+        env = DeliberationEnv()
+        env.present()
+        rejected = env.decide("reject")
+        self.assertEqual(rejected["type"], "Allow", rejected)
+        member = env.state().environment
+        self.assertEqual(member["state"], environment.REJECTED)
+        self.assertEqual(member["receipt_id"], env.receipt_id)
+        # an exact replay of the reject reads Inert, whatever else an impostor may try
+        replay = env.decide("reject")
+        self.assertEqual(replay["type"], "Inert", replay)
+
+    def test_a_stale_document_after_a_newer_revision_cannot_present(self):
+        """A document fetched for an older revision cannot present the next one: after a new
+        revision supersedes the pending pair, a present carrying the earlier fetched digest is
+        the stale fetch of E8's reason — refused with nothing written, while the same present
+        under the fresh revision's own fetched document admits, and its approve decides."""
+        env = DeliberationEnv()
+        stale_document = env.fetch_document()
+        env.member = env.submit_revision()
+        self.assertNotEqual(env.digest, stale_document["digest"])
+        stale = _receipt(env.member, env.run_id, "present", _new_receipt_id(),
+                         stale_document["digest"])
+        blocked = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=stale)["result"]
+        self.assertEqual(blocked["type"], "Block", blocked)
+        self.assertEqual(blocked["reasons"][0]["code"], "environment.document_mismatch")
+        self.assertEqual(len(tuple(env.state().environment["receipts"])), 0)
+        # the fresh fetched document is the write the host actually made under this revision
+        self.assertEqual(env.present()["type"], "Allow")
+        decided = env.decide("approve")
+        self.assertEqual(decided["type"], "Allow", decided)
+        self.assertEqual(env.state().environment["state"], environment.APPROVED)
+
     def test_a_configuration_revision_closes_a_pending_revision_and_its_reply_decides_nothing(self):
         """Spec §5's mutual exclusion in both directions: an author's configuration revision is
         admitted while an environment revision is pending and closes it as superseded without
@@ -415,7 +517,7 @@ class ReceiptTests(unittest.TestCase):
         presented = []
         for index in range(bound):
             payload = _receipt(member, env.run_id, "present", _new_receipt_id(),
-                               _document_digest(f"limit-{index}"))
+                               env.digest)
             result = env.service.trusted_environment_decision(
                 run_id=env.run_id, payload=payload)["result"]
             self.assertEqual(result["type"], "Allow", f"presentation {index}: {result}")
@@ -449,11 +551,11 @@ class ReceiptTests(unittest.TestCase):
             if first_id is None:
                 first_id = receipt_id
             payload = _receipt(member, env.run_id, "present", receipt_id,
-                               _document_digest(f"final-{index}"))
+                               env.digest)
             self.assertEqual(env.service.trusted_environment_decision(
                 run_id=env.run_id, payload=payload)["result"]["type"], "Allow")
         # the approve that names the first recorded presentation, digest and all
-        approve = _receipt(member, env.run_id, "approve", first_id, _document_digest("final-0"))
+        approve = _receipt(member, env.run_id, "approve", first_id, env.digest)
         result = env.service.trusted_environment_decision(
             run_id=env.run_id, payload=approve)["result"]
         self.assertEqual(result["type"], "Allow", result)
@@ -464,9 +566,10 @@ class ReceiptTests(unittest.TestCase):
         # a new revision starts a fresh presentation allowance
         env.member = env.submit_revision()
         fresh = _receipt(env.member, env.run_id, "present", _new_receipt_id(),
-                         _document_digest("fresh-revision"))
-        self.assertEqual(env.service.trusted_environment_decision(
-            run_id=env.run_id, payload=fresh)["result"]["type"], "Allow")
+                         env.digest)
+        result = env.service.trusted_environment_decision(
+            run_id=env.run_id, payload=fresh)["result"]
+        self.assertEqual(result["type"], "Allow", result)
         self.assertEqual(len(env.state().environment["receipts"]), 1)
         self.assertFalse(environment.revisions_exhausted(env.state()))
 
@@ -479,6 +582,92 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(env.service.trusted_environment_decision(
             run_id=env.run_id, payload=bad)["result"]["type"], "Fault")
         self.assertEqual(dict(env.state().environment), dict(env.member))
+
+
+class AdmissionRecordTests(unittest.TestCase):
+    """The admitting transaction records the run (its handle names the generation) and the
+    revision it admitted for its own dispatch, privately: never in a response, handed out once,
+    and nothing for a dispatch that admitted no revision — also on a service that is reused."""
+
+    def admission(self, env):
+        return env.service.environment_admission(request_id=_request({})["request_id"])
+
+    def test_the_admission_names_the_run_and_revision_of_its_own_dispatch_once(self):
+        env = DeliberationEnv()
+        self.assertIsNone(self.admission(ServiceEnv().start()))
+        self.assertEqual(self.admission(env), {"run_id": env.run_id, "revision": 1})
+        self.assertIsNone(self.admission(env), "a read consumes the fact")
+        env.submit_revision()
+        self.assertEqual(self.admission(env), {"run_id": env.run_id, "revision": 2})
+        self.assertEqual(_submit(env, _networked_payload())["type"], "Block")
+        self.assertIsNone(self.admission(env))
+
+    def test_a_later_dispatch_with_the_same_request_id_never_returns_an_earlier_admission(self):
+        env = DeliberationEnv()  # revision one admitted; its fact never read
+        self.assertEqual(env.request({"type": "GetRun", "run_id": env.run_id})["type"], "Allow")
+        self.assertIsNone(self.admission(env))
+
+    def test_another_request_id_is_handed_nothing_and_consumes_nothing_of_its_own(self):
+        env = DeliberationEnv()
+        self.assertIsNone(env.service.environment_admission(request_id="another-request"))
+        self.assertIsNone(self.admission(env), "the read of a foreign id consumed the fact")
+
+    def test_the_public_response_of_an_admission_names_no_revision(self):
+        env = DeliberationEnv()
+        response = env.service.dispatch(_request({"type": "ObserveAction", "run_id": env.run_id,
+                                                  "action": copy.deepcopy(ENVIRONMENT_ACTION)}))
+        self.assertEqual(response["result"]["type"], "Allow")
+        self.assertEqual(set(response), {"protocol", "request_id", "result"})
+        self.assertNotIn("admission", json.dumps(response))
+        self.assertEqual(env.service.environment_admission(request_id=response["request_id"])["revision"], 2)
+
+
+class HostIngressTests(unittest.TestCase):
+    """The environment's private legs stand for the human only for the host whose approval
+    ingress opened the run's human episode. A profile without an ingress, or with another one,
+    sharing the run repository reads no document and records no receipt, whatever it names."""
+
+    def _other_host(self, env, profile_id):
+        coordinator = env.service._coordinator
+        return compose(Workspace(), Harness(), coordinator.runs, coordinator.artifacts, None,
+                       profile_id, {}, None)
+
+    def _hosts_that_are_not_the_runs(self):
+        own = protocol.host_profile(PROFILE)["approval_ingress"]
+        return [row["profile_id"] for row in protocol._HOST_PROFILES["profiles"]
+                if row["approval_ingress"] != own]
+
+    def test_a_host_whose_ingress_is_not_the_runs_reads_no_document_and_records_no_receipt(self):
+        env = DeliberationEnv()
+        hosts = self._hosts_that_are_not_the_runs()
+        self.assertTrue(any(protocol.approval_ingress(profile_id) is None for profile_id in hosts))
+        self.assertTrue(any(protocol.approval_ingress(profile_id) is not None for profile_id in hosts))
+        before = plain(env.state().environment)
+        for profile_id in hosts:
+            with self.subTest(profile=profile_id):
+                other = self._other_host(env, profile_id)
+                self.assertEqual(other.trusted_environment_document(run_id=env.run_id)["result"]["type"],
+                                 "Inert")
+                for outcome in ("present", "approve", "reject"):
+                    result = other.trusted_environment_decision(
+                        run_id=env.run_id,
+                        payload=_receipt(env.member, env.run_id, outcome, env.receipt_id,
+                                         env.digest))["result"]
+                    self.assertEqual(result["type"], "Fault", result)
+                self.assertEqual(plain(env.state().environment), before)
+
+    def test_a_host_without_any_ingress_never_matches_a_run_that_recorded_none(self):
+        """A run no host has reported on records ``unavailable``, which a profile without an
+        ingress also declares: equality alone would admit it, so the profile's own ingress must
+        also be one that can ask a human. No profile is admitted for a run that recorded none."""
+        state = ServiceEnv().start().state()
+        self.assertEqual(state.governance["context"]["ingress"], "unavailable")
+        for row in protocol._HOST_PROFILES["profiles"]:
+            with self.subTest(host=row["host_id"]):
+                self.assertFalse(host_ingress_admitted(row["profile_id"], state))
+
+    def test_the_runs_own_host_is_admitted(self):
+        self.assertTrue(host_ingress_admitted(PROFILE, DeliberationEnv().state()))
 
 
 class AdmissionDecisionTests(unittest.TestCase):
@@ -499,6 +688,7 @@ class AdmissionDecisionTests(unittest.TestCase):
             environment.QUALIFICATION_ATTEMPTS_EXHAUSTED,
             environment.ENVIRONMENT_REVISIONS_EXHAUSTED,
             environment.ENVIRONMENT_PRESENTATIONS_EXHAUSTED,
+            environment.DOCUMENT_MISMATCH,
         )}
         for reason in emitted:
             self.assertIn(reason, registry, reason)

@@ -31,7 +31,21 @@ Claude Code 2.1.304 shows only the first three lines of an elicitation message �
 folded — while rendering field descriptions in full, so every Claude form front-loads the
 heading, the bound document's `Details:` line and its copy surface, and each field's
 description repeats what is being decided in full: the quote, the decision claim's text and the
-terminal consent's residual count ([ADR-0072](adr/0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md), PR 19); Pi is unchanged.
+terminal consent's residual count ([ADR-0072](adr/0072-bind-human-decisions-to-a-core-owned-immutable-hitl-document.md), PR 19); Pi is unchanged. Environment (Empirica 7.2, E8):
+a pending environment revision is the same write-first word — the private fetch leg returns the
+revision's core-rendered `empirica.hitl/1` `environment` document, the host publishes it once through
+the one sidecar helper — refused before any write unless it names this run, the environment kind and the
+revision the admitting transaction recorded for the action (carried privately, never in the response, and
+required again on a re-present) — and mediates a short buttons-only approve/reject form: heading, the profile
+with the networked call-out (`NETWORK EGRESS ENABLED`) and the document's exact `File:` path inside the three
+visible lines, then the goal and the image count (never a decision link while the observer projects no
+environment decision, E11); the agent's plan, rationale, image references and the installed binding live in the
+document under their unverified labels. Accept approves, Decline is an explicit rejection (spec §5), and Esc,
+cancel or a timeout leave the revision pending; a digest the host cannot recompute refuses with its own closed
+reason and the host re-presents the same revision once. The mediation is composed only for a profile whose
+approval ingress is the transport's own (MCP elicitation), and the private fetch and decision read nothing and record nothing for a host whose ingress is
+not the one the run recorded.
+Pi's environment dialog is E12's and nothing is claimed for it yet.
 
 ## Empirica 7 spike authority
 

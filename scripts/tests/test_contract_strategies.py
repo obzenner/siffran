@@ -13,6 +13,7 @@ machine (doc/testing.md T1).
 from __future__ import annotations
 
 import copy
+import json
 import sys
 import types
 import unittest
@@ -233,6 +234,16 @@ class RealContractTests(unittest.TestCase):
             self.assertIn(key, self.contract.registered, key)
         self.assertNotIn("response#/$defs/fault", self.contract.registered,
                          "the fault def's run-view closure belongs to the migration node")
+
+    def test_the_e8_registration_set_lands_by_declaration(self):
+        """The E8 registration: the private environment fetch's document presentation registers by
+        the response schema's own declaration — a one-member closed projection drawn by the same
+        engine, never a harness exception — and the hitl surface carries its third document kind
+        through the schema's own additive enum member."""
+        self.assertIn("response#/$defs/environmentPresentation", self.contract.registered)
+        self.assertIn("environment", json.loads(
+            (ROOT / "contracts" / "empirica" / "v2" / "hitl.schema.json").read_text("utf-8")
+        )["properties"]["kind"]["enum"])
 
     def test_the_attempt_row_and_view_pairings_derive_breaches_both_judges_refuse(self):
         """The conditional pairings the wire carries (E6b re-review's own handoff): the run/5

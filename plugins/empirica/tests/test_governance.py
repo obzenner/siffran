@@ -1152,11 +1152,14 @@ class GovernanceServiceTests(unittest.TestCase):
                                 "privateInertPresented"})
         carriers = {name for name, member in vendored["$defs"].items()
                     if '"document"' in json.dumps(member)}
-        # the three carriers are all private definitions (PR 10/12): the governance
-        # presentation's rendered pair and the two private evidence answers — the presentation
-        # answer's bound {digest, path} and the refusal's carried {text, digest}
+        # every carrier is a private definition: the governance presentation's rendered pair, the
+        # two private evidence answers (the presentation answer's bound {digest, path} and the
+        # refusal's carried {text, digest}) and the environment fetch's presentation pair
         self.assertEqual(carriers, {"governancePresentation", "privateEvidenceResponse",
-                                    "privateEvidenceRefusal"})
+                                    "privateEvidenceRefusal", "environmentPresentation"})
+        environment_users = {name for name, member in vendored["$defs"].items()
+                             if "environmentPresentation" in json.dumps(member)}
+        self.assertEqual(environment_users, {"privateAllowEnvironmentPresented"})
 
     def test_escaped_rationale_bound_survives_private_response_validation(self):
         self.assertEqual(self.action("route", reason="supplied context")["type"], "Allow")

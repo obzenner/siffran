@@ -1524,6 +1524,21 @@
               "$ref": "#/$defs/emptyParams"
             }
           }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
+              "const": "environment.document_mismatch"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
         }
       ]
     },
@@ -5194,9 +5209,136 @@
         "network-profile"
       ],
       "description": "The qualification probe names, owned by the Docker spike support contract (contracts/empirica-docker-spike/v1, its only copy): the run's qualification rows, its last failure and a refusal that names a probe reuse this enumeration, never a second spelling."
+    },
+    "environmentPresentation": {
+      "x-core-validator": "application.wire_views.validate_environment_presentation",
+      "type": "object",
+      "additionalProperties": false,
+      "description": "E8's private environment fetch presentation (ADR-0072, Empirica 7.2 §5): the pending revision's core-rendered document pair and nothing else — the write-first half of the receipt path, so the host never re-renders a dict and the digest the present commits is the pair's own. Never on the public wire (the public schema forbids a presentation key).",
+      "properties": {
+        "document": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The empirica.hitl/1 environment document's exact rendered UTF-8 text and its digest - the identity the presenting receipt's document_digest names.",
+          "properties": {
+            "digest": {
+              "$ref": "#/$defs/digest256"
+            },
+            "text": {
+              "description": "The document's rendered bytes as UTF-8 - the pinned pretty form, never re-rendered or re-wrapped by any host.",
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "text",
+            "digest"
+          ]
+        }
+      },
+      "required": [
+        "document"
+      ]
+    },
+    "privateAllowEnvironmentPresented": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type",
+        "converged",
+        "run",
+        "presentation"
+      ],
+      "description": "E8's write-first fetch leg: one run-bearing Allow carrying the private environment document presentation - the pending revision's rendered document, the bytes the host writes once beside the run before it presents. Never emitted on the public wire.",
+      "properties": {
+        "converged": {
+          "type": "boolean"
+        },
+        "presentation": {
+          "$ref": "#/$defs/environmentPresentation"
+        },
+        "run": {
+          "$ref": "#/$defs/runView"
+        },
+        "type": {
+          "const": "Allow"
+        }
+      }
+    },
+    "privateEnvironmentResponse": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol",
+        "request_id",
+        "result"
+      ],
+      "description": "E8's private environment ingress definition: the fetch leg's run-bearing Allow may carry the private document presentation; every other alternative - the plain Allow of an admitted presentation or decision receipt, its Blocks, the Inert reads and the Faults - must carry none. The public response schema has no presentation member anywhere, so a presentation reaching any public result is invalid there. Validated only inside application environment ingress.",
+      "properties": {
+        "protocol": {
+          "const": "empirica/v2"
+        },
+        "request_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "result": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/privateAllowEnvironmentPresented"
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/allow"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "presentation"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/block"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "presentation"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/inert"
+                },
+                {
+                  "not": {
+                    "required": [
+                      "presentation"
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "$ref": "#/$defs/fault"
+            }
+          ]
+        }
+      }
     }
   },
   "x-core-ingress": [
+    "/$defs/environmentPresentation",
     "/$defs/environmentView",
     "/$defs/qualificationView"
   ]

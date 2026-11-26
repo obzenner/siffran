@@ -435,6 +435,16 @@
       "next_actions": [
         "governance.propose"
       ]
+    },
+    "environment.document_mismatch": {
+      "message": "The host's dialog named an environment document that no longer matches this run's revision; a refused present spent no presentation and a refused decision kept its spent one. Fetch the document again through the private environment leg and re-present under the revision's own text, or submit a new environment revision if the environment changed.",
+      "sections": [
+        "environment/actions"
+      ],
+      "next_actions": [
+        "environment.propose",
+        "residual.accept"
+      ]
     }
   },
   "schemas": {
