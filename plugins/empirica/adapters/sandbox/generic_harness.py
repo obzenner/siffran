@@ -111,8 +111,13 @@ class GenericDockerHarness(application.GenericSpikeHarness):
                         current = self._resolve(request.backend, limit, request.run)
                         drifted = generic_authority.authority_facts(current.runtime) != facts
                     except Exception as exc:
-                        raise execution.GenericPostflightChanged(
-                            "qualified authority is unavailable after the spike") from exc
+                        # A binding re-observed stale keeps its own reason; any other failure
+                        # is the generic postflight change.
+                        changed = execution.GenericPostflightChanged(
+                            "qualified authority is unavailable after the spike")
+                        if getattr(exc, "reason", None) in application.AUTHORITY_STALE_REASONS:
+                            changed.reason = exc.reason
+                        raise changed from exc
                     if drifted:
                         raise execution.GenericPostflightChanged("qualified authority drifted")
                     return current.backend.execution_binding_digest

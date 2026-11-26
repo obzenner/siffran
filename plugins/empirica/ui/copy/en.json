@@ -318,6 +318,7 @@
   "spike.current": "current against captured inputs",
   "spike.stale": "a captured input has changed since",
   "spike.superseded": "replaced by a later generic spike",
+  "spike.superseded-binding": "ended without a result: the run's qualification was replaced",
   "spike.output.not_retained": "Raw stdout and stderr content is not retained or shown.",
   "now.unavailable": "The record of how this run stopped does not hold what it left unresolved, so that is unknown.",
   "now.unresolved_now": "Unresolved against the workspace now",

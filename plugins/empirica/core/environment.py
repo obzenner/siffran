@@ -54,6 +54,7 @@ ENVIRONMENT_PENDING = "environment-pending"
 ENVIRONMENT_REJECTED = "environment-rejected"
 QUALIFICATION_REQUIRED = "qualification-required"
 IMAGE_NOT_QUALIFIED = "image-not-qualified"
+SUPERSEDED_BINDING = "superseded-binding"
 QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
 ENVIRONMENT_REVISIONS_EXHAUSTED = "environment-revisions-exhausted"
 ENVIRONMENT_PRESENTATIONS_EXHAUSTED = "environment-presentations-exhausted"
@@ -425,6 +426,15 @@ def spike_admission(state: object, image: str) -> str | None:
     if member is None or image not in member["proposal"]["spike_images"]:
         return IMAGE_NOT_QUALIFIED
     return None
+
+
+def spike_request_superseded(state: object, request: Mapping[str, Any]) -> bool:
+    """Whether one spike request with no result ended ``superseded-binding`` (spec §5 "Spikes"):
+    the binding its sealed request recorded is no longer the run's active one. A derived terminal
+    outcome, never a result: it blocks no request of the same draft under the new binding. A request
+    that completed stays historical evidence whatever the binding, so callers ask only of one with
+    no result."""
+    return _plain(request.get("backend")) != _plain(state.spike_backend)
 
 
 def revision_member(proposal_body: object, revision: int, *, approved: bool) -> dict[str, object]:

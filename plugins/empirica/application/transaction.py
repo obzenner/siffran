@@ -14,7 +14,7 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              audit_operation_current, digest,
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
                              preflight_spike_request, plan_spike_request,
-                             plan_spike_result, valid_attribution)
+                             plan_spike_result, spike_result, valid_attribution)
 from core import confirmation, environment, hitl, spike_plan, spike_plan_draft
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
@@ -888,72 +888,64 @@ class Coordinator:
         return self._allow(request_id, planned)
 
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
-        """Admit against the active binding, capture and seal once, request-CAS before effects,
-        then — under the shared runtime lock where the host composed one, so a rebind cannot
-        interleave — check the binding, run the effects and result-CAS without rerun."""
+        """Admit against the active binding, capture and seal once and commit the request before
+        any effect; then, under the shared runtime lock where the host composed one (so a rebind
+        cannot interleave), admit the committed request again on a fresh read and run the effects
+        and the result compare-and-set without rerun. A request that already has its result
+        returns that success instead, before the lock or under it."""
         action = command["action"]
         draft = None
         sealed = None
         backend = None
         request_artifact = None
-        committed_binding = None
 
         def admit_request(state: OperationalState) -> dict[str, Any] | None:
-            nonlocal action, backend, draft, persisted
-            persisted = _plain(state.spike_backend)
-            # A run with no generic backend never gets one, before any workspace artifact or
-            # harness call.
-            if spike_plan.spike_backend_kind(persisted) == "spikes_unavailable":
-                return self._fault(request_id, "unavailable",
-                                   GenericPreparationReason.SPIKES_UNAVAILABLE.value)
-            if draft is None:
-                try:
-                    draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
-                except spike_plan_draft.SpikePlanDraftError:
-                    # An author mistake, never a corrupt run or a host failure.
-                    return self._fault(request_id, "invalid_request")
-                # Any valid spelling (such as unsorted inputs) is accepted; the canonical
-                # draft is the one planned, digested, and persisted.
-                action = {**action, "plan": draft.to_data()}
-            # The missing environment step of an unqualified run, or an image reference outside
-            # the revision the binding qualified (spec §5.1).
-            refused = environment.spike_admission(state, draft.image)
-            if refused is not None:
-                return self._fault(request_id, "unavailable", refused)
-            current = GenericQualifiedBackend(
-                persisted["backend"], persisted["profile_id"],
-                persisted["qualification_record_digest"],
-                persisted["execution_binding_digest"])
-            if backend is not None and current != backend:
-                # Rebound while this request was being sealed: it outlived its binding.
-                return self._fault(request_id, "unavailable",
-                                   GenericPreparationReason.SUPERSEDED_BINDING.value)
-            backend = current
-            return None
-
-        def admit_binding(state: OperationalState) -> dict[str, Any] | None:
-            if _plain(state.spike_backend) != committed_binding:
-                # Rebound after the request was recorded: the request outlived its binding.
-                return self._fault(request_id, "unavailable",
-                                   GenericPreparationReason.SUPERSEDED_BINDING.value)
-            return None
-
-        persisted: dict[str, Any] = {}
-        for _ in range(8):
+            nonlocal action, backend, draft
             try:
-                assembled = self._load_assembled(key, command, request_id, require_graph=True,
-                                                 admit=admit_request)
+                persisted = _plain(state.spike_backend)
+                # A run with no generic backend never gets one, before any workspace artifact or
+                # harness call.
+                if spike_plan.spike_backend_kind(persisted) == "spikes_unavailable":
+                    return self._fault(request_id, "unavailable",
+                                       GenericPreparationReason.SPIKES_UNAVAILABLE.value)
+                if draft is None:
+                    try:
+                        draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
+                    except spike_plan_draft.SpikePlanDraftError:
+                        # An author mistake, never a corrupt run or a host failure.
+                        return self._fault(request_id, "invalid_request")
+                    # Any valid spelling (such as unsorted inputs) is accepted; the canonical
+                    # draft is the one planned, digested, and persisted.
+                    action = {**action, "plan": draft.to_data()}
+                if backend is not None and persisted != backend.to_data():
+                    # Rebound since this request was sealed: it outlived its binding.
+                    return self._fault(request_id, "unavailable",
+                                       GenericPreparationReason.SUPERSEDED_BINDING.value)
+                # The missing environment step of an unqualified run, or an image reference
+                # outside the revision the binding qualified (spec §5.1).
+                refused = environment.spike_admission(state, draft.image)
+                if refused is not None:
+                    return self._fault(request_id, "unavailable", refused)
+                backend = GenericQualifiedBackend(
+                    persisted["backend"], persisted["profile_id"],
+                    persisted["qualification_record_digest"],
+                    persisted["execution_binding_digest"])
             except (KeyError, TypeError, ValueError):
                 return self._safe_block(key, request_id, "run.corrupt")
-            if assembled is RETRY:
-                continue
-            if isinstance(assembled, dict):
-                return assembled
+            return None
+
+        def admitted(assembled: Assembled) -> dict[str, Any] | object | None:
+            """One read's admission of the request: the ordinary preflight, the request sealed
+            once and planned again against this snapshot (it must equal the one sealed), then the
+            exact request/result lookup, committing the request where it is absent. ``None`` when
+            the request is committed and has no result yet, :data:`RETRY` to read again, else the
+            response."""
+            nonlocal sealed, request_artifact
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             preflight = preflight_spike_request(snapshot, action)
             if preflight is not None:
                 if not self._revision_unchanged(key, read.revision):
-                    continue
+                    return RETRY
                 return self._response(request_id, snapshot, preflight)
             if sealed is None:
                 try:
@@ -970,7 +962,7 @@ class Coordinator:
                 return self._fault(request_id, "unavailable")
             if decision.result_type != "Allow":
                 if not self._revision_unchanged(key, read.revision):
-                    continue
+                    return RETRY
                 return self._response(request_id, snapshot, decision)
             proposed = decision.intent.artifacts[0]
             if request_artifact is None:
@@ -981,41 +973,41 @@ class Coordinator:
                                   if item.get("kind") == "spike_request"
                                   and item.get("claim_id") == action["claim_id"]
                                   and item.get("draft_digest") == sealed.draft_digest), None)
-            prior_result = (None if prior_request is None else next(
-                (item for item in snapshot.history
-                 if item.get("kind") == "spike"
-                 and item.get("request_artifact_id") == prior_request.get("artifact_id")), None))
-            # An open request of the same draft blocks another, unless the binding it was sealed
-            # under was replaced: that request ended superseded and the retry runs under the new.
-            if (prior_request is not None and prior_result is None
+            # An open request of the same draft blocks another, unless it ended superseded-binding.
+            if (prior_request is not None
                     and prior_request.get("artifact_id") != request_artifact["artifact_id"]
-                    and _plain(prior_request.get("backend")) == persisted):
+                    and spike_result(snapshot, prior_request) is None
+                    and not environment.spike_request_superseded(state, prior_request)):
                 return self._fault(request_id, "conflict")
             exact_request = next((item for item in snapshot.history
                                   if item.get("kind") == "spike_request"
                                   and item.get("artifact_id") == request_artifact["artifact_id"]), None)
             if exact_request is not None:
-                exact_result = next((item for item in snapshot.history
-                                     if item.get("kind") == "spike"
-                                     and item.get("request_artifact_id")
-                                     == request_artifact["artifact_id"]), None)
-                if exact_result is not None:
+                if spike_result(snapshot, exact_request) is not None:
                     self.last_state = state
                     return self._allow(request_id, snapshot)
-                committed_binding = persisted
-                break
+                return None
             try:
-                committed_request_state, _, _, _ = self._commit(
-                    key, read.revision, snapshot, state, (request_artifact,))
+                self._commit(key, read.revision, snapshot, state, (request_artifact,))
             except Exception as exc:
                 if self._is_conflict(exc):
-                    continue
+                    return RETRY
                 return self._fault(request_id, "unavailable")
-            committed_binding = _plain(committed_request_state.spike_backend)
-            break
-        else:
+            return None
+
+        def admit() -> dict[str, Any] | None:
+            for assembled in self._assembled_reads(key, command, request_id, require_graph=True,
+                                                   admit=admit_request):
+                if isinstance(assembled, dict):
+                    return assembled
+                outcome = admitted(assembled)
+                if outcome is not RETRY:
+                    return outcome
             return self._fault(request_id, "conflict")
 
+        refused = admit()
+        if refused is not None:
+            return refused
         assert sealed is not None and backend is not None and request_artifact is not None
         with ExitStack() as held:
             lease = None
@@ -1027,21 +1019,25 @@ class Coordinator:
                     return self._fault(request_id, "unavailable",
                                        GenericUnavailableReason.AUTHORITY_INVALID.value)
                 # Under the lock no rebind can follow this read until the result is recorded.
-                checked = self._load_assembled(key, command, request_id, require_graph=True,
-                                               admit=admit_binding)
-                if isinstance(checked, dict):
-                    return checked
+                refused = admit()
+                if refused is not None:
+                    return refused
             return self._spike_effect(key, command, request_id, draft, sealed, backend,
-                                      request_artifact, admit_binding, lease)
+                                      request_artifact, admit_request, lease)
 
     def _spike_effect(self, key: RunKey, command: dict[str, Any], request_id: str,
                       draft: Any, sealed: Any, backend: GenericQualifiedBackend,
                       request_artifact: dict[str, Any],
-                      admit_binding: Callable[[OperationalState], dict[str, Any] | None],
+                      admit_request: Callable[[OperationalState], dict[str, Any] | None],
                       lease: Any) -> dict[str, Any]:
         """The committed request's effects and result: the harness (under ``lease`` when held),
         the workspace and authority re-observation, then the result compare-and-set while
-        ``admit_binding`` finds the binding the request was sealed under still the run's."""
+        ``admit_request`` finds the binding the request was sealed under still the run's.
+
+        The lease bounds the lock wait and the harness, which spends what is left of it. The
+        re-observations keep their own bounds and the compare-and-set has no expiry: both run
+        under the still-held lock, so no rebind lands before the result is recorded, and a
+        harness that finished inside the lease keeps its result."""
         harness_run_id = "r-" + request_artifact["artifact_id"].split(":", 1)[1][:32]
         harness_request = GenericHarnessRequest(
             harness_run_id, backend, sealed.plan, sealed.plan.digest,
@@ -1072,7 +1068,7 @@ class Coordinator:
             observations_digest(result_observations))
 
         for assembled in self._assembled_reads(key, command, request_id, require_graph=True,
-                                             admit=admit_binding):
+                                             admit=admit_request):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot

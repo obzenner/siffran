@@ -7,6 +7,7 @@ import sys
 import time
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from adapters.sandbox import common
 from adapters.sandbox import generic_authority as authority
@@ -609,6 +610,41 @@ class HistoricalResolutionTests(unittest.TestCase):
         self.assertEqual(resolved.architecture, "amd64")
         self.assertEqual(dict(resolved.environment)["DOCKER_HOST"],
                          "unix:///var/run/docker.sock")
+
+    def test_a_capability_lost_since_the_record_is_daemon_drift_through_the_default_inspector(self):
+        """The default re-observation reads the record's daemon: facts that admitted when it was
+        recorded and now lack a required capability are the stale-daemon drift, never a fresh
+        capability refusal."""
+        info = copy.deepcopy(_INFO)
+
+        class RecordedDaemon:
+            def run(self, argv, **kwargs):
+                args, fake = tuple(argv[1:]), process.CommandResult.fake
+                if args == ("context", "show"):
+                    return fake(stdout="default")
+                if args[:2] == ("context", "inspect"):
+                    return fake(stdout='"unix:///var/run/docker.sock"')
+                if args == ("version", "--format", "{{json .Client.Version}}"):
+                    return fake(stdout='"27.5.1"')
+                if args[:2] == ("version", "--format"):
+                    return fake(stdout=json.dumps(_SERVER))
+                if args == ("info", "--format", "{{json .}}"):
+                    return fake(stdout=json.dumps(info))
+                raise AssertionError(args)
+
+        resolver = authority.GenericAuthorityResolver(
+            FakeStore(self.record), implementation_inspector=lambda: {"implementation_digest": D0})
+        host = self.record["runtime"]
+        with mock.patch.object(authority.process, "BoundedRunner", RecordedDaemon), \
+                mock.patch.object(authority.platform, "system", lambda: host["host_os"]), \
+                mock.patch.object(authority.platform, "machine",
+                                  lambda: host["host_raw_architecture"]):
+            resolver.resolve(self.backend, deadline=time.monotonic() + 10)
+            info["SwapLimit"] = False
+            with self.assertRaises(authority.DaemonDrift) as caught:
+                resolver.resolve(self.backend, deadline=time.monotonic() + 10)
+        self.assertIs(authority.stale_reason(caught.exception, None),
+                      generic_spike.GenericUnavailableReason.QUALIFICATION_STALE_DAEMON)
 
     def test_platform_drift_raises_the_distinct_daemon_drift_type(self):
         changed = copy.deepcopy(self.record["runtime"])
