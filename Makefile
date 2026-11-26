@@ -242,7 +242,7 @@ observer-smoke: ## One timed smoke run of the observer at the realistic size (1,
 check-claude: ## Fast Claude payload, lifecycle translation, and fail-closed adapter tests
 	@printf '$(BOLD)==> claude suite$(RESET)\n'
 	@$(PYTHON) $(EMPIRICA_CLAUDE_ADAPTER_TESTS)
-	@$(MAKE) --no-print-directory empirica-governance-host-check ARGS='-k host_owned'
+	@$(MAKE) --no-print-directory empirica-governance-host-check ARGS='-k host_owned -k qualify'
 	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k test_post_model_switch_updates_read_only_context_without_revoking_approval'
 	@$(MAKE) --no-print-directory empirica-activation-lifecycle-check ARGS='-k ClaudeAuditorAliasTests'
 

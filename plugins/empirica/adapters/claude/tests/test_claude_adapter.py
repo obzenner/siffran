@@ -178,6 +178,16 @@ class GenericMcpContractTests(unittest.TestCase):
         self.assertNotIn("command", spike["properties"])
         self.assertNotIn("dependent_files", spike["properties"])
 
+    def test_qualify_shares_the_one_mcp_outer_margin_above_the_core_deadline(self) -> None:
+        """The MCP call is the qualify transport: the session classifies no call, so ``qualify``
+        rides the one declared outer margin every Empirica tool call shares, beside
+        ``spike_request``; the core's one qualify deadline (lock, recovery, probes, cleanup,
+        publication) stays strictly inside it, so the core answers before the transport gives up."""
+        from adapters.sandbox import run_qualification
+        manifest = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        outer = manifest["mcpServers"]["empirica"]["tool_timeout_sec"]
+        self.assertLess(run_qualification.DEFAULT_QUALIFICATION_SECONDS, outer)
+
     def test_generic_result_facts_are_readable_from_public_argument_fixture(self) -> None:
         fixture = json.loads((PLUGIN_ROOT.parents[1] / "contracts/empirica/v2/fixtures/getargument-spike-approved.json").read_text())
         artifacts = fixture["expected"]["result"]["argument"]["artifacts"]
