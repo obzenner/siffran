@@ -26,6 +26,7 @@ ADR_DIR := doc/adr
 EMPIRICA_ACTIVATION_TESTS := $(PLUGINS_DIR)/empirica/adapters/claude/tests/test_activation_lifecycle.py
 EMPIRICA_FRESHNESS_TESTS := $(PLUGINS_DIR)/empirica/tests/test_freshness.py
 EMPIRICA_SPIKE_PLAN_TESTS := $(PLUGINS_DIR)/empirica/tests/test_spike_plan.py
+EMPIRICA_ENVIRONMENT_PROPOSAL_TESTS := $(PLUGINS_DIR)/empirica/tests/test_environment_proposal.py
 EMPIRICA_SPIKE_PLAN_DRAFT_TESTS := $(PLUGINS_DIR)/empirica/tests/test_spike_plan_draft.py
 EMPIRICA_GENERIC_SPIKE_APPLICATION_TESTS := $(PLUGINS_DIR)/empirica/tests/test_generic_spike_application.py
 EMPIRICA_DOCKER_PLANNER_TESTS := $(PLUGINS_DIR)/empirica/tests/test_docker_planner.py
@@ -146,6 +147,7 @@ check-core: empirica-author-view-golden empirica-governance-dialog-golden empiri
 	@$(PYTHON) lib/obligations/tests/test_obligations.py
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_FRESHNESS_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_SPIKE_PLAN_TESTS)
+	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_ENVIRONMENT_PROPOSAL_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_OBSERVATION_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_PROTOCOL_ISOLATION_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) $(EMPIRICA_LOCATION_TESTS)
