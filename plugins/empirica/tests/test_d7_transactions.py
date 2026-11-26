@@ -37,7 +37,7 @@ from core.run import ATTEMPT_OUTCOMES  # noqa: E402
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
     claim_conflicted, claim_digest, evaluate_snapshot, frozen_semantic_digest, independence,
-    plan_spike_request, plan_spike_result, valid_graph)
+    plan_spike_request, plan_spike_result, spike_result, valid_graph)
 from core.spike_plan_draft import canonicalize_spike_plan_draft  # noqa: E402
 from core.freshness import (FileObservation, ObservationState, canonical_digest,  # noqa: E402
                             observations_digest)
@@ -53,7 +53,7 @@ from core.run import OperationalState  # noqa: E402
 from core.governance import initial as initial_governance  # noqa: E402
 from governance_setup import (  # noqa: E402
     TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current, end_with_consent,
-    qualified_state)
+    qualified_state, sized_configure_run)
 from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 PI_PROFILE = host_profile_id("pi")
@@ -2381,17 +2381,19 @@ class D7TransactionTests(unittest.TestCase):
 
 class LeasePort:
     """A host port's shared runtime lock as the spike transaction sees it: each lease records the
-    bound it was waited for and whether it is held; ``on_enter`` runs as the lock is granted, and
-    ``refuse`` makes the grant fail."""
+    bound it was waited for, its ``deadline`` on ``clock`` and whether it is held; ``on_enter``
+    runs as the lock is granted, and ``refuse`` makes the grant fail."""
 
-    def __init__(self):
+    def __init__(self, clock=time.monotonic):
         self.waits, self.held, self.on_enter, self.refuse = [], False, None, None
+        self.clock, self.deadline = clock, None
 
     @contextmanager
     def runtime_lease(self, wait_seconds=None):
         self.waits.append(wait_seconds)
         if self.refuse is not None:
             raise self.refuse
+        self.deadline = self.clock() + wait_seconds
         self.held = True
         try:
             if self.on_enter is not None:
@@ -2399,6 +2401,34 @@ class LeasePort:
             yield self
         finally:
             self.held = False
+
+
+class SharedLease:
+    """One runtime lock two coordinators share across threads, each wait bounded: ``waiters[n]``
+    is set when the n-th lease is asked for."""
+
+    def __init__(self):
+        self.lock, self.asked = threading.Lock(), 0
+        self.waiters = [threading.Event(), threading.Event()]
+
+    @contextmanager
+    def runtime_lease(self, wait_seconds=None):
+        self.waiters[min(self.asked, 1)].set()
+        self.asked += 1
+        if not self.lock.acquire(timeout=10):
+            raise RuntimeError("the shared lock wait expired")
+        try:
+            yield self
+        finally:
+            self.lock.release()
+
+
+class DistinctHarness(Harness):
+    """Each run reports its own stdout, so two runs of one request never yield equal results."""
+
+    def run(self, request, lease=None):
+        return replace(super().run(request, lease), stdout=generic_spike.GenericStreamFact(
+            0, canonical_digest(["stdout", self.calls])))
 
 
 class SpikeBindingAdmissionTests(unittest.TestCase):
@@ -2591,6 +2621,142 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         self.assertEqual({item["backend"]["qualification_record_digest"] for item in requests},
                          {QUALIFICATION_DIGEST, canonical_digest("requalified record")})
         self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 1)
+
+    def test_a_replay_waiting_on_the_lock_returns_the_committed_result_and_runs_nothing(self):
+        """Two coordinators deliver one spike: the replay finds the request open, waits for the lock
+        the first holds while it runs and commits, and once granted returns that result."""
+        lease, harness = SharedLease(), DistinctHarness()
+        first, runs, artifacts_repo, workspace, _, run_id, key, action = self.ready(
+            harness, session="replay", port=lease)
+        second = ProductionCoordinator(workspace, harness, runs, artifacts_repo, PI_PROFILE, {},
+                                       ImageResolver(), lease)
+        replayed = []
+        replay = threading.Thread(
+            target=lambda: replayed.append(self.spike(second, run_id, action, "replay")),
+            daemon=True)
+
+        def start_replay():
+            harness.before_result = None
+            replay.start()
+            self.assertTrue(lease.waiters[1].wait(timeout=10), "the replay never asked for the lock")
+
+        harness.before_result = start_replay
+        original = self.spike(first, run_id, action)
+        replay.join(timeout=10)
+        self.assertFalse(replay.is_alive(), "the replay never got the released lock")
+        self.assertEqual((original["result"]["type"], replayed[0]["result"]["type"]),
+                         ("Allow", "Allow"), replayed)
+        self.assertEqual(harness.calls, 1)
+        self.assertEqual(second.last_state, decode_state(runs.data[key].value))
+        kinds = self.kinds(artifacts_repo, key)
+        self.assertEqual((kinds.count("spike_request"), kinds.count("spike")), (1, 1))
+
+    def test_a_configuration_amended_during_the_lock_wait_blocks_as_ordinary_preflight(self):
+        port, harness = LeasePort(), Harness()
+        coordinator, _, artifacts_repo, _, _, run_id, key, action = self.ready(
+            harness, session="amended", port=port)
+        budgets = coordinator.handle({"type": "GetRun", "run_id": run_id},
+                                     "read")["result"]["run"]["governance"]["proposal"]["budgets"]
+
+        def amend():
+            amended = coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action":
+                                          sized_configure_run(
+                                              budgets={**budgets,
+                                                       "max_passes": budgets["max_passes"] + 1},
+                                              rationale=SIZED_RATIONALE)}, "amend")
+            self.assertEqual(amended["result"]["type"], "Allow", amended)
+
+        port.on_enter = amend
+        waited = self.spike(coordinator, run_id, action)
+        port.on_enter = None
+        ordinary = self.spike(coordinator, run_id, action, "ordinary")
+        self.assertEqual(ordinary["result"]["type"], "Block", ordinary)
+        self.assertEqual({**waited["result"], "run": None}, {**ordinary["result"], "run": None})
+        self.assertEqual(harness.calls, 0)
+        self.assertNotIn("spike", self.kinds(artifacts_repo, key))
+
+    def test_an_under_lock_read_that_raced_a_commit_reads_again_and_stops_on_an_ended_run(self):
+        port, harness = LeasePort(), Harness()
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
+            harness, session="raced", port=port)
+        real_assemble = coordinator._assemble
+        raced = []
+
+        def racing(*args, **kwargs):
+            if port.held and not raced:
+                raced.append(True)
+                with mock.patch.object(coordinator, "_assemble", real_assemble):
+                    rewrite_state(coordinator, runs,
+                                  lambda state: replace(state, status="stopped_residual"))
+                raise HistoryCorrupt("a concurrent commit replaced the read")
+            return real_assemble(*args, **kwargs)
+
+        with mock.patch.object(coordinator, "_assemble", racing):
+            response = self.spike(coordinator, run_id, action)
+        self.assertEqual(raced, [True])
+        self.assertEqual(response["result"]["type"], "Inert", response)
+        self.assertEqual(harness.calls, 0)
+        self.assertNotIn("spike", self.kinds(artifacts_repo, key))
+
+    def test_the_lease_bounds_the_wait_and_the_harness_not_the_reobservation_or_publication(self):
+        """A harness that ends at the edge of the lease's allowance keeps its result: the image
+        re-observation runs on its own bound and the result compare-and-set still under the held
+        lock, so the binding cannot change before the result is recorded."""
+        clock = [1000.0]
+        port, harness, resolver = LeasePort(clock=lambda: clock[0]), Harness(), ImageResolver()
+        coordinator, _, artifacts_repo, _, _, run_id, key, action = self.ready(
+            harness, session="edge", port=port, resolver=resolver)
+        harness.before_result = lambda: clock.__setitem__(0, port.deadline)
+        observed = []
+        real_resolve = resolver.resolve
+
+        def observing(reference, backend, run=None):
+            observed.append((clock[0], port.held))
+            return real_resolve(reference, backend, run)
+
+        resolver.resolve = observing
+        response = self.spike(coordinator, run_id, action)
+        self.assertEqual(response["result"]["type"], "Allow", response)
+        self.assertEqual(observed, [(1000.0, False), (port.deadline, True)])
+        self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 1)
+
+    def test_the_result_of_a_request_is_the_spike_naming_it_and_only_that(self):
+        from types import SimpleNamespace
+        requests = [{"kind": "spike_request", "artifact_id": name} for name in ("a", "b")]
+        result = {"kind": "spike", "artifact_id": "r", "request_artifact_id": "a"}
+        snapshot = SimpleNamespace(history=(*requests, result))
+        self.assertEqual([spike_result(snapshot, item) for item in requests], [result, None])
+
+    def test_an_undecodable_binding_read_blocks_as_a_corrupt_run_before_any_effect(self):
+        harness = Harness()
+        coordinator, _, artifacts_repo, _, _, run_id, key, action = self.ready(
+            harness, session="corrupt-binding")
+        with mock.patch.object(environment, "spike_admission", side_effect=KeyError("backend")):
+            response = self.spike(coordinator, run_id, action)
+        self.assertEqual((response["result"]["type"],
+                          [reason["code"] for reason in response["result"]["reasons"]]),
+                         ("Block", ["run.corrupt"]), response)
+        self.assertEqual(harness.calls, 0)
+        self.assertNotIn("spike_request", self.kinds(artifacts_repo, key))
+
+    def test_a_spike_reads_again_within_eight_request_commits_then_faults_closed(self):
+        for lost, crashes, expected in ((7, 0, "Allow"), (8, 0, "conflict"), (0, 1, "unavailable")):
+            with self.subTest(lost=lost, crashes=crashes):
+                port, harness = LeasePort(), Harness()
+                coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
+                    harness, session="bounded-" + str(lost), port=port)
+                runs.conflicts, runs.crashes, runs.cas_calls = lost, crashes, 0
+                response = self.spike(coordinator, run_id, action)
+                kinds = self.kinds(artifacts_repo, key)
+                if expected == "Allow":
+                    self.assertEqual(response["result"]["type"], "Allow", response)
+                    self.assertEqual((runs.cas_calls, harness.calls), (lost + 2, 1))
+                    self.assertEqual(kinds.count("spike"), 1)
+                    continue
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": expected, "fail_direction": "closed"})
+                self.assertEqual((runs.cas_calls, harness.calls, port.waits),
+                                 (lost + crashes, 0, []))
 
     def test_a_spike_waits_for_a_rebind_holding_the_real_lock_then_ends_superseded(self):
         """The spike's lease and a rebind share the real runtime lock: a spike whose lock wait

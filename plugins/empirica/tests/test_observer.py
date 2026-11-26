@@ -810,6 +810,51 @@ class SpikeProofTests(unittest.TestCase):
                                  ("fail", "FAIL", code))
                 self.assertTrue(result["natural_exit"])
 
+    def test_a_request_left_open_under_a_replaced_binding_reads_terminal_superseded_binding(self):
+        """Read without redelivery: the open request ends superseded-binding (no result), the completed
+        spike stays evidence, and the same draft runs again under the new binding."""
+        from core import environment
+        from core.canonical import canonical_digest
+        from driver import FIXTURE_SPIKE_IMAGE
+        from governance_setup import qualified_state
+
+        class UnavailableHarness:
+            def run(self, request, lease=None):
+                raise RuntimeError("substrate ambiguity")
+
+        b = _Builder()
+        run = b.begin("probe", "rebound", "Rebound request", _graph(
+            "C0", [("C0", "needs-experiment", "Experiment")], []), qualified=True)
+        b.research(run, "C0")
+        b.spike(run, "C0", "python check.py", {"check.py": b"old\n"})
+        b.write("other.py", b"other\n")
+        coordinator = b.drv._service._coordinator
+        original, coordinator.harness = coordinator.harness, UnavailableHarness()
+        try:
+            coordinator.handle({"type": "ObserveAction", "run_id": run,
+                                "action": _generic_spike_action("C0", ["other.py"])}, "open")
+        finally:
+            coordinator.harness = original
+        self.assertEqual([item["state"] for item in self._proof(b)], ["current", "requested"])
+        key = decode_handle(run)
+        loaded = coordinator._load(key)
+        coordinator._commit(key, loaded.read.revision, coordinator._assemble(
+            key, loaded.state, {"type": "GetRun", "run_id": run}, require_graph=False),
+            qualified_state(loaded.state, profile_id=loaded.state.spike_backend["profile_id"],
+                            record_digest=canonical_digest("rebound record"),
+                            execution_binding_digest=canonical_digest("rebound binding"),
+                            spike_images=[FIXTURE_SPIKE_IMAGE]), ())
+        completed, superseded = self._proof(b)
+        self.assertEqual((completed["state"], superseded["state"]),
+                         ("current", environment.SUPERSEDED_BINDING))
+        self.assertIsNotNone(completed["result"])
+        self.assertIsNone(superseded["result"])
+        view, details = observed(Observer(DriverSource(b.store)))
+        self.assertEqual(contract_problems(view, details), [])
+        b.spike(run, "C0", "python other.py", {"other.py": b"other\n"})
+        self.assertEqual([item["state"] for item in self._proof(b)],
+                         ["superseded", environment.SUPERSEDED_BINDING, "current"])
+
     def test_request_without_an_admitted_result_is_explicitly_requested_not_failed(self):
         class UnavailableHarness:
             def run(self, request):

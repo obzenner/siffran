@@ -537,9 +537,11 @@ def execute_generic_operation(
         detail = "generic cleanup was unavailable: " + str(cleanup_failure)
         if failure is not None:
             detail += "; lifecycle: " + str(failure)
-        kind = (GenericPostflightChanged if isinstance(cleanup_failure, GenericPostflightChanged)
-                else GenericCleanupUnavailable)
-        raise kind(detail) from cleanup_failure
+        if isinstance(cleanup_failure, GenericPostflightChanged):
+            changed = GenericPostflightChanged(detail)
+            changed.reason = cleanup_failure.reason
+            raise changed from cleanup_failure
+        raise GenericCleanupUnavailable(detail) from cleanup_failure
     if failure is not None:
         raise GenericExecutionUnavailable("generic lifecycle was unavailable: " + str(failure)) from failure
     if attach is None or terminal is None or manifest is None or realization is None:

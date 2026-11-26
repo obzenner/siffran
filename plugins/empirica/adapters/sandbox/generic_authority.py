@@ -513,7 +513,7 @@ def stale_reason(exc: BaseException, otherwise: Any) -> Any:
 
 class GenericAuthorityResolver:
     def __init__(self, store: GenericQualificationStore, *,
-                 runtime_inspector: PassiveGenericRuntimeInspector = inspect_current_runtime,
+                 runtime_inspector: PassiveGenericRuntimeInspector = inspect_pinned_runtime,
                  implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
                  loaded_release: str | None = None,
                  clock: Callable[[], float] = time.monotonic, **_: Any) -> None:
@@ -535,9 +535,10 @@ class GenericAuthorityResolver:
 
     def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float,
                 run: RunKey | None = None) -> ResolvedGenericAuthority:
-        """The authority of ``backend`` re-observed now. With ``run`` the record is the run-scoped
-        one, loaded only for that run generation, and the Docker server's major version is bound
-        across it; a changed daemon is :class:`DaemonDrift`, a changed release
+        """The authority of ``backend`` re-observed now, by default at the endpoint its record
+        pinned. With ``run`` the record is the run-scoped one, loaded only for that run
+        generation, and the Docker server's major version is bound across it; a changed daemon
+        (a lost capability included) is :class:`DaemonDrift`, a changed release
         :class:`ImplementationDrift`."""
         if type(backend) is not application.GenericQualifiedBackend or deadline <= self.clock():
             raise GenericQualificationError("historical authority input is malformed")

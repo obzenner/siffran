@@ -1217,8 +1217,8 @@
         },
         "result": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/genericSpikeResult"}]},
         "state": {
-          "enum": ["requested", "current", "stale", "superseded"],
-          "description": "requested has no admitted result; current still holds; stale has changed input; superseded was replaced."
+          "enum": ["requested", "current", "stale", "superseded", "superseded-binding"],
+          "description": "requested has no admitted result; current still holds; stale has changed input; superseded was replaced; superseded-binding ended with no result because the run's binding was replaced (a terminal outcome, not a result)."
         }
       }
     },

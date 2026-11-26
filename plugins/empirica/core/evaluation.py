@@ -1107,6 +1107,12 @@ def _validated_generic_result_facts(
     return exit_code, verdict
 
 
+def spike_result(snapshot: EvaluationSnapshot, request: Mapping[str, Any]) -> dict[str, Any] | None:
+    """The admitted result of one committed spike request, ``None`` while it has none."""
+    return next((item for item in snapshot.history if item.get("kind") == "spike"
+                 and item.get("request_artifact_id") == request.get("artifact_id")), None)
+
+
 def plan_spike_result(
     snapshot: EvaluationSnapshot,
     request_body: Mapping[str, Any],

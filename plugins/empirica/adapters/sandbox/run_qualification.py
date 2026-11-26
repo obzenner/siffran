@@ -1174,8 +1174,9 @@ def hold_runtime_lock(
     lock. Without ``wait_seconds`` the lock is taken without waiting — a lock another holder has
     raises :class:`common.RuntimeLockBusy` at once — and the lease carries the one host deadline
     of the whole qualify: a settle and the attempt run under it each spend what is left of it.
-    With ``wait_seconds`` the lock is waited for, and that one bound covers the wait and
-    everything run under the lease."""
+    With ``wait_seconds`` the lock is waited for, and that one bound covers the wait and the
+    effects run under the lease (a spike's harness); a spike's re-observation and result keep
+    their own bounds while the lock stays held."""
     if wait_seconds is not None and (type(wait_seconds) not in (int, float) or wait_seconds <= 0):
         raise ValueError("runtime lock wait is outside its bound")
     root, store = _prepared_store(sandbox_root)

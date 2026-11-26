@@ -16,7 +16,7 @@ from adapters.sandbox import planner
 from application import generic_spike
 from core import spike_plan
 from core.records import RunKey
-from test_generic_authority import runtime
+from test_generic_authority import qualification_record, runtime
 from test_generic_execution import AUTHORITY, FakeDocker, fixture
 
 
@@ -110,6 +110,48 @@ class HarnessTests(unittest.TestCase):
             service, _ = self.build(fake, Resolver(self.backend, fail=error))
             with self.subTest(reason=expected.value):
                 self.assertIs(service.run(self.request).reason, expected)
+
+    def test_a_stale_binding_at_postflight_keeps_its_own_reason_after_the_proven_cleanup(self):
+        """Through the real authority resolution: the run's binding re-observed after the spike with
+        a new Docker server major version or a new loaded release is that stale reason, after the
+        container is removed; a patch update keeps the binding."""
+        stale = generic_spike.GenericUnavailableReason
+        later = "sha256:" + "e" * 64
+        record = {**qualification_record(),
+                  "qualification_record_digest": self.backend.qualification_record_digest,
+                  "execution_binding_digest": self.backend.execution_binding_digest}
+
+        class RunStore:
+            def check_runtime(self, profile):
+                return Path("/config"), Path("/work")
+
+            def load_record(self, digest, **lineage):
+                return copy.deepcopy(record)
+
+        request = replace(self.request, run=RunKey("project", "run", 1))
+        for name, version, release, expected in (
+                ("major", "28.0.0", record["implementation_digest"], stale.QUALIFICATION_STALE_DAEMON),
+                ("release", "27.5.1", later, stale.QUALIFICATION_STALE_IMPLEMENTATION),
+                ("patch", "27.5.2", record["implementation_digest"], None)):
+            with self.subTest(change=name):
+                temporary, self.store, _, _ = fixture()
+                self.addCleanup(temporary.cleanup)
+                versions = iter((record["runtime"]["server_version"], version))
+                releases = iter((record["implementation_digest"], release))
+                resolver = authority.GenericAuthorityResolver(
+                    RunStore(), loaded_release=record["implementation_digest"],
+                    runtime_inspector=lambda seed, deadline: authority.GenericRuntimeInspection(
+                        {**copy.deepcopy(seed), "server_version": next(versions)}),
+                    implementation_inspector=lambda: {"implementation_digest": next(releases)})
+                fake = FakeDocker(self.operation)
+                service, _ = self.build(fake, resolver)
+                result = service.run(request)
+                if expected is None:
+                    self.assertIs(type(result), generic_spike.GenericHarnessResult)
+                else:
+                    self.assertIs(type(result), generic_spike.GenericHarnessUnavailable)
+                    self.assertIs(result.reason, expected)
+                self.assertEqual((fake.container_present, fake.network_present), (False, False))
 
     def test_the_run_reaches_every_resolution_of_its_binding(self):
         run = RunKey("project", "run", 1)

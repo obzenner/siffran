@@ -58,10 +58,11 @@ PLACES = (*dict.fromkeys(confirmation.ASK_WHERE.values()), "next_turn", "in_prog
 HUMAN_REACHABLE = tuple(dict.fromkeys(confirmation.ASK_WHERE[e] for e in confirmation.REPRESENTABLE))
 STEP_SUBJECTS = ("run", "claim", "record")
 CLAIM_STANDING = ("current", "replaced", "gone")
-#: Whether a spike still holds: its files unchanged, changed since (freshness), or replaced by a later spike.
 #: History kinds that record how the run was kept, not what it came to: a page folds them away by default.
 BOOKKEEPING_KINDS = ("observation_basis", "attribution")
-SPIKE_STATES = ("requested", "current", "stale", "superseded")
+#: Whether a spike still holds: requested (no result yet), its files unchanged, changed since (freshness), replaced by a
+#: later spike, or ended with no result because the run's binding was replaced (``environment.spike_request_superseded``).
+SPIKE_STATES = ("requested", "current", "stale", "superseded", environment.SUPERSEDED_BINDING)
 #: The run's binding against its latest qualification attempt: ``unbound`` (nothing bound, nothing failed), ``bound`` (the
 #: installed binding is the latest outcome), ``stale`` (a later attempt failed: the binding stays installed, a stored
 #: reference the latest observation does not repeat) or ``failed`` (nothing bound, the latest attempt failed).
@@ -245,7 +246,9 @@ def _spikes(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], claim_id_dig
     projected = []
     for request_artifact in requests:
         result_artifact = results.get(request_artifact["artifact_id"])
-        state = ("requested" if result_artifact is None else "superseded"
+        state = ((environment.SUPERSEDED_BINDING
+                  if environment.spike_request_superseded(snapshot.state, request_artifact)
+                  else "requested") if result_artifact is None else "superseded"
                  if result_artifact["artifact_id"] not in active else "stale"
                  if result_artifact["artifact_id"] in stale else "current")
         request, context = spike_observer.request(request_artifact)

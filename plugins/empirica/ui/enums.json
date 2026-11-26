@@ -148,7 +148,8 @@
     "requested",
     "current",
     "stale",
-    "superseded"
+    "superseded",
+    "superseded-binding"
   ],
   "spike_outcome": [
     "pass",
