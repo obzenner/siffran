@@ -823,17 +823,14 @@ ENVIRONMENT_REVISION_MEMBERS = ("environment", "lineage")
 
 def _declared_revision_paths(node: Any, path: str, out: set[str]) -> None:
     """Collect the instance paths (array indices as ``[]``) whose object the ref-resolved schema declares a
-    ``revision`` property for, inside one of the environment members."""
+    ``revision`` property for, inside one of the environment members. Only ``oneOf`` branches are followed: a
+    revision declared under any other combinator stays banned, the safe direction."""
     if not isinstance(node, dict):
         return
-    for keyword in ("oneOf", "anyOf", "allOf"):
-        for branch in node.get(keyword, ()):
-            _declared_revision_paths(branch, path, out)
-    for keyword in ("if", "then", "else"):
-        _declared_revision_paths(node.get(keyword), path, out)
+    for branch in node.get("oneOf", ()):
+        _declared_revision_paths(branch, path, out)
     properties = node.get("properties", {})
-    segments = {segment.removesuffix("[]") for segment in path.split(".")}
-    if "revision" in properties and segments & set(ENVIRONMENT_REVISION_MEMBERS):
+    if "revision" in properties and set(path.split(".")) & set(ENVIRONMENT_REVISION_MEMBERS):
         out.add(path)
     for name, child in properties.items():
         _declared_revision_paths(child, f"{path}.{name}", out)
@@ -3598,7 +3595,13 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
              {"argument": {"artifacts": [{"lineage": {"binding": {"revision": 1}}}]}})):
         expect(lambda e, result=result: check_banned_fields(
             {"protocol": "empirica/v2", "request_id": "x", "result": result}, e, "neg"),
-            "banned field 'revision'", label)
+            "neg: banned field 'revision'", label)
+    declared: set[str] = set()
+    _declared_revision_paths({"properties": {"run": {"properties": {
+        "environment": {"oneOf": [{"properties": {"revision": {}, "payload": {"properties": {"kind": {}}}}}]},
+        "other": {"properties": {"revision": {}}}}}}}, "result", declared)
+    if declared != {"result.run.environment"}:
+        errors.append(f"POS environment revision paths: only a member's own declaration admits it, got {declared}")
     declared_revisions = {"run": {"environment": {"revision": 1}},
                           "argument": {"environment": {"revisions": [{"revision": 1}],
                                                         "attempts": [{"revision": 1}, {"revision": 2}]},
