@@ -46,7 +46,7 @@
           "candidate_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "required_fixture_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
           "required_live_probe_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
-          "promotion_status": {"enum": ["pending_live", "promoted", "wip_unsupported"]},
+          "promotion_status": {"description": "x-supported declares the statuses whose profiles compose execution paths; a status it does not list is unsupported. Generated into core.contract_bounds by make contract-bounds.", "enum": ["pending_live", "promoted", "wip_unsupported"], "x-supported": ["pending_live", "promoted"]},
           "input_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "output_private": {"oneOf": [{"type": "boolean"}, {"const": "unverified"}]},
           "unsupported_reason_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},

@@ -17,6 +17,7 @@ from adapters.state.fsio import SymlinkRefused
 from adapters.state.hitl import (DocumentMismatch, HardLinkUnsupported, HitlDocuments, publish)
 from application import protocol
 from core import environment as core_environment, hitl as core_hitl
+from application.host_profile_values import HOST_PROFILE_APPROVAL_INGRESS_UNAVAILABLE
 from core.governance import expected_approval_kind
 
 #: The short digest length (ADR-0072 Q4): twelve hex — the scan length the repository's
@@ -523,11 +524,11 @@ class HostGovernance:
             return result
         approval_kind = expected_approval_kind(g, g["raises"])
         approval_ingress = protocol.host_profile(self.profile)["approval_ingress"]
-        if approval_kind == "host_ui" and (approval_ingress == "unavailable" or self.elicit is None):
+        if approval_kind == "host_ui" and (approval_ingress == HOST_PROFILE_APPROVAL_INGRESS_UNAVAILABLE or self.elicit is None):
             # Report what this host can do NOW, so the run's own facts (and its Next) say nobody can be asked,
             # whatever an earlier context said; then the view names the stop alone.
             reported = self.context_ingress(self.profile, run["id"],
-                                            {"author": g["context"]["author"], "ingress": "unavailable"}).get("result", {})
+                                            {"author": g["context"]["author"], "ingress": HOST_PROFILE_APPROVAL_INGRESS_UNAVAILABLE}).get("result", {})
             return unavailable(reported if reported.get("run") else result)
         context = {"author": g["context"]["author"], "ingress": approval_ingress}
         result = self.context_ingress(self.profile, run["id"], context).get("result", {})
