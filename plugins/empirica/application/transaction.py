@@ -65,6 +65,11 @@ class CorruptLoad:
 
 
 @dataclass(frozen=True)
+class LegacyLoad:
+    """Persisted bytes exist and are the read-only legacy family: never resumed or rewritten."""
+
+
+@dataclass(frozen=True)
 class AbsentLoad:
     """No persisted run exists for the key."""
 
@@ -102,7 +107,7 @@ class Coordinator:
     def _present(value: Any) -> bool:
         return hasattr(value, "value") and hasattr(value, "revision")
 
-    def _load(self, key: RunKey) -> Loaded | CorruptLoad | AbsentLoad:
+    def _load(self, key: RunKey) -> Loaded | CorruptLoad | LegacyLoad | AbsentLoad:
         """Read and classify persisted run state exactly once."""
         read = self.runs.read(key)
         if isinstance(read, Corrupt):
@@ -112,6 +117,8 @@ class Coordinator:
         classified = run_state.classify_and_decode(read.value)
         if classified.kind == "valid":
             return Loaded(read, classified.state)
+        if classified.kind == "legacy":
+            return LegacyLoad()
         return CorruptLoad()
 
     def _read_artifacts(self, key: RunKey) -> Any:
@@ -236,6 +243,8 @@ class Coordinator:
         loaded = self._load(key)
         if isinstance(loaded, CorruptLoad):
             return self._safe_block(key, request_id, "run.corrupt")
+        if isinstance(loaded, LegacyLoad):
+            return self._safe_block(key, request_id, "run.legacy")
         if isinstance(loaded, AbsentLoad):
             return self._inert(request_id)
         return self._read_response(key, loaded.read, command, request_id)
@@ -267,6 +276,10 @@ class Coordinator:
             loaded = self._load(key)
             if isinstance(loaded, CorruptLoad):
                 return self._safe_block(key, request_id, "run.corrupt")
+            # Read-only legacy (ADR-0074): a previous-family document is refused for every
+            # command except StartRun, which starts a fresh generation instead of resuming it.
+            if isinstance(loaded, LegacyLoad):
+                return self._safe_block(key, request_id, "run.legacy")
             if isinstance(loaded, AbsentLoad):
                 return self._inert(request_id)
             read, state = loaded.read, loaded.state
@@ -676,6 +689,8 @@ class Coordinator:
             loaded = self._load(key)
             if isinstance(loaded, CorruptLoad):
                 return self._safe_block(key, request_id, "run.corrupt")
+            if isinstance(loaded, LegacyLoad):
+                return self._safe_block(key, request_id, "run.legacy")
             if isinstance(loaded, AbsentLoad):
                 return self._inert(request_id)
             read, state = loaded.read, loaded.state
@@ -945,6 +960,8 @@ class Coordinator:
     def _read_response(self, key: RunKey, read: Any, command: dict[str, Any], request_id: str,
                        retries: int = 8):
         classification = run_state.classify_and_decode(read.value)
+        if classification.kind == "legacy":
+            return self._safe_block(key, request_id, "run.legacy")
         if classification.kind != "valid":
             return self._safe_block(key, request_id, "run.corrupt")
         state = classification.state

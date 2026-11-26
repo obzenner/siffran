@@ -373,13 +373,16 @@ class Run5SchemaTests(unittest.TestCase):
         with self.assertRaises(TypeError):
             classified.state.spike_backend["kind"] = "changed"
         self.assertEqual(run_state.encode_state(classified.state), self.fixture)
-        # ADR-0072: every family before the current one classifies corrupt exactly as run/2 does,
-        # with no backwards compatibility and no repair (a distinct run/4 legacy read is E2b).
-        for discriminator in ("empirica.run/4", "empirica.run/3", "empirica.run/2"):
+        # ADR-0072: every family before the current one stays undecodable with no
+        # backwards compatibility or repair; run/4 is the read-only legacy family (E2b),
+        # run/3 and the major run/2 are corrupt.
+        for discriminator, kind in ((run_state.LEGACY_STATE_SCHEMA_ID, "legacy"),
+                                    ("empirica.run/3", "current_corrupt"),
+                                    ("empirica.run/2", "current_corrupt")):
             old = copy.deepcopy(self.fixture)
             old["state_schema"] = discriminator
             with self.subTest(state_schema=discriminator):
-                self.assertEqual(run_state.classify_and_decode(old).kind, "current_corrupt")
+                self.assertEqual(run_state.classify_and_decode(old).kind, kind)
                 self.assertIsNone(run_state.classify_and_decode(old).state)
                 with self.assertRaises(ValueError):
                     run_state.encode_state(replace(classified.state, state_schema=discriminator))
@@ -771,21 +774,123 @@ class StartSelectionTests(unittest.TestCase):
                      artifacts.append_calls), before)
 
 
+def incompatible_family(identifier, offset):
+    """A neighbouring generation of a generation-suffixed identity (a state schema or the
+    protocol id), derived from an owner constant so no test retypes another era's discriminator
+    (ADR-0075; review E2b finding 1)."""
+    stem, _, generation = identifier.rpartition("/")
+    prefix, digits = generation[:1], generation[1:]
+    if prefix.isalpha():
+        return f"{stem}/{prefix}{int(digits) + offset}"
+    return f"{stem}/{int(generation) + offset}"
+
+
+# Incompatible identities, derived from the owner constants and never restated: the family
+# before the one legacy family, the major shape two before it, and the generations after the
+# current state and protocol.
+OLDER_FAMILY = incompatible_family(run_state.LEGACY_STATE_SCHEMA_ID, -1)
+MAJOR_FAMILY = incompatible_family(run_state.LEGACY_STATE_SCHEMA_ID, -2)
+FUTURE_FAMILY = incompatible_family(protocol.state_schema_id(), 1)
+FUTURE_PROTOCOL = incompatible_family(protocol.protocol_id(), 1)
+
+
 def legacy_document(state, discriminator):
     """A persisted document of a previous state family: the current state, encoded, re-labelled
-    with the legacy discriminator, so only its identity differs (the major run/2 shape predates
+    with the legacy discriminator, so only its identity differs (the major shape predates
     the spike backend binding, so it does not carry one)."""
     current = replace(state, spike_backend={"kind": "spikes_unavailable"})
     document = run_state.encode_state(current)
     document["state_schema"] = discriminator
-    if discriminator == "empirica.run/2":
+    if discriminator == MAJOR_FAMILY:
         document.pop("spike_backend")
     return document
 
 
 class LegacyRejectionTests(unittest.TestCase):
-    def test_old_handle_is_corrupt_and_cannot_mutate_state_or_artifacts(self):
-        for discriminator in ("empirica.run/4", "empirica.run/3", "empirica.run/2"):
+    def contract_reason_row(self, phrase):
+        """The one reason row whose message carries the phrase, selected from the public
+        contract by content, so its code and recovery actions are asserted, never retyped
+        (ADR-0075; review E2b finding 1)."""
+        rows = [(code, row) for code, row in protocol.public_contract()["reasons"].items()
+                if phrase in row["message"]]
+        self.assertEqual(len(rows), 1, f"expected exactly one reason row matching {phrase!r}")
+        return rows[0]
+
+    def dispatch_public(self, service, request_id, command):
+        """The public ingress envelope: the request is schema-validated, dispatched, and its
+        response schema-validated before it returns, exactly as a host receives it (review
+        E2b finding 2 — a bypassed handler does not test request dispatch)."""
+        return service.dispatch({"protocol": protocol.protocol_id(),
+                                  "request_id": request_id, "command": command})
+
+    def test_only_the_one_legacy_id_classifies_as_read_only_legacy_and_is_never_decoded(self):
+        state = replace(initial(), spike_backend={"kind": "spikes_unavailable"})
+        # the recognized identities come from the owner; the incompatible ones are derived,
+        # never retyped. Only the exact legacy discriminator classifies read-only legacy.
+        for discriminator, kind in ((run_state.LEGACY_STATE_SCHEMA_ID, "legacy"),
+                                   (OLDER_FAMILY, "current_corrupt"),
+                                   (FUTURE_FAMILY, "current_corrupt")):
+            with self.subTest(state_schema=discriminator):
+                classified = run_state.classify_and_decode(
+                    legacy_document(state, discriminator))
+                self.assertEqual(classified.kind, kind)
+                self.assertIsNone(classified.state, "neither legacy nor corrupt state is decoded")
+        wrong_protocol = legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID)
+        wrong_protocol["protocol"] = FUTURE_PROTOCOL
+        self.assertEqual(run_state.classify_and_decode(wrong_protocol).kind, "current_corrupt")
+        missing = legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID)
+        del missing["state_schema"]
+        self.assertEqual(run_state.classify_and_decode(missing).kind, "current_corrupt")
+
+    def test_a_legacy_run5_family_run_is_never_resumed_or_rewritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runs = FilesystemRunRepository(Path(temporary))
+            artifacts = Artifacts()
+            state, values = chain(initial())
+            key = RunKey(storage_id("p"), storage_id("s"), 1)
+            runs.create(key, legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID))
+            for item in values:
+                artifacts.append(key, item)
+            workspace, harness = Workspace(), Harness()
+            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+            run_id = encode_handle(key)
+            path = runs._doc_path(key)
+            before_bytes = path.read_bytes()
+            before_read = runs.read(key)
+            before_artifacts = copy.deepcopy(artifacts.values[key])
+            legacy_code, legacy_row = self.contract_reason_row("read-only legacy")
+            for command in (
+                {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
+                {"type": "GetRun", "run_id": run_id},
+                {"type": "RestoreRun", "run_id": run_id},
+                {"type": "GetArgument", "run_id": run_id},
+                {"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
+                {"type": "ObserveAction", "run_id": run_id,
+                 "action": {"kind": "route", "reason": "must not write"}},
+                {"type": "ObserveAction", "run_id": run_id,
+                 "action": {**spike_action("src/x.py")}},
+            ):
+                with self.subTest(command=command["type"]):
+                    # public ingress: the request validates, so the refusal is the legacy
+                    # one, not a wire rejection the schema would have caught earlier
+                    result = self.dispatch_public(service, command["type"], command)
+                    self.assertEqual(result["result"]["type"], "Block")
+                    self.assertEqual(result["result"]["reasons"][0]["code"], legacy_code)
+                    self.assertEqual(result["result"]["reasons"][0]["next_actions"],
+                                     legacy_row["next_actions"],
+                                     "the contract's own closed recovery action")
+            self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
+            trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
+            self.assertEqual(trusted["result"]["type"], "Inert")
+            after_read = runs.read(key)
+            self.assertEqual(path.read_bytes(), before_bytes)
+            self.assertEqual(after_read.revision, before_read.revision)
+            self.assertEqual(artifacts.values[key], before_artifacts)
+            self.assertEqual(workspace.calls, [])
+            self.assertEqual(harness.calls, 0)
+
+    def test_older_and_major_families_stay_corrupt_and_cannot_mutate(self):
+        for discriminator in (OLDER_FAMILY, MAJOR_FAMILY):
             with self.subTest(state_schema=discriminator), tempfile.TemporaryDirectory() as temporary:
                 runs = FilesystemRunRepository(Path(temporary))
                 artifacts = Artifacts()
@@ -801,6 +906,7 @@ class LegacyRejectionTests(unittest.TestCase):
                 before_bytes = path.read_bytes()
                 before_read = runs.read(key)
                 before_artifacts = copy.deepcopy(artifacts.values[key])
+                corrupt_code, corrupt_row = self.contract_reason_row("is corrupt")
                 for command in (
                     {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
                     {"type": "GetRun", "run_id": run_id},
@@ -810,14 +916,15 @@ class LegacyRejectionTests(unittest.TestCase):
                     {"type": "ObserveAction", "run_id": run_id,
                      "action": {"kind": "route", "reason": "must not write"}},
                     {"type": "ObserveAction", "run_id": run_id,
-                     "action": {"kind": "spike_request", "claim_id": "C0",
-                                "command": "true", "dependent_files": ["x"]}},
+                     "action": {**spike_action("src/x.py")}},
                 ):
                     with self.subTest(command=command["type"]):
-                        result = service._dispatch_validated(
-                            {"request_id": command["type"], "command": command})
+                        result = self.dispatch_public(service, command["type"], command)
                         self.assertEqual(result["result"]["type"], "Block")
-                        self.assertEqual(result["result"]["reasons"][0]["code"], "run.corrupt")
+                        self.assertEqual(result["result"]["reasons"][0]["code"], corrupt_code)
+                        self.assertEqual(result["result"]["reasons"][0]["next_actions"],
+                                         corrupt_row["next_actions"],
+                                         "the contract's own closed recovery action")
                 self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
                 trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
                 self.assertEqual(trusted["result"]["type"], "Inert")
@@ -827,6 +934,36 @@ class LegacyRejectionTests(unittest.TestCase):
                 self.assertEqual(artifacts.values[key], before_artifacts)
                 self.assertEqual(workspace.calls, [])
                 self.assertEqual(harness.calls, 0)
+
+    def test_start_run_after_a_legacy_latest_starts_a_fresh_generation_without_touching_it(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runs = FilesystemRunRepository(Path(temporary))
+            artifacts = Artifacts()
+            state, values = chain(initial())
+            key = RunKey(storage_id("p"), storage_id("s"), 1)
+            runs.create(key, legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID))
+            for item in values:
+                artifacts.append(key, item)
+            before_bytes = runs._doc_path(key).read_bytes()
+            before_artifacts = copy.deepcopy(artifacts.values[key])
+            workspace, harness = Workspace(), Harness()
+            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+            started = self.dispatch_public(service, "start", start_command())
+            self.assertEqual(started["result"]["type"], "Allow")
+            fresh = started["result"]["run"]["id"]
+            self.assertNotEqual(fresh, encode_handle(key), "a fresh generation, not a resume")
+            read = self.dispatch_public(service, "read", {
+                "type": "ResolveRun", "selector": {"project": "p", "session": "s"}})
+            self.assertEqual(read["result"]["type"], "Allow")
+            self.assertEqual(read["result"]["run"]["id"], fresh)
+            self.assertEqual(runs._doc_path(key).read_bytes(), before_bytes,
+                            "the legacy file is never rewritten")
+            self.assertEqual(artifacts.values[key], before_artifacts)
+            legacy_code, _row = self.contract_reason_row("read-only legacy")
+            legacy_read = self.dispatch_public(service, "legacy", {
+                "type": "GetRun", "run_id": encode_handle(key)})
+            self.assertEqual(legacy_read["result"]["type"], "Block")
+            self.assertEqual(legacy_read["result"]["reasons"][0]["code"], legacy_code)
 
 
 if __name__ == "__main__":

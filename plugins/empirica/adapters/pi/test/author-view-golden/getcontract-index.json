@@ -127,6 +127,12 @@
             ]
           },
           {
+            "code": "run.legacy",
+            "sections": [
+              "run/lifecycle"
+            ]
+          },
+          {
             "code": "graph.missing",
             "sections": [
               "claims/graph"

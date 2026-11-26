@@ -373,6 +373,21 @@
           ],
           "properties": {
             "code": {
+              "const": "run.legacy"
+            },
+            "parameters": {
+              "$ref": "#/$defs/emptyParams"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "code",
+            "parameters"
+          ],
+          "properties": {
+            "code": {
               "const": "graph.missing"
             },
             "parameters": {
