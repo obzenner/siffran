@@ -201,6 +201,18 @@ class PublicToolContractTests(unittest.TestCase):
                     with self.assertRaises(environment.EnvironmentProposalError):
                         environment.validate_proposal(payload)
 
+    def test_the_projection_fails_closed_on_any_other_surrogate(self):
+        """Only the whole surrogate block is dropped; a pattern naming a surrogate any other way (an escape,
+        a braced escape, a literal character) refuses the projection instead of reaching a model."""
+        from adapters.public_tools import _SURROGATE_BLOCK, _SURROGATES, _portable
+
+        self.assertEqual(_portable({"pattern": f"^[^a{_SURROGATE_BLOCK}]"}), {"pattern": "^[^a]"})
+        for named in (f"\\u{_SURROGATES.start:04x}", f"\\u{{{_SURROGATES.stop - 1:x}}}",
+                      chr(_SURROGATES.start)):
+            with self.subTest(named=repr(named)), \
+                    self.assertRaisesRegex(RuntimeError, "^a model-facing pattern names a lone surrogate"):
+                _portable([{"items": {"pattern": f"^[^a{named}]"}}])
+
     def test_host_handle_read_schema_also_avoids_root_combinators(self):
         from adapters.public_tools import _PUBLIC_SCHEMAS
 
