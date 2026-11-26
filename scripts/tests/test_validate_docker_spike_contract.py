@@ -130,37 +130,42 @@ class ProbeImageTests(unittest.TestCase):
     def test_the_current_pinned_pin_parses(self):
         contract = json.loads(
             (validator.CONTRACT_DIR / "support-contract.json").read_text(encoding="utf-8"))
-        reference, repository, index_digest = validator._probe_image(
-            contract["qualification"]["probe_image"])
-        self.assertRegex(f"{reference} {repository} {index_digest}",
-                         r"^[^@]+@sha256:[0-9a-f]{64} alpine sha256:[0-9a-f]{64}$")
+        pin = validator.probe_image.parse_probe_image(contract["qualification"]["probe_image"])
+        self.assertEqual(pin.repo_digest, f"{pin.repository}@{pin.index_digest}")
 
     def test_malformed_or_non_official_names_are_refused_by_the_full_name_check(self):
-        # Parser-direct: neither the schema nor a vendored-copy mismatch can mask acceptance.
+        # Parser-direct against the runtime parser the validator delegates to: neither the
+        # schema nor a vendored-copy mismatch can mask acceptance.
         for reference in ("docker.io//library/alpine:3.22@sha256:" + "4" * 64,
                           "docker.io/library//alpine:3.22@sha256:" + "4" * 64,
                           "registry.example.com/library/alpine:3.22@sha256:" + "4" * 64,
                           "docker.io/team/alpine:3.22@sha256:" + "4" * 64,
                           "docker.io/library/alpine/team:3.22@sha256:" + "4" * 64,
-                          "alpine:3.22@sha256:" + "4" * 64):
-            with self.assertRaisesRegex(validator.ContractError, "docker.io/library"):
-                validator._probe_image({"reference": reference, "repository": "alpine",
-                                        "index_digest": "sha256:" + "4" * 64})
+                          "alpine:3.22@sha256:" + "4" * 64,
+                          "docker.io/library/Alpine:3.22@sha256:" + "4" * 64):
+            with self.assertRaisesRegex(validator.probe_image.ProbeImageError,
+                                        "docker.io/library"):
+                validator.probe_image.parse_probe_image({"reference": reference,
+                                                          "repository": "alpine",
+                                                          "index_digest": "sha256:" + "4" * 64})
 
     def test_the_repository_path_including_library_is_bounded_to_255(self):
         # distribution/reference caps the repository path at 255 characters, library/ included:
         # a validated contract must not pin an image Docker cannot even inspect.
         long_pin = {"reference": f"docker.io/library/{'a' * 247}:3.22@sha256:" + "4" * 64,
                     "repository": "a" * 247, "index_digest": "sha256:" + "4" * 64}
-        self.assertEqual(validator._probe_image(long_pin),
+        pin = validator.probe_image.parse_probe_image(long_pin)
+        self.assertEqual((pin.reference, pin.repository, pin.index_digest),
                          (long_pin["reference"], "a" * 247, long_pin["index_digest"]))
-        self.assertEqual(len(f"library/{'a' * 247}"), validator.REPOSITORY_PATH_MAX)
-        for components in (248, 300):
-            over = {"reference": f"docker.io/library/{'a' * components}:3.22@sha256:" + "4" * 64,
-                    "repository": "a" * components, "index_digest": "sha256:" + "4" * 64}
-            self.assertGreater(len(f"library/{'a' * components}"), validator.REPOSITORY_PATH_MAX)
-            with self.assertRaisesRegex(validator.ContractError, "255"):
-                validator._probe_image(over)
+        self.assertEqual(len(f"library/{'a' * 247}"),
+                         validator.probe_image.REPOSITORY_PATH_MAX)
+        for characters in (248, 300):
+            over = {"reference": f"docker.io/library/{'a' * characters}:3.22@sha256:" + "4" * 64,
+                    "repository": "a" * characters, "index_digest": "sha256:" + "4" * 64}
+            self.assertGreater(len(f"library/{'a' * characters}"),
+                               validator.probe_image.REPOSITORY_PATH_MAX)
+            with self.assertRaisesRegex(validator.probe_image.ProbeImageError, "255"):
+                validator.probe_image.parse_probe_image(over)
 
 
 class StaleTextTests(unittest.TestCase):

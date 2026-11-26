@@ -39,7 +39,9 @@ IMPLEMENTATION_ROOTS = (
     "adapters/pi/bridge.py",
     "adapters/pi/src/index.ts",
     "adapters/sandbox/generic_qualification.py",
+    "adapters/sandbox/probe_image.py",
     "vendor/contracts/empirica/v2",
+    "vendor/contracts/empirica-docker-spike/v1",
 )
 
 IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
@@ -112,6 +114,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "adapters/sandbox/generic_harness.py",
     "adapters/sandbox/generic_journal.py",
     "adapters/sandbox/generic_qualification.py",
+    "adapters/sandbox/probe_image.py",
     "adapters/sandbox/generic_staging.py",
     "adapters/sandbox/planner.py",
     "adapters/sandbox/process.py",
@@ -158,6 +161,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "vendor/contracts/empirica/v2/request.schema.json",
     "vendor/contracts/empirica/v2/response.schema.json",
     "vendor/contracts/empirica/v2/state.schema.json",
+    "vendor/contracts/empirica-docker-spike/v1/support-contract.json",
 }))
 
 
