@@ -431,6 +431,21 @@ class RaisingQueueRunner(QueueRunner):
         return answer
 
 
+class ResolvedAuthorityTests(unittest.TestCase):
+    def test_the_authority_over_a_runtime_pins_its_cli_to_its_endpoint_and_private_config(self):
+        bound = backend()
+        current = {**runtime(), "endpoint": "unix:///run/pinned.sock", "ncpu": 3, "mem_total": 7}
+        resolved = authority.ResolvedGenericAuthority.at_runtime(
+            bound, current, Path("/private/config"), Path("/private/work"))
+        self.assertEqual(resolved, authority.ResolvedGenericAuthority(
+            bound, Path(CLI), (("DOCKER_CONFIG", "/private/config"),
+                                 ("DOCKER_HOST", "unix:///run/pinned.sock"),
+                                 ("LANG", "C"), ("LC_ALL", "C")),
+            Path("/private/work"), current["server_os"], current["server_architecture"], 3, 7,
+            current))
+        self.assertIs(resolved.runtime, current)
+
+
 class RuntimeInspectionTests(unittest.TestCase):
     """The one bounded observation owner behind the discovering, the admitting and the pinned
     inspectors: one closed error per read failure, the endpoint source and the admission."""

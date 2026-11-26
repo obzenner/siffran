@@ -741,6 +741,29 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         call = harness.images.calls[0]
         self.assertEqual(call[1]["timeout_seconds"], 0.5)
 
+    def test_both_image_row_shapes_name_their_own_row_in_each_refusal(self):
+        """The spike row and the probe image row share one platform check, and each refusal names
+        the row it refused: the field set, the platform facts and the declared volumes."""
+        harness = OwnerHarness(self._fresh_cell())
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        record = harness.call().record
+        for validate, row, label in (
+                (run_owner.validate_spike_image_row_shape, record["spike_images"][0], "spike row"),
+                (run_owner.validate_qualification_image_shape, record["qualification_image"],
+                 "probe image row")):
+            self.assertEqual(validate(copy.deepcopy(row)), row)
+            for name, changed, refusal in (
+                    ("field set", {**row, "extra": 1}, "shape is unknown"),
+                    ("operating system", {**row, "os": "windows"}, "platform is unknown"),
+                    ("blank architecture", {**row, "architecture": ""}, "platform is unknown"),
+                    ("raw architecture", {**row, "raw_architecture": 7}, "platform is unknown"),
+                    ("raw operating system", {**row, "raw_os": ""}, "platform is unknown"),
+                    ("volumes", {**row, "declared_volumes": ["/data"]}, "declares volumes"),
+                    ("volume shape", {**row, "declared_volumes": "none"}, "declares volumes")):
+                with self.subTest(row=label, change=name), self.assertRaises(ValueError) as caught:
+                    validate(changed)
+                self.assertEqual(str(caught.exception), f"run qualification {label} {refusal}")
+
     def test_sealed_spike_rows_refuse_every_non_conforming_form_at_load(self):
         # (the registered /3 schema owns the closed row shape — the field set, the
         # identity digest, the os enum and the no-volumes constant are the contract
