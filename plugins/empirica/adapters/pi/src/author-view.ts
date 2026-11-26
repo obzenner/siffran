@@ -346,11 +346,33 @@ function spikeBackend(run: Json): readonly Trusted[] {
   const backend = run.spike_backend as Json;
   // unavailable and unqualified both hold no spike authority, so both render the closed line
   if (backend.kind !== "qualified")
-    return [trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_unavailable}`)];
+    return [trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_unavailable}`), ...environment(run)];
   return [
     trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_qualified}`),
     trusted(`  ${LABELS.spike_backend_record} ${backend.qualification_record_digest}`),
     trusted(`  ${LABELS.spike_backend_execution} ${backend.execution_binding_digest}`),
+    ...environment(run),
+  ];
+}
+
+/** The run's environment step in closed words: revision, attempts, the stored binding, the latest failure. */
+function environment(run: Json): readonly Trusted[] {
+  const member = run.environment as Json | undefined;
+  const qualification = run.qualification as Json | undefined;
+  if (member === undefined || qualification === undefined) return [];
+  const active = qualification.active as Json | null;
+  const failure = qualification.last_failure as Json | null;
+  return [
+    trusted(`  ${LABELS.environment} ${member.revision} ${member.state} ${member.profile_id}; ` +
+      `${LABELS.environment_images} ${member.spike_image_count}`),
+    trusted(`  ${LABELS.qualification} ${qualification.attempts_used}/${qualification.attempts_max}; ` +
+      (active !== null
+        ? `${LABELS.qualification_bound} ${active.seq} ${LABELS.qualification_bound_note}`
+        : LABELS.qualification_unbound)),
+    ...(failure !== null
+      ? [trusted(`  ${LABELS.qualification_failure} ${failure.reason}` +
+        ("probe" in failure ? ` ${LABELS.qualification_probe} ${failure.probe}` : ""))]
+      : []),
   ];
 }
 
@@ -635,6 +657,7 @@ function argumentLines(argument: Json, safety: TextSafety): readonly string[] {
     ...(edges.length ? [LABELS.edges, ...edges] : []),
     ...(citations.length ? [LABELS.citations, ...citations] : []),
     ...(spikes.length ? [labels.generic_spikes, ...spikes] : []),
+    LABELS.argument_environment, `  ${JSON.stringify(argument.environment)}`,
     `${LABELS.audit_status} ${auditText(argument.audit)}`,
     ...(argument.audit.findings as unknown[]).map(
       (item) => `  ${LABELS.finding} ${untrusted(item, safety)}`),

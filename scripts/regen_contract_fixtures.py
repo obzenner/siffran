@@ -48,6 +48,29 @@ def _spike_binding(document: dict) -> dict:
     return dict(_QUALIFIED_SPIKES if requires_spikes else _UNAVAILABLE_SPIKES)
 
 
+#: The one environment revision and succeeded attempt a qualified fixture's binding came from, and the image its spikes ran.
+_FIXTURE_REVISION = {"revision": 1, "state": "approved", "digest": "sha256:" + "d" * 64}
+_FIXTURE_IMAGE_ID = "sha256:" + "c" * 64
+
+
+def _environment_context(binding: dict) -> dict:
+    """An argument's environment member for a fixture's binding (``core.environment.audit_context``): a qualified binding
+    was installed by the run's one succeeded attempt of its one approved revision; any other binding by nothing."""
+    if binding["kind"] != "qualified":
+        return {"binding": dict(binding), "revisions": [], "attempts": []}
+    return {"binding": dict(binding), "revisions": [dict(_FIXTURE_REVISION)],
+            "attempts": [{"seq": 1, "revision": _FIXTURE_REVISION["revision"], "outcome": "succeeded",
+                          "record_digest": binding["qualification_record_digest"], "reason": None, "probe": None}]}
+
+
+def _argument_environment(argument: dict, binding: dict) -> None:
+    """Every argument view carries its environment, and each spike artifact the qualification it ran under."""
+    argument["environment"] = _environment_context(binding)
+    for artifact in argument.get("artifacts", ()):
+        if isinstance(artifact, dict) and artifact.get("kind") in {"spike_request", "spike"}:
+            artifact["lineage"] = {"attempt": 1, "revision": _FIXTURE_REVISION["revision"], "image_id": _FIXTURE_IMAGE_ID}
+
+
 #: What the gate's first reason says about who the turn end waits on: a human who is asked, and an audit child that runs.
 _CONFIGURATION_REASONS = {"governance.approval_required", "governance.revision_required", "obligation.approval"}
 #: The reasons that wait on a human the core raises only in deliberative; an auto view that carried one is not a state any run reaches.
@@ -164,12 +187,14 @@ def generated(path: Path) -> str:
     argument = result.get("argument") if isinstance(result, dict) else None
     if isinstance(argument, dict):
         argument["spike_backend"] = dict(binding)
+        _argument_environment(argument, binding)
     governed = run.get("governance") if isinstance(run, dict) else None
     for child in document.get("children", ()):
         dossier = child.get("audit_argument") if isinstance(child, dict) else None
         if isinstance(dossier, dict) and isinstance(dossier.get("audit"), dict):
             # Persisted audit dossiers are argument views, so they carry the exact run backend and findings too.
             dossier["spike_backend"] = dict(binding)
+            _argument_environment(dossier, binding)
             dossier["audit"].setdefault("findings", [])
     argument_audit = result.get("argument", {}).get("audit") if isinstance(result, dict) else None
     if isinstance(argument_audit, dict):

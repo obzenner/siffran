@@ -5,13 +5,13 @@ from collections.abc import Mapping
 import re
 from typing import Any
 
-from . import citations, confirmation, governance
+from . import citations, confirmation, environment, governance
 
 from .evaluation import (CONFIRMATION_REASON, EvaluationSnapshot, HOST_TIER_UNSUPPORTED, TERMINAL_STOP_REASON,
                          active_evidence, audit_blocker, audit_covers, audit_pending, bootstrap_status, latest_audit_verdict,
                          claim_blockers, claim_digest, confirmation_batch, deferred_unresolved, derive_claims,
                          recovery_actions,
-                         derive_claims_for_projection, digest, dossier_artifact_ids, effective_scope_ids,
+                         argument_digest, derive_claims_for_projection, digest, effective_scope_ids,
                          evidence_digest, identity_pair, independence, pending_decisions, pending_human, pending_terminal,
                          progress_basis, report_requirements, terminal_batch, earliest_stage, stage_rank, turn_end_actor,
                          Requirement)
@@ -456,6 +456,9 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
         # Selected exactly once at StartRun. This is the immutable run binding, not current
         # authority-pointer or Docker health, so this pure projection performs no discovery.
         "spike_backend": governance.plain(snapshot.state.spike_backend),
+        # Stored references only (spec §7): the installed binding is history, never live health.
+        **({} if (view := environment.environment_view(snapshot.state)) is None else {
+            "environment": view, "qualification": environment.qualification_view(snapshot.state)}),
     }
 
 
@@ -558,6 +561,14 @@ def spike_result(art: Mapping[str, Any], active: bool) -> dict[str, Any]:
     }
 
 
+def spike_lineage(state: Any, request: Mapping[str, Any]) -> dict[str, Any]:
+    """The qualification one spike request (and its result) ran under (spec §7): the attempt and
+    approved revision of the binding its sealed request recorded, and the image ID that request
+    resolved and created by — read from the request artifact, never from the current binding."""
+    return {**environment.attempt_lineage(state, request["backend"]["qualification_record_digest"]),
+            "image_id": request["plan"]["image"]["id"]}
+
+
 def _redacted_spike_draft(value: Mapping[str, Any]) -> dict[str, Any]:
     """Public draft projection: preserve declared names, never authored environment values."""
     draft = governance.plain(value)
@@ -585,6 +596,7 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
             **_human_decision(snapshot, claim),
         })
     artifacts: list[dict[str, Any]] = []
+    requests = {art["artifact_id"]: art for art in snapshot.history if art.get("kind") == "spike_request"}
     for sequence, art in enumerate(snapshot.history):
         kind = art.get("kind")
         if kind not in {"research", "spike_request", "spike"}:
@@ -610,15 +622,16 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
                 snapshot_digest=art["snapshot_digest"],
                 inputs=art["plan"]["captured_files"],
                 backend=art["backend"], producer_model=identity_pair(art.get("producer")),
-                prerequisite_research_ids=art["prerequisite_research_ids"])
+                prerequisite_research_ids=art["prerequisite_research_ids"],
+                lineage=spike_lineage(snapshot.state, art))
         else:
             common.update(spike_result(art, art["artifact_id"] in active_ids))
+            common["lineage"] = spike_lineage(snapshot.state, requests[art["request_artifact_id"]])
         artifacts.append(common)
     frozen_digest = None if snapshot.state.frozen_claim_ids is None else digest(gating)
-    argument_digest = digest({"graph": snapshot.graph,
-                              "evidence": dossier_artifact_ids(snapshot.history)})
+    context = environment.audit_context(snapshot.state)
     return governance.plain({
-        "root_claim_id": snapshot.graph["root"], "argument_digest": argument_digest,
+        "root_claim_id": snapshot.graph["root"], "argument_digest": argument_digest(snapshot),
         "goal": snapshot.state.goal, "goal_digest": digest(snapshot.state.goal),
         "frozen_scope_digest": frozen_digest,
         "deferred_scope_digest": digest(deferred),
@@ -629,5 +642,8 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         # The dossier repeats the exact StartRun binding so an auditor can interpret every
         # admitted spike artifact without consulting mutable machine authority.
         "spike_backend": governance.plain(snapshot.state.spike_backend),
+        # The environment the evidence was produced under: the active binding, every revision
+        # and every attempt with its outcome (spec §7), the facts the argument digest binds.
+        "environment": context,
         "audit": _audit(snapshot),
     })

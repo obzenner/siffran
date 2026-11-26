@@ -329,7 +329,7 @@ PROGRESS_KINDS = frozenset({"graph", "research", "spike_request", "spike", "attr
 def progress_basis(snapshot: EvaluationSnapshot, blockers: Sequence[Mapping[str, Any]]) -> str:
     """The one owner of "did the run move" (ADR-0068): a digest of the blockers (code and parameters) and of the run state that
     an author's or a host's action can change: status, the bootstrap facts, the governance revision, the graph, the frozen scope, every recorded
-    artifact of the work, the audit children's states. A read (``GetRun``, ``GetArgument``), a presentation and the budget
+    artifact of the work, the audit children's states, the environment step (``core.environment.audit_context``). A read (``GetRun``, ``GetArgument``), a presentation and the budget
     counters, which move on every evaluation, never change it. Hosts remember the value at their last continuation and compare
     only that."""
     state = snapshot.state
@@ -341,6 +341,8 @@ def progress_basis(snapshot: EvaluationSnapshot, blockers: Sequence[Mapping[str,
         "frozen": None if state.frozen_claim_ids is None else sorted(state.frozen_claim_ids),
         "work": [a["artifact_id"] for a in snapshot.history if a.get("kind") in PROGRESS_KINDS],
         "children": [[c["child_id"], c["state"]] for c in state.children],
+        # The environment step is work too: a proposal, a decision, an attempt or a rebind.
+        "environment": environment.audit_context(state),
     })
 
 
@@ -606,10 +608,17 @@ def _spike_requirement(snapshot: EvaluationSnapshot, claim: Mapping[str, Any], d
         return None
     stale_head = (derivation.stale_heads.get(spikes[-1]["artifact_id"])
                   if spikes and _freshness_sensitive(snapshot, claim) else None)
+    actionable = stale_head is not None or not (spikes and spikes[-1].get("outcome") == "pass")
+    # A spike the run cannot request yet names the environment step it is missing (spec §5.1):
+    # only a run whose generic backend was composed and is not yet bound has one.
+    step = (environment.spike_prerequisite(snapshot.state)
+            if spike_plan.spike_backend_kind(snapshot.state.spike_backend) == "unqualified" else None)
+    if actionable and step is not None:
+        return step, {}, True
     if stale_head is not None:
         return "claim.spike_stale", {"changes": [{"path": change.path, "state": change.state.value}
                                                    for change in stale_head.changes]}, True
-    return "claim.spike_missing", {}, not (spikes and spikes[-1].get("outcome") == "pass")
+    return "claim.spike_missing", {}, actionable
 
 
 #: The claim reasons whose parameters carry the claim they are about (``claim_id``) and whose contract text names it.
@@ -1370,6 +1379,13 @@ def audit_exclusions(snapshot: EvaluationSnapshot) -> list[str]:
     return sorted(value for value in classes if value is not None)
 
 
+def argument_digest(snapshot: EvaluationSnapshot) -> str:
+    """The one digest an audit binds the argument by: the graph, every dossier artifact, and the environment the evidence
+    was produced under (``core.environment.audit_context``), so a rebind or a new attempt makes an earlier audit stale."""
+    return digest({"graph": snapshot.graph, "evidence": dossier_artifact_ids(snapshot.history),
+                   "environment": environment.audit_context(snapshot.state)})
+
+
 def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
     """Derive the exact audit dossier binding from the current immutable snapshot."""
     if snapshot.graph is None or frozen_scope_invalid(snapshot.state, snapshot.graph):
@@ -1383,8 +1399,7 @@ def audit_binding(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         if claim["id"] in gating and derivation.states[claim["id"]] == "approved":
             reviewed.append({"claim_id": claim["id"],
                              "evidence_digest": evidence_digest(snapshot, claim)})
-    return {"argument_digest": digest({"graph": snapshot.graph,
-                                             "evidence": dossier_artifact_ids(snapshot.history)}),
+    return {"argument_digest": argument_digest(snapshot),
             "goal_digest": digest(snapshot.state.goal),
             "frozen_scope_digest": (None if snapshot.state.frozen_claim_ids is None
                                     else digest(gating)),
@@ -1607,7 +1622,8 @@ def turn_end_actor(snapshot: EvaluationSnapshot, derivation: ClaimDerivation | N
 
 
 #: The reasons that wait on a human; the auditor acts on ``audit.pending``; everything else is the agent's.
-HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON})
+#: A pending environment revision is the human's to decide in the host's own dialog (spec §5.1).
+HUMAN_WAITING_REASONS = frozenset({CONFIRMATION_REASON, TERMINAL_STOP_REASON, environment.ENVIRONMENT_PENDING})
 #: Where a requirement waits that is not admissible yet: for the stages before it.
 LATER = "later"
 
@@ -1716,7 +1732,9 @@ def report_requirements(snapshot: EvaluationSnapshot, derivation: ClaimDerivatio
                  or (stage == "setup" and obligation == approval and configuration_waits))
         actor = "human" if human else "auditor" if reason == "audit.pending" else "agent"
         admissible = stage_rank(stage) == first
-        place = ((confirmation.ask_where(prompt_error) if reason else "next_report") if actor == "human"
+        # The environment dialog is the host's, shown when the revision was submitted: the request is with the human.
+        place = (("in_progress" if reason == environment.ENVIRONMENT_PENDING
+                  else confirmation.ask_where(prompt_error) if reason else "next_report") if actor == "human"
                  else "in_progress" if actor == "auditor" else "next_turn")
         # Whether the gate names a requirement now (``admissible``) is one fact; whether a human will be shown the question is
         # another, and the host's: the core projects the batch whatever else blocks, and an explicit report presents it

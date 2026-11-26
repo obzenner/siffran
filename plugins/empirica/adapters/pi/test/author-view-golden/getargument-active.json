@@ -130,8 +130,15 @@
       },
       "spike_backend": {
         "kind": "spikes_unavailable"
+      },
+      "environment": {
+        "binding": {
+          "kind": "spikes_unavailable"
+        },
+        "revisions": [],
+        "attempts": []
       }
     }
   },
-  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=ordinary gating=true state=open evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n  S1 kind=ordinary gating=true state=open evidence=none: <<<EMPIRICA_UNTRUSTED_DATA>>>Support claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nEdges:\n  G0 -SupportedBy-> S1\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>> — waiting for a human\nAudit status: required"
+  "text": "Argument\ngoal: <<<EMPIRICA_UNTRUSTED_DATA>>>Prove the public contract is internally consistent.<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nroot_claim_id: G0\nClaims:\n  G0 kind=ordinary gating=true state=open evidence=present: <<<EMPIRICA_UNTRUSTED_DATA>>>Root claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\n  S1 kind=ordinary gating=true state=open evidence=none: <<<EMPIRICA_UNTRUSTED_DATA>>>Support claim<<<END_EMPIRICA_UNTRUSTED_DATA>>>\nEdges:\n  G0 -SupportedBy-> S1\nCitations:\n  <<<EMPIRICA_UNTRUSTED_DATA>>>The observed source supports G0.<<<END_EMPIRICA_UNTRUSTED_DATA>>> — waiting for a human\nEnvironment:\n  {\"binding\":{\"kind\":\"spikes_unavailable\"},\"revisions\":[],\"attempts\":[]}\nAudit status: required"
 }

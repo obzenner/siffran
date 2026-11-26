@@ -814,10 +814,18 @@ def check_host_boundaries(doc: dict, errors: list[str], where: str, root: Path =
         errors.append(f"{where}: design document cannot be generated from the registry ({exc!r})")
 
 
+#: The 7.2 environment projections whose own ``revision`` is the environment revision (Empirica 7.2 §4.2), never the
+#: retired v1 compare-and-set revision: the run view's ``environment``, the argument's ``environment`` and a spike's
+#: ``lineage``.
+ENVIRONMENT_REVISION_MEMBERS = ("environment", "lineage")
+
+
 def _scan_banned(obj: Any, errors: list[str], where: str, path: str) -> None:
     if isinstance(obj, dict):
         for key, value in obj.items():
-            if key in BANNED_RESPONSE_KEYS:
+            environment_revision = key == "revision" and any(
+                f".{member}" in path for member in ENVIRONMENT_REVISION_MEMBERS)
+            if key in BANNED_RESPONSE_KEYS and not environment_revision:
                 errors.append(f"{where}: banned field {key!r} at {path}")
             _scan_banned(value, errors, where, f"{path}.{key}")
     elif isinstance(obj, list):
@@ -1103,7 +1111,20 @@ def _validation_spike_request(
                     "bytes": 0} for path in ordered],
         "backend": dict(backend), "producer_model": None,
         "prerequisite_research_ids": list(prerequisites),
+        "lineage": dict(_VALIDATION_LINEAGE),
     }
+
+
+#: The one qualification a validation spike ran under: its binding's first attempt, of revision 1, and its image ID.
+_VALIDATION_LINEAGE = {"attempt": 1, "revision": 1, "image_id": "sha256:" + "f" * 64}
+
+
+def _validation_environment(backend: dict) -> dict:
+    """A validation argument's environment: the qualified binding the run's one succeeded attempt installed."""
+    return {"binding": dict(backend),
+            "revisions": [{"revision": 1, "state": "approved", "digest": "sha256:" + "d" * 64}],
+            "attempts": [{"seq": 1, "revision": 1, "outcome": "succeeded",
+                          "record_digest": backend["qualification_record_digest"], "reason": None, "probe": None}]}
 
 
 def _validation_spike_result(
@@ -1122,7 +1143,7 @@ def _validation_spike_result(
         "request_artifact_id": request["artifact_id"],
         "plan_digest": request["plan_digest"], "policy_digest": request["policy_digest"],
         "snapshot_digest": request["snapshot_digest"], "backend": backend,
-        "producer_model": None,
+        "producer_model": None, "lineage": dict(request["lineage"]),
         "prerequisite_research_ids": list(request["prerequisite_research_ids"]),
         "file_bindings": [{"path": path, "sha256": "sha256:" + "9" * 64}
                           for path in paths],
@@ -4027,7 +4048,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         value = {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
             "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
-            "spike_backend": backend,
+            "spike_backend": backend, "environment": _validation_environment(backend),
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,
@@ -4241,7 +4262,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
         return {"root_claim_id": "G0", "argument_digest": d64, "goal": "Test goal.",
             "goal_digest": d64,
             "frozen_scope_digest": None, "deferred_scope_digest": d64,
-            "spike_backend": backend,
+            "spike_backend": backend, "environment": _validation_environment(backend),
             "untrusted_delimiters": {"open": "<<<EMPIRICA_UNTRUSTED_DATA>>>",
                 "close": "<<<END_EMPIRICA_UNTRUSTED_DATA>>>"},
             "claims": [{"claim_id": "G0", "text": "t", "wording_digest": d64,

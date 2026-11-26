@@ -122,6 +122,13 @@
         },
         "spike_backend": {
           "kind": "spikes_unavailable"
+        },
+        "environment": {
+          "binding": {
+            "kind": "spikes_unavailable"
+          },
+          "revisions": [],
+          "attempts": []
         }
       }
     }

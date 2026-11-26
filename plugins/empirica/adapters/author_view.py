@@ -326,11 +326,34 @@ def _spike_backend(run: dict[str, Any]) -> tuple[Trusted, ...]:
     if backend["kind"] != "qualified":
         # unavailable and unqualified both hold no spike authority — no requests until a binding
         # is qualified — so both render the same closed capability line.
-        return (Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_unavailable']}"),)
+        return (Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_unavailable']}"),
+                *_environment(run))
     return (
         Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_qualified']}"),
         Trusted(f"  {_LABELS['spike_backend_record']} {backend['qualification_record_digest']}"),
         Trusted(f"  {_LABELS['spike_backend_execution']} {backend['execution_binding_digest']}"),
+        *_environment(run),
+    )
+
+
+def _environment(run: dict[str, Any]) -> tuple[Trusted, ...]:
+    """The run's environment step in closed words (spec §7): the current revision and its state,
+    the attempts used, the installed binding as a stored reference, and the latest failure since
+    it with its closed reason — never the agent's preparation text or image references."""
+    member, qualification = run.get("environment"), run.get("qualification")
+    if member is None or qualification is None:
+        return ()
+    active, failure = qualification["active"], qualification["last_failure"]
+    return (
+        Trusted(f"  {_LABELS['environment']} {member['revision']} {member['state']} {member['profile_id']}; "
+                f"{_LABELS['environment_images']} {member['spike_image_count']}"),
+        Trusted(f"  {_LABELS['qualification']} {qualification['attempts_used']}/{qualification['attempts_max']}; "
+                + (f"{_LABELS['qualification_bound']} {active['seq']} "
+                   f"{_LABELS['qualification_bound_note']}" if active is not None
+                   else _LABELS["qualification_unbound"])),
+        *((Trusted(f"  {_LABELS['qualification_failure']} {failure['reason']}"
+                   + (f" {_LABELS['qualification_probe']} {failure['probe']}" if "probe" in failure else "")),)
+          if failure is not None else ()),
     )
 
 
@@ -617,6 +640,8 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         )
     )
     audit = argument["audit"]
+    # Closed words and digests only: the binding, each revision and each attempt the evidence ran under.
+    environment = json.dumps(argument["environment"], separators=(",", ":"), ensure_ascii=False)
     return (
         f"{_LABELS['goal']} {safety.untrusted(argument['goal'])}",
         f"{_LABELS['root_claim_id']} {safety.claim_id(argument['root_claim_id'])}",
@@ -624,6 +649,7 @@ def _argument_lines(argument: dict[str, Any], safety: TextSafety) -> tuple[str, 
         *((_LABELS["edges"], *edges) if edges else ()),
         *((_LABELS["citations"], *citations) if citations else ()),
         *((_LABELS["generic_spikes"], *spikes) if spikes else ()),
+        _LABELS["argument_environment"], f"  {environment}",
         f"{_LABELS['audit_status']} {audit_text(audit)}",
         *(f"  {_LABELS['finding']} {safety.untrusted(item)}" for item in audit["findings"]),
     )

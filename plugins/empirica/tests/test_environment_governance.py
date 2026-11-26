@@ -38,7 +38,7 @@ from core import environment
 from core.canonical import canonical_digest
 from core.governance import plain
 from application.v2 import compose
-from test_d7_transactions import Harness, Runs, Workspace
+from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 from test_environment_actions import (CONFIGURE_RUN, ENVIRONMENT_ACTION, PROFILE, QUALIFY_ACTION, ServiceEnv,
                                        _networked_payload, _request, approve_current)
 
@@ -669,6 +669,208 @@ class HostIngressTests(unittest.TestCase):
         self.assertTrue(host_ingress_admitted(PROFILE, DeliberationEnv().state()))
 
 
+_EXPERIMENT_GRAPH = {"root": "C0", "claims": [{"id": "C0", "text": "a spike settles the question",
+                                              "gating": True, "kind": "needs-experiment"}],
+                     "edges": []}
+
+
+def _experiment_ready(env):
+    """A needs-experiment claim whose research supports it: the next step is a spike."""
+    env.observe({"kind": "graph", "payload": _EXPERIMENT_GRAPH})
+    approve_current(env.service._coordinator, env.run_id)
+    env.observe({"kind": "route", "reason": "primary environment qualification route"})
+    env.observe({"kind": "investigate"})
+    recorded = env.observe({"kind": "research", "claim_id": "C0", "source_kind": "code",
+                            "result": "supports", "payload": {
+                                "source_ref": "test_d7_transactions.py",
+                                "citation": "Observation basis fixture."}})
+    assert recorded["type"] == "Allow", recorded
+    return env
+
+
+class _ComposedBackend(ServiceEnv):
+    """A host that composed a generic backend, so StartRun binds the unqualified reference."""
+
+    def __init__(self, **start):
+        super().__init__(**start)
+        from test_run5_binding import ComposedQualificationPort
+        self.service = compose(Workspace(), Harness(), Runs(), Artifacts(), None, PROFILE, {}, None,
+                               qualification_port=ComposedQualificationPort())
+
+
+class _ExperimentRun(_ComposedBackend):
+    fully_approved = _experiment_ready
+
+
+class _ExperimentDeliberation(DeliberationEnv, _ComposedBackend):
+    fully_approved = _experiment_ready
+
+
+def _attempt_row(state, ordinal):
+    """The ``ordinal``-th reserved attempt row of the latest revision, as the core reserves it."""
+    from core.run import ATTEMPT_OUTCOMES
+    return {"attempt_id": environment.qualification_attempt_id(ordinal, "read-test"),
+            "revision": state.environment["revision"], "started_stamp": state.stamp_seq,
+            "outcome": ATTEMPT_OUTCOMES[0], "record_digest": None, "reason": None, "probe": None}
+
+
+class EnvironmentStepReadTests(unittest.TestCase):
+    """Spec section 7 and 5.1: the environment step in the reads, the audit binding and the
+    turn-end signal — each state names its own next call and whose turn it is."""
+
+    def report(self, env):
+        result = env.request({"type": "EvaluateRun", "run_id": env.run_id,
+                              "intent": "report_convergence"})
+        self.assertTrue(protocol.validate_public_result(result), result)
+        return result
+
+    def assertStep(self, env, code, actor):
+        """The report blocks on ``code`` with the registry's next calls, the claim's obligation
+        names it, and the turn end waits on ``actor``."""
+        blocked = self.report(env)
+        self.assertEqual([row["code"] for row in blocked["reasons"]], [code], blocked)
+        self.assertEqual(blocked["reasons"][0]["next_actions"],
+                         _PUBLIC_CONTRACT["reasons"][code]["next_actions"])
+        view = env.view()
+        claim = next(row for row in view["obligations"]["active"] if row["id"] == "claim:C0")
+        self.assertEqual(claim["missing"]["code"], code)
+        self.assertEqual(view["turn_end_actor"], actor)
+        return view
+
+    def test_each_environment_state_names_its_step_and_whose_turn_it_is(self):
+        env = _ExperimentRun().start().fully_approved()
+        view = self.assertStep(env, environment.ENVIRONMENT_REQUIRED, "author")
+        self.assertNotIn("environment", view)
+        pending = _ExperimentDeliberation()
+        view = self.assertStep(pending, environment.ENVIRONMENT_PENDING, "human")
+        self.assertEqual(view["environment"]["state"], environment.PENDING)
+        pending.present()
+        pending.decide("reject")
+        self.assertStep(pending, environment.ENVIRONMENT_REJECTED, "author")
+        approved = _ExperimentDeliberation(control_mode="auto")
+        view = self.assertStep(approved, environment.QUALIFICATION_REQUIRED, "author")
+        self.assertEqual(view["qualification"], {
+            "attempts_used": 0, "attempts_max": environment.MAX_QUALIFICATION_ATTEMPTS,
+            "active": None, "last_failure": None})
+
+    def requirement(self, env):
+        """The report's requirement for the claim, read from the core's own derivation."""
+        from core import evaluation
+        coordinator = env.service._coordinator
+        key = next(iter(coordinator.runs.data))
+        state = coordinator.last_state
+        snapshot = coordinator._assemble(key, state, {"type": "GetRun", "run_id": env.run_id},
+                                         require_graph=False)
+        derivation = evaluation.derive_claims(snapshot)
+        blockers = tuple(evaluation.claim_blockers(snapshot, derivation))
+        return next(row for row in evaluation.report_requirements(snapshot, derivation, blockers)
+                    if "C0" in row.claims and row.reason is not None)
+
+    def test_a_pending_revision_is_in_the_human_dialog_and_a_missing_step_is_the_agent_next_turn(self):
+        pending = self.requirement(_ExperimentDeliberation())
+        self.assertEqual((pending.reason, pending.actor), (environment.ENVIRONMENT_PENDING, "human"))
+        self.assertTrue(pending.admissible)
+        unbound = self.requirement(_ExperimentDeliberation(control_mode="auto"))
+        self.assertEqual((unbound.reason, unbound.actor), (environment.QUALIFICATION_REQUIRED, "agent"))
+        self.assertTrue(unbound.admissible)
+        # The dialog was shown when the revision was submitted: the request is with the human
+        # now, never a prompt the next report would raise, and never the agent's next turn.
+        from core import confirmation, observer
+        self.assertIn(pending.place, observer.PLACES)
+        self.assertNotIn(pending.place, confirmation.ASK_WHERE.values())
+        self.assertNotEqual(pending.place, unbound.place)
+
+    def test_a_failed_attempt_keeps_its_reason_and_the_way_on_is_another_attempt(self):
+        from application import qualification
+        from core.run import QUALIFICATION_PROBE_FAILED_REASON, QUALIFICATION_PROBE_NAMES
+        from test_d7_transactions import rewrite_state
+        env = _ExperimentDeliberation(control_mode="auto")
+        coordinator = env.service._coordinator
+        rewrite_state(coordinator, coordinator.runs, lambda state: replace(
+            state, qualification_attempts=(qualification.failed_attempt_row(
+                _attempt_row(state, 1), QUALIFICATION_PROBE_FAILED_REASON,
+                QUALIFICATION_PROBE_NAMES[0]),)))
+        view = self.assertStep(env, environment.QUALIFICATION_REQUIRED, "author")
+        self.assertEqual(view["qualification"]["last_failure"], {
+            "reason": QUALIFICATION_PROBE_FAILED_REASON, "probe": QUALIFICATION_PROBE_NAMES[0]})
+        self.assertIsNone(view["qualification"]["active"])
+
+    def test_a_bound_binding_stays_installed_while_a_later_attempt_fails(self):
+        """The read tells the historical binding from the later stale attempt, and the claim
+        owes its spike again, not an environment step."""
+        from application import qualification
+        from test_d7_transactions import bind_qualified_backend, rewrite_state
+        stale = "qualification-stale-daemon"
+        env = _ExperimentDeliberation(control_mode="auto")
+        coordinator = env.service._coordinator
+        bind_qualified_backend(coordinator, coordinator.runs)
+        bound = env.view()
+        self.assertEqual(bound["qualification"]["active"]["seq"], 1)
+        self.assertIsNone(bound["qualification"]["last_failure"])
+        rewrite_state(coordinator, coordinator.runs, lambda state: replace(
+            state, qualification_attempts=tuple(state.qualification_attempts) + (
+                qualification.failed_attempt_row(_attempt_row(state, 2), stale, None),)))
+        view = self.assertStep(env, "claim.spike_missing", "author")
+        self.assertEqual(view["qualification"]["active"], bound["qualification"]["active"])
+        self.assertEqual(view["qualification"]["last_failure"], {"reason": stale})
+        self.assertEqual(view["qualification"]["attempts_used"], 2)
+        self.assertNotEqual(view["basis"], bound["basis"])
+
+    def test_every_environment_change_moves_the_argument_and_the_progress_basis(self):
+        """A proposal, a decision, an attempt and a rebind each change both digests an audit and a
+        host compare, so an audit taken before any of them is stale."""
+        from test_d7_transactions import bind_qualified_backend, rewrite_state
+        env = _ExperimentRun().start().fully_approved()
+        coordinator = env.service._coordinator
+
+        def digests():
+            argument = env.request({"type": "GetArgument", "run_id": env.run_id})["argument"]
+            return argument["argument_digest"], env.view()["basis"]
+
+        seen = [digests()]
+        _submit(env, copy.deepcopy(ENVIRONMENT_ACTION["payload"]))
+        seen.append(digests())
+        rewrite_state(coordinator, coordinator.runs, lambda state: replace(
+            state, environment={**plain(state.environment), "state": environment.APPROVED}))
+        seen.append(digests())
+        rewrite_state(coordinator, coordinator.runs, lambda state: replace(
+            state, qualification_attempts=(_attempt_row(state, 1),)))
+        seen.append(digests())
+        bind_qualified_backend(coordinator, coordinator.runs)
+        seen.append(digests())
+        bind_qualified_backend(coordinator, coordinator.runs,
+                               record_digest=canonical_digest("a later binding"))
+        seen.append(digests())
+        for position in (0, 1):
+            self.assertEqual(len({row[position] for row in seen}), len(seen), seen)
+        argument = env.request({"type": "GetArgument", "run_id": env.run_id})["argument"]
+        self.assertEqual(argument["environment"]["binding"], env.view()["spike_backend"])
+        self.assertEqual([row["seq"] for row in argument["environment"]["attempts"]],
+                         list(range(1, len(argument["environment"]["attempts"]) + 1)))
+        self.assertNoAuthoredEnvironmentText(env)
+
+    def assertNoAuthoredEnvironmentText(self, env):
+        """Spec section 7 and the existing redaction rule: the agent's preparation steps, its
+        rationale and its image references reach the human only through the bound document,
+        never a read, the audit's argument or the author's rendered view."""
+        from adapters.author_view import render_author_view
+        run = env.request({"type": "GetRun", "run_id": env.run_id})
+        argument = env.request({"type": "GetArgument", "run_id": env.run_id})
+        payload = ENVIRONMENT_ACTION["payload"]
+        surfaces = (json.dumps(run, ensure_ascii=False), json.dumps(argument, ensure_ascii=False),
+                    render_author_view(run), render_author_view(argument))
+        for authored in (*payload["preparation"], payload["rationale"], *payload["spike_images"]):
+            for surface in surfaces:
+                self.assertNotIn(authored, surface)
+
+    def test_a_pending_or_rejected_revision_shows_no_authored_environment_text(self):
+        env = _ExperimentDeliberation()
+        self.assertNoAuthoredEnvironmentText(env)
+        env.present()
+        env.decide("reject")
+        self.assertNoAuthoredEnvironmentText(env)
+
+
 class AdmissionDecisionTests(unittest.TestCase):
     """The pure decisions E7 owns: qualify admission (with the attempt ceiling) and the spike
     prerequisite. The ceiling is the generated module's own word, never restated here."""
@@ -754,15 +956,16 @@ class AdmissionDecisionTests(unittest.TestCase):
         self.assertEqual(environment.qualify_admission(rejected), environment.ENVIRONMENT_REJECTED)
 
     def test_the_spike_prerequisite_names_the_missing_step(self):
-        """A spike with no qualified binding names its missing step: no approved revision needs a
-        proposal first; an approved one with nothing bound needs the attempt."""
+        """A spike with no qualified binding names its missing step: no revision needs a proposal
+        first, a pending one waits on the human, and an approved one with nothing bound needs the
+        attempt."""
         without_proposal = ServiceEnv().start().fully_approved()
         self.assertIsNone(without_proposal.state().environment)
         self.assertEqual(environment.spike_prerequisite(without_proposal.state()),
                          environment.ENVIRONMENT_REQUIRED)
         pending = DeliberationEnv()
         self.assertEqual(environment.spike_prerequisite(pending.state()),
-                         environment.ENVIRONMENT_REQUIRED)
+                         environment.ENVIRONMENT_PENDING)
         approved = DeliberationEnv(control_mode="auto")
         self.assertEqual(environment.spike_prerequisite(approved.state()),
                          environment.QUALIFICATION_REQUIRED)

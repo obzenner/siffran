@@ -990,7 +990,16 @@
             "generic_spikes",
             "generic_spike_request",
             "generic_spike_result",
-            "generic_spike_no_result"
+            "generic_spike_no_result",
+            "environment",
+            "environment_images",
+            "qualification",
+            "qualification_bound",
+            "qualification_bound_note",
+            "qualification_unbound",
+            "qualification_failure",
+            "qualification_probe",
+            "argument_environment"
           ],
           "properties": {
             "no_governance": {
@@ -1306,6 +1315,42 @@
               "minLength": 1
             },
             "audit_reaudit_pending": {
+              "type": "string",
+              "minLength": 1
+            },
+            "environment": {
+              "type": "string",
+              "minLength": 1
+            },
+            "environment_images": {
+              "type": "string",
+              "minLength": 1
+            },
+            "qualification": {
+              "type": "string",
+              "minLength": 1
+            },
+            "qualification_bound": {
+              "type": "string",
+              "minLength": 1
+            },
+            "qualification_bound_note": {
+              "type": "string",
+              "minLength": 1
+            },
+            "qualification_unbound": {
+              "type": "string",
+              "minLength": 1
+            },
+            "qualification_failure": {
+              "type": "string",
+              "minLength": 1
+            },
+            "qualification_probe": {
+              "type": "string",
+              "minLength": 1
+            },
+            "argument_environment": {
               "type": "string",
               "minLength": 1
             }

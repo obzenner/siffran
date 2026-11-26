@@ -802,8 +802,9 @@ class StartSelectionTests(unittest.TestCase):
     def test_a_run5_spike_without_a_qualified_binding_is_guarded_before_every_effect(self):
         # A run with no generic backend refuses spikes-unavailable; an unqualified run/5 binding
         # (spec §4.2) names its missing environment step (spec §5.1) — environment-required
-        # with no approved revision, qualification-required once one is approved — and every
-        # refusal precedes any artifact, harness call or state rewrite.
+        # with no revision, environment-pending or environment-rejected while the latest one is
+        # undecided or refused, qualification-required once one is approved — and every refusal
+        # precedes any artifact, harness call or state rewrite.
         coordinator, values = self.coordinator(CountingSelector(SpikesUnavailable()))
         started = coordinator.handle(start_command(), "start")
         with self.subTest(binding="spikes_unavailable"):
@@ -815,7 +816,9 @@ class StartSelectionTests(unittest.TestCase):
         for member, reason in (
                 (None, environment.ENVIRONMENT_REQUIRED),
                 (environment.revision_member(proposal, 1, approved=False),
-                 environment.ENVIRONMENT_REQUIRED),
+                 environment.ENVIRONMENT_PENDING),
+                ({**environment.revision_member(proposal, 1, approved=False),
+                  "state": environment.REJECTED}, environment.ENVIRONMENT_REJECTED),
                 (environment.revision_member(proposal, 1, approved=True),
                  environment.QUALIFICATION_REQUIRED)):
             with self.subTest(binding="unqualified", member=member and member["state"]):

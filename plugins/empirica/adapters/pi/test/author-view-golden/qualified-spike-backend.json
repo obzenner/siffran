@@ -133,8 +133,28 @@
         "profile_id": "docker-isolated-v1",
         "qualification_record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         "execution_binding_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      },
+      "environment": {
+        "revision": 2,
+        "state": "approved",
+        "profile_id": "docker-isolated-v1",
+        "spike_image_count": 1,
+        "digest": "sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+      },
+      "qualification": {
+        "attempts_used": 2,
+        "attempts_max": 32,
+        "active": {
+          "seq": 1,
+          "profile_id": "docker-isolated-v1",
+          "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        "last_failure": {
+          "reason": "qualification-probe-failed",
+          "probe": "realization"
+        }
       }
     }
   },
-  "text": "Allow (converged=false) active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes qualified generic Docker profile binding (not a live-health claim)\n  qualification record: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  execution binding: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
+  "text": "Allow (converged=false) active — governance: pending; mode deliberative; passes/spawns/audits: 3/10 0/5 1/1\nrun_id: run-fx\nspikes qualified generic Docker profile binding (not a live-health claim)\n  qualification record: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n  execution binding: sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb\n  environment revision 2 approved docker-isolated-v1; spike images: 1\n  qualification attempts: 2/32; bound by attempt 1 (a stored reference, not live health)\n  latest failed attempt: qualification-probe-failed probe realization\nAudit: required\n\nOpen obligations:\n  obligation.route: Record routing before investigation.\n  obligation.graph: Propose a valid claim graph from supplied context before requesting review.\n\nNext:\n  empirica_observe kind=route\n  empirica_observe kind=graph"
 }
