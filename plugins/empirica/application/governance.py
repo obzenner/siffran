@@ -180,8 +180,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
             # its own present bound. The wire already requires the member for every host_ui
             # envelope, so the gate reads it unconditionally.
             # A receipt whose payload diverges from its own present, digest included, is the
-            # mixed envelope the decision gate refuses first as governance.receipt_replay
-            # (review-2 7a), so the prior-digest clause below is defense in depth only.
+            # mixed envelope the decision gate refuses first as governance.receipt_replay,
+            # so the prior-digest clause below is defense in depth only.
             prior = next((r for r in governed["receipts"]
                           if r["id"] == payload["receipt_id"]), None)
             if decision["approval_kind"] == "host_ui":
