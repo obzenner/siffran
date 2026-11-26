@@ -110,6 +110,12 @@ def GenericAuthorityResolver(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
+def freeze_loaded_release():
+    """Freeze the digest of the release this process is executing, once per process."""
+    from adapters.sandbox.common import freeze_loaded_release as implementation
+    return implementation()
+
+
 def DockerLocalImageResolver(*args, **kwargs):
     from adapters.sandbox.generic_authority import DockerLocalImageResolver as implementation
     return implementation(*args, **kwargs)
@@ -199,9 +205,16 @@ def build_service(profile_id: str, *, clock=time.time):
     runs = _RecordingRuns(LocatedRunRepository(), repo_dir, Path.cwd(), clock=clock)
     artifacts = _LazyGitArtifactRepository(repo_dir)
     try:
+        # The loaded-release boundary stands at the top of the guarded composition, before any
+        # fallible store setup: the first composition of the process binds the release its
+        # modules are executing, or latches it unavailable for the process's life. A failed
+        # snapshot is never retried, so a later composition cannot adopt a newer digest that
+        # no longer matches the still-executing code.
+        loaded_release = freeze_loaded_release()
         qualification_store = GenericQualificationStore()
         spike_authority = GenericBackendSelector(qualification_store)
-        authority_resolver = GenericAuthorityResolver(qualification_store)
+        authority_resolver = GenericAuthorityResolver(
+            qualification_store, loaded_release=loaded_release)
         image_resolver = DockerLocalImageResolver(authority_resolver)
         spike_harness = GenericDockerHarness(
             qualification_store.execution_store, authority_resolver)

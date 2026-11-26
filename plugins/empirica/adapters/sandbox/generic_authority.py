@@ -48,6 +48,25 @@ class GenericQualificationError(RuntimeError):
     pass
 
 
+class DaemonDrift(GenericQualificationError):
+    """The observed Docker daemon or capability differs semantically from the bound record."""
+
+
+class ImplementationDrift(GenericQualificationError):
+    """The loaded implementation release differs from disk, or from the bound record."""
+
+
+MAX_DAEMON_ID_CHARS = 128
+
+
+def _daemon_id(value: object) -> str:
+    if (type(value) is not str or not value.strip() or len(value) > MAX_DAEMON_ID_CHARS
+            or any(ord(character) <= 0x1F or 0x7F <= ord(character) <= 0x9F
+                   for character in value)):
+        raise GenericQualificationError("Docker daemon identity is malformed")
+    return value
+
+
 @dataclass(frozen=True, slots=True)
 class GenericRuntimeInspection:
     runtime: dict[str, Any]
@@ -169,6 +188,8 @@ def validate_runtime(value: object) -> dict[str, Any]:
         raise GenericQualificationError("macOS support requires Docker Desktop")
     if runtime["discovery_reads"] != 5:
         raise GenericQualificationError("Docker passive discovery read count differs")
+    if "daemon_id" in value:
+        runtime["daemon_id"] = _daemon_id(value["daemon_id"])
     return json.loads(json.dumps(runtime))
 
 
@@ -176,7 +197,7 @@ def authority_facts(runtime: Mapping[str, Any]) -> dict[str, Any]:
     checked = validate_runtime(dict(runtime))
     seccomp = ("default" if "name=seccomp,profile=default" in checked["security_options"]
                else "builtin")
-    return {
+    facts = {
         "endpoint": checked["endpoint"],
         "server_os": checked["server_os"],
         "server_architecture": checked["server_architecture"],
@@ -184,6 +205,26 @@ def authority_facts(runtime: Mapping[str, Any]) -> dict[str, Any]:
         "memory_limit": True, "swap_limit": True,
         "cpu_cfs_quota": True, "pids_limit": True,
     }
+    if "daemon_id" in checked:
+        facts["daemon_id"] = checked["daemon_id"]
+    return facts
+
+
+def authorities_match(bound: Mapping[str, Any], observed: Mapping[str, Any]) -> bool:
+    """Semantic daemon equality: `daemon_id` joins only when the bound record's runtime carries
+    it, so legacy `/2` records without one stay valid against a daemon that now reports it."""
+    expected = authority_facts(bound)
+    actual = authority_facts(observed)
+    if "daemon_id" not in expected:
+        actual.pop("daemon_id", None)
+    return actual == expected
+
+
+def implementation_release_digest(manifest: object) -> str:
+    if (not isinstance(manifest, Mapping)
+            or type(manifest.get("implementation_digest")) is not str):
+        raise ImplementationDrift("implementation identity drifted")
+    return manifest["implementation_digest"]
 
 
 def validate_record(value: object) -> dict[str, Any]:
@@ -335,6 +376,9 @@ def inspect_current_runtime(
                                   "{{json .Endpoints.docker.Host}}"),
                                  "Docker endpoint read"), "Docker endpoint")
     endpoint = _endpoint(endpoint)
+    # Pin every remaining read to the endpoint resolved from the context, so one daemon serves
+    # the whole observation even if the ambient `DOCKER_HOST` changes between reads.
+    environment = {**environment, "DOCKER_HOST": endpoint}
     client = _strict_json(read(("version", "--format", "{{json .Client.Version}}"),
                                "Docker client version read"), "Docker client version")
     server = _strict_json(read(("version", "--format",
@@ -367,6 +411,8 @@ def inspect_current_runtime(
         "host_raw_architecture": host_arch, "host_architecture": host_arch,
         "discovery_reads": 5,
     }
+    if "ID" in info:
+        runtime["daemon_id"] = info["ID"]
     return GenericRuntimeInspection(validate_runtime(runtime))
 
 
@@ -374,10 +420,22 @@ class GenericAuthorityResolver:
     def __init__(self, store: GenericQualificationStore, *,
                  runtime_inspector: PassiveGenericRuntimeInspector = inspect_current_runtime,
                  implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
+                 loaded_release: str | None = None,
                  clock: Callable[[], float] = time.monotonic, **_: Any) -> None:
         self.store = store
         self.runtime_inspector = runtime_inspector
         self.implementation_inspector = implementation_inspector
+        # The loaded release is frozen once per process at the loaded-release boundary and
+        # injected here; when absent (direct construction), the first resolver seeds the
+        # per-process freeze from its implementation inspector, never its own per-instance
+        # snapshot of a manifest that may already differ from the executing code.
+        if loaded_release is not None:
+            if type(loaded_release) is not str or not loaded_release:
+                raise GenericQualificationError("loaded release digest is malformed")
+            self.loaded_implementation_digest = loaded_release
+        else:
+            self.loaded_implementation_digest = common.freeze_loaded_release(
+                self.implementation_inspector)
         self.clock = clock
 
     def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float) \
@@ -393,12 +451,12 @@ class GenericAuthorityResolver:
         if type(observed) is not GenericRuntimeInspection:
             raise GenericQualificationError("runtime inspector returned an unknown value")
         current = validate_runtime(observed.runtime)
-        if authority_facts(current) != authority_facts(first["runtime"]):
-            raise GenericQualificationError("passive Docker authority drifted")
-        implementation = self.implementation_inspector()
-        if (not isinstance(implementation, Mapping)
-                or implementation.get("implementation_digest") != first["implementation_digest"]):
-            raise GenericQualificationError("implementation identity drifted")
+        if not authorities_match(first["runtime"], current):
+            raise DaemonDrift("Docker daemon authority drifted")
+        if (self.loaded_implementation_digest != first["implementation_digest"]
+                or implementation_release_digest(self.implementation_inspector())
+                != self.loaded_implementation_digest):
+            raise ImplementationDrift("implementation identity drifted")
         if self.store.load_record(backend.qualification_record_digest) != first:
             raise GenericQualificationError("qualification record changed while resolving")
         return ResolvedGenericAuthority(

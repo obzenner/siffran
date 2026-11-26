@@ -252,7 +252,9 @@ class ProductionProbeKernelTests(unittest.TestCase):
             made.append((name, fake))
             return fake
         return qualification.ProductionProbeKernel(
-            self.store, runtime(), profile, image(), D0, effects_factory=factory), made
+            self.store, runtime(), profile, image(), D0, effects_factory=factory,
+            runtime_inspector=runtime_inspector(),
+            implementation_inspector=lambda: {"implementation_digest": D0}), made
 
     def test_exact_five_outcomes_use_production_lifecycle_and_cleanup(self):
         options = {
@@ -274,6 +276,40 @@ class ProductionProbeKernelTests(unittest.TestCase):
         natural = dict(made)["natural-125"]
         self.assertTrue(natural.attached)
         self.assertEqual(natural.exit_code, 125)
+
+    def test_postflight_reobservation_drift_during_a_probe_fails_the_probe(self):
+        drifted_endpoint = {**runtime(), "endpoint": "unix:///var/run/other.sock"}
+        drifted_version = runtime()
+        drifted_version["server_version"] = "28.0.5"
+        cases = (
+            ("daemon", {"runtime_inspector": runtime_inspector(drifted_endpoint),
+                         "implementation_inspector": lambda: {"implementation_digest": D0}},
+             authority.DaemonDrift),
+            ("version", {"runtime_inspector": runtime_inspector(drifted_version),
+                          "implementation_inspector": lambda: {"implementation_digest": D0}},
+             authority.DaemonDrift),
+            ("implementation", {"runtime_inspector": runtime_inspector(),
+                                 "implementation_inspector": lambda: {"implementation_digest": D1}},
+             authority.ImplementationDrift),
+        )
+        for label, inspector, drift_type in cases:
+            with self.subTest(label=label):
+                store = common.ExecutionStore(
+                    Path(self.temporary.name).resolve() / f"drift-{label}")
+                store.prepare_execution_scaffolding()
+                qualification.generic_journal.GenericJournalStore(store).prepare()
+                kernel = qualification.ProductionProbeKernel(
+                    store, runtime(), "docker-isolated-v1", image(), D0,
+                    effects_factory=lambda operation, name: FakeDocker(operation),
+                    **{"clock": time.monotonic, **inspector})
+                with self.assertRaises(qualification.GenericQualificationDrift) as caught:
+                    kernel.run("realization", "PASS", deadline=time.monotonic() + 55)
+                self.assertIs(type(caught.exception.drift), drift_type)
+                self.assertIs(caught.exception.reason,
+                              qualification.QualificationReason.PROBE_FAILED)
+                self.assertIn("drifted", str(caught.exception))
+                # Exact removals ran; the drifted operation stays journalled for recovery.
+                self.assertTrue(qualification.generic_journal.GenericJournalStore(store).scan())
 
     def test_docker_cli_125_failed_start_is_not_natural_125(self):
         kernel, _ = self.kernel(options={"natural-125": {"failed_start": True}})
@@ -438,6 +474,13 @@ class InstallSeparationTests(unittest.TestCase):
         changed.update(ncpu=9, mem_total=99)
         changed["security_options"].extend(["name=rootless", "name=userns"])
         installed = self.installer(changed).install(
+            self.candidate, profile_id="docker-isolated-v1")
+        self.assertEqual(installed, record())
+
+    def test_install_ignores_an_unbound_daemon_id_as_the_resolver_does(self):
+        current = runtime()
+        current["daemon_id"] = "a-live-daemon-the-record-never-bound"
+        installed = self.installer(current).install(
             self.candidate, profile_id="docker-isolated-v1")
         self.assertEqual(installed, record())
 

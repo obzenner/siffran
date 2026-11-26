@@ -159,6 +159,81 @@ class ImplementationManifestTests(unittest.TestCase):
             next(row for row in changed if row["path"] == path)["sha256"] = "sha256:" + "f" * 64
             self.assertNotEqual(canonical_digest({"files": changed}), original)
 
+    def test_loaded_release_is_frozen_once_per_process_and_fails_closed(self):
+        digest = "sha256:" + "0" * 64
+        other = "sha256:" + "1" * 64
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        self.addCleanup(lambda: setattr(common, "_loaded_release", None))
+        self.addCleanup(lambda: setattr(common, "_loaded_release_failed", None))
+        calls = []
+
+        def disk_manifest():
+            calls.append(1)
+            return {"implementation_digest": digest}
+
+        self.assertEqual(common.freeze_loaded_release(disk_manifest), digest)
+        self.assertEqual(common.freeze_loaded_release(
+            lambda: {"implementation_digest": other}), digest)
+        self.assertEqual(common.loaded_release_digest(), digest)
+        self.assertEqual(len(calls), 1)  # the disk is read exactly once, at the first freeze
+        for index, malformed in enumerate((None, [()], 123, {}, {"implementation_digest": 1})):
+            with self.subTest(index=index):
+                common._loaded_release = None
+                common._loaded_release_failed = None
+                with self.assertRaises(common.GenericScaffoldingError) as caught:
+                    common.freeze_loaded_release(lambda: malformed)
+                self.assertEqual(
+                    str(caught.exception), "loaded implementation release is malformed")
+                self.assertEqual(
+                    common._loaded_release_failed, "loaded implementation release is malformed")
+
+    def test_failed_first_snapshot_latches_loaded_release_unavailable_for_the_process(self):
+        digest = "sha256:" + "2" * 64
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        self.addCleanup(lambda: setattr(common, "_loaded_release", None))
+        self.addCleanup(lambda: setattr(common, "_loaded_release_failed", None))
+        reads = []
+
+        def unsafe_disk_manifest(failure):
+            reads.append(1)
+            raise failure
+        unavailable = "loaded implementation release is unavailable"
+        failures = (
+            # an arbitrary snapshot failure whose detail carries a filesystem path: the
+            # boundary latches a fixed path-free message, never the cause's text
+            OSError("cannot read /private/tmp/siffran/secret/implementation.py"),
+            # an empty diagnostic must not reach the latched message either
+            common.GenericScaffoldingError(""),
+        )
+
+        for index, failure in enumerate(failures):
+            with self.subTest(index=index):
+                common._loaded_release = None
+                common._loaded_release_failed = None
+                with self.assertRaises(common.GenericScaffoldingError) as caught:
+                    common.freeze_loaded_release(lambda: unsafe_disk_manifest(failure))
+                self.assertEqual(str(caught.exception), unavailable)
+                self.assertNotIn("/private", str(caught.exception))
+                # the original failure stays chained as the cause, never as the message
+                self.assertIs(caught.exception.__cause__, failure)
+                # A valid release has now landed on disk; the process that failed its first
+                # snapshot must not adopt it: the loaded release stays unavailable for its life
+                # and the disk is never re-read at the boundary.
+                self.assertEqual(common.loaded_release_digest(), None)
+                for attempt in range(2):
+                    with self.subTest(attempt=attempt), self.assertRaises(
+                            common.GenericScaffoldingError) as retry:
+                        common.freeze_loaded_release(
+                            lambda: {"implementation_digest": digest})
+                    self.assertEqual(
+                        str(retry.exception), unavailable)
+                    self.assertNotIn("/private", str(retry.exception))
+                self.assertEqual(common._loaded_release_failed, unavailable)
+                self.assertNotEqual(common._loaded_release, digest)
+        self.assertEqual(reads, [1] * len(failures))  # one attempt per fresh process, never a retry
+
 
 if __name__ == "__main__":
     unittest.main()
