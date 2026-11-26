@@ -150,12 +150,12 @@ class QualificationEnv:
     approved revision and a composed fake port: the state the transaction's own tests start from.
     Every observation is its own delivery (a distinct request identity) unless a test names one."""
 
-    def __init__(self, port, **start):
+    def __init__(self, port, profile_id=PROFILE, **start):
         self.runs, self.artifacts_repo = Runs(), Artifacts()
         self.port = port
         self.deliveries = 0
         self.coordinator = ProductionCoordinator(
-            Workspace(), Harness(), self.runs, self.artifacts_repo, PROFILE, {},
+            Workspace(), Harness(), self.runs, self.artifacts_repo, profile_id, {},
             QualifiedSelector(), None, port)
         self.start = start
         self._start_and_approve()

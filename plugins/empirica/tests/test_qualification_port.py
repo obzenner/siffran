@@ -270,6 +270,26 @@ class RealPortTests(unittest.TestCase):
         self.assertEqual(self.harness.inspector_calls, 2, "no work after the bound is spent")
         self.assertGreater(clock() - started, bound, "the discovery that crossed the bound ended it")
 
+    def test_a_settle_that_spends_the_whole_bound_reserves_nothing_further(self):
+        """The dead row is closed (charged, interrupted) but the bound is gone: the call answers
+        the deadline refusal and starts no fresh attempt — nothing new is charged — and the next
+        qualify, with a bound of its own, runs the fresh attempt."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        self._die_after(publishing=False)
+        clock = self.harness.clock
+        self.harness.inspector_calls = 0
+        self.harness.on_inspect = lambda call: clock.advance(bound * 1.1) if call == 1 else None
+        result = self.env.qualify()
+        self.assertEqual((result["type"], result["reason"]), (
+            "Fault", run_owner.RunQualificationReason.DEADLINE_EXCEEDED.value), result)
+        self.assertEqual([(row["outcome"], row["reason"]) for row in self.env.rows()],
+                         [(FAILED, INTERRUPTED)], "closed, and no fresh row reserved")
+        self.assertEqual((self.harness.inspector_calls, self.env.binding()),
+                         (1, {"kind": "unqualified"}))
+        self.harness.on_inspect = None
+        self.assertEqual(self.env.qualify()["type"], "Allow")
+        self.assertEqual([row["outcome"] for row in self.env.rows()], [FAILED, SUCCEEDED])
+
     def test_a_settle_and_the_attempt_within_the_one_deadline_bind(self):
         bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
         self._die_after(publishing=False)

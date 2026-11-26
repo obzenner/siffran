@@ -18,7 +18,6 @@ from referencing import Registry, Resource
 
 from core.canonical import CONTRACT_DIGEST_PLACEHOLDER, canonical_digest, replace_string_values
 from core.evaluation import ContractView
-from core.governance import UNAVAILABLE_CAPABILITY
 from .history_records import POLICY_INPUT_KEYS
 
 _LOGGER = logging.getLogger("empirica.protocol")
@@ -36,6 +35,7 @@ _SCHEMA_REGISTRY = Registry().with_resource(
     _PUBLIC_CONTRACT_SCHEMA["$id"], Resource.from_contents(_PUBLIC_CONTRACT_SCHEMA))
 _STATE_SCHEMA = json.loads((_V2 / "state.schema.json").read_text(encoding="utf-8"))
 _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf-8"))
+_HOST_PROFILES_SCHEMA = json.loads((_V2 / "host-profiles.schema.json").read_text(encoding="utf-8"))
 # The static contract documents a caller can validate against, with the registry each one needs.
 _SCHEMA_DOCUMENTS = {
     "request": (_REQUEST_SCHEMA, None),
@@ -202,10 +202,25 @@ def audit_launch(profile_id: str) -> str | None:
     return (_PROFILES.get(profile_id) or {}).get("audit_launch")
 
 
-def approval_available(profile_id: str) -> bool:
-    """Whether the profile's approval ingress carries any approval capability (``public-contract.json``):
-    where none does, no host consent can ever be given."""
-    return APPROVAL_CAPABILITY[_PROFILES[profile_id]["approval_ingress"]] != UNAVAILABLE_CAPABILITY
+def _unsupported_promotion_statuses() -> frozenset[str]:
+    """The promotion statuses the host-profiles schema itself marks as work in progress: the ones
+    whose conditional owes the candidate tier the profile is working toward."""
+    found = frozenset(
+        clause["if"]["properties"]["promotion_status"]["const"]
+        for clause in _HOST_PROFILES_SCHEMA["properties"]["profiles"]["items"]["allOf"]
+        if "candidate_tier" in clause["then"].get("required", ()))
+    if not found:
+        raise RuntimeError("the host-profiles schema marks no promotion status unsupported")
+    return found
+
+
+UNSUPPORTED_PROMOTION_STATUSES: frozenset[str] = _unsupported_promotion_statuses()
+
+
+def profile_supported(profile_id: str) -> bool:
+    """Whether the registry supports the profile: only a supported profile composes execution
+    paths. Human approval ingress is a separate fact (a delegated run needs none)."""
+    return _PROFILES[profile_id]["promotion_status"] not in UNSUPPORTED_PROMOTION_STATUSES
 
 
 def host_profile(profile_id: str) -> Mapping[str, Any]:

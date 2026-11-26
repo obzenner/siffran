@@ -54,6 +54,8 @@ _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding=
 _REQUEST_SCHEMA = json.loads((_V2 / "request.schema.json").read_text(encoding="utf-8"))
 _RESPONSE_SCHEMA = json.loads((_V2 / "response.schema.json").read_text(encoding="utf-8"))
 _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf-8"))
+_HOST_PROFILES_SCHEMA = json.loads(
+    (_V2 / "host-profiles.schema.json").read_text(encoding="utf-8"))
 
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _PROFILE_IDS = [p["profile_id"] for p in _HOST_PROFILES["profiles"]]
@@ -63,9 +65,9 @@ from sandbox_isolation import (  # noqa: E402
     ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
 
 from adapters import bridge  # noqa: E402
-from core.governance import UNAVAILABLE_CAPABILITY  # noqa: E402
+from application import protocol  # noqa: E402
 from adapters.sandbox import common as sandbox_common  # noqa: E402
-from governance_setup import invocation_for  # noqa: E402
+from governance_setup import TEST_INVOCATION, invocation_for  # noqa: E402
 force_absent_sandbox_home()
 
 
@@ -524,10 +526,13 @@ class BridgeV2Tests(unittest.TestCase):
         _assert_inert_no_run(resp)
 
 
-def _withheld(profile) -> bool:
-    """A profile whose registry row carries no approval capability, read from the contract data."""
-    return (_PUBLIC_CONTRACT["approval_ingress"][profile["approval_ingress"]]["capability"]
-            == UNAVAILABLE_CAPABILITY)
+def _unsupported(profile) -> bool:
+    """Whether the registry row is an unsupported profile, by the tier the schema pins it to (a
+    different road to the same fact than the production helper's promotion status)."""
+    clauses = _HOST_PROFILES_SCHEMA["properties"]["profiles"]["items"]["allOf"]
+    (pinned,) = {clause["then"]["properties"]["current_tier"]["const"]
+                 for clause in clauses if "const" in clause["then"]["properties"]["current_tier"]}
+    return profile["current_tier"] == pinned
 
 
 class QualificationPortCompositionTests(unittest.TestCase):
@@ -549,18 +554,44 @@ class QualificationPortCompositionTests(unittest.TestCase):
             profile_id = profile["profile_id"]
             with self.subTest(profile=profile_id):
                 port = self._compose(profile_id)._coordinator.qualification_port
-                if _withheld(profile):
+                if _unsupported(profile):
                     self.assertIsNone(port)
                 else:
                     self.assertIsInstance(port, bridge._RunQualificationPort)
+
+    def test_the_registry_has_supported_and_unsupported_profiles_to_tell_apart(self):
+        self.assertEqual({_unsupported(p) for p in _HOST_PROFILES["profiles"]}, {True, False})
+        for profile in _HOST_PROFILES["profiles"]:
+            self.assertEqual(protocol.profile_supported(profile["profile_id"]),
+                             not _unsupported(profile), profile["profile_id"])
+
+    def test_a_supported_profile_without_human_ingress_gets_the_port_and_qualifies(self):
+        """Support is the registry's status, not approval ingress: a delegated automatic run needs
+        no human consent, so a supported headless profile composes the port and a qualify on its
+        approved revision runs the attempt."""
+        from test_qualification_transaction import FakeQualificationPort, QualificationEnv
+        supported = next(p for p in _HOST_PROFILES["profiles"] if not _unsupported(p))
+        headless = {**supported, "profile_id": supported["profile_id"] + "-headless",
+                    "approval_ingress": next(
+                        ingress for ingress, row in _PUBLIC_CONTRACT["approval_ingress"].items()
+                        if row["capability"] == "unavailable")}
+        with (patch.dict(protocol._PROFILES, {headless["profile_id"]: headless}),
+              patch.object(bridge, "_PROFILES", (*bridge._PROFILES, headless["profile_id"]))):
+            port = self._compose(headless["profile_id"])._coordinator.qualification_port
+            self.assertIsInstance(port, bridge._RunQualificationPort)
+            env = QualificationEnv(
+                FakeQualificationPort(), profile_id=headless["profile_id"],
+                invocation={**TEST_INVOCATION, "delegation": True, "interactive": False})
+            result = env.qualify()
+        self.assertEqual(result["type"], "Allow", result)
+        self.assertEqual((env.port.calls, env.binding()["kind"]), (1, "qualified"))
 
     def test_an_unsupported_profile_pointed_at_an_approved_run_refuses_unsupported_and_reserves_nothing(self):
         from test_d7_transactions import Workspace
         from test_environment_actions import QUALIFY_ACTION
         from test_qualification_transaction import FakeQualificationPort, QualificationEnv
         env = QualificationEnv(FakeQualificationPort())
-        unsupported = next(p["profile_id"] for p in _HOST_PROFILES["profiles"]
-                           if _withheld(p))
+        unsupported = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if _unsupported(p))
         coordinator = self._compose(unsupported)._coordinator
         coordinator.runs, coordinator.artifacts, coordinator.workspace = (
             env.runs, env.artifacts_repo, Workspace())

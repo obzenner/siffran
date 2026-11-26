@@ -864,7 +864,8 @@ class Coordinator:
         """The open row, seen under the lock and so dead (spec §5). ``None``: the row was closed
         failed-interrupted after journal recovery — the caller re-reads and evaluates its request
         afresh. Otherwise the arguments of the refusal Fault: the recovery's own closed reason when
-        it could not run, or a plain unavailable."""
+        it could not run, the deadline reason when the closing landed but the call's one bound is
+        spent (nothing new is reserved; the agent asks again), or a plain unavailable."""
         rows = state.qualification_attempts
         row = rows[-1]
         member = state.environment

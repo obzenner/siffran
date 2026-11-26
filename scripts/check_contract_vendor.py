@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CONTRACT_COPIES = (
     (ROOT / "contracts/empirica/v2",
      ROOT / "plugins/empirica/vendor/contracts/empirica/v2",
-     ("host-profiles.json", "public-contract.json", "public-contract.schema.json",
+     ("host-profiles.json", "host-profiles.schema.json", "public-contract.json", "public-contract.schema.json",
       "public-tools.json", "request.schema.json", "response.schema.json", "state.schema.json")),
     # The digest-pinned probe image (Empirica 7.2 §4.3) is read at runtime by
     # adapters/sandbox/probe_image.py; its digest is part of the implementation manifest.

@@ -167,6 +167,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "core/spike_plan.py",
     "core/spike_plan_draft.py",
     "vendor/contracts/empirica/v2/host-profiles.json",
+    "vendor/contracts/empirica/v2/host-profiles.schema.json",
     "vendor/contracts/empirica/v2/public-contract.json",
     "vendor/contracts/empirica/v2/public-contract.schema.json",
     "vendor/contracts/empirica/v2/public-tools.json",

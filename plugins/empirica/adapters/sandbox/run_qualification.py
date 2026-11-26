@@ -1379,9 +1379,10 @@ def settle_interrupted_attempt(
     Recovers every prior journal exactly as an attempt does — the same owner, the same pinned
     daemon — and runs ``on_settled`` (the transaction's durable closing of the row) still under
     the lock, so no new attempt can start between the recovery and the closing. Returns ``True``
-    once settled, or one closed failure when recovery could not run (the row then stays open for a
-    later settle). It never resumes or reuses the dead attempt's effect, and never publishes a
-    record."""
+    once settled with time left; the deadline failure when the closing landed but the qualify's
+    bound is spent (the row is closed, nothing more may be reserved under this call); or one
+    closed failure when recovery could not run (the row then stays open for a later settle). It
+    never resumes or reuses the dead attempt's effect, and never publishes a record."""
     try:
         for name, value in (("project_id", project_id), ("run_id", run_id),
                             ("attempt_id", attempt_id)):
@@ -1408,6 +1409,12 @@ def settle_interrupted_attempt(
             runtime_inspector=runtime_inspector, effects_factory=effects_factory,
             deadline=deadline, clock=clock, stage=stage)
         on_settled()
+        if clock() >= deadline:
+            # The closing is durable, but the qualify's one bound is spent: the caller must not
+            # reserve a fresh attempt that has no time to run.
+            return RunQualificationFailed(
+                RunQualificationReason.DEADLINE_EXCEEDED,
+                "run qualification deadline expired after the settle")
         return True
     except _RunFailure as exc:
         return RunQualificationFailed(exc.reason, exc.detail, exc.probe)

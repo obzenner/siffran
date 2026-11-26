@@ -198,8 +198,8 @@ _LEASE_SEAMS = frozenset({"sandbox_root", "clock"})
 
 class _RunQualificationPort:
     """The host qualification port (Empirica 7.2 §5, E9), bound only where the guarded generic
-    Docker composition succeeded and the host's profile carries an approval capability (an
-    environment revision can only be approved where one exists): every call runs E5's
+    Docker composition succeeded and the registry supports the host's profile (an execution
+    path is composed for supported profiles only, whatever approval ingress they have): every call runs E5's
     owner (``adapters.sandbox.run_qualification``) under the run binding the transaction
     reserved, with the approved revision's profile and spike-image references, the one 90-second
     host deadline the owner owns, the process's frozen loaded release, and the shared runtime
@@ -315,7 +315,7 @@ def build_service(profile_id: str, *, clock=time.time):
         spike_authority_selector=spike_authority,
         image_resolver=image_resolver,
         qualification_port=(_RunQualificationPort() if spike_harness is not None
-                            and _proto.approval_available(profile_id) else None),
+                            and _proto.profile_supported(profile_id) else None),
     )
 
 

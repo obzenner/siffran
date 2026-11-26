@@ -2034,6 +2034,17 @@ class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
         self.assertIs(outcome.reason, run_owner.RunQualificationReason.DEADLINE_EXCEEDED)
         self.assertEqual((closed, self.recoveries), ([], []))
 
+    def test_a_settle_whose_closing_lands_past_the_bound_answers_the_deadline_failure(self):
+        """The closing is durable and runs, but a settle that leaves no time must not let the
+        caller reserve another attempt: it answers the deadline failure, not success."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        clock = self.harness.clock
+        closed = []
+        outcome = self.settle(lambda: (clock.advance(bound * 1.1), closed.append(True)))
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.DEADLINE_EXCEEDED)
+        self.assertEqual(closed, [True])
+
     def test_the_budget_has_one_ingress_bound_for_the_attempt_and_the_settle(self):
         """A budget is a positive number of seconds no larger than the qualify bound, and never a
         boolean or text; the attempt and the settle refuse the same values before any effect."""
