@@ -2443,8 +2443,9 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
 
     def assertFault(self, response, reason):
         self.assertEqual(
-            (response["result"]["type"], response["result"].get("reason")),
-            ("Fault", reason.value), response)
+            (response["result"]["type"], response["result"]["code"],
+             response["result"].get("reason")),
+            ("Fault", "unavailable", reason.value), response)
 
     def rebind(self, coordinator, runs, name):
         bind_qualified_backend(coordinator, runs, record_digest=canonical_digest(name + " record"),
@@ -2488,6 +2489,8 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         self.assertEqual(set(resolver.runs), {key})
         sealed = [item["request"] for item in harness.arguments]
         self.assertEqual([item.run for item in sealed], [key, key])
+        self.assertEqual([item["lease"] for item in harness.arguments], [None, None],
+                         "with no host port the harness takes the lock itself")
         self.assertEqual([item.plan.image.image_id for item in sealed],
                          ["sha256:" + "2" * 64, resolver.image_id])
         self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 2)
@@ -2551,6 +2554,25 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         self.assertFault(self.spike(coordinator, run_id, action, "refused"),
                          generic_spike.GenericUnavailableReason.AUTHORITY_INVALID)
         self.assertEqual(harness.calls, 0)
+
+    def test_a_binding_replaced_while_the_request_is_sealed_ends_superseded(self):
+        """The rebind lands between the sealing read and the request compare-and-set: the retry
+        finds the binding the request was sealed under replaced and runs nothing."""
+        resolver, harness = ImageResolver(), Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="sealing", resolver=resolver)
+        real_resolve = resolver.resolve
+
+        def rebinding(reference, backend, run=None):
+            if not resolver.calls:
+                self.rebind(coordinator, runs, "rebound while sealing")
+            return real_resolve(reference, backend, run)
+
+        resolver.resolve = rebinding
+        self.assertFault(self.spike(coordinator, run_id, action),
+                         generic_spike.GenericPreparationReason.SUPERSEDED_BINDING)
+        self.assertEqual((harness.calls, len(resolver.calls)), (0, 1))
+        self.assertNotIn("spike", self.kinds(artifacts_repo, key))
 
     def test_a_request_left_open_under_a_replaced_binding_does_not_block_the_retry(self):
         harness = Harness(failure=generic_spike.GenericHarnessUnavailable(
