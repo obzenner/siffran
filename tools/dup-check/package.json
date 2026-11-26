@@ -1,0 +1,12 @@
+{
+  "name": "dup-check",
+  "private": true,
+  "license": "LicenseRef-PolyForm-Internal-Use-1.0.0",
+  "description": "Dev-only toolchain for make dup-check: the pinned jscpd clone detector. Installed by make dup-install (npm ci); never fetched at check time.",
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "jscpd": "5.4.3"
+  }
+}
