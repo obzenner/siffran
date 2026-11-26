@@ -29,8 +29,9 @@ _GRAPH_DEFS = ("graphClaimItem", "graphEdgeItem", "graphPayload")
 # Every target carries the claim-identifier definition; each claim-id position refers to it.
 _UNIVERSAL_SHARED_DEFS = ("claimId",)
 _EXTRA_SHARED_DEFS = {
-    "request.schema.json": (*_GRAPH_DEFS, "spikePlanDraft"),
+    "request.schema.json": (*_GRAPH_DEFS, "spikePlanDraft", "environmentProposal"),
     "response.schema.json": (*_GRAPH_DEFS, "governancePresentation", "spikePlanDraft"),
+    "state.schema.json": ("environmentProposal",),
 }
 _MANAGED_KEY = "x-generated-public-contract-defs"
 _PUBLIC_PREFIX = "publicContract__"

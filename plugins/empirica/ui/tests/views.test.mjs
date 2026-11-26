@@ -49,6 +49,22 @@ test("the run header distinguishes read-only unavailable capability from human o
   assert.match(qualified, /sha256:aaaaaaaa…aaaaaaaa/);
   assert.match(qualified, /sha256:bbbbbbbb…bbbbbbbb/);
   assert.doesNotMatch(qualified, /unix:\/\/|\.sock|current\.json/);
+  // E2a finding 4: run/5's closed non-authoritative kind renders as not qualified, never as qualified
+  const unqualified = structuredClone(qualifiedSheet);
+  unqualified.spike_backend = { kind: "unqualified" };
+  const unqualifiedText = text(sheetHtml(ctx(unqualified)));
+  assert.match(unqualifiedText, /Spikes not qualified · no spike requests yet/);
+  assert.match(unqualifiedText, /Read-only run binding/);
+  for (const qualifiedWord of ["Spikes bound", "not a live health check", "sha256:aaaaaaaa", "sha256:bbbbbbbb"])
+    assert.ok(!unqualifiedText.includes(qualifiedWord), `unqualified never renders ${JSON.stringify(qualifiedWord)}`);
+  // a kind the client refuses (validSheet rejects it) renders nothing, never a qualified binding
+  const unknown = structuredClone(qualifiedSheet);
+  unknown.spike_backend = { kind: "impossible-kind-of-binding" };
+  const nullBackend = structuredClone(qualifiedSheet);
+  nullBackend.spike_backend = null;
+  // a kind the client refuses (validSheet rejects it) renders exactly nothing beside the run's head
+  assert.equal(text(sheetHtml(ctx(unknown))), text(sheetHtml(ctx(nullBackend))));
+  assert.doesNotMatch(sheetHtml(ctx(unknown)), /data-spike-backend/);
 });
 test("an open claim shows every safe generic request and result fact without host or raw-output data", () => {
   let seen = 0, spikes = 0;

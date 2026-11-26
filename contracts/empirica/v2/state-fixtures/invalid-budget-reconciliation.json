@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/4",
+  "state_schema": "empirica.run/5",
   "goal": "Reject a charged audit child omitted from its account.",
   "invocation": {
     "host": "test",

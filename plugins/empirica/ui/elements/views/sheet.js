@@ -20,8 +20,10 @@ export function noticeHtml(key) {
 /** Compact, explicitly read-only display of the observer-owned immutable backend binding. */
 function spikeBackendHtml(backend) {
   if (backend === null) return "";
-  if (backend.kind === "spikes_unavailable")
-    return `<aside class="alert" role="note" data-spike-backend><strong>${t("spike_backend.unavailable")}</strong><span class="text-xs">${t("spike_backend.read_only")}</span></aside>`;
+  if (backend.kind === "spikes_unavailable" || backend.kind === "unqualified")
+    // the two non-authoritative kinds read as their own word, never as a qualified binding
+    return `<aside class="alert" role="note" data-spike-backend><strong>${t(backend.kind === "spikes_unavailable" ? "spike_backend.unavailable" : "spike_backend.unqualified")}</strong><span class="text-xs">${t("spike_backend.read_only")}</span></aside>`;
+  if (backend.kind !== "qualified") return "";
   // PR 17 §4: the label is the label, the value the one identifier atom - label and value never run together
   // ("Qualification identitysha256:") - and Copy improves on the old disclosure: the exact value, shown short.
   const identity = (value, label) => `<details class="text-xs"><summary class="cursor-pointer"><span>${t(label)}</span> ${identifierChip(value)}</summary><ev-copy text="${esc(value)}" label="${label}"></ev-copy></details>`;

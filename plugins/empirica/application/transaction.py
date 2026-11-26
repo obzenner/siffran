@@ -143,6 +143,7 @@ class Coordinator:
             investigation_stamp=None, stamp_seq=0, last_derivation_digest=None,
             children=(), observation_basis_digest=observation_basis_digest,
             committed_artifact_head_id=None, spike_backend=spike_backend,
+            environment=None, environment_history=(), qualification_attempts=(),
         )
 
     def _append_once(self, key: RunKey, value: Any) -> None:
@@ -681,7 +682,10 @@ class Coordinator:
             if state.status != "active":
                 return self._inert(request_id)
             persisted = dict(state.spike_backend)
-            if persisted.get("kind") == "spikes_unavailable":
+            # Only a qualified binding carries spike authority; an unqualified run/5 binding
+            # (spec §4.2) is refused exactly like unavailable, before any workspace artifact
+            # or harness call — StartRun still binds spikes_unavailable in this change.
+            if spike_plan.spike_backend_kind(persisted) != "qualified":
                 return self._fault(request_id, "unavailable",
                                    GenericPreparationReason.SPIKES_UNAVAILABLE.value)
             try:

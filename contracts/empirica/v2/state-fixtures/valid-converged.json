@@ -1,6 +1,6 @@
 {
   "protocol": "empirica/v2",
-  "state_schema": "empirica.run/4",
+  "state_schema": "empirica.run/5",
   "goal": "governed task",
   "invocation": {
     "host": "test",
@@ -160,5 +160,8 @@
   "committed_artifact_head_id": "sha256:c25304b5de05c8da2827590145e27290ace4b7c608a6a106798c86e1b5d75ead",
   "spike_backend": {
     "kind": "spikes_unavailable"
-  }
+  },
+  "environment": null,
+  "environment_history": [],
+  "qualification_attempts": []
 }

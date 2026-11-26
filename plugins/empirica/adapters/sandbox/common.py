@@ -144,6 +144,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "core/citations.py",
     "core/confirmation.py",
     "core/context_selector.py",
+    "core/environment.py",
     "core/evaluation.py",
     "core/freshness.py",
     "core/governance.py",

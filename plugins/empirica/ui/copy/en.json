@@ -168,6 +168,7 @@
   "detail.error": "The observer could not produce these details (it reported an error). What is shown comes from the list.",
   "detail.invalid": "The observer sent details this page cannot read.",
   "spike_backend.unavailable": "Spikes unavailable · read-only capability information",
+  "spike_backend.unqualified": "Spikes not qualified · no spike requests yet",
   "spike_backend.qualified": "Spikes bound",
   "spike_backend.read_only": "Read-only run binding",
   "spike_backend.not_health": "bound, not a live health check",

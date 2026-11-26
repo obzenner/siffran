@@ -1,11 +1,12 @@
 """Immutable operational run state value for Empirica v2."""
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from . import governance, spike_plan
+from . import environment, governance, spike_plan
 
 
 def delegated_auto(command: Mapping[str, Any]) -> bool:
@@ -64,6 +65,80 @@ def _immutable(value: Any) -> Any:
     return value
 
 
+def _sequence(value: Any, where: str, limit: int) -> list | tuple:
+    """A real bounded sequence of rows: a list or a tuple. A mapping is never one (an empty
+    one would silently read as \"no rows\"), and neither is an unsized iterable (its length is
+    not a fact the bound can be judged on)."""
+    if type(value) not in (list, tuple):
+        raise ValueError(f"run/5 {where} must be a list or a tuple")
+    if len(value) > limit:
+        raise ValueError(f"run/5 {where} exceeds its bound")
+    return value
+
+
+# State-bound vocabularies the pure core owns for the run/5 members (spec §4.2).
+ENVIRONMENT_STATES = ("pending", "approved", "rejected")
+ATTEMPT_OUTCOMES = ("reserved", "succeeded", "failed", "superseded")
+_ENVIRONMENT_MEMBER_FIELDS = ("revision", "proposal", "digest", "state", "receipt_id")
+_QUALIFICATION_ATTEMPT_FIELDS = ("attempt_id", "revision", "started_stamp", "outcome",
+                                 "record_digest", "reason")
+
+
+def _environment_member(value: Any, where: str, *, nullable: bool = True) -> Mapping[str, Any]:
+    """The closed {revision, proposal, digest, state, receipt_id} member.
+
+    The bounds mirror ``core.environment``; the digest is the member's own coherence check —
+    it must equal the canonical digest of the exact proposal body it carries. ``nullable``: only
+    the current member may be null \"none exists yet\"; a history row is always an object."""
+    if value is None:
+        if nullable:
+            return None
+        raise ValueError(f"run/5 {where} must be an environment member, not null")
+    if not isinstance(value, Mapping) or set(value) != set(_ENVIRONMENT_MEMBER_FIELDS):
+        raise ValueError(f"run/5 {where} is malformed")
+    revision = value["revision"]
+    if type(revision) is not int or revision < 1:
+        raise ValueError(f"run/5 {where} revision is malformed")
+    proposal = value["proposal"]
+    try:
+        if not spike_plan.is_digest256(value["digest"]):
+            raise environment.EnvironmentProposalError("digest shape")
+        # A replace() passes the frozen member back in: thaw it to the plain form the ingress
+        # validator requires instead of loosening that validator.
+        if environment.proposal_digest(governance.plain(proposal)) != value["digest"]:
+            raise environment.EnvironmentProposalError("digest coherence")
+    except environment.EnvironmentProposalError as exc:
+        raise ValueError(f"run/5 {where} proposal or digest is malformed") from exc
+    if value["state"] not in ENVIRONMENT_STATES:
+        raise ValueError(f"run/5 {where} state is unknown")
+    receipt = value["receipt_id"]
+    if receipt is not None and (type(receipt) is not str or not receipt):
+        raise ValueError(f"run/5 {where} receipt id is malformed")
+    return value
+
+
+def _qualification_attempt(value: Any) -> Mapping[str, Any]:
+    """One closed host qualification attempt; shape only — sequence and admission are derived."""
+    if not isinstance(value, Mapping) or set(value) != set(_QUALIFICATION_ATTEMPT_FIELDS):
+        raise ValueError("run/5 qualification attempt is malformed")
+    if type(value["revision"]) is not int or value["revision"] < 1:
+        raise ValueError("run/5 qualification attempt revision is malformed")
+    if type(value["started_stamp"]) is not int or value["started_stamp"] < 0:
+        raise ValueError("run/5 qualification attempt stamp is malformed")
+    if value["outcome"] not in ATTEMPT_OUTCOMES:
+        raise ValueError("run/5 qualification attempt outcome is unknown")
+    record = value["record_digest"]
+    if record is not None and not spike_plan.is_digest256(record):
+        raise ValueError("run/5 qualification attempt record digest is malformed")
+    reason = value["reason"]
+    if reason is not None and (type(reason) is not str
+                               or not re.fullmatch(r"[a-z][a-z0-9-]{0,63}", reason)):
+        raise ValueError("run/5 qualification attempt reason is malformed")
+    if type(value["attempt_id"]) is not str or not value["attempt_id"] or len(value["attempt_id"]) > 128:
+        raise ValueError("run/5 qualification attempt id is malformed")
+    return value
+
+
 @dataclass(frozen=True)
 class OperationalState:
     protocol: str
@@ -84,19 +159,33 @@ class OperationalState:
     observation_basis_digest: str
     committed_artifact_head_id: str | None
     spike_backend: Mapping[str, Any]
+    environment: Mapping[str, Any] | None
+    environment_history: tuple[Mapping[str, Any], ...]
+    qualification_attempts: tuple[Mapping[str, Any], ...]
 
     def __post_init__(self) -> None:
         binding = self.spike_backend
         if not isinstance(binding, Mapping):
-            raise ValueError("run/4 requires a spike backend binding")
+            raise ValueError("run/5 requires a spike backend binding")
         if spike_plan.spike_backend_kind(binding) is None:
-            if binding.get("kind") == "qualified":
-                raise ValueError("run/4 qualified spike backend is malformed")
-            raise ValueError("run/4 unavailable spike backend is malformed")
+            if binding.get("kind") in ("qualified", "unqualified"):
+                raise ValueError("run/5 closed spike backend kind is malformed")
+            raise ValueError("run/5 unavailable spike backend is malformed")
+        member = _environment_member(self.environment, "environment")
+        history_rows = _sequence(self.environment_history, "environment history",
+                                 environment.MAX_ENVIRONMENT_HISTORY)
+        history = tuple(_immutable(_environment_member(item, "environment history", nullable=False))
+                        for item in history_rows)
+        attempt_rows = _sequence(self.qualification_attempts, "qualification attempts",
+                                 environment.MAX_QUALIFICATION_ATTEMPTS)
+        attempts = tuple(_immutable(_qualification_attempt(item)) for item in attempt_rows)
         object.__setattr__(self, "invocation", _immutable(self.invocation))
         object.__setattr__(self, "budgets", _immutable(self.budgets))
         object.__setattr__(self, "governance", _immutable(self.governance))
         object.__setattr__(self, "children", _immutable(self.children))
         object.__setattr__(self, "spike_backend", _immutable(self.spike_backend))
+        object.__setattr__(self, "environment", _immutable(member))
+        object.__setattr__(self, "environment_history", history)
+        object.__setattr__(self, "qualification_attempts", attempts)
         if self.frozen_claim_ids is not None:
             object.__setattr__(self, "frozen_claim_ids", tuple(self.frozen_claim_ids))

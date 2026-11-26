@@ -219,6 +219,11 @@
           "const": "spikes_unavailable"
         }
       },
+      "unqualified": {
+        "kind": {
+          "const": "unqualified"
+        }
+      },
       "qualified": {
         "kind": {
           "const": "qualified"

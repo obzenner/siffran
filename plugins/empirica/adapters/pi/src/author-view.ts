@@ -344,7 +344,8 @@ function reason(row: Json, safety: TextSafety, launch: Launch = NO_LAUNCH, audit
 /** Render only the closed public StartRun binding; never infer current backend health. */
 function spikeBackend(run: Json): readonly Trusted[] {
   const backend = run.spike_backend as Json;
-  if (backend.kind === "spikes_unavailable")
+  // unavailable and unqualified both hold no spike authority, so both render the closed line
+  if (backend.kind !== "qualified")
     return [trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_unavailable}`)];
   return [
     trusted(`${LABELS.spike_backend} ${LABELS.spike_backend_qualified}`),

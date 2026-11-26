@@ -80,13 +80,15 @@ test("a sheet's spike backend is admitted exactly when the contract allows it", 
   fc.assert(fc.property(arbitraries().run, (run) => validSheet({ ...one, spike_backend: run.spike_backend })), { numRuns: 25 });
   const b = sheets[scenarios.converged].spike_backend;
   assert.equal(b.kind, "qualified");
-  for (const ok of [b, null, { kind: "spikes_unavailable" }]) assert.ok(validSheet({ ...one, spike_backend: ok }), JSON.stringify(ok));
+  // run/5's closed non-authoritative kind (state schema, spec 7.2 §4.2) is admitted exactly as its own form
+  for (const ok of [b, null, { kind: "spikes_unavailable" }, { kind: "unqualified" }]) assert.ok(validSheet({ ...one, spike_backend: ok }), JSON.stringify(ok));
   const missing = Object.keys(b).map((k) => Object.fromEntries(Object.entries(b).filter(([f]) => f !== k)));
   const misses = [
     { ...b, profile_id: `${b.profile_id}x` }, { ...b, profile_id: null }, { ...b, backend: `${b.backend}x` },
     { ...b, qualification_record_digest: b.qualification_record_digest.slice(0, -1) },
     { ...b, execution_binding_digest: b.execution_binding_digest.toUpperCase() }, { ...b, execution_binding_digest: 7 },
     { ...b, extra: 1 }, ...missing, { ...b, kind: "spikes_unavailable" }, { kind: "spikes_unavailable", extra: 1 },
+    { kind: "unqualified", reason: "qualification pending" }, { kind: "unqualified", extra: 1 },
     { kind: "other" }, { kind: "toString" }, { kind: "__proto__" }, {}, [], "qualified", 1, undefined,
   ];
   for (const miss of misses) assert.ok(!validSheet({ ...one, spike_backend: miss }), JSON.stringify(miss));

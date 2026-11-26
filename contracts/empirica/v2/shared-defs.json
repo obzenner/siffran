@@ -546,6 +546,67 @@
           }
         }
       }
+    },
+    "environmentProposal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile_id",
+        "spike_images",
+        "preparation",
+        "rationale"
+      ],
+      "properties": {
+        "profile_id": {
+          "enum": [
+            "docker-isolated-v1",
+            "docker-networked-v1"
+          ]
+        },
+        "spike_images": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 255,
+            "pattern": "^(?:(?:sha256:)?[0-9a-f]{12,64}|(?:[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*|(?:(?:(?:localhost|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::[0-9]{1,5})?|[a-z0-9]+(?:(?:_|__|-+)[a-z0-9]+)*)(?:/[a-z0-9]+(?:(?:[._]|__|-+)[a-z0-9]+)*)+))(?:@sha256:[0-9a-f]{64}|(?::[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?))(?![\\s\\S])",
+            "description": "Syntax only, the one lexical form core.spike_plan.validate_local_image_reference admits: a sha256 identity or a 12-64 hex id prefix, or a lowercase name whose first part with dots, port or 'localhost' must be a registry domain when more parts follow, with an optional tag or an exact digest (never both). Locality and ambiguity stay host-resolved; every accepted form is ASCII, so this character bound equals the core's 255-byte bound."
+          }
+        },
+        "preparation": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200,
+            "pattern": "\\S",
+            "allOf": [
+              {
+                "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+              }
+            ],
+            "description": "Free text: every character must render honestly — no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set."
+          }
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 600,
+          "pattern": "\\S",
+          "allOf": [
+            {
+              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+            }
+          ],
+          "description": "Free text, exactly the preparation step's character rules with the rationale's own bound."
+        }
+      },
+      "description": "Closed empirica.environment-proposal/1 body owned by core.environment (E1); the bounds mirror core.environment, and each member's patterns admit the same strings core.environment accepts. Embedded, never duplicated."
     }
   }
 }

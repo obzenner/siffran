@@ -208,7 +208,7 @@ for (const [label, derived, members, schemaEnum] of [
 });
 
 test("the spike-backend kind type, the guard's derived kinds and the vendored oneOf kinds are one set", () => {
-  const members: Record<SpikeBackend["kind"], true> = { spikes_unavailable: true, qualified: true };
+  const members: Record<SpikeBackend["kind"], true> = { spikes_unavailable: true, unqualified: true, qualified: true };
   const schemaKinds = DEFS.spikeBackend.oneOf.map((branch: { properties: { kind: { const: string } } }) =>
     branch.properties.kind.const).sort();
   assert.deepEqual([...SPIKE_BACKEND_KINDS].sort(), Object.keys(members).sort());

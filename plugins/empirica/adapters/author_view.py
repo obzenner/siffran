@@ -323,7 +323,9 @@ def _reason(row: dict[str, Any], safety: TextSafety, launch: _Launch = _Launch()
 def _spike_backend(run: dict[str, Any]) -> tuple[Trusted, ...]:
     """Render only the closed public StartRun binding; never infer current backend health."""
     backend = run["spike_backend"]
-    if backend["kind"] == "spikes_unavailable":
+    if backend["kind"] != "qualified":
+        # unavailable and unqualified both hold no spike authority — no requests until a binding
+        # is qualified — so both render the same closed capability line.
         return (Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_unavailable']}"),)
     return (
         Trusted(f"{_LABELS['spike_backend']} {_LABELS['spike_backend_qualified']}"),
