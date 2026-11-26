@@ -46,8 +46,10 @@ REASON_HINTS = {
 }
 
 
-# Phrases of the superseded G10/G11 Docker design; current normative text must never carry them.
-STALE_PHRASES = ("generic-sandbox-qualification", "probe_image", "probe_config", "seven-probe",
+# Phrases of the superseded G10/G11 Docker design; current normative text must never carry them. The
+# old probe-image configuration key survived as an assignment (``PROBE_IMAGE=x``): the guarded spelling keeps
+# the ``probe_image`` contract field (§4.3 of Empirica 7.2) distinct from the retired configuration form.
+STALE_PHRASES = ("generic-sandbox-qualification", "probe_image=", "probe_config", "seven-probe",
                  "seven ordered probe", "600-second", "census equality", "service exits",
                  "declared internal private", "nonzero derives", "R7 resource policy")
 STALE_SCAN = ("contracts", "plugins/empirica/vendor/contracts", "doc", "plugins/empirica/skills",
