@@ -40,7 +40,8 @@ from application.history_records import HISTORY_KINDS  # noqa: E402
 from core import citations, confirmation  # noqa: E402
 from core.evaluation import INDEPENDENCE_REASONS  # noqa: E402
 from core.observer import (ACTORS, ASSURANCE_STATES, ATTENTION_STATES, CLAIM_STANDING, DECISION_STATUSES,  # noqa: E402
-                           EVIDENCE_KINDS, HUMAN_REACHABLE, LATER, PLACES, REVIEW_STATES, SPIKE_STATES, STEP_SUBJECTS, message_problems)
+                           EVIDENCE_KINDS, HUMAN_REACHABLE, LATER, PLACES, QUALIFICATION_STANDINGS, REVIEW_STATES,
+                           SPIKE_STATES, STEP_SUBJECTS, message_problems)
 
 
 def _load(path: Path) -> Any:
@@ -81,6 +82,9 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
     waits = record["wait"]["oneOf"][1]["properties"]
     proof = run_schema["$defs"]["genericSpikeProof"]["properties"]
     proof_result = run_schema["$defs"]["genericSpikeResult"]["properties"]
+    step_of = run_schema["$defs"]["environmentStep"]["properties"]
+    revision, attempt = (step_of[name]["items"]["properties"] for name in ("revisions", "attempts"))
+    state_defs = state_schema["$defs"]
     ask = {v for v in confirmation.ASK_WHERE.values()}
     pairs = [
         ("view run.state", _enum(run, "state"), set(reg["statuses"]), "registry statuses"),
@@ -116,6 +120,14 @@ def mirror_problems(view_schema: dict, run_schema: dict, reg: dict, state_schema
         ("run proof.state", _enum(proof, "state"), set(SPIKE_STATES), "core.observer.SPIKE_STATES"),
         ("run proof.gate", _enum(proof_result, "gate"), set(reg["spike_gates"]), "registry spike_gates"),
         ("run proof.outcome", _enum(proof_result, "outcome"), {"pass", "fail"}, "registry artifact_outcomes (a spike's)"),
+        ("environment standing", _enum(step_of, "standing"), set(QUALIFICATION_STANDINGS),
+         "core.observer.QUALIFICATION_STANDINGS"),
+        ("environment revision.state", _enum(revision, "state"),
+         _enum(state_defs["environmentMember"]["properties"], "state"), "state.schema environmentMember.state"),
+        ("environment attempt.outcome", _enum(attempt, "outcome"),
+         _enum(state_defs["qualificationAttempt"]["properties"], "outcome"), "state.schema qualificationAttempt.outcome"),
+        ("environment attempt.probe", _enum(attempt, "probe"), set(state_defs["qualificationProbeName"]["enum"]),
+         "state.schema qualificationProbeName"),
         ("run steps.kind", _enum(step, "kind"), set(HISTORY_KINDS), "history_records.HISTORY_KINDS"),
         ("run steps.subject", _enum(step, "subject"), set(STEP_SUBJECTS), "core.observer.STEP_SUBJECTS"),
         ("run steps.standing", _enum(step, "standing"), set(CLAIM_STANDING), "core.observer.CLAIM_STANDING"),

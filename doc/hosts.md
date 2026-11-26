@@ -37,9 +37,9 @@ revision's core-rendered `empirica.hitl/1` `environment` document, the host publ
 the one sidecar helper — refused before any write unless it names this run, the environment kind and the
 revision the admitting transaction recorded for the action (carried privately, never in the response, and
 required again on a re-present) — and mediates a short buttons-only approve/reject form: heading, the profile
-with the networked call-out (`NETWORK EGRESS ENABLED`) and the document's exact `File:` path inside the three
-visible lines, then the goal and the image count (never a decision link while the observer projects no
-environment decision, E11); the agent's plan, rationale, image references and the installed binding live in the
+with the networked call-out (`NETWORK EGRESS ENABLED`) and the document's reference inside the three visible
+lines — a live observer's `Details:` link to the environment decision's row, else the document's exact `File:`
+path — then the goal and the image count; the agent's plan, rationale, image references and the installed binding live in the
 document under their unverified labels. Accept approves, Decline is an explicit rejection (spec §5), and Esc,
 cancel or a timeout leave the revision pending; a digest the host cannot recompute refuses with its own closed
 reason and the host re-presents the same revision once. The mediation is composed only for a profile whose

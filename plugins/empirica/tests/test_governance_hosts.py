@@ -1380,6 +1380,24 @@ class EnvironmentHostTests(unittest.TestCase):
             "Accept = approve this revision for qualification",
             "Decline = reject · Esc = decide later"])
 
+    def test_the_form_links_the_decision_row_when_an_observer_serves_this_home(self):
+        """With a live observer of this home, the reference line is the deep link to the run's
+        environment decision row, in place of the path; the bound digest stays the identity, and
+        the probe happens once per presentation. With none, the exact path stays (the test above)."""
+        from adapters.confirmation import CLAUDE_VISIBLE_LINES
+        from adapters.observer import discovery
+        self.reply_action = "cancel"
+        with patch.object(discovery, "observer_url", return_value="http://127.0.0.1:18770") as probe:
+            self.observe_environment()
+        short = Path(self.sidecar_files()[0]).stem[:12]
+        window = self.forms()[0].splitlines()
+        self.assertEqual(window[CLAUDE_VISIBLE_LINES - 1],
+                         f"Details: http://127.0.0.1:18770/app/?run={discovery.compact_run_id(self.run)}&decision={short}")
+        self.assertFalse([line for line in window if line.startswith("File:")], window)
+        self.assertIn(f"Document sha256:{short}", window)
+        self.assertEqual(probe.call_count, 1)
+        self.assertEqual(Path(probe.call_args.args[0]), Path(self.document_home), "the observer of this very home")
+
     def test_a_long_goal_is_cut_to_one_line_that_keeps_its_closing_quote(self):
         run = self.start_run("long", goal="long " * 80)
         self.reply_action = "cancel"
@@ -1444,11 +1462,11 @@ class EnvironmentHostTests(unittest.TestCase):
             with self.subTest(other=other):
                 self.assertFalse(_is_document_mismatch(other))
 
-    def test_the_native_form_is_short_and_always_names_the_document_path(self):
-        """The decision stays short: goal, profile, the image count and the document path —
-        with no decision link to an observer row that does not exist for this kind, even when
-        a live observer would answer; the full texts live in the bound document."""
-        planted = {"url": "http://observer.invalid/decision-row", "run12": "r-planted"}
+    def test_the_native_form_is_short_and_names_the_document_path_without_an_observer(self):
+        """The decision stays short: goal, profile, the image count and the document reference —
+        the exact path when no observer of this home answers; the full texts live in the bound
+        document."""
+        planted = {"url": None, "run12": "r-planted"}
         with patch("adapters.observer.discovery.document_details", return_value=planted):
             self.observe_environment()
         form = self.forms()[0]
@@ -1456,7 +1474,6 @@ class EnvironmentHostTests(unittest.TestCase):
         self.assertEqual(len(written), 1)
         self.assertIn(f"File: {written[0]}", form.splitlines())
         self.assertNotIn("Details:", form)
-        self.assertNotIn(planted["url"], form)
         proposal = self.environment_action["payload"]
         self.assertIn(f"Spike images: {len(proposal['spike_images'])}", form)
         for long_text in (*proposal["spike_images"], *proposal["preparation"], proposal["rationale"]):

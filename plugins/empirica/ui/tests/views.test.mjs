@@ -52,6 +52,7 @@ test("the run header distinguishes read-only unavailable capability from human o
   // run/5's closed non-authoritative kind renders as not qualified, never as qualified
   const unqualified = structuredClone(qualifiedSheet);
   unqualified.spike_backend = { kind: "unqualified" };
+  unqualified.environment = null; // and holds no installed binding of its own
   const unqualifiedText = text(sheetHtml(ctx(unqualified)));
   assert.match(unqualifiedText, /Spikes not qualified · no spike requests yet/);
   assert.match(unqualifiedText, /Read-only run binding/);
@@ -65,6 +66,78 @@ test("the run header distinguishes read-only unavailable capability from human o
   // a kind the client refuses (validSheet rejects it) renders exactly nothing beside the run's head
   assert.equal(text(sheetHtml(ctx(unknown))), text(sheetHtml(ctx(nullBackend))));
   assert.doesNotMatch(sheetHtml(ctx(unknown)), /data-spike-backend/);
+});
+// A copy string with its {name} placeholders filled, the way the views' `t` fills them.
+const fill = (key, vars) => Object.entries(vars).reduce((w, [k, v]) => w.replaceAll(`{${k}}`, String(v)), copy[key]);
+// The visible text after each marker attribute, up to `end` (a list item's close, by default).
+const pieces = (html, marker, end = "</li>") => html.split(marker).slice(1).map((h) => text(`<x${h.split(end)[0]}`).trim());
+test("the environment step says how the binding stands against its latest attempt, and every attempt and revision", () => {
+  const s = sheets[scenarios.environment], e = s.environment;
+  const html = sheetHtml(ctx(s)), words = text(html);
+  assert.match(html, /data-section="environment"/);
+  assert.ok(words.includes(copy[`qualification.${e.standing}.label`]), e.standing);
+  assert.ok(words.includes(copy["environment.note"]), "a stored reference, never live health");
+  assert.ok(words.includes(fill("environment.active", { seq: e.active.seq })), "the attempt that installed it");
+  assert.ok(words.includes(fill("environment.attempts.count", { used: e.attempts.length, max: e.attempts_max })));
+  const attempts = pieces(html, "data-environment-attempt");
+  assert.equal(attempts.length, e.attempts.length);
+  e.attempts.forEach((a, n) => assert.equal(attempts[n], [fill("environment.attempt", { seq: a.seq, revision: a.revision }), copy[`qualification.attempt.${a.outcome}`], a.reason, a.probe && fill("qualification.probe", { probe: a.probe })].filter(Boolean).join(" "), `attempt ${a.seq}`));
+  const revisions = pieces(html, "data-environment-revision");
+  assert.equal(revisions.length, e.revisions.length);
+  e.revisions.forEach((r, n) => assert.ok(revisions[n].startsWith(`${fill("environment.revision", { revision: r.revision })} ${copy[`environment.revision.${r.state}`]}`), `revision ${r.revision}`));
+  // nothing bound and no attempt yet are said, never left empty
+  const none = structuredClone(s);
+  none.environment = { ...e, active: null, attempts: [], standing: "unbound" };
+  none.decisions = [];
+  const fresh = text(sheetHtml(ctx(none)));
+  for (const key of ["environment.active.none", "environment.attempts.none", "qualification.unbound.label"]) assert.ok(fresh.includes(copy[key]), key);
+  // a run without an environment step shows no section, never an empty one
+  assert.doesNotMatch(sheetHtml(ctx(sheets[scenarios.verification])), /data-section="environment"/);
+});
+test("each environment answer names its revision and shows the document the human was shown", () => {
+  const s = structuredClone(sheets[scenarios.environment]);
+  const rows = s.decisions.filter((d) => d.environment !== null);
+  assert.ok(rows.length && rows.every((d) => d.document.status === "verified"));
+  // one body shows what a later qualification observed and the networked profile's call-out
+  const shown = rows[0].document.body;
+  shown.networked = true; shown.spike_images[0].image_id = rows[1].document.digest;
+  const html = sheetHtml(ctx(s, { decision: rows[0].document.digest }));
+  const decided = pieces(html, "data-decision ", "<details");
+  const environmentRows = decided.filter((_, n) => s.decisions[n].environment !== null);
+  rows.forEach((d, n) => {
+    assert.ok(environmentRows[n].includes(copy[`ask.${d.asked}`]) && environmentRows[n].includes(copy[`effect.${d.effect}`]), d.effect);
+    assert.ok(environmentRows[n].endsWith(fill("decision.environment", { revision: d.environment })), `revision ${d.environment}`);
+  });
+  const documents = pieces(html, "data-document-environment", copy["decision.document.footer"]);
+  assert.equal(documents.length, rows.length);
+  rows.forEach(({ document: { body } }, n) => {
+    const doc = documents[n], times = (needle) => doc.split(needle).length - 1;
+    assert.equal(times(copy["document.environment.question"]), 1);
+    assert.equal(times(body.rationale), 1, "the rationale once, under its unverified label");
+    assert.ok(!doc.includes(copy["document.question.approve"]), "never worded as the configuration's question");
+    for (const label of ["document.environment.preparation", "document.environment.rationale"]) assert.ok(doc.includes(copy[label]), label);
+    assert.ok(doc.includes(copy[body.networked ? "document.environment.networked" : "document.environment.isolated"]));
+    for (const step of body.preparation) assert.ok(doc.includes(step), step);
+    const last = body.spike_images.at(-1);
+    if (!last.image_id) assert.ok(doc.includes(`${last.reference} ${copy["document.environment.preparation"]}`), "an image no qualification observed yet carries nothing beside it");
+    for (const image of body.spike_images) assert.equal(doc.includes(copy["document.environment.image_id"]), body.spike_images.some((i) => i.image_id), "observed as, once known");
+    const previous = body.previous_active_binding;
+    assert.ok(doc.includes(previous ? fill("environment.revision", { revision: previous.revision }) : copy["document.environment.previous.none"]));
+  });
+  for (const image of rows.flatMap((d) => d.document.body.spike_images)) assert.ok(html.includes(image.reference), image.reference);
+  // the configuration's own document keeps its rationale under its own label
+  const [sheet, configuration] = Object.values(sheets).flatMap((x) => (x.decisions ?? []).map((d) => [x, d])).find(([, d]) => d.asked === "approve_configuration" && d.document?.body?.rationale);
+  const own = pieces(sheetHtml(ctx(sheet, { decision: configuration.document.digest })), "data-decision-match", copy["decision.document.footer"])[0];
+  assert.ok(own.includes(`${copy["document.rationale"]} ${configuration.document.body.rationale}`));
+});
+test("each spike names the qualification it ran under, or that no attempt of the run names it", () => {
+  const s = structuredClone(sheets[scenarios.environment]);
+  const claim = s.claims.find((c) => c.proof.length);
+  const [proof] = claim.proof, open = (sheet) => text(sheetHtml(ctx(sheet, { claim: claim.id })));
+  const words = copy["spike.lineage"].replace("{attempt}", proof.lineage.attempt).replace("{revision}", proof.lineage.revision);
+  assert.ok(open(s).includes(words));
+  proof.lineage = { ...proof.lineage, attempt: null, revision: null };
+  assert.ok(open(s).includes(copy["spike.lineage.unknown"]));
 });
 test("an open claim shows every safe generic request and result fact without host or raw-output data", () => {
   let seen = 0, spikes = 0;

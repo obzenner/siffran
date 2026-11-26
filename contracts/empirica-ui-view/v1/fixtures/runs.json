@@ -1,4 +1,644 @@
 {
+ "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/1": {
+  "attempts": [
+   {
+    "ask": null,
+    "asked_at": null,
+    "attention": "not_ended",
+    "audit": {
+     "current": null,
+     "independence": null,
+     "pending": false,
+     "verdict": "none"
+    },
+    "claims": [
+     {
+      "assurance": "awaiting_audit",
+      "blocker": null,
+      "blocker_claim": null,
+      "evidence": "spike",
+      "gating": true,
+      "id": "C0",
+      "kind": "needs-experiment",
+      "review": "none",
+      "state": "approved",
+      "text": "The crusher clears the sample load within the shift."
+     }
+    ],
+    "diagnostic": null,
+    "edges": [],
+    "ended": null,
+    "flags": {
+     "changed_since_audit": false,
+     "decided": true,
+     "failed_audit": false,
+     "refuted": false
+    },
+    "generation": 1,
+    "goal": "Measure the crusher's throughput on the sample load.",
+    "id": "8c6e5f6d1b83",
+    "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/1",
+    "mode": "deliberative",
+    "next": {
+     "message": "Audit is owed; spawn an independent auditor.",
+     "where": "next_turn",
+     "who": "agent"
+    },
+    "previous": null,
+    "progress": {
+     "approved": 1,
+     "required": 1
+    },
+    "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+    "root": "C0",
+    "run": "s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940",
+    "session": {
+     "delegated": false,
+     "host": "claude",
+     "interactive": true,
+     "label": null,
+     "locator": null
+    },
+    "standing": "not_ended",
+    "started": 1790603340.0,
+    "state": "active",
+    "updated": 1790604840.0,
+    "version": "sha256:1e63a65a21816c20aa59e7f6a95c67fb8b3d55c24dc99cc39c5218b4407280b2"
+   }
+  ],
+  "audit": {
+   "findings": []
+  },
+  "auditor": null,
+  "audits": [],
+  "author": "anthropic/claude-sonnet-4-6",
+  "claims": [
+   {
+    "blocker_message": null,
+    "decision": null,
+    "id": "C0",
+    "proof": [
+     {
+      "lineage": {
+       "attempt": 2,
+       "image_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "revision": 2
+      },
+      "request": {
+       "argv": [
+        "/usr/bin/python3",
+        "/inputs/probe.py",
+        "--exact-argv"
+       ],
+       "artifact_id": "sha256:b142cd3a0cffa9f2cb454f196bb16fae72c6c7a8cdd21e22b583f5c76b5d30a1",
+       "claim_id": "C0",
+       "declared_inputs": [
+        "crusher/load.md"
+       ],
+       "draft_schema": "empirica.spike-plan-draft/2",
+       "environment_names": [
+        "MODE"
+       ],
+       "harness_request_id": "sha256:6ad8549c4d2647b52ec242ee422dacf3e13a965239ef5a7dc430284c4a5f73a4",
+       "identities": {
+        "capture_digest": "sha256:38c26adff3c17255a585cf43b7470b8012f11b4f56908ec23ba018552b9fe38c",
+        "draft_digest": "sha256:d33b615cbe063e67d5bc12b669e6011e2916ea32186838caf36c70b48b9c8f85",
+        "execution_binding_digest": "sha256:267b5940f8020f0081c81c756674173ee6f43afd8aaee5a58c641ed4e2e1e37c",
+        "plan_digest": "sha256:55dc899be50286ef731cdd0a16f1891ad814ac5ae5fa23eb9c7c5e9482395308",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "qualification_record_digest": "sha256:ace34d03c75bfc049fff9701f73023d93b1c6ed4bff44b03e1a15048cb3a6bd2",
+        "snapshot_basis_id": "sha256:d25056f15c9946bc75d323ce2cff59634ed383c1b6f9ecb07a851fbb96ad120b",
+        "snapshot_digest": "sha256:e51d457242b5fb139a11f00f2a19410ddf5eca0cbc3579efbb9ab0e05e82999c"
+       },
+       "image": {
+        "architecture": "arm64",
+        "os": "linux",
+        "raw_architecture": "arm64",
+        "raw_os": "linux",
+        "requested_reference": "example/probe:local",
+        "sealed_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222"
+       },
+       "input_bytes": 12,
+       "input_count": 1,
+       "inputs": [
+        {
+         "bytes": 12,
+         "path": "crusher/load.md",
+         "sha256": "sha256:9da9eb82f7e714e59ca8b67594c18445cd88f2468cdba7ecff2e30b3a9cc12bd"
+        }
+       ],
+       "limits": {
+        "core_bytes": 0,
+        "cpu_count": 2,
+        "max_file_size_bytes": 67108864,
+        "memory_bytes": 2147483648,
+        "memory_swap_bytes": 2147483648,
+        "open_files": 1024,
+        "operation_timeout_seconds": 210,
+        "pids": 256,
+        "shm_bytes": 67108864,
+        "staging_bytes": 67108864,
+        "staging_file_bytes": 67108864,
+        "staging_files": 256,
+        "stderr_bytes": 1048576,
+        "stdout_bytes": 1048576,
+        "tmp_tmpfs_bytes": 67108864,
+        "work_tmpfs_bytes": 536870912,
+        "workload_timeout_seconds": 120
+       },
+       "profile_id": "docker-isolated-v1",
+       "runtime": {
+        "gid": 65534,
+        "inputs_mount": "/inputs",
+        "tmpdir": "/tmp",
+        "uid": 65534,
+        "workdir": "/work"
+       }
+      },
+      "result": {
+       "artifact_id": "sha256:00c9b04c622cf0a18835fc79f337c7f2580bb00e6f30d4609040f3b0113706ba",
+       "cleanup_proven": true,
+       "exit_code": 0,
+       "gate": "PASS",
+       "harness_request_id": "sha256:6ad8549c4d2647b52ec242ee422dacf3e13a965239ef5a7dc430284c4a5f73a4",
+       "harness_result_digest": "sha256:de735c664fbb40f05485570fec6d4cd33ca0761b1a4bf82c9f964edde627b59b",
+       "identities": {
+        "execution_binding_digest": "sha256:267b5940f8020f0081c81c756674173ee6f43afd8aaee5a58c641ed4e2e1e37c",
+        "input_digest": "sha256:e51d457242b5fb139a11f00f2a19410ddf5eca0cbc3579efbb9ab0e05e82999c",
+        "operation_digest": "sha256:063bd51742f1ca8f53066539d5ff51551e71684917181d906c49789759c4bfff",
+        "plan_digest": "sha256:55dc899be50286ef731cdd0a16f1891ad814ac5ae5fa23eb9c7c5e9482395308",
+        "policy_digest": "sha256:23646a0399bc03f9a9eabd0afe0a003d79692dbfcec0884b6e21904fd7e32047",
+        "process_digest": "sha256:b140b5471558f75042af64877517cfb1f565a4cd0c68e726534822e9033bd277",
+        "qualification_record_digest": "sha256:ace34d03c75bfc049fff9701f73023d93b1c6ed4bff44b03e1a15048cb3a6bd2",
+        "request_artifact_id": "sha256:b142cd3a0cffa9f2cb454f196bb16fae72c6c7a8cdd21e22b583f5c76b5d30a1",
+        "snapshot_digest": "sha256:e51d457242b5fb139a11f00f2a19410ddf5eca0cbc3579efbb9ab0e05e82999c",
+        "timing_digest": "sha256:d1dccf9ad95a789256e99b68bc8970bbe1dbaf44f3c5aba008332cfb10e3659a",
+        "topology_digest": "sha256:025d13427268235934b3509d4a9b4ddfbf4235aa663e2b5df9d0a0b401a3b2b8"
+       },
+       "natural_exit": true,
+       "outcome": "pass",
+       "postflight_identity_digest": "sha256:267b5940f8020f0081c81c756674173ee6f43afd8aaee5a58c641ed4e2e1e37c",
+       "postflight_proven": true,
+       "producer_model": "anthropic/claude-sonnet-4-6",
+       "profile_id": "docker-isolated-v1",
+       "realization_image_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "request_artifact_id": "sha256:b142cd3a0cffa9f2cb454f196bb16fae72c6c7a8cdd21e22b583f5c76b5d30a1",
+       "stderr": {
+        "bytes_seen": 0,
+        "sha256": "sha256:7963500450b54d1dd838f49cf272614df9530eeaac3d41c69e83560ddcf79256"
+       },
+       "stdout": {
+        "bytes_seen": 0,
+        "sha256": "sha256:3dc8268e33bc7cd2ab3291f728d7d3352299cf3570d5660fda6eeef67edfcf16"
+       }
+      },
+      "state": "current"
+     }
+    ],
+    "records": [
+     {
+      "class": "verbatim",
+      "note": null,
+      "outcome": "supporting",
+      "quote": "crusher/load.md states this directly.",
+      "retrieve": true,
+      "source": "crusher/load.md",
+      "source_kind": "code",
+      "spike_unavailable": null,
+      "status": "verified_by_service",
+      "wait": null
+     }
+    ],
+    "research": 1
+   }
+  ],
+  "contract": "empirica-ui-view/v1",
+  "decisions": [
+   {
+    "answer": "approve",
+    "asked": "approve_configuration",
+    "at": 1790603700.0,
+    "claim": null,
+    "document": {
+     "body": null,
+     "digest": "sha256:15e14fef208e0e20de2e40ad60bca9e77a83c78011dadd4d932d4418caae7047",
+     "path": "/tmp/empirica-home/projects/s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/runs/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/gen-1/hitl/15e14fef208e0e20de2e40ad60bca9e77a83c78011dadd4d932d4418caae7047.json",
+     "status": "missing"
+    },
+    "effect": "configuration_approved",
+    "environment": null,
+    "plan": 1,
+    "source": null
+   },
+   {
+    "answer": "reject",
+    "asked": "approve_environment",
+    "at": 1790604000.0,
+    "claim": null,
+    "document": {
+     "body": {
+      "context_when_shown": {
+       "invocation": {
+        "audit_retrieval": [
+         "local",
+         "workspace"
+        ],
+        "delegation": false,
+        "host": "claude",
+        "interactive": true,
+        "signal": "v2 harness"
+       }
+      },
+      "goal": "Measure the crusher's throughput on the sample load.",
+      "kind": "environment",
+      "networked": false,
+      "preparation": [
+       "Ask the operator to provide the needed images locally; the host never pulls.",
+       "The verifier runs one bounded container per spike under the isolated profile."
+      ],
+      "preparation_source": "agent_unverified",
+      "previous_active_binding": null,
+      "profile_id": "docker-isolated-v1",
+      "proposal_digest": "sha256:6dc27b8ab8fd5bdcc5a711502222f966700280041c5c21c0688b5a36172b1400",
+      "question": "approve",
+      "rationale": "One isolated profile over one local image; spikes stay bounded and offline.",
+      "rationale_source": "author_unverified",
+      "revision": 1,
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni0wYWU5MGNkYWNkYjQ5MjMwNTUzYTljNjQxMzdjMjJkMWI2MTQxODJhMDQzZmZkYzZhNmFlNjVhZjMwYzllZTE3IiwicyI6InMyNTYtMGY3MzU5Y2U1MDFjMmEwNWE0NTc0YjE0OGM2MTJiODY4ZDk1MDMzNmUwZjE5NzIxNmY1MjExZTc5MDBmNjk0MCJ9:1Cbt7Lnz0eGGl_9Jd8-SCacr3BaJBtlEu5xOGpdcJMA",
+      "schema": "empirica.hitl/1",
+      "spike_images": [
+       {
+        "image_id": null,
+        "reference": "example/probe:local"
+       }
+      ]
+     },
+     "digest": "sha256:3f14c30c51d1bf74448edaa5089d63ebffc0fc385bd8cfef5f48e51b391b2a47",
+     "path": "/tmp/empirica-home/projects/s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/runs/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/gen-1/hitl/3f14c30c51d1bf74448edaa5089d63ebffc0fc385bd8cfef5f48e51b391b2a47.json",
+     "status": "verified"
+    },
+    "effect": "environment_rejected",
+    "environment": 1,
+    "plan": null,
+    "source": null
+   },
+   {
+    "answer": "approve",
+    "asked": "approve_environment",
+    "at": 1790604180.0,
+    "claim": null,
+    "document": {
+     "body": {
+      "context_when_shown": {
+       "invocation": {
+        "audit_retrieval": [
+         "local",
+         "workspace"
+        ],
+        "delegation": false,
+        "host": "claude",
+        "interactive": true,
+        "signal": "v2 harness"
+       }
+      },
+      "goal": "Measure the crusher's throughput on the sample load.",
+      "kind": "environment",
+      "networked": false,
+      "preparation": [
+       "Ask the operator to provide the needed images locally; the host never pulls.",
+       "The verifier runs one bounded container per spike under the isolated profile."
+      ],
+      "preparation_source": "agent_unverified",
+      "previous_active_binding": null,
+      "profile_id": "docker-isolated-v1",
+      "proposal_digest": "sha256:6dc27b8ab8fd5bdcc5a711502222f966700280041c5c21c0688b5a36172b1400",
+      "question": "approve",
+      "rationale": "One isolated profile over one local image; spikes stay bounded and offline.",
+      "rationale_source": "author_unverified",
+      "revision": 2,
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni0wYWU5MGNkYWNkYjQ5MjMwNTUzYTljNjQxMzdjMjJkMWI2MTQxODJhMDQzZmZkYzZhNmFlNjVhZjMwYzllZTE3IiwicyI6InMyNTYtMGY3MzU5Y2U1MDFjMmEwNWE0NTc0YjE0OGM2MTJiODY4ZDk1MDMzNmUwZjE5NzIxNmY1MjExZTc5MDBmNjk0MCJ9:1Cbt7Lnz0eGGl_9Jd8-SCacr3BaJBtlEu5xOGpdcJMA",
+      "schema": "empirica.hitl/1",
+      "spike_images": [
+       {
+        "image_id": null,
+        "reference": "example/probe:local"
+       }
+      ]
+     },
+     "digest": "sha256:5da111149ed6929b80fa414cc735479b8c502a0506670310cd80155e6fd1d4d5",
+     "path": "/tmp/empirica-home/projects/s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/runs/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/gen-1/hitl/5da111149ed6929b80fa414cc735479b8c502a0506670310cd80155e6fd1d4d5.json",
+     "status": "verified"
+    },
+    "effect": "environment_approved",
+    "environment": 2,
+    "plan": null,
+    "source": null
+   },
+   {
+    "answer": "later",
+    "asked": "approve_environment",
+    "at": 1790604840.0,
+    "claim": null,
+    "document": {
+     "body": {
+      "context_when_shown": {
+       "invocation": {
+        "audit_retrieval": [
+         "local",
+         "workspace"
+        ],
+        "delegation": false,
+        "host": "claude",
+        "interactive": true,
+        "signal": "v2 harness"
+       }
+      },
+      "goal": "Measure the crusher's throughput on the sample load.",
+      "kind": "environment",
+      "networked": false,
+      "preparation": [
+       "Ask the operator to provide the needed images locally; the host never pulls.",
+       "The verifier runs one bounded container per spike under the isolated profile."
+      ],
+      "preparation_source": "agent_unverified",
+      "previous_active_binding": {
+       "record_digest": "sha256:ace34d03c75bfc049fff9701f73023d93b1c6ed4bff44b03e1a15048cb3a6bd2",
+       "revision": 2
+      },
+      "profile_id": "docker-isolated-v1",
+      "proposal_digest": "sha256:57189f5bb2fb537a3f35baab460c6e2e5ccf6eba8dc4d63956de473f26cb122d",
+      "question": "approve",
+      "rationale": "One isolated profile over one local image; spikes stay bounded and offline.",
+      "rationale_source": "author_unverified",
+      "revision": 3,
+      "run_id": "er2:eyJnIjoxLCJwIjoiczI1Ni0wYWU5MGNkYWNkYjQ5MjMwNTUzYTljNjQxMzdjMjJkMWI2MTQxODJhMDQzZmZkYzZhNmFlNjVhZjMwYzllZTE3IiwicyI6InMyNTYtMGY3MzU5Y2U1MDFjMmEwNWE0NTc0YjE0OGM2MTJiODY4ZDk1MDMzNmUwZjE5NzIxNmY1MjExZTc5MDBmNjk0MCJ9:1Cbt7Lnz0eGGl_9Jd8-SCacr3BaJBtlEu5xOGpdcJMA",
+      "schema": "empirica.hitl/1",
+      "spike_images": [
+       {
+        "image_id": null,
+        "reference": "example/probe:local"
+       },
+       {
+        "image_id": null,
+        "reference": "example/probe:local-next"
+       }
+      ]
+     },
+     "digest": "sha256:ad4685cece9168e917cf95e4aabc9c5cfcab27c66f83dcff925e2b4e431b6b03",
+     "path": "/tmp/empirica-home/projects/s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/runs/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/gen-1/hitl/ad4685cece9168e917cf95e4aabc9c5cfcab27c66f83dcff925e2b4e431b6b03.json",
+     "status": "verified"
+    },
+    "effect": "none",
+    "environment": 3,
+    "plan": null,
+    "source": null
+   }
+  ],
+  "dropped": [],
+  "environment": {
+   "active": {
+    "profile_id": "docker-isolated-v1",
+    "record_digest": "sha256:ace34d03c75bfc049fff9701f73023d93b1c6ed4bff44b03e1a15048cb3a6bd2",
+    "seq": 2
+   },
+   "attempts": [
+    {
+     "outcome": "failed",
+     "probe": "realization",
+     "reason": "qualification-probe-failed",
+     "record_digest": null,
+     "revision": 2,
+     "seq": 1
+    },
+    {
+     "outcome": "succeeded",
+     "probe": null,
+     "reason": null,
+     "record_digest": "sha256:ace34d03c75bfc049fff9701f73023d93b1c6ed4bff44b03e1a15048cb3a6bd2",
+     "revision": 2,
+     "seq": 2
+    },
+    {
+     "outcome": "failed",
+     "probe": null,
+     "reason": "qualification-stale-daemon",
+     "record_digest": null,
+     "revision": 2,
+     "seq": 3
+    }
+   ],
+   "attempts_max": 32,
+   "revisions": [
+    {
+     "digest": "sha256:6dc27b8ab8fd5bdcc5a711502222f966700280041c5c21c0688b5a36172b1400",
+     "profile_id": "docker-isolated-v1",
+     "revision": 1,
+     "spike_image_count": 1,
+     "state": "rejected"
+    },
+    {
+     "digest": "sha256:6dc27b8ab8fd5bdcc5a711502222f966700280041c5c21c0688b5a36172b1400",
+     "profile_id": "docker-isolated-v1",
+     "revision": 2,
+     "spike_image_count": 1,
+     "state": "approved"
+    },
+    {
+     "digest": "sha256:57189f5bb2fb537a3f35baab460c6e2e5ccf6eba8dc4d63956de473f26cb122d",
+     "profile_id": "docker-isolated-v1",
+     "revision": 3,
+     "spike_image_count": 2,
+     "state": "pending"
+    }
+   ],
+   "standing": "stale"
+  },
+  "goal": "Measure the crusher's throughput on the sample load.",
+  "governance": {
+   "approval": "approved",
+   "ceilings": {
+    "audit_spawns": {
+     "max": 2,
+     "used": 0
+    },
+    "passes": {
+     "max": 8,
+     "used": 0
+    },
+    "spawns": {
+     "max": 1,
+     "used": 0
+    }
+   },
+   "interactions": {
+    "left": 127,
+    "of": 128
+   },
+   "mode": "deliberative",
+   "proposal_pending": false,
+   "proposed": null
+  },
+  "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/1",
+  "now": null,
+  "outstanding": [
+   {
+    "claims": [],
+    "message": "Audit is owed; spawn an independent auditor.",
+    "need": "audit.required",
+    "where": "next_turn",
+    "who": "agent"
+   }
+  ],
+  "residuals": [],
+  "row": {
+   "ask": null,
+   "asked_at": null,
+   "attention": "not_ended",
+   "audit": {
+    "current": null,
+    "independence": null,
+    "pending": false,
+    "verdict": "none"
+   },
+   "claims": [
+    {
+     "assurance": "awaiting_audit",
+     "blocker": null,
+     "blocker_claim": null,
+     "evidence": "spike",
+     "gating": true,
+     "id": "C0",
+     "kind": "needs-experiment",
+     "review": "none",
+     "state": "approved",
+     "text": "The crusher clears the sample load within the shift."
+    }
+   ],
+   "diagnostic": null,
+   "edges": [],
+   "ended": null,
+   "flags": {
+    "changed_since_audit": false,
+    "decided": true,
+    "failed_audit": false,
+    "refuted": false
+   },
+   "generation": 1,
+   "goal": "Measure the crusher's throughput on the sample load.",
+   "id": "8c6e5f6d1b83",
+   "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/1",
+   "mode": "deliberative",
+   "next": {
+    "message": "Audit is owed; spawn an independent auditor.",
+    "where": "next_turn",
+    "who": "agent"
+   },
+   "previous": null,
+   "progress": {
+    "approved": 1,
+    "required": 1
+   },
+   "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+   "root": "C0",
+   "run": "s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940",
+   "session": {
+    "delegated": false,
+    "host": "claude",
+    "interactive": true,
+    "label": null,
+    "locator": null
+   },
+   "standing": "not_ended",
+   "started": 1790603340.0,
+   "state": "active",
+   "updated": 1790604840.0,
+   "version": "sha256:1e63a65a21816c20aa59e7f6a95c67fb8b3d55c24dc99cc39c5218b4407280b2"
+  },
+  "spike_backend": {
+   "backend": "docker",
+   "execution_binding_digest": "sha256:267b5940f8020f0081c81c756674173ee6f43afd8aaee5a58c641ed4e2e1e37c",
+   "kind": "qualified",
+   "profile_id": "docker-isolated-v1",
+   "qualification_record_digest": "sha256:ace34d03c75bfc049fff9701f73023d93b1c6ed4bff44b03e1a15048cb3a6bd2"
+  },
+  "stale": [],
+  "steps": [
+   {
+    "at": 1790603340.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 1,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790603520.0,
+    "bookkeeping": false,
+    "claim": null,
+    "command": null,
+    "kind": "graph",
+    "n": 2,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   },
+   {
+    "at": 1790604480.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "research",
+    "n": 3,
+    "outcome": "supporting",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790604540.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "spike_request",
+    "n": 4,
+    "outcome": null,
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790604600.0,
+    "bookkeeping": false,
+    "claim": "C0",
+    "command": null,
+    "kind": "spike",
+    "n": 5,
+    "outcome": "pass",
+    "standing": "current",
+    "subject": "claim",
+    "terminal": false
+   },
+   {
+    "at": 1790604660.0,
+    "bookkeeping": true,
+    "claim": null,
+    "command": null,
+    "kind": "observation_basis",
+    "n": 6,
+    "outcome": null,
+    "standing": null,
+    "subject": "run",
+    "terminal": false
+   }
+  ],
+  "stop": null,
+  "version": "sha256:1e63a65a21816c20aa59e7f6a95c67fb8b3d55c24dc99cc39c5218b4407280b2"
+ },
  "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-405b28cee2b1c2980b78f6044c23fda4ec8f9ae0a86e56da7e2b97090f74333b/1": {
   "attempts": [
    {
@@ -80,7 +720,7 @@
     "started": 1790602320.0,
     "state": "active",
     "updated": 1790603280.0,
-    "version": "sha256:18efb3678dd5db6dc3bf3ef05e98c1872e24caf20e0e8c90f9fcc18f34181f56"
+    "version": "sha256:1ee74a08e5fa27d44e7a7b5c3563fd164cb7931e2902f2b439ade0315789df45"
    }
   ],
   "audit": {
@@ -144,11 +784,13 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Write down the blasting schedule.",
   "governance": {
    "approval": "approved",
@@ -271,7 +913,7 @@
    "started": 1790602320.0,
    "state": "active",
    "updated": 1790603280.0,
-   "version": "sha256:18efb3678dd5db6dc3bf3ef05e98c1872e24caf20e0e8c90f9fcc18f34181f56"
+   "version": "sha256:1ee74a08e5fa27d44e7a7b5c3563fd164cb7931e2902f2b439ade0315789df45"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -352,7 +994,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:18efb3678dd5db6dc3bf3ef05e98c1872e24caf20e0e8c90f9fcc18f34181f56"
+  "version": "sha256:1ee74a08e5fa27d44e7a7b5c3563fd164cb7931e2902f2b439ade0315789df45"
  },
  "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-8a026a1c72cfeb0ecf5d51a17a55e4a1f0d250ca32742fef86cd0c1782d4d003/1": {
   "attempts": [
@@ -418,7 +1060,7 @@
     "started": 1790601900.0,
     "state": "active",
     "updated": 1790602260.0,
-    "version": "sha256:ed4dc820db5f86f34c9a088f77e060c37a2f6d3b19010770b31b363f30f8379e"
+    "version": "sha256:d575c22df8cda3675ca756d5833103e6aebd955d40b209318d10a2be06c990f8"
    }
   ],
   "audit": {
@@ -507,11 +1149,13 @@
      "status": "verified"
     },
     "effect": "none",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Choose the gravel grading for the north pit.",
   "governance": {
    "approval": "pending",
@@ -631,7 +1275,7 @@
    "started": 1790601900.0,
    "state": "active",
    "updated": 1790602260.0,
-   "version": "sha256:ed4dc820db5f86f34c9a088f77e060c37a2f6d3b19010770b31b363f30f8379e"
+   "version": "sha256:d575c22df8cda3675ca756d5833103e6aebd955d40b209318d10a2be06c990f8"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -664,7 +1308,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:ed4dc820db5f86f34c9a088f77e060c37a2f6d3b19010770b31b363f30f8379e"
+  "version": "sha256:d575c22df8cda3675ca756d5833103e6aebd955d40b209318d10a2be06c990f8"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-169f5325af27f0105c8dfb510772d8c31f18d234cfc59011101a3fef4dc905f3/1": {
   "attempts": [
@@ -763,7 +1407,7 @@
     "started": 1790596080.0,
     "state": "active",
     "updated": 1790596560.0,
-    "version": "sha256:bd2ac183c10f0faaf5d5a81f1e7d6cb075541156179da39545988e2632d5d0dd"
+    "version": "sha256:490e0fa110f24ede0e341794dd906a89c880fd2053b1f47764ac472070b1c053"
    }
   ],
   "audit": {
@@ -849,6 +1493,7 @@
     "why": "refuted"
    }
   ],
+  "environment": null,
   "goal": "Pick the thumbnail format and its fallback.",
   "governance": {
    "approval": "approved",
@@ -999,7 +1644,7 @@
    "started": 1790596080.0,
    "state": "active",
    "updated": 1790596560.0,
-   "version": "sha256:bd2ac183c10f0faaf5d5a81f1e7d6cb075541156179da39545988e2632d5d0dd"
+   "version": "sha256:490e0fa110f24ede0e341794dd906a89c880fd2053b1f47764ac472070b1c053"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1056,7 +1701,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:bd2ac183c10f0faaf5d5a81f1e7d6cb075541156179da39545988e2632d5d0dd"
+  "version": "sha256:490e0fa110f24ede0e341794dd906a89c880fd2053b1f47764ac472070b1c053"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-304a7406988d22c5ec496b8a79ecfbb856e45a9e20bb82b43e3e3db7a1023365/1": {
   "attempts": [
@@ -1122,7 +1767,7 @@
     "started": 1790595420.0,
     "state": "active",
     "updated": 1790596020.0,
-    "version": "sha256:f3a30335b60ad05abd2782d5a8754083a3635a318c4adab6b679a551fce982bc"
+    "version": "sha256:15e14f2ad602e763127598a665ce898a8bbe5cf6a80966f5659b380b08d097e3"
    }
   ],
   "audit": {
@@ -1168,11 +1813,13 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Thumbnail every preview once.",
   "governance": {
    "approval": "revision_pending",
@@ -1283,7 +1930,7 @@
    "started": 1790595420.0,
    "state": "active",
    "updated": 1790596020.0,
-   "version": "sha256:f3a30335b60ad05abd2782d5a8754083a3635a318c4adab6b679a551fce982bc"
+   "version": "sha256:15e14f2ad602e763127598a665ce898a8bbe5cf6a80966f5659b380b08d097e3"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1328,7 +1975,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:f3a30335b60ad05abd2782d5a8754083a3635a318c4adab6b679a551fce982bc"
+  "version": "sha256:15e14f2ad602e763127598a665ce898a8bbe5cf6a80966f5659b380b08d097e3"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/1": {
   "attempts": [
@@ -1407,7 +2054,7 @@
     "started": 1790591160.0,
     "state": "stopped_residual",
     "updated": 1790591880.0,
-    "version": "sha256:4b23863aa5015bab432e3b46d44a5746689c0606cc8bec51ea20d83361db86c8"
+    "version": "sha256:7b63d03bf374523afa98fab3e561ee6882b8bada342339ef444087e7b3c40c2a"
    },
    {
     "ask": null,
@@ -1488,7 +2135,7 @@
     "started": 1790591940.0,
     "state": "active",
     "updated": 1790593080.0,
-    "version": "sha256:78ba82999009a4395adae11de0767e66e4127a88732714c732afae2fad7e8160"
+    "version": "sha256:3c66b8eb8a417cda6395310ccc18a075161addcba661195f5f54080c24cf28eb"
    }
   ],
   "audit": {
@@ -1547,6 +2194,7 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    },
@@ -1562,11 +2210,13 @@
      "status": "missing"
     },
     "effect": "run_ended",
+    "environment": null,
     "plan": null,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Choose the colour space for exported previews.",
   "governance": {
    "approval": "approved",
@@ -1680,7 +2330,7 @@
    "started": 1790591160.0,
    "state": "stopped_residual",
    "updated": 1790591880.0,
-   "version": "sha256:4b23863aa5015bab432e3b46d44a5746689c0606cc8bec51ea20d83361db86c8"
+   "version": "sha256:7b63d03bf374523afa98fab3e561ee6882b8bada342339ef444087e7b3c40c2a"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -1758,7 +2408,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:4b23863aa5015bab432e3b46d44a5746689c0606cc8bec51ea20d83361db86c8"
+  "version": "sha256:7b63d03bf374523afa98fab3e561ee6882b8bada342339ef444087e7b3c40c2a"
  },
  "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50/s256-b534d9d77cd9f94725ea0d23dd8ba045e7f5cdada3ce102dba084cc43c8378a5/2": {
   "attempts": [
@@ -1837,7 +2487,7 @@
     "started": 1790591160.0,
     "state": "stopped_residual",
     "updated": 1790591880.0,
-    "version": "sha256:4b23863aa5015bab432e3b46d44a5746689c0606cc8bec51ea20d83361db86c8"
+    "version": "sha256:7b63d03bf374523afa98fab3e561ee6882b8bada342339ef444087e7b3c40c2a"
    },
    {
     "ask": null,
@@ -1918,7 +2568,7 @@
     "started": 1790591940.0,
     "state": "active",
     "updated": 1790593080.0,
-    "version": "sha256:78ba82999009a4395adae11de0767e66e4127a88732714c732afae2fad7e8160"
+    "version": "sha256:3c66b8eb8a417cda6395310ccc18a075161addcba661195f5f54080c24cf28eb"
    }
   ],
   "audit": {
@@ -1967,6 +2617,11 @@
     "id": "C1",
     "proof": [
      {
+      "lineage": {
+       "attempt": 1,
+       "image_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "revision": 1
+      },
       "request": {
        "argv": [
         "/usr/bin/python3",
@@ -2109,11 +2764,40 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": {
+   "active": {
+    "profile_id": "docker-isolated-v1",
+    "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "seq": 1
+   },
+   "attempts": [
+    {
+     "outcome": "succeeded",
+     "probe": null,
+     "reason": null,
+     "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "revision": 1,
+     "seq": 1
+    }
+   ],
+   "attempts_max": 32,
+   "revisions": [
+    {
+     "digest": "sha256:ef38a1b4dcf72f260818c90f6963f1b8df11144df736c22119b44897ebe610f3",
+     "profile_id": "docker-isolated-v1",
+     "revision": 1,
+     "spike_image_count": 1,
+     "state": "approved"
+    }
+   ],
+   "standing": "bound"
+  },
   "goal": "Choose the colour space for exported previews.",
   "governance": {
    "approval": "approved",
@@ -2230,7 +2914,7 @@
    "started": 1790591940.0,
    "state": "active",
    "updated": 1790593080.0,
-   "version": "sha256:78ba82999009a4395adae11de0767e66e4127a88732714c732afae2fad7e8160"
+   "version": "sha256:3c66b8eb8a417cda6395310ccc18a075161addcba661195f5f54080c24cf28eb"
   },
   "spike_backend": {
    "backend": "docker",
@@ -2351,7 +3035,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:78ba82999009a4395adae11de0767e66e4127a88732714c732afae2fad7e8160"
+  "version": "sha256:3c66b8eb8a417cda6395310ccc18a075161addcba661195f5f54080c24cf28eb"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-2fac41cee6a25f7f4d80295af5875e8d79f37d9ebe255735397d5e6cb48971ab/1": {
   "attempts": [
@@ -2434,7 +3118,7 @@
     "started": 1790596620.0,
     "state": "active",
     "updated": 1790597160.0,
-    "version": "sha256:51ec424e56c4a092f2e7c4480b7769c104d516d899771b03d66263f6d4386c6b"
+    "version": "sha256:f16aeb5a6e0fe31d17347820031722a93028ffa31424a40d4bb90e4283b488c1"
    }
   ],
   "audit": {
@@ -2491,11 +3175,13 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Check the cache key and its provider limits.",
   "governance": {
    "approval": "approved",
@@ -2630,7 +3316,7 @@
    "started": 1790596620.0,
    "state": "active",
    "updated": 1790597160.0,
-   "version": "sha256:51ec424e56c4a092f2e7c4480b7769c104d516d899771b03d66263f6d4386c6b"
+   "version": "sha256:f16aeb5a6e0fe31d17347820031722a93028ffa31424a40d4bb90e4283b488c1"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -2675,7 +3361,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:51ec424e56c4a092f2e7c4480b7769c104d516d899771b03d66263f6d4386c6b"
+  "version": "sha256:f16aeb5a6e0fe31d17347820031722a93028ffa31424a40d4bb90e4283b488c1"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-48f5398953c90415c1ac497dd0206d103c64c9f1ac9acf3fc133744c12008b7e/1": {
   "attempts": [
@@ -2770,7 +3456,7 @@
     "started": 1790587320.0,
     "state": "stopped_residual",
     "updated": 1790588040.0,
-    "version": "sha256:4a6da0f86b431754f871819af347605a6258bbce930ef4b4f78de398765a87f4"
+    "version": "sha256:78cc94fafade6af4510b36843c3b18d4ba5eba15177a068794e2a96d9676c13f"
    }
   ],
   "audit": {
@@ -2832,6 +3518,7 @@
      "status": "mismatch"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    },
@@ -2847,6 +3534,7 @@
      "status": "missing"
     },
     "effect": "run_ended",
+    "environment": null,
     "plan": null,
     "source": null
    }
@@ -2864,6 +3552,7 @@
     "why": "refuted"
    }
   ],
+  "environment": null,
   "goal": "Drop the old tile format.",
   "governance": {
    "approval": "approved",
@@ -3006,7 +3695,7 @@
    "started": 1790587320.0,
    "state": "stopped_residual",
    "updated": 1790588040.0,
-   "version": "sha256:4a6da0f86b431754f871819af347605a6258bbce930ef4b4f78de398765a87f4"
+   "version": "sha256:78cc94fafade6af4510b36843c3b18d4ba5eba15177a068794e2a96d9676c13f"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -3085,7 +3774,7 @@
    ],
    "status": "stopped_residual"
   },
-  "version": "sha256:4a6da0f86b431754f871819af347605a6258bbce930ef4b4f78de398765a87f4"
+  "version": "sha256:78cc94fafade6af4510b36843c3b18d4ba5eba15177a068794e2a96d9676c13f"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-5b683276285ade80057204dc316053f8989ce2c196c206c4adbed2e2b498b3f9/1": {
   "attempts": [
@@ -3180,7 +3869,7 @@
     "started": 1790586000.0,
     "state": "converged",
     "updated": 1790587260.0,
-    "version": "sha256:dcff12e5e37dfb6d654c3b0da9675dfa26e117420cc054f23f503ce935c8b2b9"
+    "version": "sha256:901253941dec32d3f483a7829a2aa379862efb10c2bb9f652ef9767dbb1c100a"
    }
   ],
   "audit": {
@@ -3227,6 +3916,11 @@
     "id": "C1",
     "proof": [
      {
+      "lineage": {
+       "attempt": 1,
+       "image_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "revision": 1
+      },
       "request": {
        "argv": [
         "/usr/bin/python3",
@@ -3390,11 +4084,40 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": {
+   "active": {
+    "profile_id": "docker-networked-v1",
+    "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "seq": 1
+   },
+   "attempts": [
+    {
+     "outcome": "succeeded",
+     "probe": null,
+     "reason": null,
+     "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "revision": 1,
+     "seq": 1
+    }
+   ],
+   "attempts_max": 32,
+   "revisions": [
+    {
+     "digest": "sha256:6604195414bc8cbb48b975f211b3ee310f240b7e97d3552e822f6a3056688ecf",
+     "profile_id": "docker-networked-v1",
+     "revision": 1,
+     "spike_image_count": 1,
+     "state": "approved"
+    }
+   ],
+   "standing": "bound"
+  },
   "goal": "Cache the tile index so a cold start reads one file.",
   "governance": {
    "approval": "approved",
@@ -3515,7 +4238,7 @@
    "started": 1790586000.0,
    "state": "converged",
    "updated": 1790587260.0,
-   "version": "sha256:dcff12e5e37dfb6d654c3b0da9675dfa26e117420cc054f23f503ce935c8b2b9"
+   "version": "sha256:901253941dec32d3f483a7829a2aa379862efb10c2bb9f652ef9767dbb1c100a"
   },
   "spike_backend": {
    "backend": "docker",
@@ -3658,7 +4381,7 @@
    ],
    "status": "converged"
   },
-  "version": "sha256:dcff12e5e37dfb6d654c3b0da9675dfa26e117420cc054f23f503ce935c8b2b9"
+  "version": "sha256:901253941dec32d3f483a7829a2aa379862efb10c2bb9f652ef9767dbb1c100a"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-a3ef3cd93353dc90ddc8b6c621c9599f34b705b4b0df356f4c4104f3573e212f/1": {
   "attempts": [
@@ -3741,7 +4464,7 @@
     "started": 1790594280.0,
     "state": "active",
     "updated": 1790595360.0,
-    "version": "sha256:9468f7d7b8308210fea3795c71143886a88e5d17b466cb864af56e3e24767178"
+    "version": "sha256:da439de6806243b29efd5be13fffcd85bc27707155f4b6f19f8892a707a098b1"
    }
   ],
   "audit": {
@@ -3818,11 +4541,13 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Index tiles by zoom level on write.",
   "governance": {
    "approval": "approved",
@@ -3939,7 +4664,7 @@
    "started": 1790594280.0,
    "state": "active",
    "updated": 1790595360.0,
-   "version": "sha256:9468f7d7b8308210fea3795c71143886a88e5d17b466cb864af56e3e24767178"
+   "version": "sha256:da439de6806243b29efd5be13fffcd85bc27707155f4b6f19f8892a707a098b1"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -4020,7 +4745,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:9468f7d7b8308210fea3795c71143886a88e5d17b466cb864af56e3e24767178"
+  "version": "sha256:da439de6806243b29efd5be13fffcd85bc27707155f4b6f19f8892a707a098b1"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-d9dfe7e527d1dec03abfb3ee7b6593cbee9a85c1de9ade881a43885519cae211/1": {
   "attempts": [
@@ -4199,7 +4924,7 @@
     "started": 1790593140.0,
     "state": "active",
     "updated": 1790594220.0,
-    "version": "sha256:8287f87a969810e9feb37ad5914ade0f29c592b467faf45e92c834b4bef2d8e0"
+    "version": "sha256:83a9b12f265f0b081e9b871603f8b0b68219af2323ddcd821969518b9429432f"
    }
   ],
   "audit": {
@@ -4405,6 +5130,7 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    },
@@ -4480,6 +5206,7 @@
      "status": "verified"
     },
     "effect": "none",
+    "environment": null,
     "plan": null,
     "source": null
    },
@@ -4555,6 +5282,7 @@
      "status": "verified"
     },
     "effect": "none",
+    "environment": null,
     "plan": null,
     "source": "https://provider.example.net/limits"
    },
@@ -4630,6 +5358,7 @@
      "status": "verified"
     },
     "effect": "none",
+    "environment": null,
     "plan": null,
     "source": "export log, 2026-09-21"
    },
@@ -4705,6 +5434,7 @@
      "status": "verified"
     },
     "effect": "record_confirmed",
+    "environment": null,
     "plan": null,
     "source": "https://tiles.example.org/format#export"
    },
@@ -4780,11 +5510,13 @@
      "status": "verified"
     },
     "effect": "record_rejected",
+    "environment": null,
     "plan": null,
     "source": "nightly export log, 2026-09-27"
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Document the tile export path.",
   "governance": {
    "approval": "approved",
@@ -5008,7 +5740,7 @@
    "started": 1790593140.0,
    "state": "active",
    "updated": 1790594220.0,
-   "version": "sha256:8287f87a969810e9feb37ad5914ade0f29c592b467faf45e92c834b4bef2d8e0"
+   "version": "sha256:83a9b12f265f0b081e9b871603f8b0b68219af2323ddcd821969518b9429432f"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5173,7 +5905,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:8287f87a969810e9feb37ad5914ade0f29c592b467faf45e92c834b4bef2d8e0"
+  "version": "sha256:83a9b12f265f0b081e9b871603f8b0b68219af2323ddcd821969518b9429432f"
  },
  "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9/s256-e5bc37664845dccec9f662b44804806b99e73cb885080ec8fbd053aa74fcc494/1": {
   "attempts": [
@@ -5288,7 +6020,7 @@
     "started": 1790588100.0,
     "state": "active",
     "updated": 1790589180.0,
-    "version": "sha256:949c597ed5189cd633f73bbf37be17e45e0f506ab71e5368302fa1b76a591afe"
+    "version": "sha256:5487d15a2919732e9f8457c1f04beb6d25ae2dee7e5fe3d9392d8531e60c5009"
    }
   ],
   "audit": {
@@ -5419,11 +6151,13 @@
      "status": "missing"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Split the tile index by zoom level.",
   "governance": {
    "approval": "approved",
@@ -5572,7 +6306,7 @@
    "started": 1790588100.0,
    "state": "active",
    "updated": 1790589180.0,
-   "version": "sha256:949c597ed5189cd633f73bbf37be17e45e0f506ab71e5368302fa1b76a591afe"
+   "version": "sha256:5487d15a2919732e9f8457c1f04beb6d25ae2dee7e5fe3d9392d8531e60c5009"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -5689,7 +6423,7 @@
    }
   ],
   "stop": null,
-  "version": "sha256:949c597ed5189cd633f73bbf37be17e45e0f506ab71e5368302fa1b76a591afe"
+  "version": "sha256:5487d15a2919732e9f8457c1f04beb6d25ae2dee7e5fe3d9392d8531e60c5009"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-99febc86fd21283061285a594c12ba633302d10cec385745095654a327953470/1": {
   "attempts": [
@@ -5768,7 +6502,7 @@
     "started": 1790590260.0,
     "state": "stopped_frozen",
     "updated": 1790591100.0,
-    "version": "sha256:26ae24a412214dedf81e8959dc00d59f49c3d8fef955fd1c6273092fa36bddd2"
+    "version": "sha256:a396a74ba74431b1e5749d18e5c49e3654c9e6457c9c156f8d83741668d19aa2"
    }
   ],
   "audit": {
@@ -5822,6 +6556,7 @@
      "status": "too_large"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    },
@@ -5837,11 +6572,13 @@
      "status": "missing"
     },
     "effect": "run_ended",
+    "environment": null,
     "plan": null,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": null,
   "goal": "Document the import retry policy.",
   "governance": {
    "approval": "approved",
@@ -5957,7 +6694,7 @@
    "started": 1790590260.0,
    "state": "stopped_frozen",
    "updated": 1790591100.0,
-   "version": "sha256:26ae24a412214dedf81e8959dc00d59f49c3d8fef955fd1c6273092fa36bddd2"
+   "version": "sha256:a396a74ba74431b1e5749d18e5c49e3654c9e6457c9c156f8d83741668d19aa2"
   },
   "spike_backend": {
    "kind": "spikes_unavailable"
@@ -6048,7 +6785,7 @@
    ],
    "status": "stopped_frozen"
   },
-  "version": "sha256:26ae24a412214dedf81e8959dc00d59f49c3d8fef955fd1c6273092fa36bddd2"
+  "version": "sha256:a396a74ba74431b1e5749d18e5c49e3654c9e6457c9c156f8d83741668d19aa2"
  },
  "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1": {
   "attempts": [
@@ -6089,6 +6826,7 @@
   "contract": "empirica-ui-view/v1",
   "decisions": null,
   "dropped": null,
+  "environment": null,
   "goal": null,
   "governance": null,
   "key": "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d/s256-dc014637290a07b4e78a60fdf4f58d4662ecee66a87c8d56d085604cd7578148/1",
@@ -6189,7 +6927,7 @@
     "started": 1790589240.0,
     "state": "stopped_budget",
     "updated": 1790590200.0,
-    "version": "sha256:3535603a6f770a101e9e55e6b18cfa91d19f1515c04329e7cd6592c1533fb9f9"
+    "version": "sha256:23a308455ab0ef6f16b2863f8aef030eeb3cf74eb9e5941e48a4492316c804e2"
    }
   ],
   "audit": {
@@ -6205,6 +6943,11 @@
     "id": "C0",
     "proof": [
      {
+      "lineage": {
+       "attempt": 1,
+       "image_id": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+       "revision": 1
+      },
       "request": {
        "argv": [
         "/usr/bin/python3",
@@ -6347,6 +7090,7 @@
      "status": "unreadable"
     },
     "effect": "configuration_approved",
+    "environment": null,
     "plan": 1,
     "source": null
    },
@@ -6362,11 +7106,40 @@
      "status": "missing"
     },
     "effect": "run_ended",
+    "environment": null,
     "plan": null,
     "source": null
    }
   ],
   "dropped": [],
+  "environment": {
+   "active": {
+    "profile_id": "docker-isolated-v1",
+    "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "seq": 1
+   },
+   "attempts": [
+    {
+     "outcome": "succeeded",
+     "probe": null,
+     "reason": null,
+     "record_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "revision": 1,
+     "seq": 1
+    }
+   ],
+   "attempts_max": 32,
+   "revisions": [
+    {
+     "digest": "sha256:ef38a1b4dcf72f260818c90f6963f1b8df11144df736c22119b44897ebe610f3",
+     "profile_id": "docker-isolated-v1",
+     "revision": 1,
+     "spike_image_count": 1,
+     "state": "approved"
+    }
+   ],
+   "standing": "bound"
+  },
   "goal": "Find why the nightly import is slow.",
   "governance": {
    "approval": "approved",
@@ -6460,7 +7233,7 @@
    "started": 1790589240.0,
    "state": "stopped_budget",
    "updated": 1790590200.0,
-   "version": "sha256:3535603a6f770a101e9e55e6b18cfa91d19f1515c04329e7cd6592c1533fb9f9"
+   "version": "sha256:23a308455ab0ef6f16b2863f8aef030eeb3cf74eb9e5941e48a4492316c804e2"
   },
   "spike_backend": {
    "backend": "docker",
@@ -6577,6 +7350,6 @@
    ],
    "status": "stopped_budget"
   },
-  "version": "sha256:3535603a6f770a101e9e55e6b18cfa91d19f1515c04329e7cd6592c1533fb9f9"
+  "version": "sha256:23a308455ab0ef6f16b2863f8aef030eeb3cf74eb9e5941e48a4492316c804e2"
  }
 }

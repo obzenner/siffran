@@ -12,10 +12,13 @@ timeline, ADR-0070), with a deterministic clock in place of the wall clock.
 """
 from __future__ import annotations
 
+import copy
 import hashlib
+import json
 import unittest
 import uuid
 import zlib
+from contextlib import contextmanager
 from unittest import mock
 from dataclasses import dataclass, field
 from typing import Any
@@ -23,8 +26,12 @@ from typing import Any
 from sandbox_isolation import force_absent_sandbox_home
 
 import governance_setup
+from test_environment_actions import ENVIRONMENT_ACTION, QUALIFY_ACTION
+from test_qualification_transaction import FakeQualificationPort as QualificationPort
 from governance_setup import TEST_INVOCATION, invocation_for, sized_configure_run
 from application import generic_spike
+from application.generic_spike import GenericUnavailableReason
+from core.run import QUALIFICATION_PROBE_NAMES
 from application.location import storage_id
 from application.observer import Project, document_entry, run_key
 from core import hitl as core_hitl
@@ -269,6 +276,7 @@ FIXTURE_SCENARIOS = (
     "refuted",             # stopped_residual, a refuted claim
     "frozen",              # stopped_frozen
     "budget",              # stopped_budget
+    "environment",         # the environment step: a rejected, an approved and a pending revision; failed, bound, stale
 )
 
 
@@ -303,8 +311,9 @@ class ScaleSource:
 
     def __init__(self, store: Store, n: int, projects: int = 40) -> None:
         source = DriverSource(store)
+        self._source, self._template_keys = source, list(source.keys())
         self._templates = [(source.read_state(k), source.timeline(k), source.history_revision(k), source.history(k),
-                            source.workspace(k)) for k in source.keys()]
+                            source.workspace(k)) for k in self._template_keys]
         self._names = {}
         self._map: dict[RunKey, list[int]] = {}
         for i in range(n):
@@ -348,6 +357,11 @@ class ScaleSource:
 
     def workspace(self, key):
         return self._t(key)[4]
+
+    def document(self, key, document_digest):
+        """The template run's own document read (``DriverSource.document``), so a copy shows what its template's
+        human was shown."""
+        return self._source.document(self._template_keys[self._map[key][0]], document_digest)
 
 
 class DemoSource(ScaleSource):
@@ -452,6 +466,8 @@ class _Builder:
         self.drv = self.store.driver
         self.files: dict[str, bytes] = {}  # what the workspace holds, so citations quote it verbatim
         self.independence_then: list[str | None] = []  # each verdict's independence as GetRun said it when recorded
+        self.qualifications = 0  # the store's qualify deliveries
+        self.environment_receipts: dict[str, dict] = {}  # each environment presentation's envelope, by receipt id
 
     def write(self, path: str, content: bytes) -> None:
         self.files[path] = content
@@ -461,12 +477,13 @@ class _Builder:
 
     def begin(self, project: str, session: str, goal: str, graph: dict, *, repo: str | None = None,
               surface: str | None = "human", where: tuple[str, str] | None = None, approve: bool = True,
-              qualified: bool = False, **start) -> str:
+              qualified: bool = False, qualifiable: bool = False, **start) -> str:
         """Start a run, declare its graph and have its configuration approved. ``repo`` is the path of the repository
         the project is told to live in (its folder name is the project's name); ``surface`` is what the host observes
         it can show a human (an unattended session shows nobody); ``where`` is the (label, locator) its host recorded for
         the session, none when the host recorded nothing. ``approve=False`` leaves the configuration the graph proposed
-        waiting on its human (the run does not investigate)."""
+        waiting on its human (the run does not investigate). ``qualifiable=True`` starts it with a composed qualification
+        port, so it binds the run-scoped ``unqualified`` reference and qualifies through ``qualify``."""
         a, drv = self.a, self.drv
         # The host a real one records at StartRun (``adapters.invocation.provenance``): the host whose folder holds the
         # session it recorded (Pi's ``.pi``, Claude Code's ``.claude``), else, with no locator, Pi for about a third of the
@@ -480,7 +497,8 @@ class _Builder:
         # generic binding the fixtures' spike runs run under.
         if qualified:
             drv.qualify_next_generic_run()
-        run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
+        with self._qualification_port(QualificationPort() if qualifiable else None):
+            run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
         if surface is not None:  # none: the host has not looked for a dialog (the run's recorded surface stays ``unobserved``)
             drv.trusted_human_surface(run_id, surface)  # an attended session: evidence waits on its human
         if repo is not None:
@@ -525,6 +543,52 @@ class _Builder:
                        {**envelope, "submission": {"action": "reject", "configuration": {"budgets": g["proposal"]["budgets"]}}})
             done = service.trusted_governance_decision(run_id=run_id, payload=payload)
             assert done["result"]["type"] == "Allow", done
+
+    @contextmanager
+    def _qualification_port(self, port):
+        """The coordinator composed with ``port`` for one act (a run's start, one qualify), as a host composes it."""
+        coordinator = self.drv._service._coordinator
+        before, coordinator.qualification_port = coordinator.qualification_port, port
+        try:
+            yield
+        finally:
+            coordinator.qualification_port = before
+
+    def propose_environment(self, run_id: str, spike_images: list[str]):
+        """The agent's ``environment`` action: a new revision proposing ``spike_images``."""
+        action = copy.deepcopy(ENVIRONMENT_ACTION)
+        action["payload"]["spike_images"] = list(spike_images)
+        done = self.a.dispatch(self.drv, observe_action(run_id=run_id, action=action))
+        assert done["result"]["type"] == "Allow", done
+
+    def present_environment(self, run_id: str, receipt: str, outcome: str | None = None):
+        """Its host's write-first mediation of the pending revision, as ``adapters.governance.HostEnvironment`` does
+        it: the document published beside the run, one presentation, then the human's ``approve`` or ``reject``
+        (``outcome=None``: shown and not answered yet; ``answer_environment`` answers it later)."""
+        service = self.drv._service
+        pair = service.trusted_environment_document(run_id=run_id, payload={})["result"]["presentation"]["document"]
+        self.publish_document(run_id, pair)
+        parsed = json.loads(pair["text"])
+        self.environment_receipts[receipt] = {"run_id": run_id, "receipt_id": receipt, "revision": parsed["revision"],
+                                              "proposal_digest": parsed["proposal_digest"],
+                                              "document_digest": pair["digest"]}
+        for answer in ("present", *([outcome] if outcome else [])):
+            self.answer_environment(receipt, answer)
+
+    def answer_environment(self, receipt: str, outcome: str):
+        """The human's answer to the presentation ``receipt`` names."""
+        envelope = self.environment_receipts[receipt]
+        done = self.drv._service.trusted_environment_decision(run_id=envelope["run_id"],
+                                                              payload={**envelope, "outcome": outcome})
+        assert done["result"]["type"] == "Allow", done
+
+    def qualify(self, run_id: str, reason: str | None = None, probe: str | None = None):
+        """The agent's ``qualify`` through a composed fake port: bound, or failed with ``reason`` (and ``probe``). Each
+        is its own delivery, named by the store (never the process-wide request counter), so its attempt is too."""
+        self.qualifications += 1
+        with self._qualification_port(QualificationPort(reason=reason, probe=probe)):
+            self.a.dispatch(self.drv, observe_action(run_id=run_id, action=copy.deepcopy(QUALIFY_ACTION),
+                                                     request_id=f"observer-qualify-{self.qualifications}"))
 
     def publish_document(self, run_id: str, pair: dict) -> dict:
         """PR 15 (operator finding F2): the host's binding call as it happens in a real home - the
@@ -958,6 +1022,23 @@ def _build(clock: FakeClock | None, timeline: MemoryTimeline | None, proven: int
                ("C1", "ordinary", "Neighbours are told a day ahead.")], [("C0", "C1")]))))
     b.audit(run, "pass", ["The frozen claim is cited."])
     b.stamp("freeze-scope", "quarry", "s-freeze")
+    # quarry: the environment step (spec 7.2 §5-§7). The human rejects the first revision and approves the second; its
+    # first qualification fails a probe, the next binds and a spike runs under it, a later one fails on the daemon (the
+    # binding stays installed); a third revision is shown and not answered.
+    run = b.begin("quarry", "s-environment", "Measure the crusher's throughput on the sample load.", _graph(
+        "C0", [("C0", "needs-experiment", "The crusher clears the sample load within the shift.")], []),
+        qualifiable=True)
+    for receipt, outcome in (("environment-1", "reject"), ("environment-2", "approve")):
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        b.present_environment(run, receipt, outcome)
+    b.qualify(run, GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value, QUALIFICATION_PROBE_NAMES[0])
+    b.qualify(run)
+    b.research(run, "C0", ref="crusher/load.md")
+    b.spike(run, "C0", "python bench/crusher.py", {"crusher/load.md": b"sample load\n"})
+    b.qualify(run, GenericUnavailableReason.QUALIFICATION_STALE_DAEMON.value)
+    b.propose_environment(run, [FIXTURE_SPIKE_IMAGE, f"{FIXTURE_SPIKE_IMAGE}-next"])
+    b.present_environment(run, "environment-3")
+    b.stamp("environment", "quarry", "s-environment")
     for n, ((goal, thing), (name, repo)) in enumerate(zip(demo_goals(proven), _demo_projects(proven))):
         _varied(b, n, goal, thing, name, repo)
     return b.store

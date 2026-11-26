@@ -202,7 +202,7 @@
   "started": 1790593140.0,
   "state": "active",
   "updated": 1790594220.0,
-  "version": "sha256:8287f87a969810e9feb37ad5914ade0f29c592b467faf45e92c834b4bef2d8e0"
+  "version": "sha256:83a9b12f265f0b081e9b871603f8b0b68219af2323ddcd821969518b9429432f"
  },
  {
   "ask": "approve_revision",
@@ -266,7 +266,7 @@
   "started": 1790595420.0,
   "state": "active",
   "updated": 1790596020.0,
-  "version": "sha256:f3a30335b60ad05abd2782d5a8754083a3635a318c4adab6b679a551fce982bc"
+  "version": "sha256:15e14f2ad602e763127598a665ce898a8bbe5cf6a80966f5659b380b08d097e3"
  },
  {
   "ask": "confirm_source",
@@ -347,7 +347,7 @@
   "started": 1790596620.0,
   "state": "active",
   "updated": 1790597160.0,
-  "version": "sha256:51ec424e56c4a092f2e7c4480b7769c104d516d899771b03d66263f6d4386c6b"
+  "version": "sha256:f16aeb5a6e0fe31d17347820031722a93028ffa31424a40d4bb90e4283b488c1"
  },
  {
   "ask": "approve_configuration",
@@ -411,7 +411,7 @@
   "started": 1790601900.0,
   "state": "active",
   "updated": 1790602260.0,
-  "version": "sha256:ed4dc820db5f86f34c9a088f77e060c37a2f6d3b19010770b31b363f30f8379e"
+  "version": "sha256:d575c22df8cda3675ca756d5833103e6aebd955d40b209318d10a2be06c990f8"
  },
  {
   "ask": "freeze_scope",
@@ -492,7 +492,7 @@
   "started": 1790602320.0,
   "state": "active",
   "updated": 1790603280.0,
-  "version": "sha256:18efb3678dd5db6dc3bf3ef05e98c1872e24caf20e0e8c90f9fcc18f34181f56"
+  "version": "sha256:1ee74a08e5fa27d44e7a7b5c3563fd164cb7931e2902f2b439ade0315789df45"
  },
  {
   "ask": null,
@@ -573,7 +573,7 @@
   "started": 1790594280.0,
   "state": "active",
   "updated": 1790595360.0,
-  "version": "sha256:9468f7d7b8308210fea3795c71143886a88e5d17b466cb864af56e3e24767178"
+  "version": "sha256:da439de6806243b29efd5be13fffcd85bc27707155f4b6f19f8892a707a098b1"
  },
  {
   "ask": null,
@@ -686,7 +686,71 @@
   "started": 1790588100.0,
   "state": "active",
   "updated": 1790589180.0,
-  "version": "sha256:949c597ed5189cd633f73bbf37be17e45e0f506ab71e5368302fa1b76a591afe"
+  "version": "sha256:5487d15a2919732e9f8457c1f04beb6d25ae2dee7e5fe3d9392d8531e60c5009"
+ },
+ {
+  "ask": null,
+  "asked_at": null,
+  "attention": "not_ended",
+  "audit": {
+   "current": null,
+   "independence": null,
+   "pending": false,
+   "verdict": "none"
+  },
+  "claims": [
+   {
+    "assurance": "awaiting_audit",
+    "blocker": null,
+    "blocker_claim": null,
+    "evidence": "spike",
+    "gating": true,
+    "id": "C0",
+    "kind": "needs-experiment",
+    "review": "none",
+    "state": "approved",
+    "text": "The crusher clears the sample load within the shift."
+   }
+  ],
+  "diagnostic": null,
+  "edges": [],
+  "ended": null,
+  "flags": {
+   "changed_since_audit": false,
+   "decided": true,
+   "failed_audit": false,
+   "refuted": false
+  },
+  "generation": 1,
+  "goal": "Measure the crusher's throughput on the sample load.",
+  "id": "8c6e5f6d1b83",
+  "key": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17/s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940/1",
+  "mode": "deliberative",
+  "next": {
+   "message": "Audit is owed; spawn an independent auditor.",
+   "where": "next_turn",
+   "who": "agent"
+  },
+  "previous": null,
+  "progress": {
+   "approved": 1,
+   "required": 1
+  },
+  "project": "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17",
+  "root": "C0",
+  "run": "s256-0f7359ce501c2a05a4574b148c612b868d950336e0f197216f5211e7900f6940",
+  "session": {
+   "delegated": false,
+   "host": "claude",
+   "interactive": true,
+   "label": null,
+   "locator": null
+  },
+  "standing": "not_ended",
+  "started": 1790603340.0,
+  "state": "active",
+  "updated": 1790604840.0,
+  "version": "sha256:1e63a65a21816c20aa59e7f6a95c67fb8b3d55c24dc99cc39c5218b4407280b2"
  },
  {
   "ask": null,
@@ -783,7 +847,7 @@
   "started": 1790596080.0,
   "state": "active",
   "updated": 1790596560.0,
-  "version": "sha256:bd2ac183c10f0faaf5d5a81f1e7d6cb075541156179da39545988e2632d5d0dd"
+  "version": "sha256:490e0fa110f24ede0e341794dd906a89c880fd2053b1f47764ac472070b1c053"
  },
  {
   "ask": null,
@@ -864,7 +928,7 @@
   "started": 1790591940.0,
   "state": "active",
   "updated": 1790593080.0,
-  "version": "sha256:78ba82999009a4395adae11de0767e66e4127a88732714c732afae2fad7e8160"
+  "version": "sha256:3c66b8eb8a417cda6395310ccc18a075161addcba661195f5f54080c24cf28eb"
  },
  {
   "ask": null,
@@ -957,7 +1021,7 @@
   "started": 1790586000.0,
   "state": "converged",
   "updated": 1790587260.0,
-  "version": "sha256:dcff12e5e37dfb6d654c3b0da9675dfa26e117420cc054f23f503ce935c8b2b9"
+  "version": "sha256:901253941dec32d3f483a7829a2aa379862efb10c2bb9f652ef9767dbb1c100a"
  },
  {
   "ask": null,
@@ -1034,7 +1098,7 @@
   "started": 1790591160.0,
   "state": "stopped_residual",
   "updated": 1790591880.0,
-  "version": "sha256:4b23863aa5015bab432e3b46d44a5746689c0606cc8bec51ea20d83361db86c8"
+  "version": "sha256:7b63d03bf374523afa98fab3e561ee6882b8bada342339ef444087e7b3c40c2a"
  },
  {
   "ask": null,
@@ -1127,7 +1191,7 @@
   "started": 1790587320.0,
   "state": "stopped_residual",
   "updated": 1790588040.0,
-  "version": "sha256:4a6da0f86b431754f871819af347605a6258bbce930ef4b4f78de398765a87f4"
+  "version": "sha256:78cc94fafade6af4510b36843c3b18d4ba5eba15177a068794e2a96d9676c13f"
  },
  {
   "ask": null,
@@ -1187,7 +1251,7 @@
   "started": 1790589240.0,
   "state": "stopped_budget",
   "updated": 1790590200.0,
-  "version": "sha256:3535603a6f770a101e9e55e6b18cfa91d19f1515c04329e7cd6592c1533fb9f9"
+  "version": "sha256:23a308455ab0ef6f16b2863f8aef030eeb3cf74eb9e5941e48a4492316c804e2"
  },
  {
   "ask": null,
@@ -1264,6 +1328,6 @@
   "started": 1790590260.0,
   "state": "stopped_frozen",
   "updated": 1790591100.0,
-  "version": "sha256:26ae24a412214dedf81e8959dc00d59f49c3d8fef955fd1c6273092fa36bddd2"
+  "version": "sha256:a396a74ba74431b1e5749d18e5c49e3654c9e6457c9c156f8d83741668d19aa2"
  }
 ]

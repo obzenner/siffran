@@ -37,6 +37,10 @@ export const PATHS = {
   answer: [["run", "decisions", "[]", "answer"]],
   effect: [["run", "decisions", "[]", "effect"]],
   document: [["run", "decisions", "[]", "document", "status"]],
+  // the environment step: the binding against its latest attempt, each revision's state and each attempt's outcome
+  qualification: [["run", "environment", "standing"]],
+  environment_revision: [["run", "environment", "revisions", "[]", "state"]],
+  attempt: [["run", "environment", "attempts", "[]", "outcome"]],
   // the profiles a spike backend may be bound to: the backend's own list, which validates it (app/client.js); the
   // profiles a claim's request and result name must agree with it (tests/contract.test.mjs)
   profile: [["run", "spike_backend", "profile_id"]],

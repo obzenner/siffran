@@ -45,6 +45,8 @@ function families(states, cat, enums) {
     "ask.*": of("ask", enums.ask),
     "ask.part.*": of("ask.part", enums.ask),
     "effect.*": of("effect", enums.effect),
+    "environment.revision.*": of("environment.revision", enums.environment_revision),
+    "qualification.attempt.*": of("qualification.attempt", enums.attempt),
     "flag.*": of("flag", enums.flag),
     "chip.flag.*": of("chip.flag", enums.flag),
     "period.*": of("period", cat.periods),

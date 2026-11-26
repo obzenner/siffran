@@ -516,6 +516,7 @@
             "confirm_source",
             "consent_stop",
             "freeze_scope",
+            "approve_environment",
             null
           ],
           "description": "What a human is asked about an active run (core.observer.ask), read from the item the core presents; null when nothing is asked or the run was not read."

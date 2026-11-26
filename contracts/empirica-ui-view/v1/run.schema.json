@@ -11,6 +11,7 @@
     "version",
     "goal",
     "spike_backend",
+    "environment",
     "governance",
     "audit",
     "stop",
@@ -57,6 +58,13 @@
         }
       ],
       "description": "The run's immutable StartRun binding, copied from the public RunView; qualified is not a live-health claim, and unqualified is its own closed no-authority kind. Null only when the run state could not be read."
+    },
+    "environment": {
+      "oneOf": [
+        {"$ref": "#/$defs/environmentStep"},
+        {"type": "null"}
+      ],
+      "description": "The run's environment step (core.observer.environment_step): its revisions, qualification attempts and installed binding. Null before any environment proposal, or when the run state could not be read."
     },
     "governance": {
       "oneOf": [
@@ -813,6 +821,7 @@
               "claim",
               "source",
               "plan",
+              "environment",
               "answer",
               "effect",
               "at",
@@ -826,7 +835,8 @@
                   "decide_claim",
                   "confirm_source",
                   "consent_stop",
-                  "freeze_scope"
+                  "freeze_scope",
+                  "approve_environment"
                 ]
               },
               "claim": {
@@ -850,6 +860,14 @@
                 ],
                 "minimum": 1,
                 "description": "The configuration's plan revision the answer approves, amends or rejects (approve_configuration, approve_revision only)."
+              },
+              "environment": {
+                "type": [
+                  "integer",
+                  "null"
+                ],
+                "minimum": 1,
+                "description": "The environment revision the answer approves or rejects, or that was shown and not answered (approve_environment only)."
               },
               "answer": {
                 "enum": [
@@ -942,6 +960,8 @@
                   "claim_rejected",
                   "run_ended",
                   "run_continued",
+                  "environment_approved",
+                  "environment_rejected",
                   "none"
                 ]
               },
@@ -950,13 +970,13 @@
                   "number",
                   "null"
                 ],
-                "description": "Seconds since the epoch (UTC) of the write that recorded the answer (a configuration receipt: the first write whose timeline entry lists it, ADR-0070); a label, never an order; null when unknown."
+                "description": "Seconds since the epoch (UTC) of the write that recorded the answer (a configuration receipt: the first write whose timeline entry lists it; an environment receipt row: the first whose entry lists its fingerprint, ADR-0070); a label, never an order; null when unknown."
               }
             }
           }
         }
       ],
-      "description": "Every answer a human gave (core.observer.decisions): configuration receipts from a dialog - each naming its plan revision, plus, unless a later answer superseded it, the one ask still presented and unanswered - then confirmations and items shown with no answer recorded, in history order. Every row that records a presentation carries its bound document (ADR-0072, PR 15), and `later` reads \"not answered\" (operator finding F3). Null when not read."
+      "description": "Every answer a human gave (core.observer.decisions): configuration receipts from a dialog - each naming its plan revision, plus, unless a later answer superseded it, the one ask still presented and unanswered - then environment receipts, oldest revision first, each naming its revision (a presentation its revision's answer superseded is not listed), then confirmations and items shown with no answer recorded, in history order. Every row that records a presentation carries its bound document (ADR-0072, PR 15), and `later` reads \"not answered\" (operator finding F3). Null when not read."
     },
     "row": {
       "$ref": "https://siffran.dev/contracts/empirica-ui-view/v1/row.schema.json#/$defs/row",
@@ -1145,16 +1165,56 @@
                "claim_id": {"type": "string", "minLength": 1},
                "claim_digest": {"$ref": "#/$defs/digest"},
                "text": {"type": "string", "minLength": 1}}}}},
-         "description": "The evidence kind (`core.hitl.evidence_document`): the end-of-pass batch or the terminal consent (whose terminal variant carries the `terminal` member beside empty rows)."}
+         "description": "The evidence kind (`core.hitl.evidence_document`): the end-of-pass batch or the terminal consent (whose terminal variant carries the `terminal` member beside empty rows)."},
+        {"type": "object",
+         "required": ["schema", "kind", "run_id", "question", "revision", "proposal_digest", "goal", "profile_id", "networked", "spike_images", "preparation", "preparation_source", "rationale", "rationale_source", "previous_active_binding", "context_when_shown"],
+         "properties": {
+           "schema": {"const": "empirica.hitl/1"},
+           "kind": {"const": "environment"},
+           "run_id": {"type": "string", "minLength": 1},
+           "question": {"const": "approve"},
+           "revision": {"type": "integer", "minimum": 1},
+           "proposal_digest": {"$ref": "#/$defs/digest"},
+           "goal": {"type": "string", "minLength": 1},
+           "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+           "networked": {"type": "boolean"},
+           "spike_images": {"type": "array", "minItems": 1, "items": {
+             "type": "object",
+             "required": ["reference", "image_id"],
+             "properties": {
+               "reference": {"type": "string", "minLength": 1},
+               "image_id": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}}}},
+           "preparation": {"type": "array", "minItems": 1, "items": {"type": "string", "minLength": 1}},
+           "preparation_source": {"type": "string", "minLength": 1},
+           "rationale": {"type": "string", "minLength": 1},
+           "rationale_source": {"type": "string", "minLength": 1},
+           "previous_active_binding": {"oneOf": [{"type": "null"}, {
+             "type": "object",
+             "required": ["record_digest", "revision"],
+             "properties": {
+               "record_digest": {"$ref": "#/$defs/digest"},
+               "revision": {"type": "integer", "minimum": 1}}}]},
+           "context_when_shown": {"type": "object"}},
+         "description": "The environment kind (`core.hitl.environment_document`): the dialog a host shows for approving one pending environment revision; the preparation and rationale are the agent's, labelled unverified by their `_source` members."}
       ],
       "description": "A real `empirica.hitl/1` document (ADR-0072, PR 15, A7): each alternative is a complete member set the core renders - so the UI's renderer branches on `kind` without re-deriving anything - while novel members stay allowed, so a plugin bump never stales an old sheet (the served body's owner is the plugin, not this schema)."
     },
     "genericSpikeProof": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["request", "result", "state"],
+      "required": ["request", "result", "state", "lineage"],
       "properties": {
         "request": {"$ref": "#/$defs/genericSpikeRequest"},
+        "lineage": {
+          "type": "object", "additionalProperties": false,
+          "required": ["attempt", "revision", "image_id"],
+          "description": "The qualification the request was sealed under (core.projection.spike_lineage): the attempt and approved environment revision of the binding its sealed request recorded (each null when no attempt of this run names it), and the image ID it resolved and created by.",
+          "properties": {
+            "attempt": {"type": ["integer", "null"], "minimum": 1},
+            "revision": {"type": ["integer", "null"], "minimum": 1},
+            "image_id": {"$ref": "#/$defs/digest"}
+          }
+        },
         "result": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/genericSpikeResult"}]},
         "state": {
           "enum": ["requested", "current", "stale", "superseded"],
@@ -1270,6 +1330,63 @@
     "genericSpikeStream": {
       "type": "object", "additionalProperties": false, "required": ["bytes_seen", "sha256"],
       "properties": {"bytes_seen": {"type": "integer", "minimum": 0}, "sha256": {"$ref": "#/$defs/digest"}}
+    },
+    "environmentStep": {
+      "type": "object", "additionalProperties": false,
+      "required": ["revisions", "attempts", "attempts_max", "active", "standing"],
+      "properties": {
+        "revisions": {
+          "type": "array", "minItems": 1,
+          "description": "Every environment revision, oldest first (core.environment.member_view): no preparation text, rationale or image reference.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["revision", "state", "profile_id", "spike_image_count", "digest"],
+            "properties": {
+              "revision": {"type": "integer", "minimum": 1},
+              "state": {"enum": ["pending", "approved", "rejected"]},
+              "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+              "spike_image_count": {"type": "integer", "minimum": 1},
+              "digest": {"$ref": "#/$defs/digest"}
+            }
+          }
+        },
+        "attempts": {
+          "type": "array",
+          "description": "Every qualification attempt in order (core.environment.audit_context): its outcome, the record a succeeded one bound, and a failure's closed reason and probe.",
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": ["seq", "revision", "outcome", "record_digest", "reason", "probe"],
+            "properties": {
+              "seq": {"type": "integer", "minimum": 1},
+              "revision": {"type": "integer", "minimum": 1},
+              "outcome": {"enum": ["reserved", "succeeded", "failed", "superseded"]},
+              "record_digest": {"oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+              "reason": {"type": ["string", "null"], "minLength": 1, "description": "The failure's closed reason code (the state's qualification attempt row); null unless the attempt failed."},
+              "probe": {"oneOf": [{"enum": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"]}, {"type": "null"}]}
+            }
+          }
+        },
+        "attempts_max": {"type": "integer", "minimum": 1, "description": "The run's qualification attempt ceiling."},
+        "active": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object", "additionalProperties": false,
+              "required": ["seq", "profile_id", "record_digest"],
+              "properties": {
+                "seq": {"type": "integer", "minimum": 1},
+                "profile_id": {"enum": ["docker-isolated-v1", "docker-networked-v1"]},
+                "record_digest": {"$ref": "#/$defs/digest"}
+              }
+            }
+          ],
+          "description": "The installed binding (core.environment.qualification_view): the attempt that bound it, a stored reference and never live health; null while nothing is bound."
+        },
+        "standing": {
+          "enum": ["unbound", "bound", "stale", "failed"],
+          "description": "The binding against the latest attempt (core.observer.QUALIFICATION_STANDINGS): bound, stale (installed, and a later attempt failed), failed (nothing bound, the latest attempt failed) or unbound."
+        }
+      }
     },
     "spikeBackend": {
       "oneOf": [

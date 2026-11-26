@@ -25,6 +25,11 @@ from unittest import mock
 import core.evaluation as evaluation
 import core.governance as core_governance
 import core.observer as core_observer
+from application.generic_spike import GenericUnavailableReason
+from core import environment as core_environment
+from core import hitl as core_hitl
+from core.run import QUALIFICATION_PROBE_NAMES
+from driver import FIXTURE_SPIKE_IMAGE
 from adapters.observer import civil
 from adapters.observer.server import Sources, serve
 from application import observer_index as index
@@ -253,7 +258,8 @@ class DecisionCountTests(unittest.TestCase):
         self.assertEqual(held["decisions"], [1.0, 2.0, 3.0, None])
         self.assertEqual({a: held[f"decisions:{a}"] for a in core_observer.ASKS},
                          {"approve_configuration": [1.0], "approve_revision": [], "decide_claim": [3.0],
-                          "confirm_source": [], "consent_stop": [2.0], "freeze_scope": [None]})
+                          "confirm_source": [], "consent_stop": [2.0], "freeze_scope": [None],
+                          "approve_environment": []})
 
     def test_the_aggregates_break_decisions_down_by_ask(self):
         rows = [{"key": "k", "diagnostic": None, "updated": 3.0, "standing": "not_ended", "ask": None, "project": "p",
@@ -278,18 +284,25 @@ class DecisionCountTests(unittest.TestCase):
 
 class DecisionShapeTests(unittest.TestCase):
     """A decision is attached to what it decides (P3): the claim it is about (a decided claim, or the claim a confirmed
-    source supports), the source, or the configuration's plan revision; a decision about the run's end names none. Never
+    source supports), the source, the configuration's plan revision, or the environment revision; a decision about the
+    run's end names none. Never
     one overloaded ``subject`` string the reader has to guess the meaning of."""
 
-    def test_a_decision_names_the_claim_the_source_or_the_plan_it_decides(self):
+    def test_a_decision_names_the_claim_the_source_the_plan_or_the_environment_it_decides(self):
         observer = Observer(DriverSource(build_store()))
         rows, seen = {r["key"]: r for r in observer.rows()}, set()
         for key, detail in observer.details().items():
             claims = {c["id"] for c in rows[key]["claims"] or ()} | {d["claim"] for d in detail["dropped"] or ()}
             for d in detail["decisions"] or ():
-                self.assertEqual(set(d), {"asked", "claim", "source", "plan", "answer", "effect", "at", "document"}, key)
+                self.assertEqual(set(d), {"asked", "claim", "source", "plan", "environment", "answer", "effect", "at",
+                                          "document"}, key)
                 self.assertIn("digest", d["document"], key)  # PR 15: the presentation's bound document
                 seen.add(d["asked"])
+                if d["asked"] == "approve_environment":
+                    self.assertIsInstance(d["environment"], int)
+                    self.assertEqual((d["claim"], d["source"], d["plan"]), (None, None, None), key)
+                    continue
+                self.assertIsNone(d["environment"], key)
                 if d["asked"] == "decide_claim":
                     self.assertIn(d["claim"], claims, key)
                     self.assertEqual((d["source"], d["plan"]), (None, None))
@@ -302,7 +315,8 @@ class DecisionShapeTests(unittest.TestCase):
                     self.assertEqual((d["claim"], d["source"]), (None, None))
                 else:
                     self.assertEqual((d["claim"], d["source"], d["plan"]), (None, None, None), key)
-        self.assertLessEqual({"decide_claim", "confirm_source", "approve_configuration", "consent_stop"}, seen)
+        self.assertLessEqual({"decide_claim", "confirm_source", "approve_configuration", "consent_stop",
+                              "approve_environment"}, seen)
 
 
 class AutoDecisionStandingTests(unittest.TestCase):
@@ -523,6 +537,137 @@ class DemoStoreTests(unittest.TestCase):
         self.assertEqual(demo_goals(40, seed=3), demo_goals(40, seed=3))
         self.assertNotEqual(demo_goals(40, seed=3), demo_goals(40, seed=4))
         self.assertEqual(len(set(g for g, _ in demo_goals(120, seed=3))), 120)
+
+
+class EnvironmentStepTests(unittest.TestCase):
+    """The environment step as the observer reads it (spec 7.2 §7): each answer to an environment revision is one
+    decision row at the write that recorded it, the binding is told from a later failure, and each spike names the
+    qualification it ran under."""
+
+    UNBOUND, BOUND, STALE, FAILED = core_observer.QUALIFICATION_STANDINGS
+    PROBE_FAILED = GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value
+    STALE_DAEMON = GenericUnavailableReason.QUALIFICATION_STALE_DAEMON.value
+
+    def begin(self):
+        b = _Builder()
+        run = b.begin("quarry", "s-environment", "Measure the crusher.", _graph(
+            "C0", [("C0", "needs-experiment", "The crusher clears the load.")], []), qualifiable=True)
+        return b, run
+
+    @staticmethod
+    def written(b, run) -> float:
+        """The time of the run's latest write."""
+        return b.store.timeline.read(decode_handle(run))[-1]["at"]
+
+    @staticmethod
+    def sheet(b):
+        observer = Observer(DriverSource(b.store))
+        return observer.sheet(observer.rows()[0]["key"])
+
+    def test_each_environment_answer_is_one_row_at_the_write_that_recorded_it(self):
+        b, run = self.begin()
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        b.present_environment(run, "shown")
+        shown = self.written(b, run)
+        b.present_environment(run, "shown-again")
+        b.answer_environment("shown-again", "reject")
+        rejected = self.written(b, run)
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        b.present_environment(run, "approved", "approve")
+        approved = self.written(b, run)
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        b.present_environment(run, "open")
+        opened = self.written(b, run)
+        rows = [d for d in self.sheet(b)["decisions"] if d["asked"] == core_observer.ENVIRONMENT_ASK]
+        answers = core_observer.ENVIRONMENT_ANSWERS
+        self.assertEqual([(d["environment"], (d["answer"], d["effect"]), d["at"]) for d in rows],
+                         [(1, answers["reject"], rejected), (2, answers["approve"], approved),
+                          (3, answers["present"], opened)],
+                         "the presentation the answer superseded is not listed; an answer is timed by its own write")
+        self.assertNotIn(shown, [d["at"] for d in rows])
+        listed = json.loads((ROOT / "contracts/empirica-ui-view/v1/run.schema.json").read_text())[
+            "properties"]["decisions"]["oneOf"]
+        decision = next(o for o in listed if o["type"] == "array")["items"]["properties"]
+        for d in rows:
+            self.assertIn(d["answer"], decision["answer"]["enum"], "the contract's answer")
+            self.assertIn(d["effect"], decision["effect"]["enum"], "the contract's effect")
+        self.assertEqual(len({d["effect"] for d in rows}), len(rows), "each outcome has its own effect")
+        for d in rows:
+            self.assertEqual(d["document"]["status"], "verified")
+            self.assertEqual((d["document"]["body"]["kind"], d["document"]["body"]["revision"]),
+                             (core_hitl.ENVIRONMENT, d["environment"]))
+
+    def test_an_environment_ask_is_timed_by_the_write_that_proposed_the_revision(self):
+        b, run = self.begin()
+        b.research(run, "C0", ref="crusher/load.md")
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        proposed = self.written(b, run)
+        b.present_environment(run, "shown")
+        b.present_environment(run, "shown-again")
+        row = self.sheet(b)["row"]
+        self.assertEqual((row["ask"], row["asked_at"]), (core_observer.ENVIRONMENT_ASK, proposed),
+                         "neither a presentation nor a re-presentation resets it")
+        b.answer_environment("shown-again", "approve")
+        self.assertIsNone(self.sheet(b)["row"]["ask"], "an approved revision asks the human nothing")
+
+    def test_the_binding_is_told_from_a_later_failure_and_each_spike_names_its_qualification(self):
+        b, run = self.begin()
+        self.assertIsNone(self.sheet(b)["environment"], "no step before a proposal")
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        b.present_environment(run, "approved", "approve")
+        steps = [self.sheet(b)["environment"]]
+        b.qualify(run, self.PROBE_FAILED, QUALIFICATION_PROBE_NAMES[0])
+        steps.append(self.sheet(b)["environment"])
+        b.qualify(run)
+        steps.append(self.sheet(b)["environment"])
+        b.research(run, "C0", ref="crusher/load.md")
+        b.spike(run, "C0", "python bench/crusher.py", {"crusher/load.md": b"sample load\n"})
+        b.qualify(run, self.STALE_DAEMON)
+        detail = self.sheet(b)
+        steps.append(detail["environment"])
+        self.assertEqual([s["standing"] for s in steps], [self.UNBOUND, self.FAILED, self.BOUND, self.STALE])
+        self.assertEqual([s["active"] and s["active"]["seq"] for s in steps], [None, None, 2, 2],
+                         "a later failure keeps the binding installed")
+        final = steps[-1]
+        self.assertEqual([(a["seq"], a["revision"], a["reason"], a["probe"]) for a in final["attempts"]],
+                         [(1, 1, self.PROBE_FAILED, QUALIFICATION_PROBE_NAMES[0]), (2, 1, None, None),
+                          (3, 1, self.STALE_DAEMON, None)])
+        self.assertEqual(final["active"]["record_digest"], final["attempts"][1]["record_digest"])
+        self.assertEqual({s["attempts_max"] for s in steps}, {core_environment.MAX_QUALIFICATION_ATTEMPTS})
+        self.assertEqual([(r["revision"], r["state"]) for r in final["revisions"]], [(1, core_environment.APPROVED)])
+        (proof,) = next(c for c in detail["claims"] if c["id"] == "C0")["proof"]
+        self.assertEqual(proof["lineage"], {"attempt": 2, "revision": 1,
+                                            "image_id": proof["request"]["image"]["sealed_id"]})
+
+
+    def test_a_timeline_an_earlier_writer_kept_times_no_environment_fact(self):
+        b, run = self.begin()
+        b.research(run, "C0", ref="crusher/load.md")
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+        b.present_environment(run, "shown")
+
+        class Earlier(DriverSource):
+            def timeline(self, key):
+                return [{**e, "environment": None} for e in super().timeline(key)]
+        observer = Observer(Earlier(b.store))
+        detail = observer.sheet(observer.rows()[0]["key"])
+        self.assertEqual((detail["row"]["ask"], detail["row"]["asked_at"]), (core_observer.ENVIRONMENT_ASK, None))
+        self.assertEqual([d["at"] for d in detail["decisions"] if d["environment"] is not None], [None],
+                         "unknown, never another write's time")
+
+    def test_a_run_read_in_part_still_shows_its_environment_step(self):
+        b, run = self.begin()
+        b.propose_environment(run, [FIXTURE_SPIKE_IMAGE])
+
+        class Lost(DriverSource):
+            def history(self, key):
+                return None
+        observer = Observer(Lost(b.store))
+        detail = observer.sheet(observer.rows()[0]["key"])
+        self.assertIsNotNone(detail["row"]["diagnostic"])
+        whole = self.sheet(b)["environment"]
+        self.assertIsNotNone(whole)
+        self.assertEqual(detail["environment"], whole, "the state is read; only the history is not")
 
 
 class RevisionTests(unittest.TestCase):

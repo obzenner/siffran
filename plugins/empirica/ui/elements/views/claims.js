@@ -119,11 +119,17 @@ function resultHtml(result) {
   </section>`;
 }
 
+/** The qualification a request was sealed under: its attempt and environment revision, as the observer resolved them. */
+function lineageHtml(lineage) {
+  const words = lineage.attempt === null ? t("spike.lineage.unknown") : t("spike.lineage", { attempt: num(lineage.attempt), revision: num(lineage.revision) });
+  return `<p class="text-xs text-muted-foreground" data-spike-lineage>${words}</p>`;
+}
+
 /** Generic immutable requests and admitted results; disclosures preserve narrow layouts and read-only semantics. */
 function spikesHtml(proof) {
   if (!proof.length) return "";
   const one = (item) => `<article class="flex min-w-0 flex-col gap-s" data-spike-proof>
-    <p class="text-xs text-muted-foreground">${t(`spike.${item.state}`)}</p>${requestHtml(item.request)}${resultHtml(item.result)}</article>`;
+    <p class="text-xs text-muted-foreground">${t(`spike.${item.state}`)}</p>${lineageHtml(item.lineage)}${requestHtml(item.request)}${resultHtml(item.result)}</article>`;
   return fact(t("fact.proof"), list(proof.map(one)));
 }
 

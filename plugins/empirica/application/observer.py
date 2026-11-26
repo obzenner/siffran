@@ -41,6 +41,7 @@ from typing import Any, Protocol
 
 from core import governance
 from core import observer as _core
+from core.environment import superseded_history
 from core.evaluation import digest
 from core.records import Corrupt, Present, RunKey
 
@@ -188,13 +189,25 @@ class Times:
         return max(found, key=lambda e: e["seq"])["at"] if found else None
 
     def configuration(self, state: Any) -> dict[str, Any]:
-        """When the state's configuration was recorded: the write that proposed its current plan (``proposal``) and
-        the write that recorded each of its receipts (``receipts``, by id)."""
+        """When the state's configuration and environment were recorded: the write that proposed its current plan
+        (``proposal``), the write that recorded each of its receipts (``receipts``: a configuration receipt by id, an
+        environment receipt row by fingerprint) and the write that proposed its current environment revision
+        (``environment``, ``None`` without one)."""
         gov = state.governance
         current = (gov["plan_revision"], gov["proposal_digest"])
+        member = getattr(state, "environment", None)
+
+        def environment(e) -> Mapping[str, Any]:
+            return e["environment"] or {"revision": None, "digest": None, "receipts": ()}
+
         return {"proposal": self.first(lambda e: (e["plan_revision"], e["proposal_digest"]) == current),
-                "receipts": {r["id"]: self.first(lambda e, rid=r["id"]: rid in (e["receipts"] or ()))
-                             for r in gov["receipts"]}}
+                "receipts": {**{r["id"]: self.first(lambda e, rid=r["id"]: rid in (e["receipts"] or ()))
+                                for r in gov["receipts"]},
+                             **{r["fingerprint"]: self.first(lambda e, f=r["fingerprint"]: f in environment(e)["receipts"])
+                                for m in superseded_history(state) for r in m["receipts"]}},
+                "environment": None if member is None else self.first(
+                    lambda e: (environment(e)["revision"], environment(e)["digest"])
+                    == (member["revision"], member["digest"]))}
 
     def at(self, head: str | None) -> float | None:
         """The time of the write that committed manifest ``head``; ``None`` when it was not recorded exactly."""
@@ -289,6 +302,7 @@ class Observer:
         # What was not read is unknown (null), never an empty list that reads as zero.
         detail = {"contract": CONTRACT, "key": row["key"], "version": version, "goal": goal,
                   "spike_backend": None if state is None else governance.plain(state.spike_backend),
+                  "environment": None if state is None else _core.environment_step(state),
                   "governance": None if state is None else _core.governance_view(_core.governance_facts(state, None)),
                   "audit": None, "stop": None, "residuals": None, "now": None, "outstanding": None, "stale": None, "author": None, "auditor": None,
                   "audits": None, "dropped": None, "decisions": None, "steps": None, "claims": None}

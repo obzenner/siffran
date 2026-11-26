@@ -10,19 +10,19 @@
    },
    "audit": {
     "failed": 1,
-    "none": 9,
+    "none": 10,
     "passed": 4
    },
    "host": {
-    "claude": 9,
+    "claude": 10,
     "pi": 5
    },
    "mode": {
     "auto": 1,
-    "deliberative": 13
+    "deliberative": 14
    },
    "project": {
-    "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 2,
+    "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 3,
     "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 4,
     "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9": 6,
     "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d": 2
@@ -31,7 +31,7 @@
     "audit_pending": 1,
     "changed_since_audit": 1,
     "needs_human": 5,
-    "not_ended": 2,
+    "not_ended": 3,
     "proven": 1,
     "stopped_budget": 1,
     "stopped_frozen": 1,
@@ -40,8 +40,13 @@
   },
   "decisions_by": {
    "approve_configuration": {
-    "facts": 12,
-    "runs": 12,
+    "facts": 13,
+    "runs": 13,
+    "untimed": 0
+   },
+   "approve_environment": {
+    "facts": 2,
+    "runs": 1,
     "untimed": 0
    },
    "approve_revision": {
@@ -71,18 +76,18 @@
    }
   },
   "facts": {
-   "decisions": 18,
+   "decisions": 21,
    "failed_audits": 1,
    "refutations": 2
   },
   "not_read": 1,
   "runs": {
-   "decisions": 12,
+   "decisions": 13,
    "failed_audits": 1,
    "refutations": 2
   },
   "since": null,
-  "total": 14,
+  "total": 15,
   "untimed": {
    "decisions": 0,
    "failed_audits": 0,
@@ -107,7 +112,7 @@
    6,
    2,
    4,
-   2
+   3
   ],
   "standing": [
    1,
@@ -127,9 +132,9 @@
  "coverage": {
   "partial": 0,
   "pending": 0,
-  "read": 14,
+  "read": 15,
   "reindexing": 0,
-  "runs": 15,
+  "runs": 16,
   "unreadable": 1
  },
  "facets": {
@@ -142,19 +147,19 @@
   },
   "audit": {
    "failed": 1,
-   "none": 9,
+   "none": 10,
    "passed": 4
   },
   "host": {
-   "claude": 9,
+   "claude": 10,
    "pi": 5
   },
   "mode": {
    "auto": 1,
-   "deliberative": 13
+   "deliberative": 14
   },
   "project": {
-   "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 2,
+   "s256-0ae90cdacdb49230553a9c64137c22d1b614182a043ffdc6a6ae65af30c9ee17": 3,
    "s256-456f45fddc2e725c2948d03317e2262c2ec8e86745af28dc7b2221987b858b50": 4,
    "s256-7c82602500857aa6ed0cf38c4c3e4ec645bdcaa82c00b9155eb08be100c778a9": 6,
    "s256-c1d64b2d4cb30f1be788cc4d246ddd9fc1fe85a3eb3a85a3de33829dfaf6ce7d": 2
@@ -163,7 +168,7 @@
    "audit_pending": 1,
    "changed_since_audit": 1,
    "needs_human": 5,
-   "not_ended": 2,
+   "not_ended": 3,
    "proven": 1,
    "stopped_budget": 1,
    "stopped_frozen": 1,
@@ -172,6 +177,7 @@
  },
  "marks": {
   "attempt": [
+   1,
    1,
    1,
    1,
@@ -203,6 +209,7 @@
    4,
    4,
    12,
+   4,
    2,
    5,
    4,
@@ -220,6 +227,7 @@
    "847d720ba940",
    "4bf0bcdffdf1",
    "5e08e7f95232",
+   "8c6e5f6d1b83",
    "01174704eecc",
    "fbfc17260172",
    "e9d2410d9652",
@@ -236,6 +244,7 @@
    0,
    1,
    4,
+   2,
    2,
    3,
    1,
@@ -254,6 +263,7 @@
    3,
    0,
    0,
+   3,
    2,
    2,
    0,
@@ -271,6 +281,7 @@
    1,
    2,
    3,
+   4,
    4,
    4,
    5,
@@ -299,6 +310,7 @@
    1790602320.0,
    1790594280.0,
    1790588100.0,
+   1790603340.0,
    1790596080.0,
    1790591940.0,
    1790586000.0,
@@ -316,6 +328,7 @@
    1790603280.0,
    1790595360.0,
    1790589180.0,
+   1790604840.0,
    1790596560.0,
    1790593080.0,
    1790587260.0,
@@ -333,6 +346,7 @@
    4,
    4,
    12,
+   4,
    2,
    5,
    4,
@@ -473,12 +487,13 @@
    "name": "quarry",
    "needs": 2,
    "repo": "/work/quarry",
-   "runs": 2,
+   "runs": 3,
    "since": 1790601900.0,
    "standings": {
-    "needs_human": 2
+    "needs_human": 2,
+    "not_ended": 1
    }
   }
  ],
- "token": "sha256:af00bc48885fd23d7d0830a17565f4fb286a8cf864a37cc49524a0a3d0d916a9"
+ "token": "sha256:abd1b6e3772ba2ce56f3250aef7027e9d27e571e7bb34d6bf2f1b3b63a22df76"
 }

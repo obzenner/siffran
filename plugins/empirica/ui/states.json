@@ -470,6 +470,28 @@
       "copy": "why.removed"
     }
   },
+  "qualification": {
+    "unbound": {
+      "tone": "neutral",
+      "icon": "untested",
+      "copy": "qualification.unbound"
+    },
+    "bound": {
+      "tone": "positive",
+      "icon": "verified",
+      "copy": "qualification.bound"
+    },
+    "stale": {
+      "tone": "caution",
+      "icon": "changed",
+      "copy": "qualification.stale"
+    },
+    "failed": {
+      "tone": "negative",
+      "icon": "failed",
+      "copy": "qualification.failed"
+    }
+  },
   "unknown": {
     "tone": "neutral",
     "icon": "unknown",
