@@ -61,6 +61,19 @@ REASON_HINTS = {
     "qualification-attempts-exhausted": "the run's qualification attempts are spent; continue on the current binding, stop, or start a fresh run",
     "qualification-conflict": "the attempt lost the binding race or another attempt is running; request qualification again",
     "superseded-binding": "the spike request outlived its binding; resubmit the spike request under the new binding",
+    # The E9 host-attempt causes the run-scoped qualify transaction ends with (Empirica 7.2 §5.1):
+    # the same next-call wording the spec's reason table carries, one row per closed value.
+    "capability-unavailable": "the daemon answered with facts the support contract does not admit (an unsupported engine or platform, or a server version with no derivable major); prepare the Docker host, then request qualification again",
+    "resource-limits-unavailable": "the daemon does not enforce all of the memory, CPU and PID limits, or its SwapLimit is off so memory-swap cannot equal memory; enable the limit subsystems, then request qualification again",
+    "sandbox-scaffolding-unsafe": "the qualification's own scaffolding around the Docker runtime failed a safety check; ask the operator to prepare the host, then request qualification again",
+    "image-malformed": "an inspected image's identity, platform or projection answer was not well-formed; use a well-formed local image, then request qualification again",
+    "image-inspect-failed": "the image inspection command could not be executed or answered an error; check the local image and the Docker tooling, then request qualification again",
+    "image-inspect-timeout": "the image inspection timed out; ask the operator to steady the daemon, then request qualification again",
+    "image-inspect-output-limit": "the image inspection exceeded its output bound; ask the operator to inspect the daemon, then request qualification again",
+    "image-tool-missing": "an inspected image is missing a tool the probes need (including /bin/sh): for an image of your approved environment revision, propose a revision with an image that carries them; for the host-pinned probe image, ask the operator to repair the pinned probe path (no proposal replaces it); then request qualification again",
+    "image-uid65534-unusable": "an inspected image is not readable and executable as uid 65534 (nobody): for an image of your approved environment revision, propose a revision with one that is; for the host-pinned probe image, ask the operator to repair the pinned probe path (no proposal replaces it); then request qualification again",
+    "qualification-in-progress": "another qualification attempt holds the shared runtime: nothing was reserved or charged; wait for it, then read the run and request qualification again only if nothing is bound",
+    "qualification-interrupted": "an earlier attempt of this run died before it recorded an outcome: it stays charged, bound nothing and orphaned any record it published; request qualification again",
 }
 
 
@@ -107,8 +120,8 @@ def render_limits() -> str:
     fault_reasons = tuple(generic_spike.SPIKE_FAULT_REASONS)
     require(set(REASON_HINTS) == set(fault_reasons) and len(fault_reasons) == len(REASON_HINTS),
             "REASON_HINTS must cover the closed spike Fault reasons exactly")
-    require(all(re.fullmatch(r"[a-z]+(-[a-z]+)+", name) for name in fault_reasons),
-            "spike Fault reasons must use one hyphenated spelling")
+    require(all(re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)+", name) for name in fault_reasons),
+            "spike Fault reasons must use one hyphenated lowercase spelling")
     rows = [
         "Agent chooses | any already-local image reference (name:tag, repo@sha256 digest, full "
         "image ID, or unambiguous ID prefix) on the out-of-band path until the run-scoped "
@@ -139,11 +152,20 @@ def render_limits() -> str:
         "ask the operator",
         "Environment step | a spike becomes admissible only through the run's own "
         "environment cycle (environment proposes, the human or the approval provenance approves, "
-        "prepare, qualify binds) with the attempts a run may start bounded in the run view; the "
-        "propose half has landed and the qualify effect has not: an inadmissible qualify names its "
-        "own closed admission reason, an admissible one still refuses with the closed reason "
-        "environment.not_available charging nothing (a terminal run is inert instead, an invalid "
-        "frozen scope still blocks first), and the run keeps its current spike backend",
+        "prepare, qualify binds); StartRun binds the run alone (the unqualified reference, never "
+        "machine-wide authority, with the attempt ceiling the run view's own); an admissible qualify "
+        "reserves one charged attempt durably before any host effect (charged even when the attempt "
+        "then fails or is interrupted; invalid ingress and an exact replay of a delivery whose "
+        "attempt resolved charge nothing and return the recorded outcome), under the run's "
+        "current configuration approval; while another attempt holds the shared runtime a qualify "
+        "refuses with qualification-in-progress, and an open row whose attempt died is closed by "
+        "the next qualify as qualification-interrupted (charged, binding nothing, any record it "
+        "published orphaned) before the request is evaluated as a fresh attempt; the host attempt "
+        "runs only where the composition binds a generic Docker backend (otherwise it refuses as "
+        "the unsupported host fact, charging nothing), and its outcome is recorded by "
+        "compare-and-set against the run generation, approved revision, proposal digest and prior "
+        "binding the reservation captured: a lost race (a stop, a superseded revision, a "
+        "concurrent attempt) orphans the published record and binds nothing",
         "Probe image | the qualification probes run one host-trusted probe image pinned by digest "
         "in the Docker spike support contract (a name:tag@sha256 reference); preparation pulls "
         "it, and admission is the observable inspection of that pinned reference: some "

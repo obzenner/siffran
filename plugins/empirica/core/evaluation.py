@@ -11,7 +11,7 @@ from typing import Any
 from .canonical import canonical_digest
 from .freshness import (ActiveSpikeHead, FileBinding, ObservationState, evaluate_freshness, is_digest256,
                         valid_claim_id)
-from .run import OperationalState
+from .run import ATTEMPT_OUTCOMES, OperationalState
 from . import citations, confirmation, environment, governance, spike_plan, spike_plan_draft
 
 SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"]),
@@ -20,10 +20,14 @@ HOST_TIER_UNSUPPORTED = {"foreground_only": "host.async_unsupported",
                          "observational": "host.audit_output_unobservable"}
 READ_COMMANDS = frozenset({"GetRun", "GetArgument", "RestoreRun"})
 # The run-scoped environment qualification actions (Empirica 7.2 §5): the ``environment`` action admits
-# one closed proposal as a new revision (E7); the ``qualify`` action decides admission (E7) while its
-# host effect is still missing, so an admissible qualify refuses with the one closed reason below.
+# one closed proposal as a new revision (E7), and the ``qualify`` action reserves one charged host
+# qualification attempt row for the latest approved revision (E9 step 1) — the host effect, its
+# journalling and the binding compare-and-set are the application transaction's, never this
+# pure decision's (its charging is durable exactly because the reservation is a state write).
 ENVIRONMENT_ACTIONS = frozenset({"environment", "qualify"})
-ENVIRONMENT_NOT_AVAILABLE = "environment.not_available"
+#: The attempt outcomes' first member is the reservation's own (``reserved``, the state
+#: contract's enum owner ``core.run.ATTEMPT_OUTCOMES``), read from its owner, never retyped.
+ATTEMPT_RESERVED = ATTEMPT_OUTCOMES[0]
 
 
 def _plain(value: Any) -> Any:
@@ -889,6 +893,39 @@ def _submit_environment(snapshot: EvaluationSnapshot, command: Mapping[str, Any]
         state, environment=member, environment_history=environment.superseded_history(state)))
 
 
+def _reserve_qualification_attempt(snapshot: EvaluationSnapshot, delivery: object) -> Decision:
+    """Reserve one charged host qualification attempt for the latest approved revision
+    (Empirica 7.2 §5 step 1, the pure half of E9's transaction).
+
+    The reservation is itself the state write planned here, so charging is durable before any
+    host effect: the application commits it first, then runs the host attempt under its row's
+    binding and performs the binding compare-and-set (losing orphans the record and binds
+    nothing). The row names the approved revision, one monotonic started stamp and the identity
+    ``environment.qualification_attempt_id`` derives from its ordinal and the delivery that asked
+    for it; the state contract keeps its shape, and the state's row bound (the one generated
+    ``core.environment.MAX_QUALIFICATION_ATTEMPTS`` the admission already spent) is the ceiling's
+    only owner.
+
+    Every decision here is a fresh attempt: the application settles an exact delivery replay
+    (a resolved row of this very delivery) and an unresolved earlier row (live, or interrupted
+    and closed) before it asks this decision, so a row is never reused and never resumed."""
+    state = snapshot.state
+    member = state.environment
+    rows = tuple(state.qualification_attempts)
+    row = {
+        "attempt_id": environment.qualification_attempt_id(len(rows) + 1, delivery),
+        "revision": member["revision"],
+        "started_stamp": state.stamp_seq + 1,
+        "outcome": ATTEMPT_RESERVED,
+        "record_digest": None,
+        "reason": None,
+        "probe": None,
+    }
+    return _decision(snapshot, replace(
+        state, stamp_seq=state.stamp_seq + 1,
+        qualification_attempts=rows + (row,)))
+
+
 def validate_sealed_spike_request(
     action: object,
     sealed_facts: object,
@@ -1706,9 +1743,10 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
 
     Branches, in order: an invalid frozen scope blocks; a non-active (terminal) run allows only
     reads and ``stop``/``report_convergence`` evaluation and is otherwise ``Inert``; read commands
-    are allowed; a graphless ``stop`` ends ``stopped_residual``; the declared coming environment
-    actions (``environment``, ``qualify``) refuse with the closed reason
-    ``environment.not_available`` before any bootstrap, graph or governance fact; an operation whose bootstrap
+    are allowed; a graphless ``stop`` ends ``stopped_residual``; the environment step's two
+    author actions decide before any bootstrap, graph or governance fact (``environment`` admits
+    its revision, and ``qualify`` reserves its charged attempt row for the latest approved
+    revision — an inadmissible one blocking with its own closed admission reason); an operation whose bootstrap
     precondition is unmet blocks with that reason; governed work is blocked until the current
     proposal is approved (preparation actions excepted); then each ``ObserveAction`` kind
     (route, investigate, graph, research, freeze, configure_run, child_reserve; any other is
@@ -1743,12 +1781,19 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
         if environment_kind == "environment":
             return _submit_environment(snapshot, command)
         if environment_kind == "qualify":
-            # E7 owns the admission decision only; the host attempt, its charging and its binding land with E9
-            # (spec §5 step 1). While the effect is missing, the one closed refusal keeps failing honest:
-            # nothing is attempted, nothing is charged, no binding changes, in any active run state.
+            # E7 owns the admission decision; E9 owns the transaction this decision opens (spec
+            # §5 step 1). The reservation itself is a durable state write planned here, so the
+            # attempt is charged even if the host effect then fails or is interrupted; only
+            # invalid ingress and an exact replay reserve nothing.
             reason = environment.qualify_admission(state)
-            return _decision(snapshot, state, "Block",
-                            reason=reason or ENVIRONMENT_NOT_AVAILABLE)
+            if reason:
+                return _decision(snapshot, state, "Block", reason=reason)
+            # The host effect starts only under the run's current configuration approval
+            # (spec §5, order R1): a raised configuration waiting for consent refuses with the
+            # existing governance reason before anything is reserved or attempted.
+            if reason := governance.admission(state.governance):
+                return _decision(snapshot, state, "Block", reason=reason)
+            return _reserve_qualification_attempt(snapshot, command.get("delivery_id"))
     operation = (command["action"]["kind"] if kind == "ObserveAction"
                  and command["action"]["kind"] in {"route", "graph", "configure_run", "investigate"}
                  else "report_convergence" if kind == "EvaluateRun"

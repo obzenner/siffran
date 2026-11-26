@@ -22,10 +22,11 @@ from __future__ import annotations
 import json
 import re
 import time
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Any, Callable, Iterator, Mapping, Sequence
 
 from adapters.state import fsio
 from application import generic_spike as application
@@ -123,33 +124,36 @@ class RunQualificationReason(str, Enum):
     Additive only; existing values are never collapsed or rewritten.
 
     The attempt-failure values are bound to the public reason registry — the
-    ``GenericUnavailableReason`` members whose closed set the response schema mirrors
-    as ``qualification.last_failure.reason`` (``QUALIFICATION_FAILURE_REASONS``) — by
-    member, never by a second literal: renaming or removing one in the registry fails
-    this module at import instead of drifting. The owner never emits the
-    CAS/conflict value: the binding CAS the caller performs owns it. The remaining
-    values are owner-side admission and diagnostic refusals the public registry does
-    not carry."""
+    ``GenericUnavailableReason`` and ``GenericPreparationReason`` members whose closed set
+    the response schema mirrors as ``qualification.last_failure.reason``
+    (``QUALIFICATION_FAILURE_REASONS``) — by member, never by a second literal: renaming or
+    removing one in the registry fails this module at import instead of drifting. The owner
+    never emits the CAS/conflict value: the binding CAS the caller performs owns it. The one
+    closed, documented exception is ``invalid-input``: ingress is validated before any
+    reservation (the application transaction derives every binding fact from committed,
+    validated state), so the owner's invalid-input outcome is never an attempt failure — the
+    port refuses it fail-closed and no failure word is fabricated in its place."""
     INVALID_INPUT = "invalid-input"
     PROBE_IMAGE_UNTRUSTED = application.GenericUnavailableReason.PROBE_IMAGE_UNTRUSTED.value
     DOCKER_UNREACHABLE = application.GenericUnavailableReason.DOCKER_UNREACHABLE.value
-    RESOURCE_LIMITS_UNAVAILABLE = "resource-limits-unavailable"
-    CAPABILITY_UNAVAILABLE = "capability-unavailable"
-    SANDBOX_UNSAFE = "sandbox-scaffolding-unsafe"
+    RESOURCE_LIMITS_UNAVAILABLE = \
+        application.GenericUnavailableReason.RESOURCE_LIMITS_UNAVAILABLE.value
+    CAPABILITY_UNAVAILABLE = application.GenericUnavailableReason.CAPABILITY_UNAVAILABLE.value
+    SANDBOX_UNSAFE = application.GenericUnavailableReason.SANDBOX_SCAFFOLDING_UNSAFE.value
     STALE_DAEMON = application.GenericUnavailableReason.QUALIFICATION_STALE_DAEMON.value
     STALE_IMPLEMENTATION = \
         application.GenericUnavailableReason.QUALIFICATION_STALE_IMPLEMENTATION.value
     PROBE_FAILED = application.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED.value
-    IMAGE_NOT_LOCAL = "image-not-local"
-    IMAGE_REFERENCE_AMBIGUOUS = "image-reference-ambiguous"
-    IMAGE_MALFORMED = "image-malformed"
-    IMAGE_INSPECT_FAILED = "image-inspect-failed"
-    IMAGE_INSPECT_TIMEOUT = "image-inspect-timeout"
-    IMAGE_INSPECT_OUTPUT_LIMIT = "image-inspect-output-limit"
-    IMAGE_PLATFORM_MISMATCH = "image-platform-mismatch"
-    IMAGE_DECLARES_VOLUMES = "image-declares-volumes"
-    IMAGE_TOOL_MISSING = "image-tool-missing"
-    IMAGE_UID_UNUSABLE = "image-uid65534-unusable"
+    IMAGE_NOT_LOCAL = application.GenericPreparationReason.IMAGE_NOT_LOCAL.value
+    IMAGE_REFERENCE_AMBIGUOUS = application.GenericPreparationReason.IMAGE_REFERENCE_AMBIGUOUS.value
+    IMAGE_MALFORMED = application.GenericUnavailableReason.IMAGE_MALFORMED.value
+    IMAGE_INSPECT_FAILED = application.GenericUnavailableReason.IMAGE_INSPECT_FAILED.value
+    IMAGE_INSPECT_TIMEOUT = application.GenericUnavailableReason.IMAGE_INSPECT_TIMEOUT.value
+    IMAGE_INSPECT_OUTPUT_LIMIT = application.GenericUnavailableReason.IMAGE_INSPECT_OUTPUT_LIMIT.value
+    IMAGE_PLATFORM_MISMATCH = application.GenericPreparationReason.IMAGE_PLATFORM_MISMATCH.value
+    IMAGE_DECLARES_VOLUMES = application.GenericPreparationReason.IMAGE_DECLARES_VOLUMES.value
+    IMAGE_TOOL_MISSING = application.GenericUnavailableReason.IMAGE_TOOL_MISSING.value
+    IMAGE_UID_UNUSABLE = application.GenericUnavailableReason.IMAGE_UID_UNUSABLE.value
     EGRESS_UNAVAILABLE = application.GenericUnavailableReason.NETWORK_EGRESS_UNAVAILABLE.value
     CLEANUP_UNAVAILABLE = application.GenericUnavailableReason.CLEANUP_UNAVAILABLE.value
     DEADLINE_EXCEEDED = application.GenericUnavailableReason.QUALIFICATION_DEADLINE_EXCEEDED.value
@@ -223,14 +227,18 @@ class RunBinding:
             raise ValueError("run qualification identifier is not closed: " + where)
         return value
 
+    @staticmethod
+    def _counter(value: object, where: str) -> int:
+        if type(value) is not int or isinstance(value, bool) or not 1 <= value < 2 ** 31:
+            raise ValueError("run qualification counter is not closed: " + where)
+        return value
+
     def __post_init__(self) -> None:
         self._identifier(self.project_id, "project_id")
         self._identifier(self.run_id, "run_id")
         self._identifier(self.attempt_id, "attempt_id")
         for name in ("generation", "revision"):
-            value = getattr(self, name)
-            if type(value) is not int or isinstance(value, bool) or not 1 <= value < 2 ** 31:
-                raise ValueError("run qualification counter is not closed: " + name)
+            self._counter(getattr(self, name), name)
         try:
             validate_digest256(self.proposal_digest)
         except ValueError as exc:
@@ -1120,6 +1128,63 @@ def _concrete_effects(resolved: authority.ResolvedGenericAuthority) \
                                       dict(resolved.environment), resolved.work_directory)
 
 
+def _qualification_budget(value: object) -> float:
+    """The one bound check of a qualification budget in seconds (``None`` is the default)."""
+    if value is None:
+        return float(DEFAULT_QUALIFICATION_SECONDS)
+    if type(value) is not float and type(value) is not int:
+        raise ValueError("run qualification budget is malformed")
+    if not 0 < value <= DEFAULT_QUALIFICATION_SECONDS:
+        raise ValueError("run qualification budget is outside its bound")
+    return float(value)
+
+
+def _prepared_store(sandbox_root: Path | None) -> tuple[Path, "common.ExecutionStore"]:
+    """The sandbox root and its execution store, scaffolding and journal store prepared."""
+    root = (common.sandbox_home() if sandbox_root is None
+            else common.canonical_authority_path(Path(sandbox_root)))
+    store = common.ExecutionStore(root)
+    store.prepare_execution_scaffolding()
+    generic_journal.GenericJournalStore(store).prepare()
+    return root, store
+
+
+class RuntimeLease:
+    """Proof that the shared runtime lock is held by the caller: made only by
+    :func:`hold_runtime_lock`, valid until that context exits. ``deadline`` is the one bound
+    (on the clock the lease was taken with) that every step run under the lease shares."""
+
+    __slots__ = ("root", "held", "deadline")
+
+    def __init__(self, root: Path, deadline: float) -> None:
+        self.root, self.held, self.deadline = root, True, deadline
+
+
+@contextmanager
+def hold_runtime_lock(
+    *, sandbox_root: Path | None = None, clock: Callable[[], float] = time.monotonic,
+) -> Iterator[RuntimeLease]:
+    """Take the shared runtime lock without waiting and hold it for the context: an attempt or a
+    settle given the lease runs under it instead of taking its own, so a caller can order its own
+    durable steps (the transaction's reservation) inside the lock. The lease carries the one
+    host deadline of the whole qualify: a settle and the attempt run under it each spend what is
+    left of it. A lock another holder has raises :class:`common.RuntimeLockBusy` at once."""
+    root, store = _prepared_store(sandbox_root)
+    lease = RuntimeLease(root, clock() + DEFAULT_QUALIFICATION_SECONDS)
+    with common.runtime_lock(store, lease.deadline, clock=clock, blocking=False):
+        try:
+            yield lease
+        finally:
+            lease.held = False
+
+
+def _lease_refusal(lease: object) -> RunQualificationFailed | None:
+    if type(lease) is RuntimeLease and lease.held:
+        return None
+    return RunQualificationFailed(RunQualificationReason.INVALID_INPUT,
+                                  "run qualification runtime lease is not held")
+
+
 def qualify_run_environment(
     *,
     project_id: str,
@@ -1140,6 +1205,7 @@ def qualify_run_environment(
     kernel_factory: Callable[..., qualification.QualificationProbeKernel] = qualification.ProductionProbeKernel,
     sandbox_root: Path | None = None,
     clock: Callable[[], float] = time.monotonic,
+    lease: RuntimeLease | None = None,
 ) -> RunQualificationOutcome:
     """Run one qualification attempt for the run binding and write the `/3` record.
 
@@ -1155,7 +1221,8 @@ def qualify_run_environment(
     kernel postflights and the final re-observation — at that pinned endpoint, never a
     fresh context resolution. Expiry anywhere reports the deadline reason: when the budget is gone,
     every stage error path is converted to the deadline reason before the outcome is
-    built.
+    built. With a ``lease`` the caller already holds the runtime lock (``hold_runtime_lock``) and
+    the attempt runs under it instead of taking its own, in the lease's sandbox root.
     """
     # --- ingress -------------------------------------------------------------
     try:
@@ -1169,19 +1236,15 @@ def qualify_run_environment(
             raise ValueError("run qualification spike images are not closed")
         for item in spike_images:
             spike_plan.validate_local_image_reference(item)
-        if type(qualification_seconds) is not float and type(qualification_seconds) is not int:
-            if qualification_seconds is None:
-                qualification_seconds = DEFAULT_QUALIFICATION_SECONDS
-            else:
-                raise ValueError("run qualification budget is malformed")
-        if not 0 < qualification_seconds <= DEFAULT_QUALIFICATION_SECONDS:
-            raise ValueError("run qualification budget is outside its bound")
+        budget = _qualification_budget(qualification_seconds)
         docker_cli = Path(docker_cli)
     except (ValueError, TypeError, OSError) as exc:
         return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
-    budget = float(qualification_seconds)
+    refused = None if lease is None else _lease_refusal(lease)
+    if refused is not None:
+        return refused
     began = clock()
-    deadline = began + budget
+    deadline = began + budget if lease is None else min(began + budget, lease.deadline)
     # The stage label for deadline details: the inner attempt keeps it current.
     stage: list[str] = ["the runtime lock wait"]
 
@@ -1197,10 +1260,10 @@ def qualify_run_environment(
                                implementation_inspector=implementation_inspector,
                                image_runner=image_runner, effects_factory=effects_factory,
                                kernel_factory=kernel_factory, sandbox_root=sandbox_root,
-                               began=began, clock=clock, stage=stage)
+                               began=began, clock=clock, stage=stage, lease=lease)
     except _RunFailure as exc:
         if clock() >= deadline:
-            # Expiry anywhere reports the deadline reason (E5 review, blocking 4), including
+            # Expiry anywhere reports the deadline reason, including
             # a stage error that fired while the budget was already gone.
             return deadline_outcome()
         return RunQualificationFailed(exc.reason, exc.detail, exc.probe)
@@ -1236,6 +1299,134 @@ def qualify_run_environment(
                                       "run qualification failed: " + str(exc))
 
 
+def _recover_prior_journals(
+    store: "common.ExecutionStore", root: Path, *, binding_seed: Mapping[str, Any],
+    profile_id: str, docker_cli: Path,
+    runtime_inspector: Callable[..., authority.GenericRuntimeInspection],
+    effects_factory: EffectsStage | None, deadline: float, clock: Callable[[], float],
+    stage: list[str],
+) -> tuple[Mapping[str, Any], Path, Path, str, EffectsStage]:
+    """Under the already-held shared runtime lock: observe the authority once, create the
+    run-scoped scaffolding directories, and recover every prior journal on the pinned daemon.
+    Shared by the attempt (which then admits and probes) and by the settling of an interrupted
+    attempt, so recovery has one owner. Returns the observed facts, the profile's private config
+    directory, the work directory, the seed digest and the effects selector."""
+    # Initial discovery: one observation (context, version, info including
+    # ``daemon_id``) that resolves the endpoint once — reads only, no admission.
+    # Recovery precedes the new attempt's admission, so a capability or
+    # implementation refusal must never skip journal recovery.
+    stage[0] = "the authority observation"
+    observed = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
+                                 deadline=deadline, clock=clock, stage=stage[0])
+    # The minimum pinned daemon observation journal recovery needs: the canonical
+    # endpoint and platform only (never capability facts, never the daemon
+    # identifier), so a daemon that now refuses capability still gets recovered.
+    try:
+        identity = authority.pinned_daemon_identity(observed)
+    except authority.GenericQualificationError as exc:
+        raise _RunFailure(RunQualificationReason.DOCKER_UNREACHABLE,
+                          "the Docker authority cannot be identified for recovery") from exc
+    # Private per-attempt authority scaffolding under the run-scoped namespace —
+    # directories only. The config-emptiness admission runs after recovery.
+    namespace = root / NAMESPACE
+    config = namespace / "configs" / profile_id
+    work = namespace / "work"
+    for directory in (namespace, config, work, namespace / "records"):
+        common.safe_directory(directory, create=True)
+    seed = canonical_digest({"schema": QUALIFICATION_RECORD_SCHEMA,
+                             "attempt": binding_seed})
+    recovery_cli = Path(observed.get("docker_cli", str(docker_cli)))
+    recovery = authority.ResolvedGenericAuthority(
+        application.GenericQualifiedBackend("docker", profile_id, seed, seed),
+        recovery_cli, tuple(sorted({
+            "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": identity["endpoint"],
+            "DOCKER_CONFIG": str(config),
+        }.items())), work, identity["server_os"], identity["server_architecture"],
+        observed.get("ncpu", 0), observed.get("mem_total", 0), dict(observed))
+    selected_effects = effects_factory or (lambda current, operation, name:
+                                           _concrete_effects(current))
+    # Recover every prior journal under the shared runtime lock, on the pinned
+    # daemon, before any part of the new attempt's admission.
+    stage[0] = "the prior journal recovery"
+    effects = selected_effects(recovery, None, "recovery")
+    try:
+        execution.recover_generic_operations(
+            store, effects, authority=identity, deadline=deadline, clock=clock)
+    finally:
+        effects.close()
+    return observed, config, work, seed, selected_effects
+
+
+def settle_interrupted_attempt(
+    *,
+    project_id: str,
+    run_id: str,
+    generation: int,
+    attempt_id: str,
+    profile_id: str,
+    docker_cli: Path,
+    lease: RuntimeLease,
+    on_settled: Callable[[], None],
+    qualification_seconds: float | None = None,
+    runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_observed_runtime,
+    effects_factory: EffectsStage | None = None,
+    clock: Callable[[], float] = time.monotonic,
+) -> bool | RunQualificationFailed:
+    """Settle one open attempt row no live attempt drives (Empirica 7.2 §5), under the runtime
+    lock the caller holds (``lease``, from :func:`hold_runtime_lock`): an open row seen under the
+    lock is dead, because a live attempt keeps the lock from its reservation to its outcome.
+
+    Recovers every prior journal exactly as an attempt does — the same owner, the same pinned
+    daemon — and runs ``on_settled`` (the transaction's durable closing of the row) still under
+    the lock, so no new attempt can start between the recovery and the closing. Returns ``True``
+    once settled with time left; the deadline failure when the closing landed but the qualify's
+    bound is spent (the row is closed, nothing more may be reserved under this call); or one
+    closed failure when recovery could not run (the row then stays open for a later settle). It
+    never resumes or reuses the dead attempt's effect, and never publishes a record."""
+    try:
+        for name, value in (("project_id", project_id), ("run_id", run_id),
+                            ("attempt_id", attempt_id)):
+            RunBinding._identifier(value, name)
+        RunBinding._counter(generation, "generation")
+        if type(profile_id) is not str or profile_id not in spike_plan.NETWORK_PROFILES:
+            raise ValueError("run qualification profile is unknown")
+        budget = _qualification_budget(qualification_seconds)
+        docker_cli = Path(docker_cli)
+    except (ValueError, TypeError, OSError) as exc:
+        return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
+    refused = _lease_refusal(lease)
+    if refused is not None:
+        return refused
+    deadline = min(clock() + budget, lease.deadline)
+    stage: list[str] = ["the prior journal recovery"]
+    try:
+        store = common.ExecutionStore(lease.root)
+        _recover_prior_journals(
+            store, lease.root, binding_seed={
+                "project_id": project_id, "run_id": run_id, "generation": generation,
+                "attempt_id": attempt_id},
+            profile_id=profile_id, docker_cli=docker_cli,
+            runtime_inspector=runtime_inspector, effects_factory=effects_factory,
+            deadline=deadline, clock=clock, stage=stage)
+        on_settled()
+        if clock() >= deadline:
+            # The closing is durable, but the qualify's one bound is spent: the caller must not
+            # reserve a fresh attempt that has no time to run.
+            return RunQualificationFailed(
+                RunQualificationReason.DEADLINE_EXCEEDED,
+                "run qualification deadline expired after the settle")
+        return True
+    except _RunFailure as exc:
+        return RunQualificationFailed(exc.reason, exc.detail, exc.probe)
+    except Exception as exc:
+        if clock() >= deadline:
+            return RunQualificationFailed(
+                RunQualificationReason.DEADLINE_EXCEEDED,
+                "run qualification deadline expired at: " + stage[0])
+        return RunQualificationFailed(RunQualificationReason.CAPABILITY_UNAVAILABLE,
+                                      "run qualification recovery failed: " + str(exc))
+
+
 def _qualify_locked(
     binding: RunBinding,
     spike_images: Sequence[str],
@@ -1253,56 +1444,16 @@ def _qualify_locked(
     began: float,
     clock: Callable[[], float],
     stage: list[str],
+    lease: RuntimeLease | None = None,
 ) -> RunQualificationBound:
-    root = (common.sandbox_home() if sandbox_root is None
-            else common.canonical_authority_path(Path(sandbox_root)))
-    store = common.ExecutionStore(root)
-    store.prepare_execution_scaffolding()
-    generic_journal.GenericJournalStore(store).prepare()
-    with common.runtime_lock(store, deadline, clock=clock):
-        # Initial discovery: one observation (context, version, info including
-        # ``daemon_id``) that resolves the endpoint once — reads only, no admission.
-        # Recovery precedes the new attempt's admission, so a capability or
-        # implementation refusal must never skip journal recovery (E5 review, 2).
-        stage[0] = "the authority observation"
-        observed = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
-                                     deadline=deadline, clock=clock, stage=stage[0])
-        # The minimum pinned daemon observation journal recovery needs: the canonical
-        # endpoint and platform only (never capability facts, never the daemon
-        # identifier), so a daemon that now refuses capability still gets recovered.
-        try:
-            identity = authority.pinned_daemon_identity(observed)
-        except authority.GenericQualificationError as exc:
-            raise _RunFailure(RunQualificationReason.DOCKER_UNREACHABLE,
-                              "the Docker authority cannot be identified for recovery") from exc
-        # Private per-attempt authority scaffolding under the run-scoped namespace —
-        # directories only. The config-emptiness admission runs after recovery.
-        namespace = root / NAMESPACE
-        config = namespace / "configs" / profile_id
-        work = namespace / "work"
-        for directory in (namespace, config, work, namespace / "records"):
-            common.safe_directory(directory, create=True)
-        seed = canonical_digest({"schema": QUALIFICATION_RECORD_SCHEMA,
-                                 "attempt": binding.to_data()})
-        recovery_cli = Path(observed.get("docker_cli", str(docker_cli)))
-        recovery = authority.ResolvedGenericAuthority(
-            application.GenericQualifiedBackend("docker", profile_id, seed, seed),
-            recovery_cli, tuple(sorted({
-                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": identity["endpoint"],
-                "DOCKER_CONFIG": str(config),
-            }.items())), work, identity["server_os"], identity["server_architecture"],
-            observed.get("ncpu", 0), observed.get("mem_total", 0), dict(observed))
-        selected_effects = effects_factory or (lambda current, operation, name:
-                                               _concrete_effects(current))
-        # Recover every prior journal under the shared runtime lock, on the pinned
-        # daemon, before any part of the new attempt's admission.
-        stage[0] = "the prior journal recovery"
-        effects = selected_effects(recovery, None, "recovery")
-        try:
-            execution.recover_generic_operations(
-                store, effects, authority=identity, deadline=deadline, clock=clock)
-        finally:
-            effects.close()
+    root, store = (_prepared_store(sandbox_root) if lease is None
+                   else (lease.root, common.ExecutionStore(lease.root)))
+    with (nullcontext() if lease is not None
+          else common.runtime_lock(store, deadline, clock=clock)):
+        observed, config, work, seed, selected_effects = _recover_prior_journals(
+            store, root, binding_seed=binding.to_data(), profile_id=profile_id,
+            docker_cli=docker_cli, runtime_inspector=runtime_inspector,
+            effects_factory=effects_factory, deadline=deadline, clock=clock, stage=stage)
         # --- admission of the new attempt, strictly after recovery -------------------
         # Capability admission of the same observed facts: a refusal here keeps its own
         # kept reason and has already recovered its prior journals.

@@ -149,6 +149,7 @@ class OwnerHarness:
         self.docker_cli = Path(runtime()["docker_cli"])
         self.inspector_facts = copy.deepcopy(runtime())
         self.inspector_calls = 0
+        self.on_inspect = None
         self.manifests = [{"implementation_digest": D0}]
         self.kernel_wrapper = None
         self.effects_options = {
@@ -166,6 +167,8 @@ class OwnerHarness:
 
     def _runtime_inspector(self, recorded, *, deadline, **kwargs):
         self.inspector_calls += 1
+        if self.on_inspect is not None:
+            self.on_inspect(self.inspector_calls)
         return authority.GenericRuntimeInspection(copy.deepcopy(self.inspector_facts))
 
     def _implementation_inspector(self):
@@ -185,12 +188,10 @@ class OwnerHarness:
             return self.kernel_wrapper(kernel)
         return kernel
 
-    def call(self, **overrides):
-        arguments = {
-            "project_id": "project-1", "run_id": "run-1", "generation": 1,
-            "attempt_id": self.attempt_id, "revision": 1, "proposal_digest": D0,
-            "spike_images": list(self.spike_images), "profile_id": self.profile_id,
-            "docker_cli": self.docker_cli,
+    def options(self):
+        """The owner's own injection seams — every Docker answer a fake — as the keyword set a
+        host port passes through unchanged (the bridge's ``_RunQualificationPort``)."""
+        return {
             "runtime_inspector": self.runtime_inspector,
             "pinned_reobserver": self.pinned_reobserver or self._runtime_inspector,
             "implementation_inspector": self.implementation_inspector,
@@ -198,6 +199,15 @@ class OwnerHarness:
             "kernel_factory": self.kernel_factory,
             "sandbox_root": self.root,
             "clock": self.clock,
+        }
+
+    def call(self, **overrides):
+        arguments = {
+            "project_id": "project-1", "run_id": "run-1", "generation": 1,
+            "attempt_id": self.attempt_id, "revision": 1, "proposal_digest": D0,
+            "spike_images": list(self.spike_images), "profile_id": self.profile_id,
+            "docker_cli": self.docker_cli,
+            **self.options(),
         }
         arguments.update(overrides)
         return run_owner.qualify_run_environment(**arguments)
@@ -1920,6 +1930,161 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         outcome = harness.call()
         self.assertIs(outcome.reason,
                       run_owner.RunQualificationReason.IMAGE_DECLARES_VOLUMES)
+
+
+class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
+    """Settling the open row of a dead attempt (spec §5): the shared runtime lock
+    is taken without waiting, prior journals are recovered by the attempt's own recovery owner
+    under it, and the transaction's closing runs still under it."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = (Path(self.temporary.name) / "sandbox").resolve()
+        self.root.mkdir(mode=0o700, parents=True)
+        self.root.chmod(0o700)
+        self.harness = OwnerHarness(self.root)
+        self.recoveries = []
+        original = self.harness.effects_factory
+
+        def recording(resolved, operation, name):
+            self.recoveries.append(name)
+            return original(resolved, operation, name)
+
+        self.harness.effects_factory = recording
+
+    def settle(self, on_settled, **overrides):
+        """Settle under the lease the caller holds, as the transaction does."""
+        options = self.harness.options()
+        arguments = {
+            "project_id": "project-1", "run_id": "run-1", "generation": 1,
+            "attempt_id": self.harness.attempt_id, "profile_id": self.harness.profile_id,
+            "docker_cli": self.harness.docker_cli, "on_settled": on_settled,
+            "runtime_inspector": options["runtime_inspector"],
+            "effects_factory": options["effects_factory"], "clock": options["clock"],
+        }
+        arguments.update(overrides)
+        if "lease" in arguments:
+            return run_owner.settle_interrupted_attempt(**arguments)
+        with run_owner.hold_runtime_lock(sandbox_root=self.root, clock=options["clock"]) as lease:
+            return run_owner.settle_interrupted_attempt(lease=lease, **arguments)
+
+    def test_a_free_lock_recovers_journals_and_runs_the_closing_under_the_lock(self):
+        held_during = []
+
+        def closing():
+            store = common.ExecutionStore(self.root)
+            try:
+                with common.runtime_lock(store, time.monotonic() + 1.0, blocking=False):
+                    held_during.append(False)
+            except common.RuntimeLockBusy:
+                held_during.append(True)
+
+        outcome = self.settle(closing)
+        self.assertIs(outcome, True)
+        self.assertEqual(held_during, [True], "the closing runs while the settle holds the lock")
+        self.assertEqual(self.recoveries, ["recovery"], "prior journals are recovered first")
+        self.assertEqual(self.harness.inspector_calls, 1)
+        self.assertNoRecordPublished()
+
+    def test_a_lock_another_holder_has_is_busy_at_once(self):
+        store = common.ExecutionStore(self.root)
+        store.prepare_execution_scaffolding()
+        with common.runtime_lock(store, time.monotonic() + 5.0):
+            with self.assertRaises(common.RuntimeLockBusy):
+                with run_owner.hold_runtime_lock(sandbox_root=self.root):
+                    self.fail("the lease is never granted over a held lock")
+        with run_owner.hold_runtime_lock(sandbox_root=self.root):
+            pass
+
+    def test_a_lease_that_is_not_held_is_refused_as_invalid_input(self):
+        with run_owner.hold_runtime_lock(sandbox_root=self.root) as lease:
+            pass
+        closed = []
+        for stale in (lease, None):
+            outcome = self.settle(lambda: closed.append(True), lease=stale)
+            self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+            self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual((closed, self.recoveries), ([], []))
+
+    def test_an_attempt_under_a_held_lease_runs_without_taking_the_lock_again(self):
+        """The lease is the caller's hold on the one lock: the attempt runs under it (a second
+        acquisition on another descriptor would block against the holder itself), and a lease
+        that is no longer held is refused before any effect."""
+        with run_owner.hold_runtime_lock(sandbox_root=self.root) as lease:
+            outcome = self.harness.call(lease=lease)
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        stale = self.harness.call(lease=lease)
+        self.assertIs(type(stale), run_owner.RunQualificationFailed)
+        self.assertIs(stale.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+
+    def test_a_settle_spends_only_what_is_left_of_the_lease_deadline(self):
+        """The lease carries the one bound of a qualify: time already spent under it is not given
+        back to the settle, so a settle that starts past the bound ends as the deadline failure
+        without recovering or closing the row (the settle's own budget alone would still have had room)."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        clock = self.harness.clock
+        closed = []
+        with run_owner.hold_runtime_lock(sandbox_root=self.root, clock=clock) as lease:
+            clock.advance(bound * 1.1)
+            outcome = self.settle(lambda: closed.append(True), lease=lease)
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.DEADLINE_EXCEEDED)
+        self.assertEqual((closed, self.recoveries), ([], []))
+
+    def test_a_settle_whose_closing_lands_past_the_bound_answers_the_deadline_failure(self):
+        """The closing is durable and runs, but a settle that leaves no time must not let the
+        caller reserve another attempt: it answers the deadline failure, not success."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        clock = self.harness.clock
+        closed = []
+        outcome = self.settle(lambda: (clock.advance(bound * 1.1), closed.append(True)))
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.DEADLINE_EXCEEDED)
+        self.assertEqual(closed, [True])
+
+    def test_the_budget_has_one_ingress_bound_for_the_attempt_and_the_settle(self):
+        """A budget is a positive number of seconds no larger than the qualify bound, and never a
+        boolean or text; the attempt and the settle refuse the same values before any effect."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        refused = (0, -1, bound + 0.001, True, "5", float("nan"))
+        closed = []
+        for value in refused:
+            with self.subTest(value=value):
+                settled = self.settle(lambda: closed.append(True), qualification_seconds=value)
+                attempted = self.harness.call(qualification_seconds=value)
+                for outcome in (settled, attempted):
+                    self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                    self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual((closed, self.recoveries, self.harness.inspector_calls), ([], [], 0))
+        for value in (None, bound, 0.5):
+            with self.subTest(accepted=value):
+                self.assertIs(self.settle(lambda: None, qualification_seconds=value), True)
+
+    def test_a_recovery_that_cannot_run_returns_its_closed_failure_and_never_closes(self):
+        closed = []
+
+        def unreachable(recorded, *, deadline, **kwargs):
+            raise authority.GenericQualificationError("the daemon cannot be reached")
+
+        outcome = self.settle(lambda: closed.append(True), runtime_inspector=unreachable)
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIsNot(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual(closed, [])
+
+    def test_an_unclosed_binding_is_refused_as_invalid_input_before_any_lock(self):
+        closed = []
+        outcome = self.settle(lambda: closed.append(True), attempt_id="")
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual((closed, self.recoveries), ([], []))
+
+    def assertNoRecordPublished(self):
+        records = run_owner.RunQualificationStore(self.root).records
+        self.assertFalse(records.exists() and any(records.iterdir()),
+                         "settling a dead attempt publishes no record")
 
 
 class OutcomeAndStoreGuardTests(IsolatedSandboxHomeTestCase):

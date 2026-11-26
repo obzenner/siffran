@@ -6,9 +6,11 @@ approval and investigation admission (never while a configuration is pending), r
 above the StartRun-bound host ceiling with ``profile-not-allowed``, supersedes one still-pending
 revision, and — where the configuration or delegation provenance says auto — derives the approval
 itself, fabricating no receipt. The ``qualify`` action is admissible only for the latest approved
-revision with attempts remaining; its host effect is a later node's (E9), so E7 only decides
-admission: an inadmissible qualify names its closed reason and an admissible one still refuses
-with the one closed reason ``environment.not_available``, changing nothing
+revision with attempts remaining; an inadmissible qualify names its own closed reason, and once the
+admission passes, only where the host composed a qualification port (a bound generic Docker
+backend, E9) does the reservation-and-binding transaction start — this suite composes none, so an
+admitted qualify here refuses as the unsupported host fact, charging nothing. The transaction
+itself is ``test_qualification_transaction.py``'s
 <plugins/../doc/design/specs/empirica-7.2-run-scoped-environment-qualification.md> (§4.4, §5).
 
 No contract value is restated as a literal in a test: the action samples are the public contract's
@@ -29,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from application import protocol
 from application.protocol import host_profile_id
 from application.v2 import compose
-from core.evaluation import ENVIRONMENT_NOT_AVAILABLE
 from governance_setup import AUTHOR, TEST_INVOCATION, approve_current
 from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 
@@ -348,7 +349,8 @@ class ConfigurationExclusionTests(ReasonRow):
 
 
 class QualifyAdmissionTests(ReasonRow):
-    """The qualify action decides admission only; its effect is a later node's (E9)."""
+    """The qualify admission family and the composed-out effect half (the transaction is
+    test_qualification_transaction's; the admission reasons are its pure precondition)."""
 
     def test_a_pending_revision_blocks_qualify_on_the_human(self):
         env = ServiceEnv().start().fully_approved()
@@ -361,14 +363,21 @@ class QualifyAdmissionTests(ReasonRow):
         env = ServiceEnv().start()  # not even approved: the qualify decision needs no bootstrap
         self._block(env, QUALIFY_ACTION, "environment-required")
 
-    def test_an_approved_revision_admits_but_the_effect_still_refuses_honestly(self):
-        """E7 owns the decision; E9 owns the attempt: an admissible qualify still refuses with the
-        one closed reason, and nothing is attempted, charged or bound."""
+    def test_an_approved_revision_admits_but_a_host_without_a_port_refuses_unsupported(self):
+        """E9: this suite composes no qualification port (no generic Docker backend bound), so
+        once the admission passes the request refuses as the unsupported host fact — nothing
+        attempted, charged or bound. Where a port composes, the transaction's own suite watches
+        the attempt, its charging and its binding (test_qualification_transaction.py)."""
         env = ServiceEnv(control_mode="auto").start().fully_approved()
         env.observe(copy.deepcopy(ENVIRONMENT_ACTION))
         self.assertEqual(env.state().environment["state"], "approved")
-        reason = self._block(env, QUALIFY_ACTION, ENVIRONMENT_NOT_AVAILABLE)
-        self.assertEqual(reason["parameters"], {})
+        before = copy.deepcopy(env.view())
+        result = env.observe(copy.deepcopy(QUALIFY_ACTION))
+        self.assertTrue(protocol.validate_public_result(result), result)
+        self.assertEqual(result["type"], "Fault", result)
+        self.assertEqual(result["code"], "unsupported", result)
+        self.assertEqual(env.state().qualification_attempts, ())
+        self.assertEqual(before, env.view())
 
 
 if __name__ == "__main__":

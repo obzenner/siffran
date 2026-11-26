@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import Any
 
@@ -14,14 +15,16 @@ from core.evaluation import (READ_COMMANDS, SPAWN_BUDGET, Decision, EvaluationSn
                              evaluate_snapshot, frozen_scope_invalid, plan_evidence_confirmation, plan_evidence_presentation,
                              preflight_spike_request, plan_spike_request,
                              plan_spike_result, valid_attribution)
-from core import confirmation, hitl, spike_plan, spike_plan_draft
+from core import confirmation, environment, hitl, spike_plan, spike_plan_draft
 from core.projection import (confirmation_actions, project_argument, project_runview, project_presentation,
                              recovery_actions)
 from core.ports import RunRepository
 from core.records import Conflict, Corrupt, RunKey
-from core.run import OperationalState, delegated_auto, effective_ceilings, start_admission
+from core.run import (OperationalState, delegated_auto, effective_ceilings, start_admission,
+                      ATTEMPT_OUTCOMES, QUALIFICATION_PROBE_FAILED_REASON,
+                      validate_qualification_probe_name)
 from . import protocol as _proto
-from . import run_state
+from . import run_state, qualification
 from .history_records import MANIFEST_KEYS, MANIFEST_KIND, MANIFEST_VERSION
 from .location import decode_handle, encode_handle, storage_id
 from .observation import (ObservationUnavailable, build_observation_snapshot,
@@ -34,7 +37,10 @@ from .generic_spike import (
     reobserve_generic_spike, sealed_request_facts,
     sealed_result_facts, validate_generic_harness_result,
 )
-from .ports import NullSpikeAuthoritySelector, ObservationSnapshot
+from .ports import (NullSpikeAuthoritySelector, ObservationSnapshot,
+                    QualificationAttemptRequest,
+                    QualificationAttemptBound, QualificationAttemptFailed,
+                    QualificationRuntimeBusy, QualificationSettleRequest)
 from .snapshot import (GraphInvalid, HistoryCorrupt, assemble, graph_from_history,
                        make_artifact, state_digest, traverse_history,
                        validate_investigation_history)
@@ -52,12 +58,50 @@ def _history_item(item: dict[str, Any]) -> dict[str, Any]:
     return {"artifact_id": item["artifact_id"], **item["body"]}
 
 
+def _qualification_request(key: RunKey, member: Mapping[str, Any],
+                           row: Mapping[str, Any]) -> QualificationAttemptRequest:
+    """The charged attempt's host facts, derived entirely from committed state: the run binding
+    (project and bounded storage run identifier — never the encoded public handle, which exceeds
+    the owner's identifier bound — plus the generation), the attempt row's own identity, and the approved revision's
+    proposal digest, spike-image references and profile. Never author data — the action carries
+    no payload, so an attempt is exactly the approved revision it was reserved for."""
+    proposal = _plain(member["proposal"])
+    return QualificationAttemptRequest(
+        project_id=key.project_id, run_id=key.run_id, generation=key.generation,
+        attempt_id=row["attempt_id"], revision=member["revision"],
+        proposal_digest=member["digest"],
+        spike_images=tuple(proposal["spike_images"]), profile_id=proposal["profile_id"])
+
+
+def _resolved_attempts(state: OperationalState, index: int,
+                       row: Mapping[str, Any]) -> OperationalState:
+    """The run state with one append-only attempt row resolved in its own slot: rows are never
+    reordered, dropped or rewritten beyond their own outcome resolution."""
+    rows = list(state.qualification_attempts)
+    rows[index] = row
+    return replace(state, qualification_attempts=tuple(rows))
+
+
+
 @dataclass(frozen=True)
 class Loaded:
     """One valid persisted run and its repository revision."""
 
     read: Any
     state: OperationalState
+
+
+@dataclass(frozen=True)
+class Assembled:
+    """One loaded run with the snapshot assembled from it: what a transaction body decides on."""
+
+    read: Any
+    state: OperationalState
+    snapshot: EvaluationSnapshot
+
+
+#: ``Coordinator._load_assembled`` answer: the read raced a commit, so the caller reads again.
+RETRY = object()
 
 
 @dataclass(frozen=True)
@@ -93,9 +137,14 @@ def complete_start_ceilings(command: Mapping[str, Any],
 class Coordinator:
     def __init__(self, workspace: Any, harness: Any, runs: RunRepository[Any], artifacts: Any,
                  profile_id: str, limits: Mapping[str, int], spike_authority_selector: Any = None,
-                 image_resolver: Any = None):
+                 image_resolver: Any = None, qualification_port: Any = None):
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
         self.profile_id, self.limits = profile_id, limits
+        # The host qualification port (Empirica 7.2 §5, E9): composed only where the host bound a
+        # generic Docker backend. ``None`` — the composed-out half, an unsupported profile and a
+        # degraded composition — makes StartRun bind spikes-unavailable and an admitted ``qualify`` refuse
+        # as the unsupported host fact before reserving anything.
+        self.qualification_port = qualification_port
         self.spike_authority_selector = (spike_authority_selector
                                          if spike_authority_selector is not None
                                          else NullSpikeAuthoritySelector())
@@ -212,22 +261,15 @@ class Coordinator:
             key = RunKey(latest.project_id, latest.run_id, latest.generation + 1)
         else:
             key = RunKey(storage_id(selector["project"]), storage_id(selector["session"]), 1)
-        try:
-            requested_profile = command.get("spike_profile")
-            selected = (self.spike_authority_selector.select()
-                        if requested_profile is None
-                        else self.spike_authority_selector.select(requested_profile))
-        except Exception:
-            selected = None
-        if type(selected) is GenericQualifiedBackend:
-            spike_backend = {
-                "kind": "qualified", "backend": selected.backend,
-                "profile_id": selected.profile_id,
-                "qualification_record_digest": selected.qualification_record_digest,
-                "execution_binding_digest": selected.execution_binding_digest,
-            }
-        else:
-            spike_backend = {"kind": "spikes_unavailable"}
+        # StartRun binds the run-scoped spike backend reference (Empirica 7.2 §4.2, E9): a
+        # qualified binding exists in a run only once one of this run's qualification attempts
+        # installs it by compare-and-set. Where the host composed a generic Docker backend — the
+        # qualification port is bound —
+        # the run starts unqualified; where it degraded (no backend composed, the port is None)
+        # spikes stay unavailable for the run's life. No machine-wide authority pointer or
+        # record is read on this path.
+        spike_backend = ({"kind": "unqualified"} if self.qualification_port is not None
+                         else {"kind": "spikes_unavailable"})
         empty = build_observation_snapshot((), self.workspace)
         basis_artifact = self._observation_basis_artifact(empty)
         state = self._initial_state(
@@ -289,6 +331,8 @@ class Coordinator:
         if command["type"] == "ObserveAction" and command["action"]["kind"] == "spike_request":
             return self._spike(key, command, request_id)
         environmental = command["type"] == "ObserveAction" and command["action"]["kind"] == "environment"
+        if (command["type"] == "ObserveAction" and command["action"].get("kind") == "qualify"):
+            return self._qualify(key, command, request_id)
         for _ in range(8):
             loaded = self._load(key)
             if isinstance(loaded, CorruptLoad):
@@ -696,6 +740,265 @@ class Coordinator:
             result["presentation"] = project_presentation(snapshot)
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}
 
+    def _qualify(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
+        """The ``qualify`` transaction (Empirica 7.2 §5, E9): settle, reserve, effect, CAS.
+
+        The request's identity is its delivery (``request_id``). In order, per attempt:
+
+        1. **An exact replay** — this delivery's own row already resolved — returns the recorded
+           outcome: no charge, no effect.
+        2. **The shared runtime lock**, taken without waiting before anything is reserved or
+           settled and held to the end of the call: where another attempt holds it the request
+           refuses with ``qualification-in-progress`` (nothing reserved, charged or attempted),
+           and since a live attempt keeps the lock from its reservation to its outcome, an open
+           row seen under the lock is dead. The state is then re-read under the lock.
+        3. **An open row** is recovered by the port (prior journals, under the lock) and closed by
+           this transaction, still under the lock, failed as ``qualification-interrupted``
+           (charged, binding nothing, any record it published an orphan no row names). This
+           cleanup only repairs, so it precedes the admission below and its approval gate. The
+           effect is never resumed or reused; the request is then evaluated as a fresh attempt, so
+           the ceiling refuses honestly if that was the last. The lock's lease carries the one
+           host deadline of the call: the recovery and the attempt each spend what is left of it.
+        4. The core decides admission (environment, configuration approval, ceiling); an admitted
+           qualify with no composed port refuses as the unsupported host fact.
+        5. **Reserve** one charged row durably first, before any effect, under the lock.
+        6. **Effect** through the port, then record the outcome by compare-and-set against the
+           reservation's captured generation, approved revision, proposal digest and prior binding:
+           bound installs the qualified binding; failed records the closed reason (and probe);
+           a lost compare-and-set (stop, superseded revision, resolved row, changed binding) closes
+           our own open row superseded, orphans the record and binds nothing."""
+        if not isinstance(key, RunKey):
+            return self._inert(request_id)
+        evaluated = {**command, "delivery_id": request_id}
+        port = self.qualification_port
+        settled_here = False
+        reserved = None
+        prior_binding = None
+        lease = None
+        with ExitStack() as held:
+            for _ in range(8):
+                assembled = self._load_assembled(key, command, request_id)
+                if assembled is RETRY:
+                    continue
+                if isinstance(assembled, dict):
+                    return assembled
+                read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
+                rows = state.qualification_attempts
+                # --- 1. an exact replay of this delivery's resolved attempt ---------------
+                replayed = environment.delivery_attempt_index(rows, request_id)
+                if (not settled_here and replayed is not None
+                        and rows[replayed]["outcome"] != ATTEMPT_OUTCOMES[0]):
+                    if not self._revision_unchanged(key, read.revision):
+                        continue
+                    self.last_state = state
+                    return self._recorded_qualification(request_id, snapshot, rows[replayed])
+                # --- 2. an open row (settled under the lock) -----------------------------
+                if rows and rows[-1]["outcome"] == ATTEMPT_OUTCOMES[0]:
+                    if port is None:
+                        return self._fault(request_id, "unsupported")
+                    if lease is None:
+                        lease, refusal = self._hold_runtime(held)
+                        if refusal is not None:
+                            return self._fault(request_id, *refusal)
+                        continue
+                    refusal = self._settle_open_attempt(key, read, snapshot, state, lease)
+                    if refusal is not None:
+                        return self._fault(request_id, *refusal)
+                    settled_here = True
+                    continue
+                # --- 3. the core's admission ----------------------------------------------
+                try:
+                    decision = evaluate_snapshot(snapshot, evaluated)
+                except Exception:
+                    return self._fault(request_id, "unavailable")
+                if decision.result_type != "Allow":
+                    # The admission family (environment-required | environment-pending |
+                    # environment-rejected | qualification-attempts-exhausted | the configuration
+                    # approval gate) and the frozen scope, exactly as the core decides them:
+                    # nothing attempted, charged or bound.
+                    if not self._revision_unchanged(key, read.revision):
+                        continue
+                    self.last_state = state
+                    return self._response(request_id, snapshot, decision)
+                if port is None:
+                    # The effect half is composed out (no generic Docker backend bound on this
+                    # host, or the host's profile unsupported: a degraded composition). An
+                    # admitted qualify refuses as the unsupported host fact before reserving
+                    # anything: not charged, nothing bound.
+                    return self._fault(request_id, "unsupported")
+                # --- 4. reserve, durably, under the lock, before any effect ---------------
+                if lease is None:
+                    lease, refusal = self._hold_runtime(held)
+                    if refusal is not None:
+                        return self._fault(request_id, *refusal)
+                    continue
+                try:
+                    committed, _, _, _ = self._commit(
+                        key, read.revision, snapshot, decision.intent.state, ())
+                except Exception as exc:
+                    if self._is_conflict(exc):
+                        continue
+                    return self._fault(request_id, "unavailable")
+                self.last_state = committed
+                reserved = _qualification_request(key, committed.environment,
+                                                  committed.qualification_attempts[-1])
+                prior_binding = _plain(committed.spike_backend)
+                break
+            else:
+                return self._fault(request_id, "conflict")
+            return self._attempt_and_record(
+                key, command, request_id, reserved, prior_binding, lease)
+
+    def _hold_runtime(self, held: ExitStack) -> tuple[Any, tuple[Any, ...] | None]:
+        """Take the shared runtime lock without waiting, held until ``held`` closes: the lease, or
+        the arguments of the refusal Fault — in-progress where another attempt holds the lock."""
+        try:
+            return held.enter_context(self.qualification_port.runtime_lease()), None
+        except QualificationRuntimeBusy:
+            return None, ("unavailable", qualification.QUALIFICATION_IN_PROGRESS)
+        except Exception:
+            return None, ("unavailable",)
+
+    def _settle_open_attempt(self, key: RunKey, read: Any, snapshot: EvaluationSnapshot,
+                             state: OperationalState, lease: Any) -> tuple[Any, ...] | None:
+        """The open row, seen under the lock and so dead (spec §5). ``None``: the row was closed
+        failed-interrupted after journal recovery — the caller re-reads and evaluates its request
+        afresh. Otherwise the arguments of the refusal Fault: the recovery's own closed reason when
+        it could not run, the deadline reason when the closing landed but the call's one bound is
+        spent (nothing new is reserved; the agent asks again), or a plain unavailable."""
+        rows = state.qualification_attempts
+        row = rows[-1]
+        member = state.environment
+        profile_id = (_plain(member["proposal"])["profile_id"] if member is not None
+                      else spike_plan.ISOLATED_PROFILE)
+        closing: list[str] = []
+
+        def close() -> None:
+            """Runs under the lock the port holds: the row's durable closing, by compare-and-set
+            against the revision this settle read. Never raises into the port."""
+            try:
+                self._commit(key, read.revision, snapshot, _resolved_attempts(
+                    state, len(rows) - 1, qualification.interrupted_attempt_row(row)), ())
+            except Exception as exc:
+                closing.append("conflict" if self._is_conflict(exc) else "failed")
+                return
+            closing.append("closed")
+
+        try:
+            settled = self.qualification_port.settle_interrupted_attempt(
+                QualificationSettleRequest(
+                    project_id=key.project_id, run_id=key.run_id, generation=key.generation,
+                    attempt_id=row["attempt_id"], profile_id=profile_id), close, lease)
+        except Exception:
+            return ("unavailable",)
+        if isinstance(settled, QualificationAttemptFailed):
+            try:
+                outcome = qualification.validate_attempt_outcome(settled)
+            except ValueError:
+                return ("unavailable",)
+            return ("unavailable", outcome.reason, outcome.probe)
+        if settled is True and closing and closing[-1] in {"closed", "conflict"}:
+            # Closed here — or the row was resolved or the run moved while we recovered: either
+            # way the caller re-reads and decides on what is now committed.
+            return None
+        return ("unavailable",)
+
+    def _recorded_qualification(self, request_id: str, snapshot: EvaluationSnapshot,
+                                row: Mapping[str, Any]) -> dict[str, Any]:
+        """The recorded outcome of one resolved attempt, returned to an exact replay of its
+        delivery without a charge or an effect: success reads the run as it stands; a failure or a
+        lost compare-and-set reproduces the closed Fault the original delivery carried."""
+        if row["outcome"] == "succeeded":
+            return self._allow(request_id, snapshot)
+        reason = row["reason"]
+        if reason in SPIKE_FAULT_REASONS:
+            return self._fault(request_id, "unavailable", reason, row["probe"])
+        return self._fault(request_id, "unavailable")
+
+    def _attempt_and_record(self, key: RunKey, command: dict[str, Any], request_id: str,
+                            reserved: QualificationAttemptRequest,
+                            prior_binding: Any, lease: Any) -> dict[str, Any]:
+        """Step 5: the host attempt on the durable reservation, then the outcome's
+        compare-and-set against the facts the reservation captured."""
+        # --- the host attempt, only ever after the durable reservation -------------------
+        outcome = None
+        try:
+            outcome = qualification.validate_attempt_outcome(
+                self.qualification_port.run_qualification_attempt(reserved, lease))
+        except Exception:
+            # Nothing binds and the open reservation stays charged and unresolved. A Fault
+            # without a reason is an internal host failure: the next qualify finds the open row
+            # under the lock and closes it as interrupted before it asks for a fresh one.
+            return self._fault(request_id, "unavailable")
+        # --- the outcome compare-and-set against the exact run facts ---------------------
+        conflict = False
+        failed = None
+        planned = None
+        for _ in range(8):
+            # An unreadable or vanished run records and binds nothing on a guess; a stopped run
+            # is read as it stands (its own open row closes superseded below).
+            assembled = self._load_assembled(
+                key, {"type": "GetRun", "run_id": command["run_id"]}, request_id,
+                inactive_ok=True)
+            if assembled is RETRY:
+                continue
+            if isinstance(assembled, dict):
+                return assembled
+            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
+            rows = state.qualification_attempts
+            index = next((position for position, row in enumerate(rows)
+                          if row["attempt_id"] == reserved.attempt_id), None)
+            member = state.environment
+            row_is_ours = index is not None and rows[index]["outcome"] == ATTEMPT_OUTCOMES[0]
+            # The attempt's own approved-revision window: a passed member, approved and exactly
+            # the reserved revision. Revision-window loss (superseded or withdrawn member) is
+            # still our own open row: the attempt is over and the row closes superseded.
+            revision_lost = (member is None or member["state"] != environment.APPROVED
+                             or member["revision"] != reserved.revision
+                             or member["digest"] != reserved.proposal_digest)
+            if not row_is_ours or _plain(state.spike_backend) != prior_binding:
+                # Lost compare-and-set where the row is no longer ours to close: the row was
+                # resolved by a concurrent attempt or the run's binding changed mid-attempt.
+                # The already-published record is orphaned and binds nothing.
+                conflict = True
+                break
+            if state.status != "active" or revision_lost:
+                # The run stopped during the attempt, or its revision window closed: a
+                # compare-and-set loser (spec §5). Our own still-open row records the outcome
+                # superseded, nothing binds, the already-published record stays an orphan.
+                next_state = _resolved_attempts(state, index,
+                                                qualification.superseded_attempt_row(rows[index]))
+                conflict = True
+            elif isinstance(outcome, QualificationAttemptBound):
+                next_state = replace(
+                    _resolved_attempts(state, index, qualification.bound_attempt_row(
+                        rows[index], outcome.record_digest)),
+                    spike_backend=qualification.qualified_binding(
+                        reserved.profile_id, outcome.record_digest,
+                        outcome.execution_binding_digest))
+            else:
+                next_state = _resolved_attempts(state, index, qualification.failed_attempt_row(
+                    rows[index], outcome.reason, outcome.probe))
+                failed = outcome
+            try:
+                committed, _, _, planned = self._commit(key, read.revision, snapshot,
+                                                        next_state, ())
+            except Exception as exc:
+                if self._is_conflict(exc):
+                    continue
+                return self._fault(request_id, "unavailable")
+            self.last_state = committed
+            break
+        else:
+            return self._fault(request_id, "conflict")
+        if conflict:
+            # charge recorded or concurrent-loss: the run's own recovery renders the way on.
+            return self._fault(request_id, "unavailable", qualification.QUALIFICATION_CONFLICT)
+        if failed is not None:
+            return self._fault(request_id, "unavailable", failed.reason, failed.probe)
+        self.last_snapshot = planned
+        return self._allow(request_id, planned)
+
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
         """Capture and seal once, request-CAS before effects, then result-CAS without rerun."""
         action = command["action"]
@@ -932,6 +1235,38 @@ class Coordinator:
         return assemble(state, stored, self.workspace, run_id=encode_handle(key),
                         profile_id=self.profile_id, command=command, require_graph=require_graph)
 
+    def _load_assembled(self, key: RunKey, command: dict[str, Any], request_id: str, *,
+                        require_graph: bool = False,
+                        inactive_ok: bool = False) -> Assembled | dict[str, Any] | object:
+        """One author-surface read of a run: load, classify, gate on an active run (unless
+        ``inactive_ok``) and assemble the evaluation snapshot. Returns the :class:`Assembled`
+        read, :data:`RETRY` when the persisted run moved under a failed assembly, or the closed
+        response the caller returns as it stands (corrupt, legacy, absent or inactive run, an
+        invalid graph, an unavailable observation)."""
+        loaded = self._load(key)
+        if isinstance(loaded, CorruptLoad):
+            return self._safe_block(key, request_id, "run.corrupt")
+        if isinstance(loaded, LegacyLoad):
+            return self._safe_block(key, request_id, "run.legacy")
+        if isinstance(loaded, AbsentLoad):
+            return self._inert(request_id)
+        read, state = loaded.read, loaded.state
+        if state.status != "active" and not inactive_ok:
+            return self._inert(request_id)
+        try:
+            snapshot = self._assemble(key, state, command, require_graph=require_graph)
+        except HistoryCorrupt:
+            if not self._revision_unchanged(key, read.revision):
+                return RETRY
+            return self._safe_block(key, request_id, "run.corrupt")
+        except GraphInvalid:
+            if not self._revision_unchanged(key, read.revision):
+                return RETRY
+            return self._block_from_state(key, state, command, request_id, "graph.invalid")
+        except ObservationUnavailable:
+            return self._fault(request_id, "unavailable")
+        return Assembled(read, state, snapshot)
+
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,
                 next_state: OperationalState, domain: tuple[dict[str, Any], ...],
                 additional_observations=(),
@@ -1111,7 +1446,7 @@ class Coordinator:
                 "result": {"type": "Inert", "reason": "no_run"}}
 
     @staticmethod
-    def _fault(request_id: str, code: str, reason: str | None = None):
+    def _fault(request_id: str, code: str, reason: str | None = None, probe: str | None = None):
         allowed = {"invalid_request", "unsupported", "conflict", "corrupt_run", "corrupt_artifacts", "unavailable"}
         result = {"type": "Fault", "code": code if code in allowed else "unsupported",
                   "fail_direction": "closed"}
@@ -1119,4 +1454,14 @@ class Coordinator:
             if reason not in SPIKE_FAULT_REASONS:
                 raise ValueError("spike fault reason is not closed")
             result["reason"] = reason
+            # The wire identity rule the fault schema writes (Empirica 7.2 §5.1): the probe
+            # member is required exactly when the closed reason is the probe failure, and
+            # forbidden for every other reason — read from its owners, never retyped here.
+            if reason == QUALIFICATION_PROBE_FAILED_REASON:
+                if probe is None:
+                    raise ValueError("the probe failure must name its probe")
+                validate_qualification_probe_name(probe)
+                result["probe"] = probe
+            elif probe is not None:
+                raise ValueError("only the probe failure names a probe")
         return {"protocol": _proto.protocol_id(), "request_id": request_id, "result": result}

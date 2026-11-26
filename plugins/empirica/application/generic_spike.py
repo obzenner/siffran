@@ -411,6 +411,28 @@ class GenericUnavailableReason(str, Enum):
     # each (R12), spelled exactly as their owner spells them, never collapsed into a shorter set.
     QUALIFICATION_DEADLINE_EXCEEDED = "qualification-deadline-exceeded"
     NETWORK_EGRESS_UNAVAILABLE = "network-egress-unavailable"
+    # Empirica 7.2 §5.1 (E9): the rest of the closed attempt-failure set every E5
+    # RunQualificationReason maps onto — the capability, limits and scaffolding causes and the
+    # spike-image admission family the run's qualification can end with. The image members the
+    # preparation vocabulary already carries (not-local, reference-ambiguous, platform-mismatch,
+    # declares-volumes) keep that vocabulary's spelling; the remainder are new public values
+    # with their own hints (recovery next actions) in the spike limits clause.
+    CAPABILITY_UNAVAILABLE = "capability-unavailable"
+    RESOURCE_LIMITS_UNAVAILABLE = "resource-limits-unavailable"
+    SANDBOX_SCAFFOLDING_UNSAFE = "sandbox-scaffolding-unsafe"
+    IMAGE_MALFORMED = "image-malformed"
+    IMAGE_INSPECT_FAILED = "image-inspect-failed"
+    IMAGE_INSPECT_TIMEOUT = "image-inspect-timeout"
+    IMAGE_INSPECT_OUTPUT_LIMIT = "image-inspect-output-limit"
+    IMAGE_TOOL_MISSING = "image-tool-missing"
+    IMAGE_UID_UNUSABLE = "image-uid65534-unusable"
+    # Empirica 7.2 §5 (E9): the two causes of an attempt that is not one delivery's own.
+    # ``qualification-in-progress`` refuses a qualify while another attempt of the shared runtime
+    # holds the lock (nothing reserved, nothing charged); ``qualification-interrupted`` is the
+    # cause the next qualify records on an open row whose attempt died, which stays charged and
+    # binds nothing.
+    QUALIFICATION_IN_PROGRESS = "qualification-in-progress"
+    QUALIFICATION_INTERRUPTED = "qualification-interrupted"
 
 
 # The closed agent-visible spike Fault `reason` vocabulary (public-contract `evidence/spike/limits`).
@@ -418,10 +440,16 @@ SPIKE_FAULT_REASONS = tuple(item.value for item in GenericPreparationReason) + t
     item.value for item in GenericUnavailableReason)
 
 
-# The run view's qualification.last_failure closed reason set (Empirica 7.2 §5.1): every attempt
-# failure from the reason table plus the kept /2 deadline, egress and cleanup failures — never an
-# admission reason (a refusal that never starts an attempt is not an attempt failure), never a
-# shorter list. Mirrored exactly by the response schema (validate_docker_spike_contract).
+# The run view's qualification.last_failure closed reason set (Empirica 7.2 §5.1): every
+# attempt failure the host qualification owner can end with — the E5 reason table plus the kept
+# /2 deadline, egress and cleanup failures — never an admission reason (a refusal that never
+# starts an attempt is not an attempt failure; invalid ingress and an exact replay charge
+# nothing), never a shorter list. Mirrored exactly by the response schema
+# (validate_docker_spike_contract).
+#: Every failure a qualification attempt can end with: the E5 values with a registry owner
+#: (the preparation vocabulary's image admission family and the unavailable vocabulary), plus
+#: the E9 capability, limits, scaffolding and remaining image-inspection causes — never
+#: invalid-input (that ingress failure precedes any reservation), never an admission reason.
 QUALIFICATION_FAILURE_REASONS = tuple(member.value for member in (
     GenericUnavailableReason.DOCKER_UNREACHABLE,
     GenericUnavailableReason.PROBE_IMAGE_UNTRUSTED,
@@ -431,7 +459,22 @@ QUALIFICATION_FAILURE_REASONS = tuple(member.value for member in (
     GenericUnavailableReason.QUALIFICATION_CONFLICT,
     GenericUnavailableReason.CLEANUP_UNAVAILABLE,
     GenericUnavailableReason.QUALIFICATION_DEADLINE_EXCEEDED,
-    GenericUnavailableReason.NETWORK_EGRESS_UNAVAILABLE))
+    GenericUnavailableReason.NETWORK_EGRESS_UNAVAILABLE,
+    GenericUnavailableReason.CAPABILITY_UNAVAILABLE,
+    GenericUnavailableReason.RESOURCE_LIMITS_UNAVAILABLE,
+    GenericUnavailableReason.SANDBOX_SCAFFOLDING_UNSAFE,
+    GenericPreparationReason.IMAGE_NOT_LOCAL,
+    GenericPreparationReason.IMAGE_REFERENCE_AMBIGUOUS,
+    GenericUnavailableReason.IMAGE_MALFORMED,
+    GenericUnavailableReason.IMAGE_INSPECT_FAILED,
+    GenericUnavailableReason.IMAGE_INSPECT_TIMEOUT,
+    GenericUnavailableReason.IMAGE_INSPECT_OUTPUT_LIMIT,
+    GenericPreparationReason.IMAGE_PLATFORM_MISMATCH,
+    GenericPreparationReason.IMAGE_DECLARES_VOLUMES,
+    GenericUnavailableReason.IMAGE_TOOL_MISSING,
+    GenericUnavailableReason.IMAGE_UID_UNUSABLE,
+    GenericUnavailableReason.QUALIFICATION_INTERRUPTED,
+))
 
 
 @dataclass(frozen=True, slots=True)

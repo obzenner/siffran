@@ -265,6 +265,24 @@ class QualifiedSelector:
             EXECUTION_BINDING_DIGEST)
 
 
+def bind_qualified_backend(coordinator, runs: Runs) -> None:
+    """Seed the started run with an active qualified binding — the one state change a succeeded
+    qualification attempt's compare-and-set installs (Empirica 7.2 §4.2, E9: StartRun itself
+    binds unqualified and reads no machine-wide authority). A test seam through the
+    coordinator's own commit machinery (the manifest witness chain stays intact), never a raw
+    store write."""
+    key = next(iter(runs.data))
+    read = runs.read(key)
+    state = decode_state(read.value)
+    snapshot = coordinator._assemble(
+        key, state, {"type": "GetRun", "run_id": encode_handle(key)}, require_graph=False)
+    installed = generic_spike.GenericQualifiedBackend(
+        "docker", "docker-isolated-v1", QUALIFICATION_DIGEST,
+        EXECUTION_BINDING_DIGEST).to_data()
+    coordinator._commit(key, read.revision, snapshot,
+                        replace(state, spike_backend=installed), ())
+
+
 def activate_investigation(coordinator: ProductionCoordinator, run_id: str) -> None:
     coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                         "action": {"kind": "route", "reason": "test"}}, "route")
@@ -571,6 +589,7 @@ class D7TransactionTests(unittest.TestCase):
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
                                               "kind": "ordinary"}], "edges": []}
         graph_command = {"type": "ObserveAction", "run_id": run_id,
@@ -597,6 +616,7 @@ class D7TransactionTests(unittest.TestCase):
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
                                               "kind": "ordinary"}], "edges": []}
         command = {"type": "ObserveAction", "run_id": run_id,
@@ -614,6 +634,7 @@ class D7TransactionTests(unittest.TestCase):
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         activate_investigation(coordinator, run_id)
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t", "gating": True,
                                               "kind": "ordinary"}], "edges": []}
@@ -723,6 +744,7 @@ class D7TransactionTests(unittest.TestCase):
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         baseline = runs.read_calls
         runs.bump_on_read.add(baseline + 2)  # revision validation read of the first attempt
         response = coordinator.handle({"type": "GetRun", "run_id": run_id}, "read")
@@ -736,6 +758,7 @@ class D7TransactionTests(unittest.TestCase):
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "route"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         graph = {"root": "C0", "claims": [{"id": "C0", "text": "t",
             "gating": True, "kind": "needs-experiment"}], "edges": []}
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
@@ -948,6 +971,7 @@ class D7TransactionTests(unittest.TestCase):
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         activate_investigation(coordinator, run_id)
         graph = {"root": "C0", "claims": [
             {"id": "C0", "text": "zero", "gating": True, "kind": "needs-experiment"},
@@ -1156,6 +1180,7 @@ class D7TransactionTests(unittest.TestCase):
             {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
              "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         activate_investigation(coordinator, run_id)
         graph = {"root": "C0", "claims": [
             {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
@@ -1263,6 +1288,7 @@ class D7TransactionTests(unittest.TestCase):
              "invocation": dict(TEST_INVOCATION),
              "selector": {"project": "p", "session": session}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
+        bind_qualified_backend(coordinator, runs)
         activate_investigation(coordinator, run_id)
         graph = graph or {"root": "C0", "claims": [
             {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
@@ -1415,7 +1441,9 @@ class D7TransactionTests(unittest.TestCase):
                     {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
                 self.assertEqual(response["result"]["type"], "Allow", response)
                 self.assertEqual(harness.calls, 1)
-                self.assertEqual(selector.calls, 1)
+                # E9: StartRun reads no machine-wide authority (the run binds through its own
+                # qualification), so the selector is never consulted on this path.
+                self.assertEqual(selector.calls, 0)
                 request_value = harness.arguments[0]["request"]
                 self.assertTrue(request_value.run_id.startswith("r-"))
                 self.assertEqual(request_value.backend, generic_spike.GenericQualifiedBackend(
@@ -1452,6 +1480,11 @@ class D7TransactionTests(unittest.TestCase):
         failures = tuple(
             (generic_spike.GenericHarnessUnavailable(reason), reason.value)
             for reason in generic_spike.GenericUnavailableReason
+            # The probe-failure reason never travels probe-less (Empirica 7.2 §5.1 wire
+            # identity): a spike harness cannot run qualification probes, so its member is
+            # excluded here and the legally paired Fault is covered by the qualification
+            # transaction's own suite (test_qualification_transaction.py).
+            if reason is not generic_spike.GenericUnavailableReason.QUALIFICATION_PROBE_FAILED
         ) + ((KeyboardInterrupt(), "BaseException"),)
         for failure, expected in failures:
             with self.subTest(expected=expected):

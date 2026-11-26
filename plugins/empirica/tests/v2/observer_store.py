@@ -474,7 +474,11 @@ class _Builder:
                 else "pi" if zlib.crc32(session.encode()) % 3 == 0 else "claude")
         start.setdefault("invocation", {**TEST_INVOCATION, "host": host, "signal": "v2 harness",
                                         **({} if where is None else {"session": {"label": where[0], "locator": where[1]}})})
-        self.spike_authority.qualified_next = qualified
+        # E9: a fixture run's qualification cycle is the driver's own fixture seam — StartRun
+        # binds the run-scoped unqualified reference, and the completed cycle binds the exact
+        # generic binding the fixtures' spike runs run under.
+        if qualified:
+            drv.qualify_next_generic_run()
         run_id = a.start_run(drv, goal=goal, project=project, session=session, **start)
         if surface is not None:  # none: the host has not looked for a dialog (the run's recorded surface stays ``unobserved``)
             drv.trusted_human_surface(run_id, surface)  # an attended session: evidence waits on its human

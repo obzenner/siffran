@@ -40,6 +40,7 @@ not already enforce.
 from __future__ import annotations
 
 from collections.abc import Mapping
+from contextlib import ExitStack, contextmanager
 import json
 import os
 import sys
@@ -189,6 +190,86 @@ def GenericDockerHarness(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
+#: The owner injection seams the lease and the settle take: recovery needs the discovery, the
+#: effects and the clock — never the attempt's probes; the sandbox root is the lease's.
+_SETTLE_SEAMS = frozenset({"runtime_inspector", "effects_factory", "clock"})
+_LEASE_SEAMS = frozenset({"sandbox_root", "clock"})
+
+
+class _RunQualificationPort:
+    """The host qualification port (Empirica 7.2 §5, E9), bound only where the guarded generic
+    Docker composition succeeded and the registry supports the host's profile (an execution
+    path is composed for supported profiles only, whatever approval ingress they have): every call runs E5's
+    owner (``adapters.sandbox.run_qualification``) under the run binding the transaction
+    reserved, with the approved revision's profile and spike-image references, the one 90-second
+    host deadline the owner owns, the process's frozen loaded release, and the shared runtime
+    lock the transaction holds through ``runtime_lease``. The port holds no state of its own, and
+    its closed failure mapping is the identity over every registered attempt failure; the one
+    non-failure spelling — the low-level invalid-input — is an internal impossible-after-validation
+    breach and refuses closed without an attempt failure word (the transaction treats it as an
+    internal host failure: the open reservation stays charged and the next qualify closes it as
+    interrupted).
+
+    ``owner_options`` are the owner's own injection seams (its runtime inspector, effects, sandbox
+    root and clock), empty in production; the port passes them through unchanged."""
+
+    def __init__(self, **owner_options):
+        self._owner_options = dict(owner_options)
+
+    @contextmanager
+    def runtime_lease(self):
+        from application.ports import QualificationRuntimeBusy
+        from adapters.sandbox import common, run_qualification
+        with ExitStack() as held:
+            try:
+                lease = held.enter_context(run_qualification.hold_runtime_lock(
+                    **{name: value for name, value in self._owner_options.items()
+                       if name in _LEASE_SEAMS}))
+            except common.RuntimeLockBusy:
+                raise QualificationRuntimeBusy("the runtime lock is held") from None
+            yield lease
+
+    def run_qualification_attempt(self, request, lease):
+        from application.ports import (QualificationAttemptBound,
+                                       QualificationAttemptFailed)
+        from adapters.sandbox import run_qualification
+        if lease is None:
+            raise RuntimeError("a qualification attempt runs only under the held runtime lease")
+        outcome = run_qualification.qualify_run_environment(
+            project_id=request.project_id, run_id=request.run_id,
+            generation=request.generation, attempt_id=request.attempt_id,
+            revision=request.revision,
+            proposal_digest=request.proposal_digest,
+            spike_images=list(request.spike_images),
+            profile_id=request.profile_id,
+            docker_cli=Path("docker"), lease=lease, **self._owner_options)
+        if type(outcome) is run_qualification.RunQualificationBound:
+            return QualificationAttemptBound(
+                outcome.record_digest,
+                outcome.record["execution_binding_digest"])
+        if outcome.reason is run_qualification.RunQualificationReason.INVALID_INPUT:
+            raise RuntimeError(
+                "the run qualification owner refused the transaction's validated binding")
+        return QualificationAttemptFailed(outcome.reason.value, outcome.probe)
+
+    def settle_interrupted_attempt(self, request, close, lease):
+        from application.ports import QualificationAttemptFailed
+        from adapters.sandbox import run_qualification
+        outcome = run_qualification.settle_interrupted_attempt(
+            project_id=request.project_id, run_id=request.run_id,
+            generation=request.generation, attempt_id=request.attempt_id,
+            profile_id=request.profile_id, docker_cli=Path("docker"),
+            lease=lease, on_settled=close,
+            **{name: value for name, value in self._owner_options.items()
+               if name in _SETTLE_SEAMS})
+        if type(outcome) is bool:
+            return outcome
+        if outcome.reason is run_qualification.RunQualificationReason.INVALID_INPUT:
+            raise RuntimeError(
+                "the run qualification owner refused the transaction's validated binding")
+        return QualificationAttemptFailed(outcome.reason.value, outcome.probe)
+
+
 def build_service(profile_id: str, *, clock=time.time):
     """Compose the v2 service with an explicit exact registry ``profile_id`` (D6-C §4).
 
@@ -222,12 +303,19 @@ def build_service(profile_id: str, *, clock=time.time):
         spike_authority = NullSpikeAuthoritySelector()
         spike_harness = None
         image_resolver = None
+        # (E9) a degraded composition also composes no qualification port (``_v2.compose``
+        # below receives ``None`` the same way): StartRun binds spikes-unavailable for the run's
+        # life and an admitted ``qualify`` refuses as the unsupported host fact before reserving
+        # anything.
+
     return _v2.compose(
         workspace=FilesystemWorkspace(Path.cwd()), harness=spike_harness,
         runs=runs, artifacts=artifacts,
         host=None, profile_id=profile_id, limits={}, clock=None,
         spike_authority_selector=spike_authority,
         image_resolver=image_resolver,
+        qualification_port=(_RunQualificationPort() if spike_harness is not None
+                            and _proto.profile_supported(profile_id) else None),
     )
 
 

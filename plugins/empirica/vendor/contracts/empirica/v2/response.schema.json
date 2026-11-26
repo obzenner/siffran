@@ -216,7 +216,21 @@
                     "qualification-conflict",
                     "cleanup-unavailable",
                     "qualification-deadline-exceeded",
-                    "network-egress-unavailable"
+                    "network-egress-unavailable",
+                    "capability-unavailable",
+                    "resource-limits-unavailable",
+                    "sandbox-scaffolding-unsafe",
+                    "image-not-local",
+                    "image-reference-ambiguous",
+                    "image-malformed",
+                    "image-inspect-failed",
+                    "image-inspect-timeout",
+                    "image-inspect-output-limit",
+                    "image-platform-mismatch",
+                    "image-declares-volumes",
+                    "image-tool-missing",
+                    "image-uid65534-unusable",
+                    "qualification-interrupted"
                   ],
                   "description": "The closed cause the attempt ended with (Empirica 7.2 §5.1): every attempt failure plus the kept deadline, egress and cleanup reasons, never an admission reason."
                 },
@@ -1384,21 +1398,6 @@
           "properties": {
             "code": {
               "const": "governance.revision_exhausted"
-            },
-            "parameters": {
-              "$ref": "#/$defs/emptyParams"
-            }
-          }
-        },
-        {
-          "type": "object",
-          "required": [
-            "code",
-            "parameters"
-          ],
-          "properties": {
-            "code": {
-              "const": "environment.not_available"
             },
             "parameters": {
               "$ref": "#/$defs/emptyParams"
@@ -4296,7 +4295,18 @@
             "docker-unreachable",
             "qualification-conflict",
             "qualification-deadline-exceeded",
-            "network-egress-unavailable"
+            "network-egress-unavailable",
+            "capability-unavailable",
+            "resource-limits-unavailable",
+            "sandbox-scaffolding-unsafe",
+            "image-malformed",
+            "image-inspect-failed",
+            "image-inspect-timeout",
+            "image-inspect-output-limit",
+            "image-tool-missing",
+            "image-uid65534-unusable",
+            "qualification-in-progress",
+            "qualification-interrupted"
           ]
         },
         "probe": {

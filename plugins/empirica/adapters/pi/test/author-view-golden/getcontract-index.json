@@ -468,12 +468,6 @@
             ]
           },
           {
-            "code": "environment.not_available",
-            "sections": [
-              "environment/actions"
-            ]
-          },
-          {
             "code": "profile-not-allowed",
             "sections": [
               "environment/actions"

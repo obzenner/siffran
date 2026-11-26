@@ -54,6 +54,8 @@ _PUBLIC_CONTRACT = json.loads((_V2 / "public-contract.json").read_text(encoding=
 _REQUEST_SCHEMA = json.loads((_V2 / "request.schema.json").read_text(encoding="utf-8"))
 _RESPONSE_SCHEMA = json.loads((_V2 / "response.schema.json").read_text(encoding="utf-8"))
 _HOST_PROFILES = json.loads((_V2 / "host-profiles.json").read_text(encoding="utf-8"))
+_HOST_PROFILES_SCHEMA = json.loads(
+    (_V2 / "host-profiles.schema.json").read_text(encoding="utf-8"))
 
 _PROTOCOL = _PUBLIC_CONTRACT["protocol"]
 _PROFILE_IDS = [p["profile_id"] for p in _HOST_PROFILES["profiles"]]
@@ -63,8 +65,9 @@ from sandbox_isolation import (  # noqa: E402
     ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
 
 from adapters import bridge  # noqa: E402
+from application import protocol  # noqa: E402
 from adapters.sandbox import common as sandbox_common  # noqa: E402
-from governance_setup import invocation_for  # noqa: E402
+from governance_setup import TEST_INVOCATION, invocation_for  # noqa: E402
 force_absent_sandbox_home()
 
 
@@ -311,6 +314,10 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
         self.assertIs(compose.call_args.kwargs["image_resolver"], image_resolver)
         self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
+        # E9: the host qualification port is composed exactly where the generic Docker backend
+        # composed, and it is the bridge's own run-scoped port type.
+        port = compose.call_args.kwargs["qualification_port"]
+        self.assertIsInstance(port, bridge._RunQualificationPort)
 
     def test_sandbox_constructor_failure_degrades_only_spikes(self):
         names = ("GenericQualificationStore", "GenericBackendSelector", "freeze_loaded_release",
@@ -341,6 +348,8 @@ class BridgeV2Tests(unittest.TestCase):
             self.assertIsNone(service._harness)
             self.assertIsInstance(
                 service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            self.assertIsNone(service._coordinator.qualification_port,
+                               "a degraded composition composes no qualification port")
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
 
@@ -387,6 +396,7 @@ class BridgeV2Tests(unittest.TestCase):
             self.assertIsNone(service._harness)
             self.assertIsInstance(
                 service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
+            self.assertIsNone(service._coordinator.qualification_port)
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
         self.assertEqual(reads, [1])  # one snapshot attempt, at the failed first composition
@@ -406,7 +416,7 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertTrue(callable(service.dispatch))
         selector.select.assert_not_called()
 
-    def test_start_run_with_absent_authority_binds_unavailable_without_docker_reads(self):
+    def test_start_run_binds_the_run_scoped_reference_without_docker_reads(self):
         self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
         self.assertFalse(ABSENT_SANDBOX_HOME.exists())
         with tempfile.TemporaryDirectory() as home:
@@ -427,8 +437,10 @@ class BridgeV2Tests(unittest.TestCase):
                 else:
                     os.environ["EMPIRICA_HOME"] = saved
         self.assertIn(response["result"]["type"], {"Allow", "Block"}, response)
+        # E9: the composed generic Docker backend makes the run unqualified — the machine-wide
+        # authority record was never read (and in this test's sandbox home it does not exist).
         self.assertEqual(
-            service._coordinator.last_state.spike_backend, {"kind": "spikes_unavailable"})
+            service._coordinator.last_state.spike_backend, {"kind": "unqualified"})
 
     def test_unsafe_authority_does_not_block_nonspike_read(self):
         saved = os.environ["EMPIRICA_SANDBOX_HOME"]
@@ -512,6 +524,86 @@ class BridgeV2Tests(unittest.TestCase):
         self.assertEqual(calls["gateway"], 1, "protocol gateway called exactly once")
         self.assertEqual(calls["handler"], 1, "service handler called exactly once")
         _assert_inert_no_run(resp)
+
+
+def _unsupported(profile) -> bool:
+    """Whether the registry row is an unsupported profile, by the tier the schema pins it to (a
+    different road to the same fact than the production helper's promotion status)."""
+    clauses = _HOST_PROFILES_SCHEMA["properties"]["profiles"]["items"]["allOf"]
+    (pinned,) = {clause["then"]["properties"]["current_tier"]["const"]
+                 for clause in clauses if "const" in clause["then"]["properties"]["current_tier"]}
+    return profile["current_tier"] == pinned
+
+
+class QualificationPortCompositionTests(unittest.TestCase):
+    """The qualification port is an execution path: it is composed where the generic Docker
+    composition succeeded, and never for a profile the registry marks unsupported."""
+
+    def _compose(self, profile_id):
+        store = type("Store", (), {"execution_store": object()})()
+        with (patch.object(bridge, "GenericQualificationStore", return_value=store),
+              patch.object(bridge, "GenericBackendSelector", return_value=object()),
+              patch.object(bridge, "freeze_loaded_release", return_value="sha256:" + "0" * 64),
+              patch.object(bridge, "GenericAuthorityResolver", return_value=object()),
+              patch.object(bridge, "DockerLocalImageResolver", return_value=object()),
+              patch.object(bridge, "GenericDockerHarness", return_value=object())):
+            return bridge.build_service(profile_id)
+
+    def test_the_port_is_composed_for_every_supported_profile(self):
+        for profile in _HOST_PROFILES["profiles"]:
+            profile_id = profile["profile_id"]
+            with self.subTest(profile=profile_id):
+                port = self._compose(profile_id)._coordinator.qualification_port
+                if _unsupported(profile):
+                    self.assertIsNone(port)
+                else:
+                    self.assertIsInstance(port, bridge._RunQualificationPort)
+
+    def test_the_registry_has_supported_and_unsupported_profiles_to_tell_apart(self):
+        self.assertEqual({_unsupported(p) for p in _HOST_PROFILES["profiles"]}, {True, False})
+        for profile in _HOST_PROFILES["profiles"]:
+            self.assertEqual(protocol.profile_supported(profile["profile_id"]),
+                             not _unsupported(profile), profile["profile_id"])
+
+    def test_a_supported_profile_without_human_ingress_gets_the_port_and_qualifies(self):
+        """Support is the registry's status, not approval ingress: a delegated automatic run needs
+        no human consent, so a supported headless profile composes the port and a qualify on its
+        approved revision runs the attempt."""
+        from test_qualification_transaction import FakeQualificationPort, QualificationEnv
+        supported = next(p for p in _HOST_PROFILES["profiles"] if not _unsupported(p))
+        headless = {**supported, "profile_id": supported["profile_id"] + "-headless",
+                    "approval_ingress": next(
+                        ingress for ingress, row in _PUBLIC_CONTRACT["approval_ingress"].items()
+                        if row["capability"] == "unavailable")}
+        with (patch.dict(protocol._PROFILES, {headless["profile_id"]: headless}),
+              patch.object(bridge, "_PROFILES", (*bridge._PROFILES, headless["profile_id"]))):
+            port = self._compose(headless["profile_id"])._coordinator.qualification_port
+            self.assertIsInstance(port, bridge._RunQualificationPort)
+            env = QualificationEnv(
+                FakeQualificationPort(), profile_id=headless["profile_id"],
+                invocation={**TEST_INVOCATION, "delegation": True, "interactive": False})
+            result = env.qualify()
+        self.assertEqual(result["type"], "Allow", result)
+        self.assertEqual((env.port.calls, env.binding()["kind"]), (1, "qualified"))
+
+    def test_an_unsupported_profile_pointed_at_an_approved_run_refuses_unsupported_and_reserves_nothing(self):
+        from test_d7_transactions import Workspace
+        from test_environment_actions import QUALIFY_ACTION
+        from test_qualification_transaction import FakeQualificationPort, QualificationEnv
+        env = QualificationEnv(FakeQualificationPort())
+        unsupported = next(p["profile_id"] for p in _HOST_PROFILES["profiles"] if _unsupported(p))
+        coordinator = self._compose(unsupported)._coordinator
+        coordinator.runs, coordinator.artifacts, coordinator.workspace = (
+            env.runs, env.artifacts_repo, Workspace())
+        before = env.runs.data[env.key]
+        response = coordinator.handle(
+            {"type": "ObserveAction", "run_id": env.run_id,
+             "action": json.loads(json.dumps(QUALIFY_ACTION))}, "unsupported-qualify")["result"]
+        jsonschema.validate(instance={"protocol": _PROTOCOL, "request_id": "unsupported-qualify",
+                                      "result": response}, schema=_RESPONSE_SCHEMA)
+        self.assertEqual((response["type"], response["code"]), ("Fault", "unsupported"), response)
+        self.assertEqual(env.runs.data[env.key], before, "nothing was reserved or committed")
+        self.assertEqual((env.rows(), env.port.calls), ([], 0))
 
 
 if __name__ == "__main__":

@@ -29,7 +29,7 @@
  },
  {
   "ask": "decide_claim",
-  "asked_at": 1790593140.0,
+  "asked_at": 1790593320.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -199,14 +199,14 @@
    "locator": "/home/dev/.claude/projects/atlas/6f2c1a.jsonl"
   },
   "standing": "needs_human",
-  "started": 1790592960.0,
+  "started": 1790593140.0,
   "state": "active",
-  "updated": 1790594040.0,
-  "version": "sha256:5e997007a2fea0a119bb05faa7eeeef2c8a4d9fc61d5390265f8bfd4d516f76e"
+  "updated": 1790594220.0,
+  "version": "sha256:466e3c53da328294ca2b8aee285391ac92477c77358772357a8285bab2db4246"
  },
  {
   "ask": "approve_revision",
-  "asked_at": 1790595840.0,
+  "asked_at": 1790596020.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -263,14 +263,14 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790595240.0,
+  "started": 1790595420.0,
   "state": "active",
-  "updated": 1790595840.0,
-  "version": "sha256:43a5dcc7585c7a83b24a33e2cd1c262ba92a9fcaa73910547af17dbdbd425bee"
+  "updated": 1790596020.0,
+  "version": "sha256:bfc987c9bcd56299e251d3657e3ec0a2cce07b67b6178bbc68dd3448f7815643"
  },
  {
   "ask": "confirm_source",
-  "asked_at": 1790596980.0,
+  "asked_at": 1790597160.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -344,14 +344,14 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790596440.0,
+  "started": 1790596620.0,
   "state": "active",
-  "updated": 1790596980.0,
-  "version": "sha256:7b9fc95d10ac8f0204af143978ee853ddc4825eebd375287d9d352ef192334f1"
+  "updated": 1790597160.0,
+  "version": "sha256:9e4ffd17e492cf45c69065e5e03e246016ba5ab788c4e429e925f3639bbe1ae5"
  },
  {
   "ask": "approve_configuration",
-  "asked_at": 1790601960.0,
+  "asked_at": 1790602140.0,
   "attention": "needs_you",
   "audit": {
    "current": null,
@@ -408,10 +408,10 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790601720.0,
+  "started": 1790601900.0,
   "state": "active",
-  "updated": 1790602080.0,
-  "version": "sha256:2ea1afe0a94fa4329f1f45b79fde7231bed17b9c5688185c5ddd06e3ba952345"
+  "updated": 1790602260.0,
+  "version": "sha256:d4c823760f7b7de53eaa2ebc8ee919424626c7c67e80fbeadf63dca1878d53e6"
  },
  {
   "ask": "freeze_scope",
@@ -489,10 +489,10 @@
    "locator": null
   },
   "standing": "needs_human",
-  "started": 1790602140.0,
+  "started": 1790602320.0,
   "state": "active",
-  "updated": 1790603100.0,
-  "version": "sha256:9af842c5e952adb1fc3ee29f2098f273510e7b46f8cc9d163c172c7d1db0a806"
+  "updated": 1790603280.0,
+  "version": "sha256:66753b4bcc18a19a4cf71ca6b5879727a8c9db93c07c70c8b0e0c4d5182fe3d3"
  },
  {
   "ask": null,
@@ -570,10 +570,10 @@
    "locator": "/home/dev/.pi/sessions/atlas-writer.jsonl"
   },
   "standing": "audit_pending",
-  "started": 1790594100.0,
+  "started": 1790594280.0,
   "state": "active",
-  "updated": 1790595180.0,
-  "version": "sha256:a7ce402549eba1a0527f3788d372091d1cf6d59c9f121c943dbc110adade275f"
+  "updated": 1790595360.0,
+  "version": "sha256:ecce6adc6a85b471a3116bbeeedd522ae0456e88cce21d61f58d56300ed1911f"
  },
  {
   "ask": null,
@@ -683,10 +683,10 @@
    "locator": null
   },
   "standing": "changed_since_audit",
-  "started": 1790588040.0,
+  "started": 1790588100.0,
   "state": "active",
-  "updated": 1790589120.0,
-  "version": "sha256:65fb1f038b75859463aceb3e46fbb06ef9e850cd5cd6a0cb946dcd381cdc47f4"
+  "updated": 1790589180.0,
+  "version": "sha256:6f71201517c4a90ac27ec26c1377343aa2bd006e4e8f1baede66d5f3c7e387ae"
  },
  {
   "ask": null,
@@ -780,10 +780,10 @@
    "locator": null
   },
   "standing": "not_ended",
-  "started": 1790595900.0,
+  "started": 1790596080.0,
   "state": "active",
-  "updated": 1790596380.0,
-  "version": "sha256:6468eea0e4e2a36443fb8d6fdec722b6572a4d4168d30f0b7217c1d282a0f8a8"
+  "updated": 1790596560.0,
+  "version": "sha256:e4f299f787ead779cb26401619de2c4b4d3a0a0644297223ee8b7d40a102cba4"
  },
  {
   "ask": null,
@@ -861,10 +861,10 @@
    "locator": null
   },
   "standing": "not_ended",
-  "started": 1790591820.0,
+  "started": 1790591940.0,
   "state": "active",
-  "updated": 1790592900.0,
-  "version": "sha256:d4c3c81938eff794109e79cefe8c5800bb04f1f35254fa8cbf21b2681e8b34d3"
+  "updated": 1790593080.0,
+  "version": "sha256:b1cf3b759e4b215fcf363ce94fba60ee899b262b92c0ae2ae0995e4d6bc7b710"
  },
  {
   "ask": null,
@@ -925,7 +925,7 @@
     "to": "C2"
    }
   ],
-  "ended": 1790587200.0,
+  "ended": 1790587260.0,
   "flags": {
    "changed_since_audit": false,
    "decided": true,
@@ -956,8 +956,8 @@
   "standing": "proven",
   "started": 1790586000.0,
   "state": "converged",
-  "updated": 1790587200.0,
-  "version": "sha256:0710b506f4972ec5ddbaffc15f9e77e7159c536a763bf235991952844ba218e7"
+  "updated": 1790587260.0,
+  "version": "sha256:ea7d58bb759e82ba258d3828ddffc3be36ef142bdc63555fdda879d8a47abda5"
  },
  {
   "ask": null,
@@ -1002,7 +1002,7 @@
     "to": "C1"
    }
   ],
-  "ended": 1790591760.0,
+  "ended": 1790591880.0,
   "flags": {
    "changed_since_audit": false,
    "decided": true,
@@ -1031,10 +1031,10 @@
    "locator": null
   },
   "standing": "stopped_residual",
-  "started": 1790591040.0,
+  "started": 1790591160.0,
   "state": "stopped_residual",
-  "updated": 1790591760.0,
-  "version": "sha256:aef26c877c3a130a807a142e2a740a6acb7f126e641f36e252ac45453480e15b"
+  "updated": 1790591880.0,
+  "version": "sha256:2a2bdef7d402e26716168b3b54e705ca24917331e5e0a380e3bc0f3533dc45e9"
  },
  {
   "ask": null,
@@ -1095,7 +1095,7 @@
     "to": "C2"
    }
   ],
-  "ended": 1790587980.0,
+  "ended": 1790588040.0,
   "flags": {
    "changed_since_audit": false,
    "decided": true,
@@ -1124,10 +1124,10 @@
    "locator": null
   },
   "standing": "stopped_residual",
-  "started": 1790587260.0,
+  "started": 1790587320.0,
   "state": "stopped_residual",
-  "updated": 1790587980.0,
-  "version": "sha256:e0ebce43a2da8f888a4255ad25ba0579d8dfbaff7962f6b8431107cada0dc72b"
+  "updated": 1790588040.0,
+  "version": "sha256:b60098b7cb11bb2852aec73ff5161d421fc32d075eb55d0f7ca5796a099742a0"
  },
  {
   "ask": null,
@@ -1155,7 +1155,7 @@
   ],
   "diagnostic": null,
   "edges": [],
-  "ended": 1790590080.0,
+  "ended": 1790590200.0,
   "flags": {
    "changed_since_audit": false,
    "decided": true,
@@ -1184,10 +1184,10 @@
    "locator": null
   },
   "standing": "stopped_budget",
-  "started": 1790589180.0,
+  "started": 1790589240.0,
   "state": "stopped_budget",
-  "updated": 1790590080.0,
-  "version": "sha256:624c1bf1342eb3ba456557a992667e600baf10c03379637babadd403d0078471"
+  "updated": 1790590200.0,
+  "version": "sha256:211699060592b8ece00d8297abbff5c97af955d004bd355e07fb5661a42ff707"
  },
  {
   "ask": null,
@@ -1232,7 +1232,7 @@
     "to": "C1"
    }
   ],
-  "ended": 1790590980.0,
+  "ended": 1790591100.0,
   "flags": {
    "changed_since_audit": false,
    "decided": true,
@@ -1261,9 +1261,9 @@
    "locator": null
   },
   "standing": "stopped_frozen",
-  "started": 1790590140.0,
+  "started": 1790590260.0,
   "state": "stopped_frozen",
-  "updated": 1790590980.0,
-  "version": "sha256:5fb75d1fc3dea537c0170b6259e2fbbc03b1953f52abec8af6b63856902f2b5f"
+  "updated": 1790591100.0,
+  "version": "sha256:696acd8cd3c6670ea15f63f68ae3a9b982d08dd0cef74211133c8072168efa8a"
  }
 ]
