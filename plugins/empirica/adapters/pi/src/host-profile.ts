@@ -166,8 +166,8 @@ export function parseHostProfiles(document: unknown): HostProfiles {
     if ("audit_launch_policy" in profile)
       policies.set(profile.profile_id, auditLaunchPolicy(profile.audit_launch_policy, `${profile.profile_id}.audit_launch_policy`));
     if ("approval_ingress" in profile) {
-      if (typeof profile.approval_ingress !== "string" || !/^[a-z]+(_[a-z]+)*$/.test(profile.approval_ingress))
-        throw new Error(`host-profiles: ${profile.profile_id}.approval_ingress must be a lowercase word`);
+      if (typeof profile.approval_ingress !== "string" || !APPROVAL_INGRESS_VOCABULARY.includes(profile.approval_ingress))
+        throw new Error(`host-profiles: ${profile.profile_id}.approval_ingress must be one of ${APPROVAL_INGRESS_VOCABULARY.join(", ")}`);
       ingresses.set(profile.profile_id, profile.approval_ingress);
     }
     if ("subagents_compatibility" in profile)
@@ -190,6 +190,18 @@ export function hostCompatibilityFor(profiles: HostProfiles, profileId: string):
   const range = profiles.host_compatibility.get(profileId);
   if (range === undefined) throw new Error(`host-profiles: ${profileId} declares no compatibility`);
   return range;
+}
+
+/** The approval ingress of `profileId` through which its own dialog asks a human; none when it is unavailable. */
+export function dialogIngressFor(profiles: HostProfiles, profileId: string): string | undefined {
+  const ingress = approvalIngressFor(profiles, profileId);
+  return ingress === APPROVAL_INGRESS_UNAVAILABLE ? undefined : ingress;
+}
+
+/** Whether a configured or reported ingress is the dialog ingress of `profileId`; an unavailable one never is. */
+export function routesToDialog(ingress: unknown, profiles: HostProfiles = PROFILES, profileId: string = HOST_PROFILE_ID): boolean {
+  const dialog = dialogIngressFor(profiles, profileId);
+  return dialog !== undefined && ingress === dialog;
 }
 
 /** The approval ingress of `profileId`; throws when the profile declares none (fail closed). */
@@ -218,6 +230,15 @@ export function auditLaunchFields(policy: AuditLaunchPolicy): {
 }
 
 export const HOST_PROFILES_PATH = path.join(VENDORED_CONTRACT_DIR, "host-profiles.json");
+
+/** The approval ingress words of the contract (`approval_ingress`, read from the vendored host-profiles schema). */
+const APPROVAL_INGRESS_VOCABULARY: readonly string[] = JSON.parse(readFileSync(
+  path.join(VENDORED_CONTRACT_DIR, "host-profiles.schema.json"), "utf8")).properties.profiles.items.properties.approval_ingress.enum;
+
+/** The ingress word of a host that can put no question to a human; loading fails if the contract drops it. */
+export const APPROVAL_INGRESS_UNAVAILABLE = "unavailable";
+if (!APPROVAL_INGRESS_VOCABULARY.includes(APPROVAL_INGRESS_UNAVAILABLE))
+  throw new Error(`host-profiles: approval_ingress has no ${APPROVAL_INGRESS_UNAVAILABLE} word`);
 
 const DOCUMENT: unknown = JSON.parse(readFileSync(HOST_PROFILES_PATH, "utf8"));
 const PROFILES: HostProfiles = parseHostProfiles(DOCUMENT);
@@ -248,3 +269,6 @@ export const SUBAGENTS_COMPATIBILITY: SubagentsCompatibility = subagentsCompatib
 
 /** How this adapter's host profile can put a question to a human (contract `approval_ingress`). */
 export const HOST_APPROVAL_INGRESS: string = approvalIngressFor(PROFILES, HOST_PROFILE_ID);
+
+/** This adapter's own dialog ingress (the Pi dialog's registered word), none when the profile has no human ingress. */
+export const DIALOG_INGRESS: string | undefined = dialogIngressFor(PROFILES, HOST_PROFILE_ID);

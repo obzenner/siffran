@@ -453,8 +453,8 @@ def project_runview(snapshot: EvaluationSnapshot, relevant_sections: list[str] |
                  "missing_capabilities": ([HOST_TIER_UNSUPPORTED[snapshot.host_tier]]
                     if snapshot.host_tier in HOST_TIER_UNSUPPORTED else []),
                  **_unreviewed_runtime(snapshot.state.invocation)},
-        # Selected exactly once at StartRun. This is the immutable run binding, not current
-        # authority-pointer or Docker health, so this pure projection performs no discovery.
+        # The run's current stored binding (set at StartRun, replaced by each successful
+        # qualification): a reference, never live Docker health, so this projection discovers nothing.
         "spike_backend": governance.plain(snapshot.state.spike_backend),
         # Stored references only (spec §7): the installed binding is history, never live health.
         **({} if (view := environment.environment_view(snapshot.state)) is None else {
@@ -639,8 +639,8 @@ def project_argument(snapshot: EvaluationSnapshot) -> dict[str, Any]:
         "claims": claims, "edges": [dict(edge) for edge in snapshot.graph["edges"]], "artifacts": artifacts,
         "route_stamp": snapshot.state.route_stamp,
         "investigation_stamp": snapshot.state.investigation_stamp,
-        # The dossier repeats the exact StartRun binding so an auditor can interpret every
-        # admitted spike artifact without consulting mutable machine authority.
+        # The dossier repeats the run's current stored binding (each spike's lineage names the
+        # attempt it was sealed under) so an auditor needs no machine authority to read it.
         "spike_backend": governance.plain(snapshot.state.spike_backend),
         # The environment the evidence was produced under: the active binding, every revision
         # and every attempt with its outcome (spec §7), the facts the argument digest binds.

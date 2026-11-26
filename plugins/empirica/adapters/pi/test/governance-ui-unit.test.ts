@@ -8,6 +8,7 @@ import type { Dialog, DialogDecision } from "../src/dialog-view.ts";
 import type { PrivateIngress } from "../src/private-transport.ts";
 import { PUBLIC_TOOLS } from "../src/public-tools.ts";
 import { fakeCtx } from "./fakes.ts";
+import { APPROVAL_INGRESS_UNAVAILABLE, HOST_APPROVAL_INGRESS } from "../src/host-profile.ts";
 
 const fixture = JSON.parse(readFileSync(new URL("../../../tests/fixtures/governance-dialog-golden.json", import.meta.url), "utf8")) as {
   dialogs: { review: Dialog; confirmation: Dialog; hostile: Dialog; hostile_rationale: Dialog };
@@ -144,7 +145,7 @@ function harness(keyScripts: string[][] = [[ENTER, ENTER]]) {
     plan_revision: 0, first_approval: false, prompt_error: null as string | null, human_wait: true, raises: false, proposal: {
       budgets: Object.fromEntries(dialog.budgets.map(row => [row.key, row.value])) as Record<string, number>,
       rationale: dialog.rationale,
-    }, context: { author: null, ingress: "pi_ui", approval_capability: "human_configuration", interactive: true,
+    }, context: { author: null, ingress: HOST_APPROVAL_INGRESS, approval_capability: "human_configuration", interactive: true,
       delegation: false } };
   const run = { id: "run", status: "active", spike_backend: { kind: "spikes_unavailable" }, governance: g };
   const decisions: Array<Record<string, unknown>> = [];
@@ -325,16 +326,16 @@ test("a closed dialog, a spent configuration, a spent run and no UI each choose 
   // capability, and nobody to ask outranks the spent configuration (the same order as Claude's closed_code).
   assert.deepEqual(await codes(h => { h.g.human_wait = false; h.g.prompt_error = "governance.interaction_limit";
     (h.g as Record<string, unknown>).interactions_remaining = { proposal: 0, total: 100 };
-    h.g.context.approval_capability = "unavailable"; h.g.context.ingress = "unavailable"; h.ctx.hasUI = false; }, []),
+    h.g.context.approval_capability = "unavailable"; h.g.context.ingress = APPROVAL_INGRESS_UNAVAILABLE; h.ctx.hasUI = false; }, []),
     ["governance.approval_unavailable", ["residual.accept"]]);
 });
 
 test("the host reports what it can show NOW: no UI means an unavailable ingress", () => {
   const ctx = fakeCtx();
   ctx.hasUI = true;
-  assert.equal(piGovernanceContext(ctx).ingress, "pi_ui");
+  assert.equal(piGovernanceContext(ctx).ingress, HOST_APPROVAL_INGRESS);
   ctx.hasUI = false;
-  assert.equal(piGovernanceContext(ctx).ingress, "unavailable");
+  assert.equal(piGovernanceContext(ctx).ingress, APPROVAL_INGRESS_UNAVAILABLE);
 });
 
 test("no-op keys and cancel approve nothing", async () => {
@@ -398,7 +399,7 @@ test("A11d: interactive auto after its first approval asks its human about a rai
 
 test("interactive auto with unavailable UI fails closed and never delegates", async () => {
   const h = harness(); h.g.control_mode = "auto"; h.g.context.delegation = true;
-  h.ctx.hasUI = false; h.g.context.ingress = "unavailable"; delete h.ctx.ui.custom;
+  h.ctx.hasUI = false; h.g.context.ingress = APPROVAL_INGRESS_UNAVAILABLE; delete h.ctx.ui.custom;
   assert.equal((await h.invoke()).result.type, "Block");
   assert.deepEqual(h.decisions, []);
 });
@@ -440,7 +441,7 @@ test("governance context does not inspect configured models", () => {
   const ctx = fakeCtx(); ctx.hasUI = true; ctx.model = { provider: "anthropic", id: "sonnet" } as never;
   let calls = 0; ctx.modelRegistry = { getAvailable: () => { calls++; throw new Error("must not read"); },
     getError: () => { calls++; return "configured error"; } } as never;
-  assert.deepEqual(piGovernanceContext(ctx), { author: { provider_id: "anthropic", model_id: "sonnet", source: "pi-context" }, ingress: "pi_ui" });
+  assert.deepEqual(piGovernanceContext(ctx), { author: { provider_id: "anthropic", model_id: "sonnet", source: "pi-context" }, ingress: HOST_APPROVAL_INGRESS });
   assert.equal(calls, 0);
 });
 

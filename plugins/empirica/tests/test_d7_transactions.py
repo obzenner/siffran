@@ -1035,22 +1035,33 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual((after.frozen_claim_ids, after.frozen_semantic_digest),
                          (frozen.frozen_claim_ids, frozen.frozen_semantic_digest))
 
-    def test_post_plan_capture_tracks_disjoint_graph_heads(self):
-        runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
+    def _investigating_run(self, graph, *, harness=None, workspace=None, session="s",
+                           resolver=None, port=None):
+        """A started run with a qualified binding, ``graph`` declared and investigation active."""
+        runs, artifacts_repo = Runs(), Artifacts()
+        workspace = Workspace() if workspace is None else workspace
+        harness = Harness() if harness is None else harness
         coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, ImageResolver())
-        started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
-                                      "goal": "g"}, "start")
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {},
+            ImageResolver() if resolver is None else resolver, port)
+        started = coordinator.handle(
+            {"type": "StartRun", "control_mode": "deliberative",
+             "invocation": dict(TEST_INVOCATION),
+             "selector": {"project": "p", "session": session}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
         bind_qualified_backend(coordinator, runs)
         activate_investigation(coordinator, run_id)
+        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
+                            "action": {"kind": "graph", "payload": graph}}, "graph")
+        activate_investigation(coordinator, run_id)
+        return coordinator, runs, artifacts_repo, workspace, harness, run_id
+
+    def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         graph = {"root": "C0", "claims": [
             {"id": "C0", "text": "zero", "gating": True, "kind": "needs-experiment"},
             {"id": "C1", "text": "one", "gating": True, "kind": "needs-experiment"}],
             "edges": [{"from": "C0", "to": "C1", "type": "SupportedBy"}]}
-        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
-                            "action": {"kind": "graph", "payload": graph}}, "g")
-        activate_investigation(coordinator, run_id)
+        coordinator, runs, _artifacts, workspace, _harness, run_id = self._investigating_run(graph)
         for claim, path in (("C0", "src/0.py"), ("C1", "src/1.py")):
             coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                                 "action": {"kind": "research", "claim_id": claim,
@@ -1242,21 +1253,9 @@ class D7TransactionTests(unittest.TestCase):
     def _run_with_passing_spike(self, *, conflict=False, switch_context=False,
                                 research_author=_KEEP, request_author=_KEEP,
                                 completion_author=AUDITOR):
-        runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, ImageResolver())
-        started = coordinator.handle(
-            {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
-             "goal": "g"}, "start")
-        run_id = started["result"]["run"]["id"]
-        bind_qualified_backend(coordinator, runs)
-        activate_investigation(coordinator, run_id)
-        graph = {"root": "C0", "claims": [
-            {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
-            "edges": []}
-        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
-                            "action": {"kind": "graph", "payload": graph}}, "g")
-        activate_investigation(coordinator, run_id)
+        coordinator, runs, artifacts_repo, workspace, harness, run_id = self._investigating_run(
+            {"root": "C0", "claims": [
+                {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}], "edges": []})
         if research_author is not _KEEP:
             self._set_context_author(coordinator, run_id, research_author)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
@@ -1345,25 +1344,10 @@ class D7TransactionTests(unittest.TestCase):
 
     def _qualified_spike_ready(self, harness=None, *, session="qualified", resolver=None,
                                workspace=None, graph=None, port=None):
-        runs, artifacts_repo = Runs(), Artifacts()
-        workspace = Workspace() if workspace is None else workspace
-        harness = harness if harness is not None else Harness()
-        coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {},
-            ImageResolver() if resolver is None else resolver, port)
-        started = coordinator.handle(
-            {"type": "StartRun", "control_mode": "deliberative",
-             "invocation": dict(TEST_INVOCATION),
-             "selector": {"project": "p", "session": session}, "goal": "g"}, "start")
-        run_id = started["result"]["run"]["id"]
-        bind_qualified_backend(coordinator, runs)
-        activate_investigation(coordinator, run_id)
-        graph = graph or {"root": "C0", "claims": [
-            {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}],
-            "edges": []}
-        coordinator.handle({"type": "ObserveAction", "run_id": run_id,
-                            "action": {"kind": "graph", "payload": graph}}, "graph")
-        activate_investigation(coordinator, run_id)
+        coordinator, runs, artifacts_repo, workspace, harness, run_id = self._investigating_run(
+            graph or {"root": "C0", "claims": [
+                {"id": "C0", "text": "t", "gating": True, "kind": "needs-experiment"}], "edges": []},
+            harness=harness, workspace=workspace, session=session, resolver=resolver, port=port)
         coordinator.handle({"type": "ObserveAction", "run_id": run_id,
                             "action": {"kind": "research", "claim_id": "C0",
                                        "source_kind": "code", "result": "supports", "payload": {

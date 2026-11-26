@@ -5,14 +5,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { auditLaunchInput, preflightLaunch } from "../src/audit-launch.ts";
 import {
-  AUDIT_LAUNCH_POLICY, HOST_PROFILE_ID, HOST_PROFILES_PATH, compareVersions, SUBAGENTS_COMPATIBILITY, THINKING_LEVELS, auditLaunchFields, auditLaunchPolicyFor,
-  inSubagentsRange, parseHostProfiles,
+  APPROVAL_INGRESS_UNAVAILABLE, AUDIT_LAUNCH_POLICY, HOST_PROFILE_ID, HOST_PROFILES_PATH, compareVersions, SUBAGENTS_COMPATIBILITY, THINKING_LEVELS,
+  auditLaunchFields, auditLaunchPolicyFor, dialogIngressFor, inSubagentsRange, parseHostProfiles, routesToDialog,
 } from "../src/host-profile.ts";
 import { loadInventory, parseInventory } from "../src/subagent-inventory.ts";
 import { reviewedVersions } from "./compat-versions.ts";
@@ -158,6 +158,37 @@ for (const [name, mutate, message] of REJECTED) {
     assert.throws(() => parse(mutate), message);
   });
 }
+
+// --- approval ingress vocabulary --------------------------------------------------------------
+
+const INGRESS_VOCABULARY: string[] = JSON.parse(readFileSync(path.join(path.dirname(HOST_PROFILES_PATH),
+  "host-profiles.schema.json"), "utf8")).properties.profiles.items.properties.approval_ingress.enum;
+
+test("only a profile's own registered dialog ingress routes to its dialog; the unavailable word never does", () => {
+  assert.ok(INGRESS_VOCABULARY.includes(APPROVAL_INGRESS_UNAVAILABLE));
+  for (const own of INGRESS_VOCABULARY) {
+    const parsed = parseHostProfiles(Object.assign(document(), { profiles: [{ ...pi(document()), approval_ingress: own }] }));
+    const dialog = dialogIngressFor(parsed, HOST_PROFILE_ID);
+    assert.equal(dialog, own === APPROVAL_INGRESS_UNAVAILABLE ? undefined : own);
+    for (const configured of INGRESS_VOCABULARY)
+      assert.equal(routesToDialog(configured, parsed, HOST_PROFILE_ID), configured === own && own !== APPROVAL_INGRESS_UNAVAILABLE,
+        `${configured} under a profile registered as ${own}`);
+  }
+});
+
+test("parseHostProfiles rejects an approval ingress outside the contract vocabulary", () => {
+  assert.throws(() => parse((d) => { pi(d).approval_ingress = "terminal_prompt"; }), /approval_ingress must be one of/);
+});
+
+test("the ingress vocabulary has one owner in the adapter: no other source spells an ingress word or compares one", () => {
+  const SRC = path.join(HERE, "..", "src");
+  for (const file of readdirSync(SRC).filter((name) => name.endsWith(".ts") && name !== "host-profile.ts")) {
+    const source = readFileSync(path.join(SRC, file), "utf8");
+    for (const word of INGRESS_VOCABULARY.filter((word) => word !== APPROVAL_INGRESS_UNAVAILABLE))
+      assert.ok(!source.includes(JSON.stringify(word)), `${file} spells the ingress ${word}`);
+    assert.doesNotMatch(source, /ingress[^\n]{0,40}["']unavailable["']/, `${file} spells the unavailable ingress`);
+  }
+});
 
 // --- Python/TS mirror ---------------------------------------------------------------------------
 

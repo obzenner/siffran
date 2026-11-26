@@ -24,7 +24,7 @@ import { assertResponse } from "./guard.ts";
 import type { RetrievalKind } from "./audit-retrieval.ts";
 import { canPresent, confirmEvidence, sessionLocator, evidenceConfirmationWait, evidenceHostFailure, observeSurface } from "./evidence-ui.ts";
 import {
-  govern, governEnvironment, governanceTimeout, piGovernanceContext, PI_INGRESS, refreshGovernance, settlementNotice,
+  govern, governEnvironment, governanceTimeout, piGovernanceContext, refreshGovernance, settlementNotice,
 } from "./governance-ui.ts";
 import type {
   ExtensionAPI,
@@ -45,7 +45,7 @@ import {
 import {
   identityFromSessionJsonl, sessionFileFromDetails,
 } from "./audit-identity.ts";
-import { HOST_APPROVAL_INGRESS, HOST_COMPATIBILITY, HOST_PROFILE_ID, checkHostVersion } from "./host-profile.ts";
+import { HOST_APPROVAL_INGRESS, HOST_COMPATIBILITY, HOST_PROFILE_ID, checkHostVersion, routesToDialog } from "./host-profile.ts";
 import { createStdioBridgeDispatch, defaultBridgeConfig } from "./stdio-transport.ts";
 import { renderAuthorView } from "./author-view.ts";
 import {
@@ -421,7 +421,7 @@ export function createEmpiricaExtension(deps: EmpiricaPiDeps) {
   const governanceTimeoutMs = governanceTimeout();
   // The environment approval is mediated only where the profile's registered approval ingress is this transport's
   // own (the Pi dialog); any other profile dispatches the action as every other one and asks nobody.
-  const environmentMediated = (deps.approvalIngress ?? HOST_APPROVAL_INGRESS) === PI_INGRESS;
+  const environmentMediated = routesToDialog(deps.approvalIngress ?? HOST_APPROVAL_INGRESS);
 
   return function empiricaExtension(pi: ExtensionAPI): void {
     let runHandle: string | null = null;

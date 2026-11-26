@@ -1015,6 +1015,46 @@ class AdmissionDecisionTests(unittest.TestCase):
         self.assertEqual(environment.spike_admission(base, "listed/image:1"),
                          environment.spike_prerequisite(base))
 
+    def test_the_binding_and_the_lineage_find_an_attempt_by_its_record_digest_after_a_rebind(self):
+        """Spec section 7: the active binding and a spike's lineage resolve the same attempt for a
+        record digest. After a rebind the current digest names the later attempt, the earlier one
+        stays historical, and an absent or unknown digest names no attempt, never an unsuccessful
+        row (which carries no record)."""
+        from governance_setup import qualified_state
+        base = ServiceEnv().start().fully_approved().state()
+        profile_id = ENVIRONMENT_ACTION["payload"]["profile_id"]
+        first_record, current_record = canonical_digest("first"), canonical_digest("current")
+        first = qualified_state(base, profile_id=profile_id, record_digest=first_record,
+                                execution_binding_digest=canonical_digest("binding"),
+                                spike_images=["listed/image:1"])
+        failed = {**plain(self._attempt_plan(first, 1)[0]), "attempt_id": "qualification-failed"}
+        rebound = qualified_state(
+            replace(first, qualification_attempts=first.qualification_attempts + (failed,)),
+            profile_id=profile_id, record_digest=current_record,
+            execution_binding_digest=canonical_digest("binding"), spike_images=["listed/image:1"])
+        rows = rebound.qualification_attempts
+        sequence = {row["record_digest"]: index + 1 for index, row in enumerate(rows)}
+        current = environment.active_attempt(rebound)
+        self.assertEqual((current[0], plain(current[1])), (sequence[current_record],
+                                                           plain(rows[sequence[current_record] - 1])))
+        for digest in (first_record, current_record):
+            with self.subTest(digest=digest):
+                found = environment.recorded_attempt(rebound, digest)
+                self.assertEqual((found[0], plain(found[1])),
+                                 (sequence[digest], plain(rows[sequence[digest] - 1])))
+                self.assertEqual(environment.attempt_lineage(rebound, digest),
+                                 {"attempt": sequence[digest],
+                                  "revision": rows[sequence[digest] - 1]["revision"]})
+        for digest in (None, canonical_digest("absent")):
+            with self.subTest(digest=digest):
+                self.assertIsNone(environment.recorded_attempt(rebound, digest))
+                self.assertEqual(environment.attempt_lineage(rebound, digest),
+                                 {"attempt": None, "revision": None})
+        unrecorded = replace(rebound, spike_backend={
+            **plain(rebound.spike_backend), "qualification_record_digest": canonical_digest("absent")})
+        self.assertIsNone(environment.active_attempt(unrecorded))
+        self.assertIsNone(environment.qualification_view(unrecorded)["active"])
+
     def test_the_revision_ceiling_refuses_a_further_submission_and_never_drops_a_row(self):
         """Spec §4.2's retention rule: every revision and its receipts stay immutable, and the
         bound the state contract carries is the per-run environment revision ceiling — a further
