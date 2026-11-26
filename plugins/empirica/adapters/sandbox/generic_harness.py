@@ -3,20 +3,22 @@ from __future__ import annotations
 
 import secrets
 import time
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 from typing import Callable, Protocol
 
 from application import generic_spike as application
 from core import spike_plan
 from core.canonical import canonical_digest
+from core.records import RunKey
 
 from . import common, generic_authority, generic_execution as execution, planner
 from .common import runtime_lock
+from .run_qualification import RuntimeLease
 
 
 class GenericAuthorityResolver(Protocol):
-    def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float) \
-            -> generic_authority.ResolvedGenericAuthority: ...
+    def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float,
+                run: RunKey | None = None) -> generic_authority.ResolvedGenericAuthority: ...
 
 
 class GenericEffectsFactory(Protocol):
@@ -55,25 +57,40 @@ class GenericDockerHarness(application.GenericSpikeHarness):
         self.operation_id_factory = operation_id_factory
         self.clock = clock
 
-    def _resolve(self, backend: application.GenericQualifiedBackend, deadline: float):
+    def _resolve(self, backend: application.GenericQualifiedBackend, deadline: float,
+                 run: RunKey | None):
         try:
-            value = self.resolver.resolve(backend, deadline=deadline)
+            value = self.resolver.resolve(backend, deadline=deadline, run=run)
         except Exception as exc:
-            raise execution.GenericExecutionUnavailable("qualified authority is unavailable") from exc
+            failure = execution.GenericExecutionUnavailable("qualified authority is unavailable")
+            failure.reason = generic_authority.stale_reason(
+                exc, application.GenericUnavailableReason.AUTHORITY_INVALID)
+            raise failure from exc
         if (type(value) is not generic_authority.ResolvedGenericAuthority
                 or value.backend != backend):
             raise execution.GenericExecutionUnavailable("qualified authority differs")
         return value
 
-    def run(self, request: application.GenericHarnessRequest):
+    def run(self, request: application.GenericHarnessRequest, lease: object | None = None):
+        """Run one sealed request under the shared runtime lock: the caller's held ``lease`` (from
+        ``run_qualification.hold_runtime_lock`` over this harness's store), whose deadline also
+        bounds the run, or the lock this call takes itself."""
         if type(request) is not application.GenericHarnessRequest:
             return application.GenericHarnessUnavailable(
                 application.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE)
         deadline = self.clock() + spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS
+        if lease is not None:
+            if (type(lease) is not RuntimeLease or not lease.held
+                    or lease.root != self.store.home):
+                return application.GenericHarnessUnavailable(
+                    application.GenericUnavailableReason.AUTHORITY_INVALID,
+                    "the runtime lease is not held over this harness's store")
+            deadline = min(deadline, lease.deadline)
         resolving = True
         try:
-            with runtime_lock(self.store, deadline, clock=self.clock), ExitStack() as owners:
-                authority = self._resolve(request.backend, deadline)
+            with (runtime_lock(self.store, deadline, clock=self.clock) if lease is None
+                  else nullcontext()), ExitStack() as owners:
+                authority = self._resolve(request.backend, deadline, request.run)
                 facts = generic_authority.authority_facts(authority.runtime)
                 effect = self.effects_factory(authority)
                 owners.callback(effect.close)
@@ -91,7 +108,7 @@ class GenericDockerHarness(application.GenericSpikeHarness):
 
                 def postflight(limit: float) -> str:
                     try:
-                        current = self._resolve(request.backend, limit)
+                        current = self._resolve(request.backend, limit, request.run)
                         drifted = generic_authority.authority_facts(current.runtime) != facts
                     except Exception as exc:
                         raise execution.GenericPostflightChanged(
@@ -117,10 +134,12 @@ class GenericDockerHarness(application.GenericSpikeHarness):
                 return application.validate_generic_harness_result(request, converted)
         except Exception as exc:
             # The typed exception owns its reason. Before execution (the runtime lock, scaffolding,
-            # authority, effects) a failure is `authority-invalid`; any other untyped failure is
-            # lifecycle.
-            reason = (application.GenericUnavailableReason.AUTHORITY_INVALID if resolving
-                      else exc.reason if isinstance(exc, execution.GenericExecutionUnavailable)
+            # authority, effects) a failure is `authority-invalid` unless the authority was
+            # re-observed stale; any other untyped failure is lifecycle.
+            typed = isinstance(exc, execution.GenericExecutionUnavailable)
+            reason = (exc.reason if typed and (
+                          not resolving or exc.reason in application.AUTHORITY_STALE_REASONS)
+                      else application.GenericUnavailableReason.AUTHORITY_INVALID if resolving
                       else application.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE)
             detail = (str(exc) if isinstance(exc, execution.GenericExecutionUnavailable)
                       else "failed without a safely attributable Docker detail")

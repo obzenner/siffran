@@ -122,3 +122,31 @@ def end_with_consent(coordinator, run_id, intent="stop"):
                                                        "document_digest": digest})
     assert answered["result"]["type"] == "Allow", answered
     return evaluate()
+
+
+def qualified_state(state, *, profile_id, record_digest, execution_binding_digest,
+                    spike_images, delivery="fixture-qualify"):
+    """``state`` as one succeeded qualification attempt leaves it, built by the production row and
+    binding builders: a new approved revision proposing ``spike_images`` under ``profile_id`` (any
+    earlier member kept in the history), its succeeded attempt naming ``record_digest``, and the
+    qualified binding installed. A host-side fixture for the runs whose spikes need a binding."""
+    from dataclasses import replace
+    from application import qualification
+    from core import environment
+    from core.run import ATTEMPT_OUTCOMES
+    revision = environment.next_revision(
+        [row["revision"] for row in environment.superseded_history(state)])
+    member = environment.revision_member(
+        {"profile_id": profile_id, "spike_images": list(spike_images),
+         "preparation": ["The fixture's images are local."],
+         "rationale": "The fixture binds its spike images."}, revision, approved=True)
+    rows = tuple(state.qualification_attempts)
+    reserved = {"attempt_id": environment.qualification_attempt_id(len(rows) + 1, delivery),
+                "revision": revision, "started_stamp": state.stamp_seq + 1,
+                "outcome": ATTEMPT_OUTCOMES[0], "record_digest": None, "reason": None, "probe": None}
+    return replace(
+        state, stamp_seq=state.stamp_seq + 1, environment=member,
+        environment_history=environment.superseded_history(state),
+        qualification_attempts=rows + (qualification.bound_attempt_row(reserved, record_digest),),
+        spike_backend=qualification.qualified_binding(
+            profile_id, record_digest, execution_binding_digest))

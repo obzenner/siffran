@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 
 from application import generic_spike as subject
@@ -33,7 +34,7 @@ class Resolver:
         self.calls = []
         self.value = value
 
-    def resolve(self, reference, selected):
+    def resolve(self, reference, selected, run=None):
         self.calls.append((reference, selected))
         return self.value or subject.LocalImageResolution(
             reference, D1, "linux", "aarch64", "linux", "arm64", (), 14, selected)
@@ -96,6 +97,7 @@ class GenericSpikeApplicationTests(unittest.TestCase):
             subject.GenericPreparationReason.IMAGE_REFERENCE_AMBIGUOUS,
             subject.GenericPreparationReason.MALFORMED_REQUIRED_RESULT,
             subject.GenericPreparationReason.AUTHORITY_DRIFT,
+            *subject.AUTHORITY_STALE_REASONS,
         ):
             source = Workspace()
             resolver = Resolver(subject.LocalImageResolutionUnavailable(reason))
@@ -121,6 +123,9 @@ class GenericSpikeApplicationTests(unittest.TestCase):
                 "python:3.12", D1, "linux", "arm64", "linux", "arm64", (), 2,
                 backend("docker-networked-v1")),
              subject.GenericPreparationReason.AUTHORITY_DRIFT),
+            (subject.LocalImageResolution(
+                "python:3.12", D1, "linux", "arm64", "linux", "arm64", (), 2, selected, 29),
+             subject.GenericPreparationReason.MALFORMED_REQUIRED_RESULT),
         )
         for value, reason in cases:
             with self.subTest(reason=reason), self.assertRaises(
@@ -181,6 +186,20 @@ class GenericSpikeApplicationTests(unittest.TestCase):
             subject.GenericPreparationReason.IMAGE_NOT_LOCAL))
         self.assertIs(subject.reobserve_authority(sealed, draft(), selected, gone),
                       subject.GenericPreparationReason.IMAGE_NOT_LOCAL)
+
+    def test_only_a_stale_binding_extends_the_closed_preparation_reasons(self):
+        for reason in subject.AUTHORITY_STALE_REASONS:
+            self.assertIs(subject.GenericPreparationUnavailable(reason).reason, reason)
+            self.assertIs(subject.LocalImageResolutionUnavailable(reason).reason, reason)
+        for other in (subject.GenericUnavailableReason.AUTHORITY_INVALID, reason.value):
+            with self.subTest(other=other), self.assertRaises(ValueError):
+                subject.GenericPreparationUnavailable(other)
+        with self.assertRaises(ValueError):
+            subject.LocalImageResolutionUnavailable(
+                subject.GenericUnavailableReason.AUTHORITY_INVALID)
+        sealed = subject.prepare_generic_spike(draft(), Workspace(), Resolver(), backend())
+        with self.assertRaises(ValueError):
+            replace(sealed, server_version=29)
 
     def test_sealed_request_contains_no_bytes_or_old_partitions(self):
         selected = backend()

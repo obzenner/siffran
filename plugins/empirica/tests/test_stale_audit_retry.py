@@ -88,7 +88,7 @@ class StaleAuditRetryTests(unittest.TestCase):
 
         class LocalImage:
             @staticmethod
-            def resolve(reference, selected):
+            def resolve(reference, selected, run=None):
                 return generic_spike.LocalImageResolution(
                     reference, "sha256:" + "c" * 64, "linux", "amd64",
                     "linux", "amd64", (), 2, selected)

@@ -139,10 +139,10 @@ class LiveDriver:
         return result
 
     def _seed_qualified_binding(self, run_id: str) -> None:
-        from dataclasses import replace
-        from application import generic_spike
         from core import environment
         from application.location import decode_handle
+        from driver import FIXTURE_SPIKE_IMAGE
+        from governance_setup import qualified_state
         coordinator = self._service._coordinator
         key = decode_handle(run_id)
         loaded = coordinator._load(key)
@@ -155,10 +155,10 @@ class LiveDriver:
         # StartRun ceiling; a pre-member fixture run binds the ceiling the run started with.
         profile = ((proposed or {}).get("profile_id") or ceiling
                    or "docker-isolated-v1")
-        binding = generic_spike.GenericQualifiedBackend(
-            "docker", profile, "sha256:" + "a" * 64, "sha256:" + "b" * 64).to_data()
-        coordinator._commit(key, loaded.read.revision, snapshot,
-                            replace(loaded.state, spike_backend=binding), ())
+        coordinator._commit(key, loaded.read.revision, snapshot, qualified_state(
+            loaded.state, profile_id=profile, record_digest="sha256:" + "a" * 64,
+            execution_binding_digest="sha256:" + "b" * 64,
+            spike_images=[FIXTURE_SPIKE_IMAGE]), ())
 
     def approve_governance(self, run_id: str) -> None:
         from governance_setup import approve_current

@@ -32,7 +32,8 @@ from .observation import (ObservationUnavailable, build_observation_snapshot,
 from .generic_spike import (
     GenericHarnessRequest, GenericHarnessResult, GenericHarnessUnavailable,
     SPIKE_FAULT_REASONS, GenericPreparationReason, GenericPreparationUnavailable,
-    GenericQualifiedBackend, NullLocalImageResolver, prepare_generic_spike,
+    GenericQualifiedBackend, GenericUnavailableReason, NullLocalImageResolver,
+    prepare_generic_spike,
     reobserve_authority,
     reobserve_generic_spike, sealed_request_facts,
     sealed_result_facts, validate_generic_harness_result,
@@ -890,7 +891,9 @@ class Coordinator:
         return self._allow(request_id, planned)
 
     def _spike(self, key: RunKey, command: dict[str, Any], request_id: str) -> dict[str, Any]:
-        """Capture and seal once, request-CAS before effects, then result-CAS without rerun."""
+        """Admit against the active binding, capture and seal once, request-CAS before effects,
+        then — under the shared runtime lock where the host composed one, so a rebind cannot
+        interleave — check the binding, run the effects and result-CAS without rerun."""
         action = command["action"]
         draft = None
         sealed = None
@@ -900,17 +903,12 @@ class Coordinator:
 
         def admit_request(state: OperationalState) -> dict[str, Any] | None:
             nonlocal action, backend, draft, persisted
-            persisted = dict(state.spike_backend)
-            # Only a qualified binding carries spike authority; an unqualified run/5 binding
-            # (spec §4.2) is refused exactly like unavailable, before any workspace artifact
-            # or harness call — StartRun still binds spikes_unavailable in this change.
-            if spike_plan.spike_backend_kind(persisted) != "qualified":
+            persisted = _plain(state.spike_backend)
+            # A run with no generic backend never gets one, before any workspace artifact or
+            # harness call.
+            if spike_plan.spike_backend_kind(persisted) == "spikes_unavailable":
                 return self._fault(request_id, "unavailable",
                                    GenericPreparationReason.SPIKES_UNAVAILABLE.value)
-            backend = GenericQualifiedBackend(
-                persisted["backend"], persisted["profile_id"],
-                persisted["qualification_record_digest"],
-                persisted["execution_binding_digest"])
             if draft is None:
                 try:
                     draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
@@ -920,6 +918,27 @@ class Coordinator:
                 # Any valid spelling (such as unsorted inputs) is accepted; the canonical
                 # draft is the one planned, digested, and persisted.
                 action = {**action, "plan": draft.to_data()}
+            # The missing environment step of an unqualified run, or an image reference outside
+            # the revision the binding qualified (spec §5.1).
+            refused = environment.spike_admission(state, draft.image)
+            if refused is not None:
+                return self._fault(request_id, "unavailable", refused)
+            current = GenericQualifiedBackend(
+                persisted["backend"], persisted["profile_id"],
+                persisted["qualification_record_digest"],
+                persisted["execution_binding_digest"])
+            if backend is not None and current != backend:
+                # Rebound while this request was being sealed: it outlived its binding.
+                return self._fault(request_id, "unavailable",
+                                   GenericPreparationReason.SUPERSEDED_BINDING.value)
+            backend = current
+            return None
+
+        def admit_binding(state: OperationalState) -> dict[str, Any] | None:
+            if _plain(state.spike_backend) != committed_binding:
+                # Rebound after the request was recorded: the request outlived its binding.
+                return self._fault(request_id, "unavailable",
+                                   GenericPreparationReason.SUPERSEDED_BINDING.value)
             return None
 
         persisted: dict[str, Any] = {}
@@ -942,7 +961,7 @@ class Coordinator:
             if sealed is None:
                 try:
                     sealed = prepare_generic_spike(
-                        draft, self.workspace, self.image_resolver, backend)
+                        draft, self.workspace, self.image_resolver, backend, key)
                 except GenericPreparationUnavailable as exc:
                     return self._fault(request_id, "unavailable", exc.reason.value)
                 except Exception:
@@ -969,8 +988,11 @@ class Coordinator:
                 (item for item in snapshot.history
                  if item.get("kind") == "spike"
                  and item.get("request_artifact_id") == prior_request.get("artifact_id")), None))
+            # An open request of the same draft blocks another, unless the binding it was sealed
+            # under was replaced: that request ended superseded and the retry runs under the new.
             if (prior_request is not None and prior_result is None
-                    and prior_request.get("artifact_id") != request_artifact["artifact_id"]):
+                    and prior_request.get("artifact_id") != request_artifact["artifact_id"]
+                    and _plain(prior_request.get("backend")) == persisted):
                 return self._fault(request_id, "conflict")
             exact_request = next((item for item in snapshot.history
                                   if item.get("kind") == "spike_request"
@@ -992,19 +1014,45 @@ class Coordinator:
                 if self._is_conflict(exc):
                     continue
                 return self._fault(request_id, "unavailable")
-            committed_binding = dict(committed_request_state.spike_backend)
+            committed_binding = _plain(committed_request_state.spike_backend)
             break
         else:
             return self._fault(request_id, "conflict")
 
         assert sealed is not None and backend is not None and request_artifact is not None
+        with ExitStack() as held:
+            lease = None
+            if self.qualification_port is not None:
+                try:
+                    lease = held.enter_context(self.qualification_port.runtime_lease(
+                        wait_seconds=spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS))
+                except Exception:
+                    return self._fault(request_id, "unavailable",
+                                       GenericUnavailableReason.AUTHORITY_INVALID.value)
+                # Under the lock no rebind can follow this read until the result is recorded.
+                checked = self._load_assembled(key, command, request_id, require_graph=True,
+                                               admit=admit_binding)
+                if isinstance(checked, dict):
+                    return checked
+            return self._spike_effect(key, command, request_id, draft, sealed, backend,
+                                      request_artifact, admit_binding, lease)
+
+    def _spike_effect(self, key: RunKey, command: dict[str, Any], request_id: str,
+                      draft: Any, sealed: Any, backend: GenericQualifiedBackend,
+                      request_artifact: dict[str, Any],
+                      admit_binding: Callable[[OperationalState], dict[str, Any] | None],
+                      lease: Any) -> dict[str, Any]:
+        """The committed request's effects and result: the harness (under ``lease`` when held),
+        the workspace and authority re-observation, then the result compare-and-set while
+        ``admit_binding`` finds the binding the request was sealed under still the run's."""
         harness_run_id = "r-" + request_artifact["artifact_id"].split(":", 1)[1][:32]
         harness_request = GenericHarnessRequest(
             harness_run_id, backend, sealed.plan, sealed.plan.digest,
-            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot)
+            spike_plan.FRAMEWORK_SPIKE_POLICY.digest, sealed.snapshot, key)
         try:
             harness_value = validate_generic_harness_result(
-                harness_request, self.harness.run(harness_request))
+                harness_request, self.harness.run(harness_request) if lease is None
+                else self.harness.run(harness_request, lease=lease))
         except Exception:
             return self._fault(request_id, "unavailable")
         if type(harness_value) is GenericHarnessUnavailable:
@@ -1015,7 +1063,7 @@ class Coordinator:
         if not reobserve_generic_spike(sealed, self.workspace):
             return self._fault(request_id, "unavailable",
                                GenericPreparationReason.CAPTURE_INVALID.value)
-        changed = reobserve_authority(sealed, draft, backend, self.image_resolver)
+        changed = reobserve_authority(sealed, draft, backend, self.image_resolver, key)
         if changed is not None:
             return self._fault(request_id, "unavailable", changed.value)
         result_facts = sealed_result_facts(harness_value)
@@ -1026,13 +1074,8 @@ class Coordinator:
             result_observations, sealed.snapshot.basis_id,
             observations_digest(result_observations))
 
-        def admit_result(state: OperationalState) -> dict[str, Any] | None:
-            if dict(state.spike_backend) != committed_binding:
-                return self._safe_block(key, request_id, "run.corrupt")  # the binding is immutable persisted state
-            return None
-
         for assembled in self._assembled_reads(key, command, request_id, require_graph=True,
-                                             admit=admit_result):
+                                             admit=admit_binding):
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot

@@ -19,6 +19,7 @@ from typing import Any, Callable, Mapping, Protocol
 from application import generic_spike as application
 from core import spike_plan
 from core.freshness import is_digest256
+from core.records import RunKey
 
 from . import common, generic_admission, planner, process
 
@@ -266,6 +267,22 @@ def _json_document(raw: bytes, where: str) -> object:
     return value
 
 
+def check_private_runtime(directories: tuple[Path, ...], config: Path, work: Path,
+                          profile: str) -> tuple[Path, Path]:
+    """The private spike runtime directories of one record namespace, each an existing safe
+    directory, and the profile's Docker config directory empty: its ``(config, work)`` pair."""
+    for path in (*directories, config, work):
+        common.safe_directory(path, create=False)
+    try:
+        if tuple(config.iterdir()):
+            raise GenericQualificationError(
+                "Docker config authority contains foreign files; remove them from the private "
+                f"{profile} config directory and requalify")
+    except OSError as exc:
+        raise GenericQualificationError("Docker config authority is unreadable") from exc
+    return config, work
+
+
 class GenericQualificationStore:
     """Read only current qualification records and pointers; never publishes or repairs."""
     def __init__(self, sandbox_root: Path | None = None, **_: Any) -> None:
@@ -279,18 +296,9 @@ class GenericQualificationStore:
 
     def check_runtime(self, profile_id: str) -> tuple[Path, Path]:
         profile = _profile(profile_id)
-        config = self.configs / profile
-        for path in (self.sandbox_root, self.root, self.records, self.pointers,
-                     self.configs, config, self.work):
-            common.safe_directory(path, create=False)
-        try:
-            if tuple(config.iterdir()):
-                raise GenericQualificationError(
-                    "Docker config authority contains foreign files; remove them from the private "
-                    f"{profile} config directory and requalify")
-        except OSError as exc:
-            raise GenericQualificationError("Docker config authority is unreadable") from exc
-        return config, self.work
+        return check_private_runtime(
+            (self.sandbox_root, self.root, self.records, self.pointers, self.configs),
+            self.configs / profile, self.work, profile)
 
     def load_record(self, record_digest: str) -> dict[str, Any]:
         digest_value = _digest(record_digest, "qualification record digest")
@@ -530,6 +538,16 @@ def pinned_daemon_identity(observed_runtime: object) -> dict[str, str]:
             "the Docker authority observation cannot identify a recovery daemon") from exc
 
 
+def stale_reason(exc: BaseException, otherwise: Any) -> Any:
+    """The closed stale-binding reason of a re-observation failure: a changed daemon or a
+    changed release; ``otherwise`` for any other failure."""
+    if isinstance(exc, ImplementationDrift):
+        return application.GenericUnavailableReason.QUALIFICATION_STALE_IMPLEMENTATION
+    if isinstance(exc, DaemonDrift):
+        return application.GenericUnavailableReason.QUALIFICATION_STALE_DAEMON
+    return otherwise
+
+
 class GenericAuthorityResolver:
     def __init__(self, store: GenericQualificationStore, *,
                  runtime_inspector: PassiveGenericRuntimeInspector = inspect_current_runtime,
@@ -552,26 +570,37 @@ class GenericAuthorityResolver:
                 self.implementation_inspector)
         self.clock = clock
 
-    def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float) \
-            -> ResolvedGenericAuthority:
+    def resolve(self, backend: application.GenericQualifiedBackend, *, deadline: float,
+                run: RunKey | None = None) -> ResolvedGenericAuthority:
+        """The authority of ``backend`` re-observed now. With ``run`` the record is the run-scoped
+        one, loaded only for that run generation, and the Docker server's major version is bound
+        across it; a changed daemon is :class:`DaemonDrift`, a changed release
+        :class:`ImplementationDrift`."""
         if type(backend) is not application.GenericQualifiedBackend or deadline <= self.clock():
             raise GenericQualificationError("historical authority input is malformed")
+        lineage = {} if run is None else {
+            "project_id": run.project_id, "run_id": run.run_id, "generation": run.generation}
         config, work = self.store.check_runtime(backend.profile_id)
-        first = self.store.load_record(backend.qualification_record_digest)
+        first = self.store.load_record(backend.qualification_record_digest, **lineage)
         if (first["profile_id"] != backend.profile_id
                 or first["execution_binding_digest"] != backend.execution_binding_digest):
             raise GenericQualificationError("historical backend binding differs")
         observed = self.runtime_inspector(first["runtime"], deadline=deadline)
         if type(observed) is not GenericRuntimeInspection:
             raise GenericQualificationError("runtime inspector returned an unknown value")
-        current = validate_runtime(observed.runtime)
+        current = validate_reobserved_runtime(first["runtime"], observed.runtime)
         if not authorities_match(first["runtime"], current):
             raise DaemonDrift("Docker daemon authority drifted")
+        if run is not None:
+            from .run_qualification import server_version_major
+            if (server_version_major(current["server_version"])
+                    != server_version_major(first["runtime"]["server_version"])):
+                raise DaemonDrift("Docker server major version changed")
         if (self.loaded_implementation_digest != first["implementation_digest"]
                 or implementation_release_digest(self.implementation_inspector())
                 != self.loaded_implementation_digest):
             raise ImplementationDrift("implementation identity drifted")
-        if self.store.load_record(backend.qualification_record_digest) != first:
+        if self.store.load_record(backend.qualification_record_digest, **lineage) != first:
             raise GenericQualificationError("qualification record changed while resolving")
         return ResolvedGenericAuthority.at_runtime(backend, current, config, work)
 
@@ -593,7 +622,8 @@ class DockerLocalImageResolver(application.LocalImageResolver):
             return application.GenericPreparationReason.IMAGE_NOT_LOCAL
         return application.GenericPreparationReason.MALFORMED_REQUIRED_RESULT
 
-    def resolve(self, requested_reference: str, backend: application.GenericQualifiedBackend):
+    def resolve(self, requested_reference: str, backend: application.GenericQualifiedBackend,
+                run: RunKey | None = None):
         try:
             spike_plan.validate_local_image_reference(requested_reference)
         except Exception:
@@ -601,10 +631,10 @@ class DockerLocalImageResolver(application.LocalImageResolver):
                 application.GenericPreparationReason.MALFORMED_REQUIRED_RESULT)
         try:
             deadline = self.clock() + 15.0
-            authority = self.authority.resolve(backend, deadline=deadline)
-        except Exception:
-            return application.LocalImageResolutionUnavailable(
-                application.GenericPreparationReason.AUTHORITY_DRIFT)
+            authority = self.authority.resolve(backend, deadline=deadline, run=run)
+        except Exception as exc:
+            return application.LocalImageResolutionUnavailable(stale_reason(
+                exc, application.GenericPreparationReason.AUTHORITY_DRIFT))
         try:
             argv = (str(authority.docker_cli), "image", "inspect", "--format",
                     planner.IMAGE_INSPECT_FORMAT, requested_reference)
@@ -622,7 +652,7 @@ class DockerLocalImageResolver(application.LocalImageResolver):
                 requested_reference, image_id, raw_os, raw_arch,
                 authority.runtime["server_raw_os"],
                 authority.runtime["server_raw_architecture"], volumes,
-                authority.engine_ncpu, backend)
+                authority.engine_ncpu, backend, authority.runtime["server_version"])
         except application.GenericPreparationUnavailable as exc:
             return application.LocalImageResolutionUnavailable(exc.reason)
         except Exception:

@@ -53,6 +53,7 @@ ENVIRONMENT_REQUIRED = "environment-required"
 ENVIRONMENT_PENDING = "environment-pending"
 ENVIRONMENT_REJECTED = "environment-rejected"
 QUALIFICATION_REQUIRED = "qualification-required"
+IMAGE_NOT_QUALIFIED = "image-not-qualified"
 QUALIFICATION_ATTEMPTS_EXHAUSTED = "qualification-attempts-exhausted"
 ENVIRONMENT_REVISIONS_EXHAUSTED = "environment-revisions-exhausted"
 ENVIRONMENT_PRESENTATIONS_EXHAUSTED = "environment-presentations-exhausted"
@@ -308,8 +309,7 @@ def delivery_attempt_index(rows: object, delivery: object) -> int | None:
 
 
 def spike_prerequisite(state: object) -> str | None:
-    """The pure spike prerequisite (spec §5.1, decision only; per-spike image resolution is E10):
-    on a run with no active qualified binding, ``environment-required`` when no approved
+    """The pure spike prerequisite (spec §5.1): on a run with no active qualified binding, ``environment-required`` when no approved
     environment revision exists (the way on is a proposal) and ``qualification-required`` once one
     is approved but nothing is bound (the way on is a qualification attempt)."""
     if spike_plan.spike_backend_kind(state.spike_backend) == "qualified":
@@ -318,6 +318,35 @@ def spike_prerequisite(state: object) -> str | None:
     if member is not None and member["state"] == APPROVED:
         return QUALIFICATION_REQUIRED
     return ENVIRONMENT_REQUIRED
+
+
+def bound_member(state: object) -> Mapping | None:
+    """The approved revision the run's active qualified binding was qualified for (spec §5): the
+    revision of the attempt row whose record the binding names, read from the current member or
+    the immutable history (a later revision may be pending while the binding stays active), or
+    ``None`` when the run holds no such binding."""
+    backend = state.spike_backend
+    if spike_plan.spike_backend_kind(backend) != "qualified":
+        return None
+    # Only a succeeded row carries a record digest.
+    revision = next((row["revision"] for row in state.qualification_attempts
+                     if row["record_digest"] == backend["qualification_record_digest"]), None)
+    return next((member for member in superseded_history(state)
+                 if member["revision"] == revision and member["state"] == APPROVED), None)
+
+
+def spike_admission(state: object, image: str) -> str | None:
+    """The pure spike admission against the active binding (spec §5 "Spikes"): the spike
+    prerequisite first, then the plan's image reference must be one of the spike images of the
+    revision the binding qualified, exactly as proposed (``image-not-qualified`` otherwise). The
+    image itself is resolved per spike by the host; rebuilding a listed image needs no revision."""
+    missing = spike_prerequisite(state)
+    if missing is not None:
+        return missing
+    member = bound_member(state)
+    if member is None or image not in member["proposal"]["spike_images"]:
+        return IMAGE_NOT_QUALIFIED
+    return None
 
 
 def revision_member(proposal_body: object, revision: int, *, approved: bool) -> dict[str, object]:

@@ -4,7 +4,9 @@ from __future__ import annotations
 import copy
 import json
 import sys
+import tempfile
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 from adapters.sandbox import generic_authority as authority
@@ -13,6 +15,7 @@ from adapters.sandbox import generic_journal as journal
 from adapters.sandbox import planner
 from application import generic_spike
 from core import spike_plan
+from core.records import RunKey
 from test_generic_authority import runtime
 from test_generic_execution import AUTHORITY, FakeDocker, fixture
 
@@ -23,9 +26,13 @@ class Resolver:
         self.drift = drift
         self.fail = fail
         self.calls = 0
+        self.runs = []
 
-    def resolve(self, selected, *, deadline):
+    def resolve(self, selected, *, deadline, run=None):
         self.calls += 1
+        self.runs.append(run)
+        if isinstance(self.fail, Exception):
+            raise self.fail
         if self.fail:
             raise RuntimeError("authority unavailable")
         facts = runtime()
@@ -94,6 +101,45 @@ class HarnessTests(unittest.TestCase):
         result = service.run(self.request)
         self.assertIs(result.reason, generic_spike.GenericUnavailableReason.POSTFLIGHT_CHANGED)
 
+    def test_a_stale_binding_at_resolution_keeps_its_own_reason(self):
+        stale = generic_spike.GenericUnavailableReason
+        for error, expected in ((authority.DaemonDrift("daemon"), stale.QUALIFICATION_STALE_DAEMON),
+                                (authority.ImplementationDrift("release"),
+                                 stale.QUALIFICATION_STALE_IMPLEMENTATION)):
+            fake = FakeDocker(self.operation)
+            service, _ = self.build(fake, Resolver(self.backend, fail=error))
+            with self.subTest(reason=expected.value):
+                self.assertIs(service.run(self.request).reason, expected)
+
+    def test_the_run_reaches_every_resolution_of_its_binding(self):
+        run = RunKey("project", "run", 1)
+        request = replace(self.request, run=run)
+        service, resolver = self.build(FakeDocker(self.operation))
+        self.assertIs(type(service.run(request)), generic_spike.GenericHarnessResult)
+        self.assertEqual(resolver.runs, [run, run])
+
+    def test_a_held_lease_runs_the_effects_without_taking_the_lock_again(self):
+        """Under the caller's lease the harness never takes the lock itself (a second hold on
+        another descriptor would wait on the caller); a lease that is no longer held, or held
+        over another store, is refused before any effect."""
+        from adapters.sandbox import run_qualification
+        fake = FakeDocker(self.operation)
+        service, resolver = self.build(fake)
+        with run_qualification.hold_runtime_lock(sandbox_root=self.store.home) as lease:
+            result = service.run(self.request, lease=lease)
+        self.assertIs(type(result), generic_spike.GenericHarnessResult)
+        other = tempfile.TemporaryDirectory()
+        self.addCleanup(other.cleanup)
+        foreign_root = (Path(other.name) / "sandbox").resolve()
+        foreign_root.mkdir(mode=0o700)
+        with run_qualification.hold_runtime_lock(sandbox_root=foreign_root) as foreign:
+            refused = [service.run(self.request, lease=foreign)]
+        refused.append(service.run(self.request, lease=lease))
+        refused.append(service.run(self.request, lease=object()))
+        for item in refused:
+            self.assertIs(item.reason, generic_spike.GenericUnavailableReason.AUTHORITY_INVALID)
+        self.assertEqual(resolver.calls, 2, "a refused lease reaches no resolution")
+
     def test_each_unavailable_path_carries_the_reason_its_hint_describes(self):
         import importlib.util
         from unittest import mock
@@ -106,7 +152,7 @@ class HarnessTests(unittest.TestCase):
         reason = generic_spike.GenericUnavailableReason
 
         class FlakyPostflight(Resolver):
-            def resolve(self, selected, *, deadline):
+            def resolve(self, selected, *, deadline, run=None):
                 if self.calls == 1:
                     self.calls += 1
                     raise RuntimeError("daemon stopped after the spike")

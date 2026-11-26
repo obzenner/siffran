@@ -37,7 +37,7 @@ from governance_setup import TEST_INVOCATION
 from adapters.identity import observe
 from core.canonical import canonical_digest
 from core.projection import confirmation_actions
-from driver import CITED_SOURCE, V2SeamAbsent, new_driver
+from driver import CITED_SOURCE, FIXTURE_SPIKE_IMAGE, V2SeamAbsent, new_driver
 from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 
@@ -319,7 +319,7 @@ def action_spike_request(*, claim_id: str, paths: list[str]) -> dict:
     """Build the closed single-container /2 plan used by conformance scenarios."""
     return {"kind": "spike_request", "claim_id": claim_id, "plan": {
         "schema": "empirica.spike-plan-draft/2",
-        "image": "example/probe:local",
+        "image": FIXTURE_SPIKE_IMAGE,
         "argv": ["/usr/bin/python3", "/inputs/probe.py", "--exact-argv"],
         "inputs": sorted(paths),
         "environment": {"MODE": "sealed"},

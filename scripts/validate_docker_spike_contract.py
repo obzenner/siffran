@@ -72,7 +72,7 @@ REASON_HINTS = {
     "image-inspect-output-limit": "the image inspection exceeded its output bound; ask the operator to inspect the daemon, then request qualification again",
     "image-tool-missing": "an inspected image is missing a tool the probes need (including /bin/sh): for an image of your approved environment revision, propose a revision with an image that carries them; for the host-pinned probe image, ask the operator to repair the pinned probe path (no proposal replaces it); then request qualification again",
     "image-uid65534-unusable": "an inspected image is not readable and executable as uid 65534 (nobody): for an image of your approved environment revision, propose a revision with one that is; for the host-pinned probe image, ask the operator to repair the pinned probe path (no proposal replaces it); then request qualification again",
-    "qualification-in-progress": "another qualification attempt holds the shared runtime: nothing was reserved or charged; wait for it, then read the run and request qualification again only if nothing is bound",
+    "qualification-in-progress": "another qualification attempt or a running spike holds the shared runtime: nothing was reserved or charged; wait for it, then read the run and request qualification again only if nothing is bound",
     "qualification-interrupted": "an earlier attempt of this run died before it recorded an outcome: it stays charged, bound nothing and orphaned any record it published; request qualification again",
 }
 
@@ -123,11 +123,11 @@ def render_limits() -> str:
     require(all(re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)+", name) for name in fault_reasons),
             "spike Fault reasons must use one hyphenated lowercase spelling")
     rows = [
-        "Agent chooses | any already-local image reference (name:tag, repo@sha256 digest, full "
-        "image ID, or unambiguous ID prefix) on the out-of-band path until the run-scoped "
-        "environment cycle lands — once it lands, the reference must be one of the spike images "
-        "of the revision the active qualification bound (environment/actions/spikes; the closed "
-        "reason for a stray reference is image-not-qualified); exact argv, any tool, no shell "
+        "Agent chooses | one of the spike images of the revision the active qualification bound "
+        "(environment/actions/spikes; the closed reason for a stray reference is "
+        "image-not-qualified), each an already-local image reference (name:tag, repo@sha256 "
+        "digest, full image ID, or unambiguous ID prefix) resolved again for every spike, so a "
+        "rebuilt listed image needs no new proposal; exact argv, any tool, no shell "
         "unless written; "
         f"inputs as repository-relative files or directories; up to {spike_plan.MAX_ENVIRONMENT} "
         "environment overrides, never secrets, HOME and TMPDIR reserved",

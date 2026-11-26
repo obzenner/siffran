@@ -29,6 +29,7 @@ from adapters.sandbox import process
 from adapters.sandbox import probe_image
 from adapters.sandbox import run_qualification as run_owner
 from core import spike_plan
+from core.records import RunKey
 from test_docker_planner import D0, D1
 from test_generic_authority import CLI, runtime
 from test_generic_execution import FakeDocker, StubRunner
@@ -2678,6 +2679,140 @@ class DestinationRecordingRunner(StubRunner):
     def run(self, argv, *, env=None, **kwargs):
         self.destinations.append((tuple(argv), dict(env or {})))
         return super().run(argv, env=env, **kwargs)
+
+
+class RunBindingSpikeAuthorityTests(IsolatedSandboxHomeTestCase):
+    """A spike resolves its run's binding through the run-scoped record the qualification
+    published (spec sections 4.5 and 5 "Spikes"): loaded for its own run generation only, every
+    observation at the record's pinned endpoint, the server major version bound across it."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = (Path(temporary.name) / "sandbox").resolve()
+        self.root.mkdir(mode=0o700)
+        common._loaded_release = None
+        common._loaded_release_failed = None
+        self.addCleanup(lambda: setattr(common, "_loaded_release", None))
+        harness = OwnerHarness(self.root)
+        harness.manifests = [{"implementation_digest": D0}] * 32
+        harness.inspector_facts["daemon_id"] = "the-qualified-daemon"
+        outcome = harness.call()
+        self.assertIs(type(outcome), run_owner.RunQualificationBound)
+        self.record = outcome.record
+        self.backend = run_owner.application.GenericQualifiedBackend(
+            "docker", self.record["profile_id"], self.record["qualification_record_digest"],
+            self.record["execution_binding_digest"])
+        self.run = RunKey("project-1", "run-1", 1)
+
+    def resolve(self, run=None, observed=None, release=D0):
+        facts = copy.deepcopy(self.record["runtime"]) if observed is None else observed
+        seen = []
+
+        def pinned(recorded, *, deadline):
+            seen.append(recorded["endpoint"])
+            return authority.GenericRuntimeInspection(copy.deepcopy(facts))
+
+        resolved = authority.GenericAuthorityResolver(
+            run_owner.RunQualificationStore(self.root), runtime_inspector=pinned,
+            implementation_inspector=lambda: {"implementation_digest": release},
+            loaded_release=release).resolve(
+                self.backend, deadline=time.monotonic() + 10, run=self.run if run is None else run)
+        self.assertEqual(seen, [self.record["runtime"]["endpoint"]])
+        return resolved
+
+    def changed(self, **facts):
+        return {**copy.deepcopy(self.record["runtime"]), **facts}
+
+    def test_the_run_resolves_its_binding_in_the_run_scoped_private_runtime(self):
+        resolved = self.resolve()
+        store = run_owner.RunQualificationStore(self.root)
+        self.assertEqual(resolved.work_directory, store.work)
+        self.assertEqual(dict(resolved.environment)["DOCKER_CONFIG"],
+                         str(store.configs / self.backend.profile_id))
+        self.assertEqual(dict(resolved.environment)["DOCKER_HOST"],
+                         self.record["runtime"]["endpoint"])
+
+    def test_another_run_generation_never_resolves_the_record(self):
+        for other in (RunKey("project-1", "run-1", 2), RunKey("project-1", "run-2", 1),
+                      RunKey("project-2", "run-1", 1)):
+            with self.subTest(other=other), self.assertRaises(
+                    authority.GenericQualificationError) as caught:
+                self.resolve(run=other)
+            self.assertNotIsInstance(caught.exception, authority.DaemonDrift)
+
+    def test_only_the_server_major_version_is_bound_across_the_binding(self):
+        major, _, rest = self.record["runtime"]["server_version"].partition(".")
+        self.assertEqual(self.resolve(observed=self.changed(
+            server_version=major + ".99.0")).runtime["server_version"], major + ".99.0")
+        with self.assertRaises(authority.DaemonDrift):
+            self.resolve(observed=self.changed(server_version=str(int(major) + 1) + "." + rest))
+
+    def test_a_changed_daemon_or_release_is_its_own_drift(self):
+        with self.assertRaises(authority.DaemonDrift):
+            self.resolve(observed=self.changed(daemon_id="another-daemon"))
+        with self.assertRaises(authority.DaemonDrift):
+            self.resolve(observed=self.changed(memory_limit=False))
+        with self.assertRaises(authority.ImplementationDrift):
+            self.resolve(release=D1)
+
+    def test_a_foreign_file_in_the_private_config_refuses_the_binding(self):
+        store = run_owner.RunQualificationStore(self.root)
+        foreign = store.configs / self.backend.profile_id / "config.json"
+        foreign.write_text("{}")
+        with self.assertRaises(authority.GenericQualificationError) as caught:
+            self.resolve()
+        self.assertIn("foreign files", str(caught.exception))
+        foreign.unlink()
+        with self.assertRaises(authority.GenericQualificationError):
+            store.check_runtime("docker-unknown-v1")
+
+
+class RuntimeLockWaitTests(IsolatedSandboxHomeTestCase):
+    """A spike's lease waits for the shared runtime lock within its own bound."""
+
+    def setUp(self):
+        super().setUp()
+        import tempfile
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.root = (Path(temporary.name) / "sandbox").resolve()
+        self.root.mkdir(mode=0o700)
+
+    def test_a_waiting_lease_is_granted_once_the_holder_releases(self):
+        granted, released = threading.Event(), threading.Event()
+
+        def waiter():
+            with run_owner.hold_runtime_lock(sandbox_root=self.root, wait_seconds=10) as lease:
+                granted.set()
+                self.assertTrue(released.is_set(), "granted while another holder had it")
+                self.assertLessEqual(lease.deadline, time.monotonic() + 10)
+
+        with run_owner.hold_runtime_lock(sandbox_root=self.root):
+            worker = threading.Thread(target=waiter, daemon=True)
+            worker.start()
+            self.assertFalse(granted.wait(timeout=0.2), "a held lock was granted again")
+            released.set()
+        self.assertTrue(granted.wait(timeout=10), "the waiting lease was never granted")
+        worker.join(timeout=10)
+        self.assertFalse(worker.is_alive())
+
+    def test_a_wait_past_its_bound_fails_and_a_malformed_bound_is_refused(self):
+        clock = MutableClock()
+        with run_owner.hold_runtime_lock(sandbox_root=self.root):
+            def advance(*_):
+                clock.advance(1.0)
+            with mock.patch.object(common.time, "sleep", advance), \
+                    self.assertRaises(common.GenericScaffoldingError):
+                with run_owner.hold_runtime_lock(sandbox_root=self.root, clock=clock,
+                                                 wait_seconds=0.5):
+                    self.fail("a lease past its wait bound is never granted")
+        for malformed in (0, -1, True, "1"):
+            with self.subTest(malformed=malformed), self.assertRaises(ValueError):
+                with run_owner.hold_runtime_lock(sandbox_root=self.root, wait_seconds=malformed):
+                    self.fail("a malformed wait bound takes no lock")
 
 
 if __name__ == "__main__":
