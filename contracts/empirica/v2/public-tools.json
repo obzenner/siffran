@@ -928,7 +928,7 @@
                           "pattern": "[^ \t\n\r\f\u000b\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]",
                           "allOf": [
                             {
-                              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+                              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])"
                             }
                           ],
                           "description": "Free text: every character must render honestly \u2014 no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set. Blank itself means the explicit cross-host whitespace set this member's own pattern writes (U+FEFF included, where JavaScript's \\S says blank and Python's strip does not); no host language's \\s or strip decides."
@@ -941,7 +941,7 @@
                         "pattern": "[^ \t\n\r\f\u000b\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]",
                         "allOf": [
                           {
-                            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+                            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])"
                           }
                         ],
                         "description": "Free text, exactly the preparation step's character rules with the rationale's own bound."
@@ -1533,7 +1533,7 @@
                           "pattern": "[^ \t\n\r\f\u000b\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]",
                           "allOf": [
                             {
-                              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+                              "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])"
                             }
                           ],
                           "description": "Free text: every character must render honestly \u2014 no C0/C1 control characters (an embedded newline included), no UTF-16 surrogate code point (a lone surrogate cannot be digested or rendered), exactly the core.environment._text refusal set. Blank itself means the explicit cross-host whitespace set this member's own pattern writes (U+FEFF included, where JavaScript's \\S says blank and Python's strip does not); no host language's \\s or strip decides."
@@ -1546,7 +1546,7 @@
                         "pattern": "[^ \t\n\r\f\u000b\u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]",
                         "allOf": [
                           {
-                            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f\\ud800-\\udfff]*(?![\\s\\S])"
+                            "pattern": "^[^\\u0000-\\u001f\\u007f-\\u009f]*(?![\\s\\S])"
                           }
                         ],
                         "description": "Free text, exactly the preparation step's character rules with the rationale's own bound."

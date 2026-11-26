@@ -91,6 +91,19 @@ class ClosedMessageTests(unittest.TestCase):
             self.assertEqual(str(caught.exception), message)
 
 
+    def test_every_free_text_member_refuses_a_lone_surrogate_and_a_control_character(self):
+        """The core refuses both in the rationale and in a preparation step, whatever the tool schema admits."""
+        for member in ("rationale", "preparation"):
+            for character, message in (("\ud800", "environment proposal text must be UTF-8"),
+                                       ("\x07", "environment proposal text carries control characters")):
+                text = f"text {character} here"
+                changes = {member: [text] if member == "preparation" else text}
+                with self.subTest(member=member, character=repr(character)), \
+                        self.assertRaises(subject.EnvironmentProposalError) as caught:
+                    subject.validate_proposal(_proposal(**changes))
+                self.assertEqual(str(caught.exception), message)
+
+
 class CanonicalAndDigestTests(unittest.TestCase):
     def test_canonical_form_sorts_images_and_keeps_strings_as_given(self):
         body = _proposal(spike_images=["b/alpine:3.22", "a/python:3.12"], preparation=[" obey  spaces "],
