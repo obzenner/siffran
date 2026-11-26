@@ -290,10 +290,11 @@ class BridgeV2Tests(unittest.TestCase):
     def test_build_service_composes_exact_v2_authority_image_resolver_and_harness(self):
         execution_store = object()
         store = type("Store", (), {"execution_store": execution_store})()
-        selector, resolver, image_resolver, docker_harness, service = (
-            object(), object(), object(), object(), object())
+        selector, resolver, image_resolver, docker_harness, service, run_store = (
+            object(), object(), object(), object(), object(), object())
         loaded_release = "sha256:" + "0" * 64
         with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
+              patch.object(bridge, "RunQualificationStore", return_value=run_store) as run_type,
               patch.object(
                   bridge, "GenericBackendSelector", return_value=selector) as selector_type,
               patch.object(bridge, "freeze_loaded_release", return_value=loaded_release) as frozen,
@@ -308,7 +309,9 @@ class BridgeV2Tests(unittest.TestCase):
         store_type.assert_called_once_with()
         selector_type.assert_called_once_with(store)
         frozen.assert_called_once_with()
-        resolver_type.assert_called_once_with(store, loaded_release=loaded_release)
+        # A run's spikes resolve their binding through the run-scoped record store.
+        run_type.assert_called_once_with()
+        resolver_type.assert_called_once_with(run_store, loaded_release=loaded_release)
         image_type.assert_called_once_with(resolver)
         harness_type.assert_called_once_with(execution_store, resolver)
         self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
@@ -319,9 +322,18 @@ class BridgeV2Tests(unittest.TestCase):
         port = compose.call_args.kwargs["qualification_port"]
         self.assertIsInstance(port, bridge._RunQualificationPort)
 
+    def test_the_binding_resolver_observes_only_at_the_pinned_endpoint(self):
+        from adapters.sandbox import generic_authority
+        with patch.object(generic_authority, "GenericAuthorityResolver") as implementation:
+            bridge.GenericAuthorityResolver("store", loaded_release="release")
+        implementation.assert_called_once_with(
+            "store", runtime_inspector=generic_authority.inspect_pinned_runtime,
+            loaded_release="release")
+
     def test_sandbox_constructor_failure_degrades_only_spikes(self):
         names = ("GenericQualificationStore", "GenericBackendSelector", "freeze_loaded_release",
-                 "GenericAuthorityResolver", "DockerLocalImageResolver", "GenericDockerHarness")
+                 "RunQualificationStore", "GenericAuthorityResolver", "DockerLocalImageResolver",
+                 "GenericDockerHarness")
         for failing in names:
             store_value = type("Store", (), {"execution_store": object()})()
             with self.subTest(failing=failing), \
@@ -331,6 +343,8 @@ class BridgeV2Tests(unittest.TestCase):
                                  return_value=object()) as selector, \
                     patch.object(bridge, "freeze_loaded_release",
                                  return_value="sha256:" + "0" * 64) as loaded_release, \
+                    patch.object(bridge, "RunQualificationStore",
+                                 return_value=object()) as run_store, \
                     patch.object(bridge, "GenericAuthorityResolver",
                                  return_value=object()) as resolver, \
                     patch.object(bridge, "DockerLocalImageResolver",
@@ -338,7 +352,7 @@ class BridgeV2Tests(unittest.TestCase):
                     patch.object(bridge, "GenericDockerHarness",
                                  return_value=object()) as docker_harness:
                 {"GenericQualificationStore": store, "GenericBackendSelector": selector,
-                 "freeze_loaded_release": loaded_release,
+                 "freeze_loaded_release": loaded_release, "RunQualificationStore": run_store,
                  "GenericAuthorityResolver": resolver,
                  "DockerLocalImageResolver": image_resolver,
                  "GenericDockerHarness": docker_harness}[failing].side_effect = PermissionError(

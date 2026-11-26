@@ -84,12 +84,14 @@ class QualificationAttemptPort(Protocol):
     to E5's sandbox owner; no Docker in the host-neutral layer). The transaction holds the
     shared runtime lock (``runtime_lease``) from before its durable reservation to after its
     outcome, so an open row seen under the lock is never a live attempt; a killed or raising
-    attempt binds nothing."""
+    attempt binds nothing. A spike holds the same lock from its binding check before effects to
+    its result, so its effects and a rebind never interleave."""
 
-    def runtime_lease(self) -> AbstractContextManager[Any]:
-        """Take the shared runtime lock without waiting and hold it for the context, yielding the
-        lease the two calls below run under; raises :class:`QualificationRuntimeBusy` at once
-        when another attempt holds it."""
+    def runtime_lease(self, wait_seconds: float | None = None) -> AbstractContextManager[Any]:
+        """Take the shared runtime lock and hold it for the context, yielding the lease the calls
+        below (and a spike's harness) run under. Without ``wait_seconds`` it never waits: raises
+        :class:`QualificationRuntimeBusy` at once when another holder has it; with a bound it waits
+        within that bound, which is then the lease's one deadline."""
         ...
 
     def run_qualification_attempt(

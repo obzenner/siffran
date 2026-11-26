@@ -734,6 +734,17 @@ class RunQualificationStore:
                              else common.canonical_authority_path(Path(sandbox_root)))
         self.root = self.sandbox_root / NAMESPACE
         self.records = self.root / "records"
+        self.configs = self.root / "configs"
+        self.work = self.root / "work"
+
+    def check_runtime(self, profile_id: str) -> tuple[Path, Path]:
+        """The private spike runtime a binding's spikes run in: the namespace's work directory and
+        the profile's Docker config, which the attempt that qualified it left empty."""
+        if type(profile_id) is not str or profile_id not in spike_plan.NETWORK_PROFILES:
+            raise authority.GenericQualificationError("run qualification profile is unknown")
+        return authority.check_private_runtime(
+            (self.sandbox_root, self.root, self.records, self.configs),
+            self.configs / profile_id, self.work, profile_id)
 
     def load_record(self, record_digest: str, *, project_id: str, run_id: str,
                     generation: int) -> dict[str, Any]:
@@ -1155,15 +1166,23 @@ class RuntimeLease:
 @contextmanager
 def hold_runtime_lock(
     *, sandbox_root: Path | None = None, clock: Callable[[], float] = time.monotonic,
+    wait_seconds: float | None = None,
 ) -> Iterator[RuntimeLease]:
-    """Take the shared runtime lock without waiting and hold it for the context: an attempt or a
-    settle given the lease runs under it instead of taking its own, so a caller can order its own
-    durable steps (the transaction's reservation) inside the lock. The lease carries the one
-    host deadline of the whole qualify: a settle and the attempt run under it each spend what is
-    left of it. A lock another holder has raises :class:`common.RuntimeLockBusy` at once."""
+    """Take the shared runtime lock and hold it for the context: an attempt, a settle or a spike
+    given the lease runs under it instead of taking its own, so a caller can order its own
+    durable steps (the transaction's reservation, a spike's binding check and result) inside the
+    lock. Without ``wait_seconds`` the lock is taken without waiting — a lock another holder has
+    raises :class:`common.RuntimeLockBusy` at once — and the lease carries the one host deadline
+    of the whole qualify: a settle and the attempt run under it each spend what is left of it.
+    With ``wait_seconds`` the lock is waited for, and that one bound covers the wait and
+    everything run under the lease."""
+    if wait_seconds is not None and (type(wait_seconds) not in (int, float) or wait_seconds <= 0):
+        raise ValueError("runtime lock wait is outside its bound")
     root, store = _prepared_store(sandbox_root)
-    lease = RuntimeLease(root, clock() + DEFAULT_QUALIFICATION_SECONDS)
-    with common.runtime_lock(store, lease.deadline, clock=clock, blocking=False):
+    lease = RuntimeLease(root, clock() + (DEFAULT_QUALIFICATION_SECONDS if wait_seconds is None
+                                          else wait_seconds))
+    with common.runtime_lock(store, lease.deadline, clock=clock,
+                             blocking=wait_seconds is not None):
         try:
             yield lease
         finally:

@@ -7,6 +7,7 @@ from enum import Enum
 from typing import Protocol
 
 from core.canonical import canonical_digest
+from core.records import RunKey
 from core.freshness import FileBinding, FileObservation, ObservationState, validate_digest256, valid_claim_id
 from core import spike_plan
 from core.spike_plan_draft import SpikePlanDraft, canonicalize_spike_plan_draft, seal_spike_plan
@@ -23,8 +24,8 @@ class GenericPreparationReason(str, Enum):
     CAPTURE_INVALID = "capture-invalid"
     # The run is bound to `spikes_unavailable`; raised by the transaction, never by preparation.
     SPIKES_UNAVAILABLE = "spikes-unavailable"
-    # Empirica 7.2 §5.1 admission/transaction reasons (E6b): declared on the wire with no producer
-    # yet; the transaction raises them once the environment step lands (E7/E9/E10).
+    # Empirica 7.2 §5.1 admission/transaction reasons: the environment step's prerequisites, the
+    # approved-reference membership and the binding a spike request outlived.
     ENVIRONMENT_REQUIRED = "environment-required"
     ENVIRONMENT_PENDING = "environment-pending"
     ENVIRONMENT_REJECTED = "environment-rejected"
@@ -36,8 +37,9 @@ class GenericPreparationReason(str, Enum):
 
 
 class GenericPreparationUnavailable(ValueError):
-    def __init__(self, reason: GenericPreparationReason):
-        if type(reason) is not GenericPreparationReason:
+    def __init__(self, reason: "GenericPreparationReason | GenericUnavailableReason"):
+        if type(reason) is not GenericPreparationReason and not (
+                type(reason) is GenericUnavailableReason and reason in AUTHORITY_STALE_REASONS):
             raise ValueError("generic preparation reason must be closed")
         self.reason = reason
         super().__init__(reason.value)
@@ -73,11 +75,13 @@ class LocalImageResolution:
     declared_volumes: tuple[str, ...]
     engine_ncpu: int
     backend: GenericQualifiedBackend
+    #: The Docker server version the resolution observed: within one spike it must not change.
+    server_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class LocalImageResolutionUnavailable:
-    reason: GenericPreparationReason
+    reason: "GenericPreparationReason | GenericUnavailableReason"
 
     def __post_init__(self) -> None:
         if self.reason not in {
@@ -85,19 +89,23 @@ class LocalImageResolutionUnavailable:
             GenericPreparationReason.IMAGE_REFERENCE_AMBIGUOUS,
             GenericPreparationReason.MALFORMED_REQUIRED_RESULT,
             GenericPreparationReason.AUTHORITY_DRIFT,
+            *AUTHORITY_STALE_REASONS,
         }:
             raise ValueError("resolver unavailable reason is not closed")
 
 
 class LocalImageResolver(Protocol):
-    """Bounded read-only resolution under the exact run-bound backend."""
+    """Bounded read-only resolution under the exact run-bound backend; ``run`` names the run whose
+    binding it is, so a run-scoped record is loaded only for its own run generation."""
     def resolve(
         self, requested_reference: str, backend: GenericQualifiedBackend,
+        run: RunKey | None = None,
     ) -> LocalImageResolution | LocalImageResolutionUnavailable: ...
 
 
 class NullLocalImageResolver:
-    def resolve(self, requested_reference: str, backend: GenericQualifiedBackend):
+    def resolve(self, requested_reference: str, backend: GenericQualifiedBackend,
+                run: RunKey | None = None):
         return LocalImageResolutionUnavailable(GenericPreparationReason.MALFORMED_REQUIRED_RESULT)
 
 
@@ -135,12 +143,15 @@ class GenericSealedCapture:
     draft_digest: str
     plan: spike_plan.SealedSpikePlan
     snapshot: GenericExecutionSnapshot
+    server_version: str | None = None
 
     def __post_init__(self) -> None:
         validate_digest256(self.draft_digest)
         if type(self.plan) is not spike_plan.SealedSpikePlan \
                 or type(self.snapshot) is not GenericExecutionSnapshot:
             raise ValueError("generic sealed capture values must be exact")
+        if self.server_version is not None and type(self.server_version) is not str:
+            raise ValueError("generic sealed capture server version is malformed")
         if self.plan.draft_digest != self.draft_digest:
             raise ValueError("sealed plan differs from draft")
         plan_files = tuple((item.path, item.sha256, item.bytes) for item in self.plan.captured_files)
@@ -208,7 +219,8 @@ def _resolved_image(
             or type(value.declared_volumes) is not tuple
             or any(type(item) is not str or not item for item in value.declared_volumes)
             or type(value.engine_ncpu) is not int or isinstance(value.engine_ncpu, bool)
-            or value.engine_ncpu <= 0):
+            or value.engine_ncpu <= 0
+            or value.server_version is not None and type(value.server_version) is not str):
         raise GenericPreparationUnavailable(GenericPreparationReason.MALFORMED_REQUIRED_RESULT)
     if value.declared_volumes:
         raise GenericPreparationUnavailable(GenericPreparationReason.IMAGE_DECLARES_VOLUMES)
@@ -233,6 +245,7 @@ def prepare_generic_spike(
     workspace: Workspace,
     resolver: LocalImageResolver,
     backend: GenericQualifiedBackend,
+    run: RunKey | None = None,
 ) -> GenericSealedCapture:
     """Resolve and capture read-only facts before request CAS; perform no staging or effects."""
     if type(draft) is not SpikePlanDraft or type(backend) is not GenericQualifiedBackend:
@@ -240,7 +253,7 @@ def prepare_generic_spike(
     if canonicalize_spike_plan_draft(draft.to_data()) != draft:
         raise GenericPreparationUnavailable(GenericPreparationReason.MALFORMED_REQUIRED_RESULT)
     try:
-        resolved_value = resolver.resolve(draft.image, backend)
+        resolved_value = resolver.resolve(draft.image, backend, run)
     except Exception as exc:
         raise GenericPreparationUnavailable(
             GenericPreparationReason.MALFORMED_REQUIRED_RESULT) from exc
@@ -259,7 +272,7 @@ def prepare_generic_spike(
             network_profile=backend.profile_id)
     except Exception as exc:
         raise GenericPreparationUnavailable(GenericPreparationReason.CAPTURE_INVALID) from exc
-    return GenericSealedCapture(draft.digest, plan, snapshot)
+    return GenericSealedCapture(draft.digest, plan, snapshot, resolved_value.server_version)
 
 
 def reobserve_authority(
@@ -267,16 +280,20 @@ def reobserve_authority(
     draft: SpikePlanDraft,
     backend: GenericQualifiedBackend,
     resolver: LocalImageResolver,
-) -> GenericPreparationReason | None:
+    run: RunKey | None = None,
+) -> "GenericPreparationReason | GenericUnavailableReason | None":
     """None when the image and engine still equal the sealed ones; otherwise the closed reason
-    (the resolver's own, such as `image-not-local`, or `authority-drift` for a changed match)."""
+    (the resolver's own, such as `image-not-local` or a stale binding, `authority-drift` for a
+    changed match, and a stale daemon for a server version that changed within the spike)."""
     try:
-        value = resolver.resolve(draft.image, backend)
+        value = resolver.resolve(draft.image, backend, run)
         image, engine_ncpu = _resolved_image(draft, backend, value)
     except GenericPreparationUnavailable as exc:
         return exc.reason
     except Exception:
         return GenericPreparationReason.MALFORMED_REQUIRED_RESULT
+    if value.server_version != sealed.server_version:
+        return GenericUnavailableReason.QUALIFICATION_STALE_DAEMON
     if image == sealed.plan.image and engine_ncpu == sealed.plan.engine_ncpu:
         return None
     return GenericPreparationReason.AUTHORITY_DRIFT
@@ -306,13 +323,16 @@ class GenericHarnessRequest:
     plan_digest: str
     policy_digest: str
     snapshot: GenericExecutionSnapshot
+    #: The run whose binding the request runs under (its run-scoped record's lineage).
+    run: RunKey | None = None
 
     def __post_init__(self) -> None:
         if (not valid_claim_id(self.run_id) or type(self.backend) is not GenericQualifiedBackend
                 or type(self.plan) is not spike_plan.SealedSpikePlan
                 or self.plan_digest != self.plan.digest
                 or self.policy_digest != spike_plan.FRAMEWORK_SPIKE_POLICY.digest
-                or type(self.snapshot) is not GenericExecutionSnapshot):
+                or type(self.snapshot) is not GenericExecutionSnapshot
+                or self.run is not None and type(self.run) is not RunKey):
             raise ValueError("generic harness request is malformed")
         if self.plan.network_profile != self.backend.profile_id:
             raise ValueError("generic harness request authority differs")
@@ -492,8 +512,17 @@ class GenericHarnessUnavailable:
             raise ValueError("generic private unavailable detail is malformed")
 
 
+#: A binding observed changed from the one it was qualified under (spec §5): the Docker endpoint,
+#: daemon identity, server major version or capability, or the loaded release.
+AUTHORITY_STALE_REASONS = (GenericUnavailableReason.QUALIFICATION_STALE_DAEMON,
+                           GenericUnavailableReason.QUALIFICATION_STALE_IMPLEMENTATION)
+
+
 class GenericSpikeHarness(Protocol):
-    def run(self, request: GenericHarnessRequest) -> GenericHarnessResult | GenericHarnessUnavailable: ...
+    """``lease``: the shared runtime lock the caller already holds; the effects run under it
+    instead of the harness taking its own."""
+    def run(self, request: GenericHarnessRequest, lease: object | None = None) \
+            -> GenericHarnessResult | GenericHarnessUnavailable: ...
 
 
 def sealed_request_facts(sealed: GenericSealedCapture, backend: GenericQualifiedBackend) -> dict[str, object]:

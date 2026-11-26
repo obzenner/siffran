@@ -13,6 +13,7 @@ from adapters.sandbox import generic_authority as authority
 from adapters.sandbox import generic_qualification as qualification
 from adapters.sandbox import planner, process
 from application import generic_spike
+from core.records import RunKey
 
 D0 = "sha256:" + "0" * 64
 D1 = "sha256:" + "1" * 64
@@ -753,6 +754,9 @@ class HistoricalResolutionTests(unittest.TestCase):
                 self.assertEqual(resolved.runtime[key], expected)
 
 
+RUN = RunKey("project", "run", 1)
+
+
 class LocalImageResolverTests(unittest.TestCase):
     def resolved_authority(self):
         return authority.ResolvedGenericAuthority(
@@ -766,7 +770,7 @@ class LocalImageResolverTests(unittest.TestCase):
                 self.value = value
                 self.calls = []
 
-            def resolve(self, selected, *, deadline):
+            def resolve(self, selected, *, deadline, run=None):
                 self.calls.append((selected, deadline))
                 return self.value
         provider = Authority(self.resolved_authority())
@@ -801,14 +805,34 @@ class LocalImageResolverTests(unittest.TestCase):
         self.assertEqual(result.declared_volumes, ("/data",))
 
     def test_authority_failure_is_distinct_from_malformed_image_output(self):
-        class RefusingAuthority:
-            def resolve(self, selected, *, deadline):
-                raise authority.GenericQualificationError("drift")
+        """A changed daemon or release is the stale binding it is; any other authority failure
+        is authority drift. The run the resolution is for reaches the authority."""
+        stale = generic_spike.GenericUnavailableReason
+        for error, expected in (
+                (authority.GenericQualificationError("drift"),
+                 generic_spike.GenericPreparationReason.AUTHORITY_DRIFT),
+                (authority.DaemonDrift("daemon"), stale.QUALIFICATION_STALE_DAEMON),
+                (authority.ImplementationDrift("release"),
+                 stale.QUALIFICATION_STALE_IMPLEMENTATION)):
+            runs = []
 
-        resolver = authority.DockerLocalImageResolver(
-            RefusingAuthority(), runner=QueueRunner([]))
+            class RefusingAuthority:
+                def resolve(self, selected, *, deadline, run=None):
+                    runs.append(run)
+                    raise error
+
+            resolver = authority.DockerLocalImageResolver(
+                RefusingAuthority(), runner=QueueRunner([]))
+            result = resolver.resolve("python:3.12", backend(), RUN)
+            with self.subTest(error=type(error).__name__):
+                self.assertIs(result.reason, expected)
+                self.assertEqual(runs, [RUN])
+
+    def test_the_resolution_reports_the_observed_server_version(self):
+        resolver, _, _ = self.image_resolver(process.CommandResult.fake(stdout=json.dumps({
+            "Id": D1, "Os": "linux", "Architecture": "amd64", "Volumes": None})))
         result = resolver.resolve("python:3.12", backend())
-        self.assertIs(result.reason, generic_spike.GenericPreparationReason.AUTHORITY_DRIFT)
+        self.assertEqual(result.server_version, runtime()["server_version"])
 
     def test_missing_ambiguous_and_malformed_results_are_closed(self):
         cases = [

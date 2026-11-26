@@ -165,6 +165,9 @@ def _normalize(path: str) -> str:
 #: The source a test's research cites by default, held by every driver's workspace: research must
 #: quote the cited workspace file verbatim (``core.citations``).
 CITED_SOURCE = ("docs/cited.md", "The test observed this source directly.")
+#: The local image every fixture spike names: the one spike image the fixture-completed
+#: environment cycle approves and binds.
+FIXTURE_SPIKE_IMAGE = "example/probe:local"
 
 
 class FakeWorkspace:
@@ -297,7 +300,7 @@ class FakeWorkspace:
 
 
 class FakeLocalImageResolver:
-    def resolve(self, reference, backend):
+    def resolve(self, reference, backend, run=None):
         return generic_spike.LocalImageResolution(
             reference, "sha256:" + "2" * 64,
             "linux", "arm64", "linux", "aarch64", (), 8, backend)

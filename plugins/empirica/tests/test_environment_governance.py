@@ -754,9 +754,8 @@ class AdmissionDecisionTests(unittest.TestCase):
         self.assertEqual(environment.qualify_admission(rejected), environment.ENVIRONMENT_REJECTED)
 
     def test_the_spike_prerequisite_names_the_missing_step(self):
-        """A spike with no qualified binding reads the two decisions E10 will wire: no approved
-        revision needs a proposal first; an approved one with nothing bound needs the attempt.
-        StartRun still binds spikes_unavailable, so the missing binding is the real run fact."""
+        """A spike with no qualified binding names its missing step: no approved revision needs a
+        proposal first; an approved one with nothing bound needs the attempt."""
         without_proposal = ServiceEnv().start().fully_approved()
         self.assertIsNone(without_proposal.state().environment)
         self.assertEqual(environment.spike_prerequisite(without_proposal.state()),
@@ -767,6 +766,51 @@ class AdmissionDecisionTests(unittest.TestCase):
         approved = DeliberationEnv(control_mode="auto")
         self.assertEqual(environment.spike_prerequisite(approved.state()),
                          environment.QUALIFICATION_REQUIRED)
+
+    def test_a_spike_image_is_admitted_only_from_the_revision_the_binding_qualified(self):
+        """Spec section 5 "Spikes": the plan's reference must be exactly one of the bound
+        revision's spike images; a later pending, approved or rejected revision lends none of its
+        images, and the bound revision is found in the immutable history."""
+        from governance_setup import qualified_state
+        base = ServiceEnv().start().fully_approved().state()
+        bound = qualified_state(base, profile_id=ENVIRONMENT_ACTION["payload"]["profile_id"],
+                                record_digest=canonical_digest("record"),
+                                execution_binding_digest=canonical_digest("binding"),
+                                spike_images=["listed/image:1", "other/image:2"])
+        self.assertEqual(plain(environment.bound_member(bound)), plain(bound.environment))
+        for image in ("listed/image:1", "other/image:2"):
+            self.assertIsNone(environment.spike_admission(bound, image))
+        for image in ("listed/image", "listed/image:10", "docker.io/listed/image:1",
+                      "LISTED/image:1"):
+            with self.subTest(image=image):
+                self.assertEqual(environment.spike_admission(bound, image),
+                                 environment.IMAGE_NOT_QUALIFIED)
+        later_proposal = {**plain(bound.environment["proposal"]), "spike_images": ["later/image:1"]}
+        for approved in (False, True):
+            later = replace(
+                bound, environment=environment.revision_member(
+                    later_proposal, bound.environment["revision"] + 1, approved=approved),
+                environment_history=environment.superseded_history(bound))
+            with self.subTest(approved=approved):
+                self.assertEqual(plain(environment.bound_member(later)), plain(bound.environment))
+                self.assertIsNone(environment.spike_admission(later, "listed/image:1"))
+                self.assertEqual(environment.spike_admission(later, "later/image:1"),
+                                 environment.IMAGE_NOT_QUALIFIED)
+        # A binding no succeeded row names, or one naming a revision no longer approved, admits
+        # nothing; an unqualified run names its missing step before any membership.
+        orphan = replace(bound, spike_backend={
+            **plain(bound.spike_backend), "qualification_record_digest": canonical_digest("x")})
+        self.assertIsNone(environment.bound_member(orphan))
+        self.assertEqual(environment.spike_admission(orphan, "listed/image:1"),
+                         environment.IMAGE_NOT_QUALIFIED)
+        unapproved = replace(bound, environment={**plain(bound.environment),
+                                                 "state": environment.REJECTED})
+        self.assertIsNone(environment.bound_member(unapproved))
+        self.assertEqual(environment.spike_admission(unapproved, "listed/image:1"),
+                         environment.IMAGE_NOT_QUALIFIED)
+        self.assertIsNone(environment.bound_member(base))
+        self.assertEqual(environment.spike_admission(base, "listed/image:1"),
+                         environment.spike_prerequisite(base))
 
     def test_the_revision_ceiling_refuses_a_further_submission_and_never_drops_a_row(self):
         """Spec §4.2's retention rule: every revision and its receipts stay immutable, and the

@@ -6,8 +6,10 @@ import hashlib
 import json
 import sys
 import tempfile
+import threading
 import time
 import unittest
+from contextlib import contextmanager
 from dataclasses import replace
 from unittest import mock
 from pathlib import Path
@@ -30,7 +32,7 @@ from application.ports import (CapturedFile, ObservationSnapshot,  # noqa: E402
 from application.run_state import decode_state, encode_state  # noqa: E402
 from application.location import encode_handle, storage_id  # noqa: E402
 from application.transaction import Coordinator as ProductionCoordinator  # noqa: E402
-from core import governance as core_governance, spike_plan  # noqa: E402
+from core import environment, governance as core_governance, spike_plan  # noqa: E402
 from core.evaluation import (  # noqa: E402
     EvaluationSnapshot, active_spike_heads, artifact, audit_binding, audit_passes,
     claim_conflicted, claim_digest, evaluate_snapshot, frozen_semantic_digest, independence,
@@ -49,7 +51,8 @@ from core.records import (ABSENT, Artifact, Conflict, Corrupt, Present, Revision
 from core.run import OperationalState  # noqa: E402
 from core.governance import initial as initial_governance  # noqa: E402
 from governance_setup import (  # noqa: E402
-    TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current, end_with_consent)
+    TEST_INVOCATION, AUTHOR, AUDITOR, SIZED_RATIONALE, approve_current, end_with_consent,
+    qualified_state)
 from application.protocol import host_profile_id  # noqa: E402
 CLAUDE_PROFILE = host_profile_id("claude-code")
 PI_PROFILE = host_profile_id("pi")
@@ -187,15 +190,25 @@ class Workspace:
 
 
 class ImageResolver:
+    """A local image under the run binding; ``answers`` (when given) replaces the n-th
+    resolution's answer, so a test can make one observation stale."""
+
     def __init__(self):
         self.calls = []
+        self.runs = []
         self.image_id = "sha256:" + "2" * 64
+        self.server_version = "29.1.0"
+        self.answers = {}
 
-    def resolve(self, reference, backend):
+    def resolve(self, reference, backend, run=None):
         self.calls.append((reference, backend))
+        self.runs.append(run)
+        answer = self.answers.get(len(self.calls))
+        if answer is not None:
+            return answer
         return generic_spike.LocalImageResolution(
             reference, self.image_id, "linux", "arm64", "linux", "aarch64",
-            (), 8, backend)
+            (), 8, backend, self.server_version)
 
 
 class Harness:
@@ -206,9 +219,9 @@ class Harness:
         self.failure = failure
         self.arguments = []
 
-    def run(self, request):
+    def run(self, request, lease=None):
         self.calls += 1
-        self.arguments.append({"request": request})
+        self.arguments.append({"request": request, "lease": lease})
         if self.before_result is not None:
             self.before_result()
         if self.failure is not None:
@@ -265,7 +278,9 @@ class QualifiedSelector:
             EXECUTION_BINDING_DIGEST)
 
 
-def bind_qualified_backend(coordinator, runs: Runs) -> None:
+def bind_qualified_backend(coordinator, runs: Runs, *, record_digest=QUALIFICATION_DIGEST,
+                           execution_binding_digest=EXECUTION_BINDING_DIGEST,
+                           spike_images=None) -> None:
     """Seed the started run with an active qualified binding — the one state change a succeeded
     qualification attempt's compare-and-set installs (Empirica 7.2 §4.2, E9: StartRun itself
     binds unqualified and reads no machine-wide authority). A test seam through the
@@ -276,11 +291,10 @@ def bind_qualified_backend(coordinator, runs: Runs) -> None:
     state = decode_state(read.value)
     snapshot = coordinator._assemble(
         key, state, {"type": "GetRun", "run_id": encode_handle(key)}, require_graph=False)
-    installed = generic_spike.GenericQualifiedBackend(
-        "docker", "docker-isolated-v1", QUALIFICATION_DIGEST,
-        EXECUTION_BINDING_DIGEST).to_data()
-    coordinator._commit(key, read.revision, snapshot,
-                        replace(state, spike_backend=installed), ())
+    coordinator._commit(key, read.revision, snapshot, qualified_state(
+        state, profile_id=spike_plan.ISOLATED_PROFILE, record_digest=record_digest,
+        execution_binding_digest=execution_binding_digest,
+        spike_images=spike_images or [spike_action()["plan"]["image"]]), ())
 
 
 def activate_investigation(coordinator: ProductionCoordinator, run_id: str) -> None:
@@ -1337,14 +1351,14 @@ class D7TransactionTests(unittest.TestCase):
                          decode_state(runs.data[key].value).observation_basis_digest)
 
     def _qualified_spike_ready(self, harness=None, *, session="qualified", resolver=None,
-                               workspace=None, graph=None):
+                               workspace=None, graph=None, port=None):
         runs, artifacts_repo = Runs(), Artifacts()
         workspace = Workspace() if workspace is None else workspace
         harness = harness if harness is not None else Harness()
         selector = QualifiedSelector()
         coordinator = ProductionCoordinator(
             workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, selector,
-            ImageResolver() if resolver is None else resolver)
+            ImageResolver() if resolver is None else resolver, port)
         started = coordinator.handle(
             {"type": "StartRun", "control_mode": "deliberative",
              "invocation": dict(TEST_INVOCATION),
@@ -1386,7 +1400,7 @@ class D7TransactionTests(unittest.TestCase):
         operation_id = "o-" + "8" * 32
 
         class Resolver:
-            def resolve(self, selected, *, deadline):
+            def resolve(self, selected, *, deadline, run=None):
                 facts = docker_runtime()
                 return generic_authority.ResolvedGenericAuthority(
                     selected, Path(sys.executable).resolve(),
@@ -1576,7 +1590,7 @@ class D7TransactionTests(unittest.TestCase):
                 super().__init__()
                 self.reason = reason
 
-            def resolve(self, reference, backend):
+            def resolve(self, reference, backend, run=None):
                 self.calls.append((reference, backend))
                 if self.reason is generic_spike.GenericPreparationReason.IMAGE_PLATFORM_MISMATCH:
                     return generic_spike.LocalImageResolution(
@@ -1617,7 +1631,7 @@ class D7TransactionTests(unittest.TestCase):
         class Resolver(ImageResolver):
             gone = False
 
-            def resolve(self, reference, backend):
+            def resolve(self, reference, backend, run=None):
                 if self.gone:
                     self.calls.append((reference, backend))
                     return generic_spike.LocalImageResolutionUnavailable(
@@ -1817,7 +1831,7 @@ class D7TransactionTests(unittest.TestCase):
         class DriftOnAuthorityRecheck(ImageResolver):
             armed = 0
 
-            def resolve(self, reference, backend):
+            def resolve(self, reference, backend, run=None):
                 if self.armed:
                     self.armed += 1
                     if self.armed == 3:  # reobserve_authority: after the input reobservation, before the commit
@@ -1879,7 +1893,7 @@ class D7TransactionTests(unittest.TestCase):
         kinds = self._artifact_kinds(artifacts_repo, key)
         self.assertEqual((kinds.count("spike_request"), kinds.count("spike")), (1, 0))
 
-    def test_a_binding_changed_between_request_and_result_is_run_corrupt(self):
+    def test_a_binding_replaced_between_request_and_result_ends_superseded(self):
         harness = Harness()
         coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="binding-changed")
@@ -1896,8 +1910,9 @@ class D7TransactionTests(unittest.TestCase):
         harness.before_result = change_binding
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
-        self.assertEqual(response["result"]["type"], "Block", response)
-        self.assertEqual([reason["code"] for reason in response["result"]["reasons"]], ["run.corrupt"])
+        self.assertEqual(
+            (response["result"]["type"], response["result"]["reason"]),
+            ("Fault", generic_spike.GenericPreparationReason.SUPERSEDED_BINDING.value), response)
         self.assertEqual(harness.calls, 1)
         self.assertEqual(runs.data[key], mutated[0])
         self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
@@ -2390,6 +2405,225 @@ class D7TransactionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unknown bootstrap operation"):
             project_runview(replace(snapshot, contract=replace(protocol.CONTRACT_VIEW,
                                                                bootstrap_operations=())))
+
+
+class LeasePort:
+    """A host port's shared runtime lock as the spike transaction sees it: each lease records the
+    bound it was waited for and whether it is held; ``on_enter`` runs as the lock is granted, and
+    ``refuse`` makes the grant fail."""
+
+    def __init__(self):
+        self.waits, self.held, self.on_enter, self.refuse = [], False, None, None
+
+    @contextmanager
+    def runtime_lease(self, wait_seconds=None):
+        self.waits.append(wait_seconds)
+        if self.refuse is not None:
+            raise self.refuse
+        self.held = True
+        try:
+            if self.on_enter is not None:
+                self.on_enter()
+            yield self
+        finally:
+            self.held = False
+
+
+class SpikeBindingAdmissionTests(unittest.TestCase):
+    """A spike against the run's active binding (spec section 5 "Spikes"): approved-reference
+    membership, per-spike resolution under the binding, re-observation before effects and before
+    the result, and serialization with a rebind through the shared runtime lock."""
+
+    ready = D7TransactionTests._qualified_spike_ready
+    kinds = staticmethod(D7TransactionTests._artifact_kinds)
+
+    def spike(self, coordinator, run_id, action, request_id="spike"):
+        return coordinator.handle(
+            {"type": "ObserveAction", "run_id": run_id, "action": action}, request_id)
+
+    def assertFault(self, response, reason):
+        self.assertEqual(
+            (response["result"]["type"], response["result"]["code"],
+             response["result"].get("reason")),
+            ("Fault", "unavailable", reason.value), response)
+
+    def rebind(self, coordinator, runs, name):
+        bind_qualified_backend(coordinator, runs, record_digest=canonical_digest(name + " record"),
+                               execution_binding_digest=canonical_digest(name + " binding"))
+
+    def test_only_an_image_of_the_revision_the_binding_qualified_is_admitted(self):
+        """A pending later revision qualifies nothing: its image is not admitted, while the bound
+        revision's image stays admitted until a rebind."""
+        resolver, harness = ImageResolver(), Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="membership", resolver=resolver)
+        state = decode_state(runs.data[key].value)
+        later = environment.revision_member(
+            {**core_governance.plain(state.environment["proposal"]),
+             "spike_images": ["other/image:local"]},
+            state.environment["revision"] + 1, approved=False)
+        snapshot = coordinator._assemble(key, state, {"type": "GetRun", "run_id": run_id},
+                                         require_graph=False)
+        coordinator._commit(key, runs.data[key].revision, snapshot, replace(
+            state, environment=later,
+            environment_history=environment.superseded_history(state)), ())
+        stray = {**action, "plan": {**action["plan"], "image": "other/image:local"}}
+        self.assertFault(self.spike(coordinator, run_id, stray, "stray"),
+                         generic_spike.GenericPreparationReason.IMAGE_NOT_QUALIFIED)
+        self.assertEqual((resolver.calls, harness.calls), ([], 0))
+        self.assertNotIn("spike_request", self.kinds(artifacts_repo, key))
+        allowed = self.spike(coordinator, run_id, action)
+        self.assertEqual(allowed["result"]["type"], "Allow", allowed)
+
+    def test_each_spike_resolves_its_image_under_the_run_binding_and_seals_that_id(self):
+        """A rebuilt listed image needs no new revision: the next spike resolves the reference
+        again, for this run's binding, and seals and runs the new image ID."""
+        resolver, harness = ImageResolver(), Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="per-spike", resolver=resolver)
+        first = self.spike(coordinator, run_id, action, "first")
+        resolver.image_id = "sha256:" + "7" * 64
+        second = self.spike(coordinator, run_id, action, "second")
+        self.assertEqual((first["result"]["type"], second["result"]["type"]),
+                         ("Allow", "Allow"), second)
+        self.assertEqual(set(resolver.runs), {key})
+        sealed = [item["request"] for item in harness.arguments]
+        self.assertEqual([item.run for item in sealed], [key, key])
+        self.assertEqual([item["lease"] for item in harness.arguments], [None, None],
+                         "with no host port the harness takes the lock itself")
+        self.assertEqual([item.plan.image.image_id for item in sealed],
+                         ["sha256:" + "2" * 64, resolver.image_id])
+        self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 2)
+
+    def test_a_stale_binding_or_server_version_refuses_before_effects_or_before_the_result(self):
+        stale = generic_spike.GenericUnavailableReason
+        for call, answer, reason, effects in (
+                (1, generic_spike.LocalImageResolutionUnavailable(stale.QUALIFICATION_STALE_DAEMON),
+                 stale.QUALIFICATION_STALE_DAEMON, 0),
+                (2, generic_spike.LocalImageResolutionUnavailable(
+                    stale.QUALIFICATION_STALE_IMPLEMENTATION),
+                 stale.QUALIFICATION_STALE_IMPLEMENTATION, 1),
+                (2, "30.0.0", stale.QUALIFICATION_STALE_DAEMON, 1)):
+            with self.subTest(call=call, reason=reason.value):
+                resolver, harness = ImageResolver(), Harness()
+                coordinator, _, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+                    harness, session="stale-" + str(call) + reason.value, resolver=resolver)
+                if isinstance(answer, str):
+                    harness.before_result = lambda: setattr(resolver, "server_version", answer)
+                else:
+                    resolver.answers[call] = answer
+                self.assertFault(self.spike(coordinator, run_id, action), reason)
+                kinds = self.kinds(artifacts_repo, key)
+                self.assertEqual((harness.calls, kinds.count("spike_request"),
+                                  kinds.count("spike")), (effects, effects, 0))
+
+    def test_the_effects_and_the_result_run_under_the_held_runtime_lock(self):
+        port, harness = LeasePort(), Harness()
+        coordinator, _, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="leased", port=port)
+        held = []
+        harness.before_result = lambda: held.append(port.held)
+        committed = []
+        real_commit = coordinator._commit
+
+        def commit(*args, **kwargs):
+            committed.append(port.held)
+            return real_commit(*args, **kwargs)
+
+        with mock.patch.object(coordinator, "_commit", commit):
+            response = self.spike(coordinator, run_id, action)
+        self.assertEqual(response["result"]["type"], "Allow", response)
+        self.assertEqual(port.waits, [spike_plan.BACKEND_OPERATION_TIMEOUT_SECONDS])
+        self.assertEqual(held, [True])
+        self.assertIs(harness.arguments[0]["lease"], port)
+        self.assertEqual(committed, [False, True], "the request commits before, the result under")
+        self.assertFalse(port.held)
+        self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 1)
+
+    def test_a_binding_replaced_before_the_lock_is_granted_ends_superseded_without_effects(self):
+        port, harness = LeasePort(), Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="superseded", port=port)
+        port.on_enter = lambda: self.rebind(coordinator, runs, "rebound")
+        self.assertFault(self.spike(coordinator, run_id, action),
+                         generic_spike.GenericPreparationReason.SUPERSEDED_BINDING)
+        self.assertEqual(harness.calls, 0)
+        self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 0)
+        port.refuse = RuntimeError("the lock wait expired")
+        port.on_enter = None
+        self.assertFault(self.spike(coordinator, run_id, action, "refused"),
+                         generic_spike.GenericUnavailableReason.AUTHORITY_INVALID)
+        self.assertEqual(harness.calls, 0)
+
+    def test_a_binding_replaced_while_the_request_is_sealed_ends_superseded(self):
+        """The rebind lands between the sealing read and the request compare-and-set: the retry
+        finds the binding the request was sealed under replaced and runs nothing."""
+        resolver, harness = ImageResolver(), Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="sealing", resolver=resolver)
+        real_resolve = resolver.resolve
+
+        def rebinding(reference, backend, run=None):
+            if not resolver.calls:
+                self.rebind(coordinator, runs, "rebound while sealing")
+            return real_resolve(reference, backend, run)
+
+        resolver.resolve = rebinding
+        self.assertFault(self.spike(coordinator, run_id, action),
+                         generic_spike.GenericPreparationReason.SUPERSEDED_BINDING)
+        self.assertEqual((harness.calls, len(resolver.calls)), (0, 1))
+        self.assertNotIn("spike", self.kinds(artifacts_repo, key))
+
+    def test_a_request_left_open_under_a_replaced_binding_does_not_block_the_retry(self):
+        harness = Harness(failure=generic_spike.GenericHarnessUnavailable(
+            generic_spike.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE))
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="retry")
+        self.spike(coordinator, run_id, action, "first")
+        self.rebind(coordinator, runs, "requalified")
+        harness.failure = None
+        retried = self.spike(coordinator, run_id, action, "retry")
+        self.assertEqual(retried["result"]["type"], "Allow", retried)
+        requests = [json.loads(item.body) for item in artifacts_repo.values[key].values()
+                    if json.loads(item.body)["kind"] == "spike_request"]
+        self.assertEqual(len(requests), 2)
+        self.assertEqual({item["backend"]["qualification_record_digest"] for item in requests},
+                         {QUALIFICATION_DIGEST, canonical_digest("requalified record")})
+        self.assertEqual(self.kinds(artifacts_repo, key).count("spike"), 1)
+
+    def test_a_spike_waits_for_a_rebind_holding_the_real_lock_then_ends_superseded(self):
+        """The spike's lease and a rebind share the real runtime lock: a spike whose lock wait
+        began while a rebind held it sees the replaced binding once it is granted."""
+        from adapters import bridge
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        root = (Path(temporary.name) / "sandbox").resolve()
+        root.mkdir(mode=0o700)
+        port = bridge._RunQualificationPort(sandbox_root=root)
+        waiting = threading.Event()
+        real_lease = port.runtime_lease
+
+        def announced(wait_seconds=None):
+            if wait_seconds is not None:
+                waiting.set()
+            return real_lease(wait_seconds)
+
+        port.runtime_lease = announced
+        harness = Harness()
+        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+            harness, session="real-lock", port=port)
+        responses = []
+        with port.runtime_lease():
+            worker = threading.Thread(
+                target=lambda: responses.append(self.spike(coordinator, run_id, action)),
+                daemon=True)
+            worker.start()
+            self.assertTrue(waiting.wait(timeout=10), "the spike never asked for the lock")
+            self.rebind(coordinator, runs, "rebound under the lock")
+        worker.join(timeout=10)
+        self.assertFalse(worker.is_alive(), "the spike never got the released lock")
+        self.assertFault(responses[0], generic_spike.GenericPreparationReason.SUPERSEDED_BINDING)
+        self.assertEqual(harness.calls, 0)
 
 
 class ValidGraphClaimIdTests(unittest.TestCase):

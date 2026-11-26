@@ -800,17 +800,31 @@ class StartSelectionTests(unittest.TestCase):
             "reason": "spikes-unavailable"})
 
     def test_a_run5_spike_without_a_qualified_binding_is_guarded_before_every_effect(self):
-        # run/5 admits an unqualified binding (spec §4.2): every guarded spike path refuses it
-        # exactly like unavailable — no artifact, no harness call, no state rewrite.
+        # A run with no generic backend refuses spikes-unavailable; an unqualified run/5 binding
+        # (spec §4.2) names its missing environment step (spec §5.1) — environment-required
+        # with no approved revision, qualification-required once one is approved — and every
+        # refusal precedes any artifact, harness call or state rewrite.
         coordinator, values = self.coordinator(CountingSelector(SpikesUnavailable()))
         started = coordinator.handle(start_command(), "start")
         with self.subTest(binding="spikes_unavailable"):
             self.assert_spike_refused_untouched(
                 coordinator, started["result"]["run"]["id"], values, self.assert_spikes_unavailable)
-        with self.subTest(binding="unqualified"):
-            self.assert_spike_refused_untouched(
-                *self.seeded(replace(initial(), spike_backend={"kind": "unqualified"})),
-                self.assert_spikes_unavailable, spike_action("probe.py"))
+        proposal = {"profile_id": spike_plan.ISOLATED_PROFILE,
+                    "spike_images": [spike_action("probe.py")["plan"]["image"]],
+                    "preparation": ["Load the image."], "rationale": "One local image."}
+        for member, reason in (
+                (None, environment.ENVIRONMENT_REQUIRED),
+                (environment.revision_member(proposal, 1, approved=False),
+                 environment.ENVIRONMENT_REQUIRED),
+                (environment.revision_member(proposal, 1, approved=True),
+                 environment.QUALIFICATION_REQUIRED)):
+            with self.subTest(binding="unqualified", member=member and member["state"]):
+                self.assert_spike_refused_untouched(
+                    *self.seeded(replace(initial(), spike_backend={"kind": "unqualified"},
+                                         environment=member)),
+                    lambda result, reason=reason: self.assertEqual(result, {
+                        "type": "Fault", "code": "unavailable", "fail_direction": "closed",
+                        "reason": reason}), spike_action("probe.py"))
 
     def test_terminal_run5_spike_is_inert_before_every_side_effect(self):
         for binding in ({"kind": "spikes_unavailable"}, {"kind": "unqualified"},

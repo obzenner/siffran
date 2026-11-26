@@ -106,9 +106,17 @@ def GenericBackendSelector(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
-def GenericAuthorityResolver(*args, **kwargs):
-    from adapters.sandbox.generic_authority import GenericAuthorityResolver as implementation
+def RunQualificationStore(*args, **kwargs):
+    from adapters.sandbox.run_qualification import RunQualificationStore as implementation
     return implementation(*args, **kwargs)
+
+
+def GenericAuthorityResolver(*args, **kwargs):
+    """The resolver of a run's qualified binding: every observation is made at the endpoint the
+    binding's record pinned, never a fresh context discovery."""
+    from adapters.sandbox.generic_authority import (GenericAuthorityResolver as implementation,
+                                                    inspect_pinned_runtime)
+    return implementation(*args, runtime_inspector=inspect_pinned_runtime, **kwargs)
 
 
 def freeze_loaded_release():
@@ -217,12 +225,13 @@ class _RunQualificationPort:
         self._owner_options = dict(owner_options)
 
     @contextmanager
-    def runtime_lease(self):
+    def runtime_lease(self, wait_seconds=None):
         from application.ports import QualificationRuntimeBusy
         from adapters.sandbox import common, run_qualification
         with ExitStack() as held:
             try:
                 lease = held.enter_context(run_qualification.hold_runtime_lock(
+                    wait_seconds=wait_seconds,
                     **{name: value for name, value in self._owner_options.items()
                        if name in _LEASE_SEAMS}))
             except common.RuntimeLockBusy:
@@ -294,8 +303,10 @@ def build_service(profile_id: str, *, clock=time.time):
         loaded_release = freeze_loaded_release()
         qualification_store = GenericQualificationStore()
         spike_authority = GenericBackendSelector(qualification_store)
+        # A run's spikes resolve their binding through the run-scoped records its qualification
+        # attempts published.
         authority_resolver = GenericAuthorityResolver(
-            qualification_store, loaded_release=loaded_release)
+            RunQualificationStore(), loaded_release=loaded_release)
         image_resolver = DockerLocalImageResolver(authority_resolver)
         spike_harness = GenericDockerHarness(
             qualification_store.execution_store, authority_resolver)

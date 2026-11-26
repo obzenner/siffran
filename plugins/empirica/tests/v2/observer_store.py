@@ -34,7 +34,8 @@ from core.canonical import canonical_digest
 from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
-from driver import FakeClock, FakeSpikeAuthoritySelector, MemoryTimeline, clone_driver
+from driver import (FIXTURE_SPIKE_IMAGE, FakeClock, FakeSpikeAuthoritySelector, MemoryTimeline,
+                    clone_driver)
 force_absent_sandbox_home()
 
 PROFILE = ConformanceCase.DEFAULT_PROFILE
@@ -46,7 +47,7 @@ STEP = 60.0
 def _generic_spike_action(claim_id: str, paths: list[str]) -> dict:
     return {"kind": "spike_request", "claim_id": claim_id, "plan": {
         "schema": "empirica.spike-plan-draft/2",
-        "image": "example/probe:local",
+        "image": FIXTURE_SPIKE_IMAGE,
         "argv": ["/usr/bin/python3", "/inputs/probe.py", "--exact-argv"],
         "inputs": sorted(paths),
         "environment": {"MODE": "observer-secret-value"},
