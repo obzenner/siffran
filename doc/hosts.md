@@ -70,7 +70,7 @@ reference and never reads machine-wide authority, and a run binds its exact qual
 `docker-networked-v1` qualification and execution digest pair only through its own approved environment revision and
 `qualify` attempt (a charged attempt, compare-and-set into the run). `qualify` takes the shared runtime lock without
 waiting before it reserves anything and holds it until the outcome is recorded: a request that cannot take it refuses with
-`qualification-in-progress` and is never charged, and an open attempt row seen under the lock belongs to a dead attempt. The one 90-second bound of a `qualify` starts when it takes the lock and is shared by the recovery of a dead row and the attempt that follows.
+`qualification-in-progress` and is never charged, and an open attempt row seen under the lock belongs to a dead attempt. The one 90-second bound of a `qualify` starts when it takes the lock and is shared by the recovery of a dead row and the attempt that follows. On Claude Code, `qualify` is one MCP tool call like `spike_request`, under the same outer margin, and asks the human nothing itself.
 The host composes the run qualification port wherever the guarded generic Docker composition succeeded, never for an
 unsupported profile, and a run whose host composition did not bind reads `spikes_unavailable`; existing runs never adopt a later current record. Qualified means bound, not live
 health. At host
