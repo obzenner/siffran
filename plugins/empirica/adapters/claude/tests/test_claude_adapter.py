@@ -9,6 +9,7 @@ honest native unsupported/fail-closed.
 from __future__ import annotations
 
 import json
+import math
 import os
 import uuid
 import sys
@@ -177,6 +178,18 @@ class GenericMcpContractTests(unittest.TestCase):
                          "empirica.spike-plan-draft/2")
         self.assertNotIn("command", spike["properties"])
         self.assertNotIn("dependent_files", spike["properties"])
+
+    def test_qualify_is_bounded_by_the_core_deadline_under_no_claude_per_call_limit(self) -> None:
+        """The MCP call is the qualify transport, as it is for ``spike_request``: the session
+        classifies no call and the server entry declares no Claude Code per-server ``timeout``
+        (milliseconds), so Claude Code applies only its own default, ``MCP_TOOL_TIMEOUT`` or about
+        28 hours (code.claude.com/docs/en/mcp, "Time limits on MCP tool calls"). What bounds
+        ``qualify`` is the core's one finite deadline (lock, recovery, probes, cleanup, publication)."""
+        from adapters.sandbox import run_qualification
+        manifest = json.loads((PLUGIN_ROOT / ".mcp.json").read_text(encoding="utf-8"))
+        self.assertNotIn("timeout", manifest["mcpServers"]["empirica"])
+        deadline = run_qualification.DEFAULT_QUALIFICATION_SECONDS
+        self.assertTrue(math.isfinite(deadline) and deadline > 0, deadline)
 
     def test_generic_result_facts_are_readable_from_public_argument_fixture(self) -> None:
         fixture = json.loads((PLUGIN_ROOT.parents[1] / "contracts/empirica/v2/fixtures/getargument-spike-approved.json").read_text())

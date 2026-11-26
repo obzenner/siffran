@@ -1684,6 +1684,50 @@ class EnvironmentHostTests(unittest.TestCase):
                 self.assertEqual(self.forms(), [])
                 self.assertEqual(self.sidecar_files(), files)
 
+    def test_qualify_reaches_the_port_after_each_approval_form_and_asks_nothing_itself(self):
+        """End to end through the session's own elicitation: each admitted revision is presented
+        exactly once; a qualify while the revision waits on the human refuses with the pending
+        reason and the port is never reached; a qualify after the human's approval reaches the
+        composed port for that very revision and binds its record. ``qualify`` itself sends no
+        form, on any revision."""
+        from test_qualification_transaction import FakeQualificationPort
+        port = FakeQualificationPort()
+        service = compose(Workspace(), Harness(), self.runs, self.artifacts, None, self.profile, {}, None,
+                          qualification_port=port)
+        run = self.start_run("qualify-transport", service=service)
+        self.session.tools = self.wire(self.mediator, service, self.profile)
+        for answer in ("timeout", "accept", "accept"):
+            with self.subTest(answer=answer, revision=len(self._stored_environment_rows(run))):
+                self.reply_action = answer
+                calls, before = port.calls, len(self.forms())
+                self.observe_environment(run=run)
+                self.assertEqual(len(self.forms()) - before, 1)
+                row = self._stored_environment_row(run)
+                result = self.qualify(run)
+                self.assertEqual(len(self.forms()) - before, 1)
+                if answer == "timeout":
+                    self.assertEqual(row["state"], core_environment.PENDING)
+                    self.assertEqual(result["reasons"][0]["code"], core_environment.ENVIRONMENT_PENDING)
+                    self.assertEqual(port.calls, calls)
+                    continue
+                self.assertEqual(row["state"], core_environment.APPROVED)
+                self.assertEqual(port.calls, calls + 1)
+                self.assertEqual(port.requests[-1].revision, row["revision"])
+                self.assertEqual(self._stored_state(run).spike_backend["qualification_record_digest"],
+                                 port.published[-1])
+
+    def qualify(self, run):
+        """One ``qualify`` through the session's wire, as the model calls it; its validated result."""
+        from test_environment_actions import QUALIFY_ACTION
+        answer = self.session.process_internal({"jsonrpc": "2.0", "id": "qualify", "method": "tools/call",
+            "params": {"name": "empirica_observe",
+                       "arguments": {"run_id": run, "action": copy.deepcopy(QUALIFY_ACTION)}}})
+        return answer["result"]["structuredContent"]
+
+    def _stored_state(self, run):
+        from application.run_state import classify_and_decode
+        return classify_and_decode(self.runs.read(decode_handle(run)).value).state
+
     def _stored_environment_row(self, run=None) -> dict:
         """The current member row as E7 committed it (the run view does not project the member)."""
         return self._stored_environment_rows(run)[-1]
@@ -1691,9 +1735,8 @@ class EnvironmentHostTests(unittest.TestCase):
     def _stored_environment_rows(self, run=None) -> list[dict]:
         """Every revision's row, oldest first, read from the repository for the named run (the
         fixture's own when none is named)."""
-        from application.run_state import classify_and_decode
         from core.governance import plain
-        state = classify_and_decode(self.runs.read(decode_handle(self.run if run is None else run)).value).state
+        state = self._stored_state(self.run if run is None else run)
         return [plain(row) for row in (*state.environment_history, state.environment)]
 
 
