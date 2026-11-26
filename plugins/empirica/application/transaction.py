@@ -292,14 +292,7 @@ class Coordinator:
         key = self._latest_key(command["selector"])
         if key is None:
             return self._inert(request_id)
-        loaded = self._load(key)
-        if isinstance(loaded, CorruptLoad):
-            return self._safe_block(key, request_id, "run.corrupt")
-        if isinstance(loaded, LegacyLoad):
-            return self._safe_block(key, request_id, "run.legacy")
-        if isinstance(loaded, AbsentLoad):
-            return self._inert(request_id)
-        return self._read_response(key, loaded.read, command, request_id)
+        return self._read_response(key, self.runs.read(key), command, request_id)
 
     def take_environment_admission(self, request_id: str) -> tuple[str, int] | None:
         """Hand out, once, the (run handle, revision) the dispatch of ``request_id`` admitted."""
@@ -1238,6 +1231,12 @@ class Coordinator:
 
     def _read_response(self, key: RunKey, read: Any, command: dict[str, Any], request_id: str,
                        retries: int = 8):
+        """The read-only response over one persisted read: a corrupt read blocks, an absent one is
+        ``Inert``, and a read that moved under assembly reads again within ``retries``."""
+        if isinstance(read, Corrupt):
+            return self._safe_block(key, request_id, "run.corrupt")
+        if not self._present(read):
+            return self._inert(request_id)
         classification = run_state.classify_and_decode(read.value)
         if classification.kind == "legacy":
             return self._safe_block(key, request_id, "run.legacy")
@@ -1253,12 +1252,7 @@ class Coordinator:
         if not self._revision_unchanged(key, read.revision):
             if retries <= 1:
                 return self._fault(request_id, "conflict")
-            latest = self.runs.read(key)
-            if isinstance(latest, Corrupt):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if not self._present(latest):
-                return self._inert(request_id)
-            return self._read_response(key, latest, command, request_id, retries - 1)
+            return self._read_response(key, self.runs.read(key), command, request_id, retries - 1)
         if command["type"] == "ResolveRun" and state.status != "active":
             return self._inert(request_id)
         self.last_state = state

@@ -440,6 +440,13 @@ def validate_spike_image_row_shape(value: object) -> dict[str, Any]:
     reference = value["reference"]
     if type(reference) is not str or not 1 <= len(reference) <= 255:
         _refuse("spike row reference is abnormal")
+    _validate_image_row_platform(value, "spike row")
+    return value
+
+
+def _validate_image_row_platform(value: dict[str, Any], row: str) -> None:
+    """The image-row facts both row shapes share: the daemon image ID, the recorded Linux platform
+    facts (every one a nonblank string) and no declared volumes; ``row`` names the refused row."""
     validate_digest256(value["id"])
     raw_os = value["raw_os"]
     raw_architecture = value["raw_architecture"]
@@ -447,10 +454,9 @@ def validate_spike_image_row_shape(value: object) -> dict[str, Any]:
     if (type(raw_os) is not str or not raw_os or value["os"] != "linux"
             or type(raw_architecture) is not str or not raw_architecture
             or type(architecture) is not str or not architecture):
-        _refuse("spike row platform is unknown")
+        _refuse(row + " platform is unknown")
     if type(value["declared_volumes"]) is not list or value["declared_volumes"]:
-        _refuse("spike row declares volumes")
-    return value
+        _refuse(row + " declares volumes")
 
 
 def validate_qualification_image_shape(value: object) -> dict[str, Any]:
@@ -460,16 +466,7 @@ def validate_qualification_image_shape(value: object) -> dict[str, Any]:
     if type(value) is not dict or set(value) != _PROBE_IMAGE_FIELDS:
         _refuse("probe image row shape is unknown")
     validate_repo_digest(value["reference"])
-    validate_digest256(value["id"])
-    raw_os = value["raw_os"]
-    raw_architecture = value["raw_architecture"]
-    architecture = value["architecture"]
-    if (type(raw_os) is not str or not raw_os or value["os"] != "linux"
-            or type(raw_architecture) is not str or not raw_architecture
-            or type(architecture) is not str or not architecture):
-        _refuse("probe image row platform is unknown")
-    if type(value["declared_volumes"]) is not list or value["declared_volumes"]:
-        _refuse("probe image row declares volumes")
+    _validate_image_row_platform(value, "probe image row")
     capabilities = value["capabilities"]
     if (type(capabilities) is not list or len(capabilities) != len(qualification.IMAGE_CAPABILITIES)
             or any(type(item) is not str or not item for item in capabilities)):
@@ -1492,13 +1489,8 @@ def _qualify_locked(
         except OSError as exc:
             raise _RunFailure(RunQualificationReason.CAPABILITY_UNAVAILABLE,
                               "the qualification Docker config is unreadable") from exc
-        resolved = authority.ResolvedGenericAuthority(
-            application.GenericQualifiedBackend("docker", profile_id, seed, seed),
-            Path(runtime["docker_cli"]), tuple(sorted({
-                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime["endpoint"],
-                "DOCKER_CONFIG": str(config),
-            }.items())), work, runtime["server_os"], runtime["server_architecture"],
-            runtime["ncpu"], runtime["mem_total"], runtime)
+        resolved = authority.ResolvedGenericAuthority.at_runtime(
+            application.GenericQualifiedBackend("docker", profile_id, seed, seed), runtime, config, work)
         runner = process.BoundedRunner() if image_runner is None else image_runner
         # Trusted probe image admission (4.3), then spike-image resolution and sealing.
         stage[0] = "the trusted probe image inspection"

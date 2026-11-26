@@ -105,6 +105,18 @@ class ResolvedGenericAuthority:
     mem_total: int
     runtime: dict[str, Any]
 
+    @classmethod
+    def at_runtime(cls, backend: application.GenericQualifiedBackend, runtime: dict[str, Any],
+                   config: Path, work: Path) -> "ResolvedGenericAuthority":
+        """The authority over one admitted runtime: its Docker CLI pinned to its endpoint under the
+        private qualification config, its platform and capacity, and the runtime itself."""
+        return cls(
+            backend, Path(runtime["docker_cli"]), tuple(sorted({
+                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime["endpoint"],
+                "DOCKER_CONFIG": str(config),
+            }.items())), work, runtime["server_os"], runtime["server_architecture"],
+            runtime["ncpu"], runtime["mem_total"], runtime)
+
 
 def _digest(value: object, where: str) -> str:
     if not is_digest256(value):
@@ -561,12 +573,7 @@ class GenericAuthorityResolver:
             raise ImplementationDrift("implementation identity drifted")
         if self.store.load_record(backend.qualification_record_digest) != first:
             raise GenericQualificationError("qualification record changed while resolving")
-        return ResolvedGenericAuthority(
-            backend, Path(current["docker_cli"]), tuple(sorted({
-                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": current["endpoint"],
-                "DOCKER_CONFIG": str(config),
-            }.items())), work, current["server_os"], current["server_architecture"],
-            current["ncpu"], current["mem_total"], current)
+        return ResolvedGenericAuthority.at_runtime(backend, current, config, work)
 
 
 class DockerLocalImageResolver(application.LocalImageResolver):
