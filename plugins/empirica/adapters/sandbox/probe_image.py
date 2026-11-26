@@ -4,15 +4,16 @@ The one trusted probe image is a field of the vendored Docker spike support cont
 (``qualification.probe_image``): one OCI image *index* reference
 ``docker.io/library/<name>:<tag>@sha256:<64-hex digest>`` whose single index covers
 both canonical architectures, ``linux/arm64`` and ``linux/amd64``. Pins are official
-Docker Hub library images only: no other registry and no other namespace qualifies, so
-``<repository>@<index_digest>`` is exactly the RepoDigests form Docker's classic store
-reports for the image (a familiar name that preserves non-default registries and
-non-library namespaces would never match). Admission (E5) keys on the image's
-``RepoDigests`` carrying the expected entry, present (never singleton-equal) — never on
-the daemon-local ``Id``: the classic store reports the platform config digest as ``Id``,
-and a locally built, loaded or retagged image has no matching ``RepoDigests`` entry at
-all. The contract digest is part of the implementation manifest, so a pin change is a
-code change that invalidates installed qualifications.
+Docker Hub library images only: no other registry and no other namespace qualifies,
+so the pin stays one closed canonical form Docker can always inspect (admission,
+below, matches the pinned digest under any repository name, so a mirror's own name
+never disqualifies the image). Admission (E5) keys on the image's ``RepoDigests``
+carrying the pinned index digest in some entry — the digest is the image's content
+identity, the repository name is not — present (never singleton-equal), and never on
+the daemon-local ``Id``: the classic store reports the platform config digest as
+``Id``, and a locally built, loaded or retagged image has no ``RepoDigests`` entry with
+the pinned digest at all. The contract digest is part of the implementation manifest,
+so a pin change is a code change that invalidates installed qualifications.
 """
 from __future__ import annotations
 

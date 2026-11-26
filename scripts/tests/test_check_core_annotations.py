@@ -441,6 +441,23 @@ class RegistrationByDeclarationTests(unittest.TestCase):
                         "an unimplemented validator is reported, the mechanism already registered it:"
                         + "\n" + "\n".join(found))
 
+    def test_the_docker_spike_record_document_registers_by_declaration(self):
+        """E5's /3 qualification record: the harness discovers the docker-spike contract directory
+        with the v2 surface, so the record registers through its own declarations — its root and every
+        $defs definition its ingress reaches — with no harness change beyond that discovery, and the
+        guard reports no disagreement for it."""
+        documents = module_documents()
+        self.assertIn("qualification-record", documents,
+                      "the docker-spike contract directory is part of the discovery surface")
+        contract = engine.Contract()
+        self.assertIn("qualification-record#/", contract.registered)
+        for definition in ("digest", "elapsedMs", "identifier", "counter", "runBinding",
+                           "spikeImageRow", "probeImage", "repoDigest", "spikeImages", "probe"):
+            self.assertIn(f"qualification-record#/$defs/{definition}", contract.registered)
+        self.assertFalse([line for line in guard.check() if "qualification-record" in line],
+                        "the record's two declarations agree: "
+                        + "\n".join(guard.check()))
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -414,8 +414,11 @@ class FamilyWitnessTests(unittest.TestCase):
                     self.assertTrue(engine.witness_of_family(case),
                                     "a const/enum candidate must be of the held family")
                     node = case.node
-                    held = node.get("const", node.get("enum"))
-                    pool = list(held) if isinstance(held, (list, tuple)) else [held]
+                    # the same family rule the ledger's own witness check applies: a
+                    # ``const`` node's family is the const value's type itself (a const
+                    # array's family is ``array`` — its members are not the alternatives),
+                    # while an ``enum`` node's family pool is its enumerated values.
+                    pool = [node["const"]] if "const" in node else list(node["enum"])
                     families = {engine._json_type(member) for member in pool}
                     self.assertIn(engine._json_type(case.holding), families)
 

@@ -28,6 +28,11 @@ NAMESPACE = "docker-spike-qualification-v2"
 MAX_RECORD_BYTES = 2 * 1024 * 1024
 MAX_POINTER_BYTES = 64 * 1024
 _CONTEXT = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
+#: `docker version --format` projects exactly the server facts both observation paths use.
+SERVER_VERSION_FORMAT = (
+    '{"Version":{{json .Server.Version}},"Os":{{json .Server.Os}},'
+    '"Arch":{{json .Server.Arch}},"PlatformName":{{json .Server.Platform.Name}}}'
+)
 
 RUNTIME_REQUIRED = frozenset({
     "docker_cli", "endpoint", "context", "client_version", "server_version",
@@ -50,6 +55,12 @@ class GenericQualificationError(RuntimeError):
 
 class DaemonDrift(GenericQualificationError):
     """The observed Docker daemon or capability differs semantically from the bound record."""
+
+
+class CapabilityRefused(GenericQualificationError):
+    """The endpoint resolved and the daemon answered, but its observed facts do not
+    admit: an unsupported platform or capability (for example a macOS engine that is
+    not Docker Desktop), never an unreachability and never a read failure."""
 
 
 class ImplementationDrift(GenericQualificationError):
@@ -338,14 +349,24 @@ def _admit_command_result(value: object, ceiling: int, where: str) -> process.Co
     return value
 
 
-def inspect_current_runtime(
+def inspect_observed_runtime(
     recorded_runtime: Mapping[str, Any], *, deadline: float,
     runner: process.Runner | None = None,
     clock: Callable[[], float] = time.monotonic,
     host_facts: tuple[str, str] | None = None,
     **_: Any,
 ) -> GenericRuntimeInspection:
-    """Perform exactly five bounded passive Docker reads and admit semantic capabilities."""
+    """Perform exactly five bounded passive Docker reads and project the raw facts.
+
+    The non-admitting observation (re-review, blocking 1): the endpoint is resolved once
+    and the remaining reads are pinned to it exactly as before, but no capability
+    admission runs — the raw facts are returned, so journal recovery runs on them before
+    the new attempt's admission decides the capability. A capability refusal observed
+    through this function is therefore an observation to recover on, never a boundary
+    error that would skip recovery. Command-launch and read failures are normalized at
+    this boundary (re-review, blocking 4): the refined difference stays between the
+    admitting wrapper and the owner classifier, never an unclassified transport error.
+    """
     cli = _verified_cli(recorded_runtime, deadline=deadline, clock=clock)
     selected = process.BoundedRunner() if runner is None else runner
     environment = {"LANG": "C", "LC_ALL": "C"}
@@ -354,10 +375,16 @@ def inspect_current_runtime(
         remaining = deadline - clock()
         if remaining <= 0:
             raise GenericQualificationError("passive verification deadline expired")
-        result = _admit_command_result(selected.run(
-            (cli, *args), timeout_seconds=min(5.0, remaining),
-            output_limit_bytes=MAX_POINTER_BYTES, env=environment),
-            MAX_POINTER_BYTES, where)
+        try:
+            launched = selected.run(
+                (cli, *args), timeout_seconds=min(5.0, remaining),
+                output_limit_bytes=MAX_POINTER_BYTES, env=environment)
+        except OSError as exc:
+            # a daemon command that could not be launched or read (missing CLI, refused
+            # spawn, lost descriptor) is one closed read failure of the observed daemon
+            raise GenericQualificationError(
+                where + " could not be launched at the observed daemon") from exc
+        result = _admit_command_result(launched, MAX_POINTER_BYTES, where)
         if (result.timed_out
                 or result.output_limited or result.returncode != 0):
             raise GenericQualificationError(where + " failed")
@@ -381,10 +408,8 @@ def inspect_current_runtime(
     environment = {**environment, "DOCKER_HOST": endpoint}
     client = _strict_json(read(("version", "--format", "{{json .Client.Version}}"),
                                "Docker client version read"), "Docker client version")
-    server = _strict_json(read(("version", "--format",
-        '{"Version":{{json .Server.Version}},"Os":{{json .Server.Os}},'
-        '"Arch":{{json .Server.Arch}},"PlatformName":{{json .Server.Platform.Name}}}'),
-        "Docker server version read"), "Docker server version")
+    server = _strict_json(read(("version", "--format", SERVER_VERSION_FORMAT),
+                               "Docker server version read"), "Docker server version")
     # docker/cli formats `info` over a Go struct (no `index`, field names differ from JSON keys),
     # so read the Engine-API JSON whole and project only the keys used below by their JSON names.
     info = _strict_json(read(("info", "--format", "{{json .}}"), "Docker info read"),
@@ -413,7 +438,155 @@ def inspect_current_runtime(
     }
     if "ID" in info:
         runtime["daemon_id"] = info["ID"]
-    return GenericRuntimeInspection(validate_runtime(runtime))
+    return GenericRuntimeInspection(runtime)
+
+
+def inspect_current_runtime(
+    recorded_runtime: Mapping[str, Any], *, deadline: float,
+    runner: process.Runner | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    host_facts: tuple[str, str] | None = None,
+    **_: Any,
+) -> GenericRuntimeInspection:
+    """Observe the authority once and admit its facts (the admitting wrapper).
+
+    Existing callers keep this semantics: the non-admitting
+    :func:`inspect_observed_runtime` resolves the endpoint and reads the facts, and the
+    wrapper admits them here. The endpoint resolved and every read succeeded, so a facts
+    projection that does not admit is a capability/platform refusal of a reachable daemon
+    (for example a macOS engine that is not Docker Desktop), never an unreachability. The
+    closed admission decision itself is unchanged — only its boundary is marked.
+    """
+    observed = inspect_observed_runtime(
+        recorded_runtime, deadline=deadline, runner=runner, clock=clock,
+        host_facts=host_facts)
+    try:
+        validated = validate_runtime(observed.runtime)
+    except GenericQualificationError as exc:
+        raise CapabilityRefused(str(exc)) from exc
+    return GenericRuntimeInspection(validated)
+
+
+def inspect_pinned_runtime(
+    recorded_runtime: Mapping[str, Any], *, deadline: float,
+    runner: process.Runner | None = None,
+    clock: Callable[[], float] = time.monotonic,
+    host_facts: tuple[str, str] | None = None,
+    **_: Any,
+) -> GenericRuntimeInspection:
+    """Re-observe an already-discovered pinned daemon at its recorded endpoint.
+
+    The recorded runtime was resolved by exactly one initial discovery
+    (:func:`inspect_current_runtime`), which pinned the endpoint into the facts; this
+    re-observation performs its bounded daemon reads (client version, server version,
+    info) directly at that recorded endpoint and never re-runs context discovery, so an
+    ambient context change between reads can never redirect an observation to a second
+    daemon. No admission runs here: the fresh facts are returned for the caller's
+    decision, and fresh facts that no longer admit are a changed observation of the
+    same pinned daemon (:func:`validate_reobserved_runtime`), never a fresh capability
+    refusal and never a collapsed read failure.
+    """
+    try:
+        pinned = validate_runtime(dict(recorded_runtime))
+    except GenericQualificationError as exc:
+        raise GenericQualificationError("the recorded pinned runtime is malformed") from exc
+    cli = pinned["docker_cli"]
+    selected = process.BoundedRunner() if runner is None else runner
+    environment = {"LANG": "C", "LC_ALL": "C", "DOCKER_HOST": pinned["endpoint"]}
+
+    def read(args: tuple[str, ...], where: str) -> str:
+        remaining = deadline - clock()
+        if remaining <= 0:
+            raise GenericQualificationError("passive verification deadline expired")
+        try:
+            launched = selected.run(
+                (cli, *args), timeout_seconds=min(5.0, remaining),
+                output_limit_bytes=MAX_POINTER_BYTES, env=environment)
+        except OSError as exc:
+            # normalized at the observation boundary (re-review, blocking 4): a command
+            # that could not be launched or read at the pinned endpoint is one closed
+            # read failure, classified unreachable by the owner, never a capability guess
+            raise GenericQualificationError(
+                where + " could not be launched at the pinned daemon") from exc
+        result = _admit_command_result(launched, MAX_POINTER_BYTES, where)
+        if (result.timed_out or result.output_limited or result.returncode != 0):
+            raise GenericQualificationError(where + " failed")
+        try:
+            text = result.stdout.data.decode("utf-8").strip()
+        except UnicodeDecodeError as exc:
+            raise GenericQualificationError(where + " is not UTF-8") from exc
+        if not text:
+            raise GenericQualificationError(where + " is empty")
+        return text
+
+    client = _strict_json(read(("version", "--format", "{{json .Client.Version}}"),
+                               "Docker client version read"), "Docker client version")
+    server = _strict_json(read(("version", "--format", SERVER_VERSION_FORMAT),
+                               "Docker server version read"), "Docker server version")
+    info = _strict_json(read(("info", "--format", "{{json .}}"), "Docker info read"), "Docker info")
+    if type(client) is not str or type(server) is not dict or type(info) is not dict:
+        raise GenericQualificationError("Docker version/info projection is malformed")
+    raw_os = server.get("Os") or info.get("OSType")
+    raw_arch = server.get("Arch") or info.get("Architecture")
+    host_os, host_arch = ((platform.system(), platform.machine())
+                          if host_facts is None else host_facts)
+    runtime = {
+        "docker_cli": cli, "endpoint": pinned["endpoint"], "context": pinned["context"],
+        "client_version": client, "server_version": server.get("Version", ""),
+        "server_raw_os": raw_os, "server_os": raw_os,
+        "server_raw_architecture": raw_arch, "server_architecture": raw_arch,
+        "platform_name": server.get("PlatformName", ""),
+        "operating_system": info.get("OperatingSystem", ""),
+        "security_options": info.get("SecurityOptions"),
+        "memory_limit": info.get("MemoryLimit"), "swap_limit": info.get("SwapLimit"),
+        "cpu_cfs_quota": info.get("CpuCfsQuota"),
+        "pids_limit": info.get("PidsLimit"), "ncpu": info.get("NCPU"),
+        "mem_total": info.get("MemTotal"), "cgroup_version": info.get("CgroupVersion") or "",
+        "cgroup_driver": info.get("CgroupDriver") or "", "host_os": host_os,
+        "host_raw_architecture": host_arch, "host_architecture": host_arch,
+        # The pinned re-observation inherits the read count of the discovery observation
+        # this runtime was pinned from (``validate_runtime`` admits exactly that closed
+        # count); the re-observation itself never re-resolves the endpoint.
+        "discovery_reads": pinned["discovery_reads"],
+    }
+    if "ID" in info:
+        runtime["daemon_id"] = info["ID"]
+    return GenericRuntimeInspection(runtime)
+
+
+def validate_reobserved_runtime(pinned: Mapping[str, Any], observed: object) -> dict[str, Any]:
+    """Admit the fresh facts of a pinned re-observation (postflight, E5).
+
+    The pinned runtime was admitted when the pin was made, so fresh facts that no longer
+    admit are a changed observation of that same daemon — the caller reports daemon
+    drift or staleness — never a fresh capability refusal (which belongs to the initial
+    observation) and never a collapsed read failure (which fails before this point).
+    """
+    try:
+        return validate_runtime(observed)
+    except GenericQualificationError as exc:
+        raise DaemonDrift("Docker daemon authority drifted during re-observation: " + str(exc)) from exc
+
+
+def pinned_daemon_identity(observed_runtime: object) -> dict[str, str]:
+    """The minimum daemon identity journal recovery needs, without capability admission.
+
+    Recovery precedes new-attempt admission (E5 review): this projects only what journal
+    identity keys on — the canonical endpoint and the canonical server platform, never
+    capability facts and never the daemon identifier — from the raw discovery facts, so
+    a daemon that now refuses capability still gets its prior journals recovered.
+    """
+    try:
+        facts = observed_runtime if isinstance(observed_runtime, Mapping) else {}
+        return {
+            "endpoint": _endpoint(facts.get("endpoint")),
+            "server_os": spike_plan.canonical_os(facts.get("server_raw_os")),
+            "server_architecture": spike_plan.canonical_architecture(
+                facts.get("server_raw_architecture")),
+        }
+    except (GenericQualificationError, TypeError, ValueError) as exc:
+        raise GenericQualificationError(
+            "the Docker authority observation cannot identify a recovery daemon") from exc
 
 
 class GenericAuthorityResolver:

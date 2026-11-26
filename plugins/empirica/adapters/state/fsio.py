@@ -95,13 +95,18 @@ def read_bytes(path: Path) -> bytes | None:
         return handle.read()
 
 
-def atomic_write(path: Path, data: bytes) -> None:
+def atomic_write(path: Path, data: bytes, *, durable: bool = False) -> None:
     """Write ``data`` to ``path`` via a fresh 0600 temp file, fsync, then atomic rename.
 
     Refuses to write when ``path`` is itself a symlink: the rename would otherwise replace the link
     (harmless) but callers rely on the pre-write check to fail closed on a hostile target. The temp
     file is created ``O_CREAT|O_EXCL`` by ``mkstemp`` with a unique name, so uncoordinated writers
     never share a temp path and no pre-planted ``.tmp`` symlink is followed.
+
+    With ``durable=True`` (publication paths) the containing directory is synchronized strictly:
+    a directory-open or fsync error fails the write, because a dirent that may not survive a crash
+    must never be reported as published. The default is the historical best-effort sync used by
+    control files.
     """
     if path.is_symlink():
         raise SymlinkRefused(f"refusing symlinked write target: {path}")
@@ -110,15 +115,36 @@ def atomic_write(path: Path, data: bytes) -> None:
     tmp = Path(tmp_name)
     try:
         with os.fdopen(fd, "wb") as handle:
+            # The closed 0600 mode is fixed on the exclusive temporary descriptor before
+            # the write, the fsync and the rename — and inside the descriptor-owning
+            # context, so an injected mode-change failure closes the descriptor on the
+            # way out, exactly like every other failure below it (re-review 2, blocking
+            # 4; re-review 3, blocking 3). No path-based chmod ever runs — not after
+            # the rename, where a concurrent swap could put another file at the name,
+            # and not on the temporary either.
+            os.fchmod(handle.fileno(), _MODE)
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.chmod(tmp, _MODE)
         tmp.replace(path)  # atomic on POSIX
-        _fsync_dir(path.parent)
+        (sync_directory if durable else _fsync_dir)(path.parent)
     except BaseException:
         tmp.unlink(missing_ok=True)
         raise
+
+
+def sync_directory(directory: Path) -> None:
+    """Strictly fsync one directory for publication durability.
+
+    Unlike the best-effort :func:`_fsync_dir`, every error propagates: a directory entry whose
+    persistence cannot be proven must never be published as durable (E5 review, blocking
+    finding 5). The file itself is fsynced before the rename by :func:`atomic_write`.
+    """
+    dir_fd = os.open(str(directory), os.O_RDONLY | _O_CLOEXEC)
+    try:
+        os.fsync(dir_fd)
+    finally:
+        os.close(dir_fd)
 
 
 def _fsync_dir(directory: Path) -> None:

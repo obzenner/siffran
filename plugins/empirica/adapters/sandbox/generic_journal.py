@@ -225,7 +225,15 @@ DAEMON_IDENTITY = ("endpoint", "server_os", "server_architecture")
 
 def daemon_identity(value: object) -> dict[str, str]:
     """Which daemon owns the recorded IDs. Capability facts are not identity: passive
-    verification and postflight enforce them for new execution, never for recovery."""
+    verification and postflight enforce them for new execution, never for recovery.
+
+    Inherited limitation (explicit, E5 review): a journal row is keyed on the endpoint and
+    the server platform, never on the Docker daemon identifier — a daemon restarted on the
+    same socket with the same platform owns its IDs regardless of identity proof, and the
+    residual is accepted by spec section 5 ("Residual"). The ownership and exact-identifier
+    checks that guard every removal are unaffected: recovery still removes only the exact
+    recorded 64-hex full IDs of operations whose name, labels and recorded identity match.
+    """
     if not isinstance(value, Mapping) or any(
             type(value.get(key)) is not str or not value[key] for key in DAEMON_IDENTITY):
         raise GenericJournalError("journal Docker daemon identity is malformed")

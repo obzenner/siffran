@@ -25,7 +25,14 @@ MODE_DIR = 0o700
 MAX_CONTROL_FILE_BYTES = 2 * 1024 * 1024
 OPERATION_ID = re.compile(r"^o-[0-9a-f]{32}$")
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+OPENDIR = getattr(os, "O_DIRECTORY", 0)
+NONBLOCK = getattr(os, "O_NONBLOCK", 0)
 CLOEXEC = getattr(os, "O_CLOEXEC", 0)
+# Opening a scaffold name asks the kernel for a directory directly (O_DIRECTORY): a
+# planted non-directory — a regular file, a device, or a named pipe — fails the open
+# with ENOTDIR immediately instead of parking the caller in the kernel's blocked-open
+# wait (re-review 2, blocking 3); O_NONBLOCK is never needed for that refusal.
+DIRECTORY_OPEN = os.O_RDONLY | NOFOLLOW | OPENDIR | CLOEXEC
 EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
 
 # The implementation manifest is exactly the closure of these roots, by the rule in doc/testing.md ("The generic
@@ -40,6 +47,7 @@ IMPLEMENTATION_ROOTS = (
     "adapters/pi/src/index.ts",
     "adapters/sandbox/generic_qualification.py",
     "adapters/sandbox/probe_image.py",
+    "adapters/sandbox/run_qualification.py",
     "vendor/contracts/empirica/v2",
     "vendor/contracts/empirica-docker-spike/v1",
 )
@@ -115,6 +123,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "adapters/sandbox/generic_journal.py",
     "adapters/sandbox/generic_qualification.py",
     "adapters/sandbox/probe_image.py",
+    "adapters/sandbox/run_qualification.py",
     "adapters/sandbox/generic_staging.py",
     "adapters/sandbox/planner.py",
     "adapters/sandbox/process.py",
@@ -163,6 +172,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "vendor/contracts/empirica/v2/request.schema.json",
     "vendor/contracts/empirica/v2/response.schema.json",
     "vendor/contracts/empirica/v2/state.schema.json",
+    "vendor/contracts/empirica-docker-spike/v1/qualification-record.schema.json",
     "vendor/contracts/empirica-docker-spike/v1/support-contract.json",
 }))
 
@@ -221,43 +231,177 @@ def sandbox_home(env: Mapping[str, str] | None = None) -> Path:
     return canonical_authority_path(selected)
 
 
-def safe_directory(path: Path, *, create: bool) -> None:
+def _verified_identity(descriptor: int, name: str, *, final: bool, created: bool) -> None:
+    """Verify one opened scaffold component's identity from ``fstat`` alone.
+
+    No permission is ever changed on a scaffold: a component is required to *be*
+    exactly the closed owner-only directory, and anything else — including a
+    same-owner replacement swapped in after this call's own ``mkdir`` — is refused as
+    it stands. The ``created`` mark comes from an earlier ``mkdir`` by name and does
+    not establish that the opened inode is the one created, so a created component is
+    validated exactly like a found one; the only difference is that a component this
+    walk had to create may not stand at a permissive mode even mid-path (the attacker's
+    replacement lands on that branch), while a pre-existing intermediate is only
+    required to be a directory (re-review 3, blocking 1).
+    """
     try:
-        info = path.lstat()
+        info = os.fstat(descriptor)
+        if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
+                or (final or created) and info.st_uid != os.getuid()):
+            raise GenericScaffoldingError(
+                f"sandbox directory has unsafe identity: {name}")
+        if (final or created) and stat.S_IMODE(info.st_mode) != MODE_DIR:
+            # the closed mode can only be refused here, never fixed: this code neither
+            # chmods the entry nor removes it, whatever created it or when
+            raise GenericScaffoldingError(
+                f"sandbox directory has unsafe ownership/mode: {name}")
+    except OSError as exc:
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be initialized safely: {name}") from exc
+
+
+def _scaffold_component(parent: int, name: str, *, create: bool, final: bool) -> int:
+    """Open one scaffold component relative to its opened, verified parent.
+
+    An existing component is opened directory-only and never modified. A missing
+    component is created by ``mkdir(name, 0o700, dir_fd=parent)`` — the process mask is
+    never touched, and can only remove bits from the requested mode — then opened the
+    same way and required to stand at exactly the closed identity: type, owner, and
+    mode 0700 on the opened descriptor. Anything else, including a same-owner
+    replacement substituted after a successful ``mkdir`` or a mask that stripped owner
+    bits, is refused with the scaffolding-unsafe error: never fixed, and never removed
+    by name either (re-review 3, blocking 1; re-review 2, blocking 1).
+    """
+    def opened() -> int:
+        try:
+            return os.open(name, DIRECTORY_OPEN, dir_fd=parent)
+        except OSError as exc:
+            # after this call's own mkdir, the entry can be unopenable because the mask
+            # stripped the owner-read bit, or because a swap stands at the name: refused
+            # either way, without one permission change and without removing the entry
+            # by name (re-review 3, blocking 1)
+            raise GenericScaffoldingError(
+                "sandbox directory cannot be opened after its creation: " + name) from exc
+
+    def adopted(descriptor: int) -> int:
+        try:
+            _verified_identity(descriptor, name, final=final, created=True)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+
+    try:
+        descriptor = os.open(name, DIRECTORY_OPEN, dir_fd=parent)
     except FileNotFoundError:
         if not create:
-            raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}")
-        try:
-            path.mkdir(parents=True, mode=MODE_DIR)
-            os.chmod(path, MODE_DIR)
-            info = path.lstat()
-        except OSError as exc:
-            raise GenericScaffoldingError(
-                f"sandbox directory cannot be created safely: {path.name}") from exc
+            raise GenericScaffoldingError(f"sandbox directory is unavailable: {name}") from None
     except OSError as exc:
-        raise GenericScaffoldingError(f"sandbox directory is unavailable: {path.name}") from exc
-    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode)
-            or info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != MODE_DIR):
-        raise GenericScaffoldingError(f"sandbox directory has unsafe ownership/mode: {path.name}")
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be opened safely: {name}") from exc
+    else:
+        try:
+            _verified_identity(descriptor, name, final=final, created=False)
+        except BaseException:
+            os.close(descriptor)
+            raise
+        return descriptor
+    try:
+        os.mkdir(name, MODE_DIR, dir_fd=parent)
+    except FileExistsError:
+        # lost the create race: the winner is validated below exactly like this call's
+        # own creation — and never altered (re-review 1, blocking 3)
+        pass
+    except OSError as exc:
+        raise GenericScaffoldingError(
+            f"sandbox directory cannot be created safely: {name}") from exc
+    # won or lost the create after a genuinely missing lookup: the opened entry is
+    # required to be the closed identity as it stands, whatever stands there
+    return adopted(opened())
+
+
+def safe_directory(path: Path, *, create: bool) -> None:
+    """Validate one scaffolding directory's identity, component by component.
+
+    The process umask is never read or changed, and no permission is ever changed on a
+    scaffold: a fresh component is created relative to its opened, verified parent at
+    mode 0700 (the mask can only remove bits), opened with ``O_DIRECTORY|O_NOFOLLOW`",
+    and required to stand at exactly type, owner and mode 0700 on that descriptor — a
+    component that a mask left at another mode, a replacement, or a planted impostor
+    is refused exactly as it stands, never fixed and never removed by name. A name
+    that is not a directory (a regular file, a device, a named pipe) is refused by the
+    directory-only open without blocking (re-review 2, blocking 3).
+    """
+    supplied = Path(path)
+    if (not supplied.is_absolute() or ".." in supplied.parts
+            or os.path.normpath(str(supplied)) != str(supplied)
+            or not supplied.parts[1:]):
+        raise GenericScaffoldingError("sandbox directory path is not canonical and absolute")
+    parent = os.open(supplied.anchor or os.sep, DIRECTORY_OPEN)
+    try:
+        names = supplied.parts[1:]
+        for index, name in enumerate(names):
+            final = index == len(names) - 1
+            descriptor = _scaffold_component(parent, name, create=create, final=final)
+            os.close(parent)
+            parent = descriptor
+    finally:
+        os.close(parent)
 
 
 def safe_file(path: Path, *, cap: int = MAX_CONTROL_FILE_BYTES) -> bytes:
+    """Read one bounded control file through a single no-follow, non-blocking descriptor.
+
+    ``fstat`` on that one descriptor owns the checks: type regular, owner, closed
+    mode, exactly one link, size inside the cap. The bounded bytes are read from the
+    same descriptor, the read is confirmed to have watched a stable inode, link count
+    and size, and only when the name still identifies that validated inode does the
+    call return: anything substituted between the checks and the read — Sol's hard
+    link carrying the very same bytes — is neither read nor reported, and a second
+    name linked to the same inode during the read is refused by its changed link
+    count (re-review 4, non-blocking 1), with the substitute keeping its own metadata
+    untouched (re-review 3, blocking 2).
+    """
     try:
-        info = path.lstat()
-    except OSError as exc:
+        descriptor = os.open(path, os.O_RDONLY | NOFOLLOW | NONBLOCK | CLOEXEC)
+    except FileNotFoundError as exc:
         raise GenericScaffoldingError(f"sandbox file is unavailable: {path.name}") from exc
-    if (path.is_symlink() or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
-            or stat.S_IMODE(info.st_mode) != MODE_FILE or info.st_nlink != 1):
-        raise GenericScaffoldingError(f"sandbox file has unsafe ownership/mode: {path.name}")
-    if info.st_size > cap:
-        raise GenericScaffoldingError("sandbox file exceeds its byte cap")
+    except OSError as exc:
+        raise GenericScaffoldingError("sandbox file cannot be opened safely") from exc
     try:
-        raw = fsio.read_bytes(path)
-    except (OSError, fsio.SymlinkRefused) as exc:
+        opened = os.fstat(descriptor)
+        if (stat.S_ISLNK(opened.st_mode) or not stat.S_ISREG(opened.st_mode)
+                or opened.st_uid != os.getuid()
+                or stat.S_IMODE(opened.st_mode) != MODE_FILE or opened.st_nlink != 1
+                or opened.st_size > cap):
+            raise GenericScaffoldingError(f"sandbox file has unsafe ownership/mode: {path.name}")
+        data = b""
+        while len(data) <= cap:
+            chunk = os.read(descriptor, min(64 * 1024, cap + 1 - len(data)))
+            if not chunk:
+                break
+            data += chunk
+        after = os.fstat(descriptor)
+        # the link count joins the comparison: a second name linked to the same inode
+        # between the checks and the end of the read changes nothing else about it
+        if ((after.st_dev, after.st_ino, after.st_nlink, after.st_size)
+                != (opened.st_dev, opened.st_ino, opened.st_nlink, opened.st_size)):
+            raise GenericScaffoldingError("sandbox file changed while read")
+        named = path.lstat()
+        if (stat.S_ISLNK(named.st_mode)
+                or (named.st_dev, named.st_ino) != (opened.st_dev, opened.st_ino)):
+            # the name no longer identifies the file just validated and read: a
+            # substitute stands at it, or it was moved away — refused before the bytes
+            # are reported, with the substitute never opened through the name
+            raise GenericScaffoldingError(
+                f"sandbox file no longer names the validated file: {path.name}")
+    except OSError as exc:
         raise GenericScaffoldingError("sandbox file cannot be read safely") from exc
-    if raw is None or len(raw) > cap:
-        raise GenericScaffoldingError("sandbox file is absent or over its byte cap")
-    return raw
+    finally:
+        os.close(descriptor)
+    if len(data) > cap:
+        raise GenericScaffoldingError("sandbox file is over its byte cap")
+    return data
 
 
 def implementation_manifest() -> dict[str, object]:
@@ -333,11 +477,45 @@ class ExecutionStore:
     def prepare_execution_scaffolding(self) -> None:
         for path in (self.home, self.runtime, self.staging):
             safe_directory(path, create=True)
+        self._create_runtime_lock_exclusively()
+        self._check_runtime_lock()
+
+    def _create_runtime_lock_exclusively(self) -> None:
+        """Initialize the shared runtime lock without ever replacing an existing inode.
+
+        First use creates the lock with ``O_CREAT|O_EXCL`` and then every attempt opens the
+        same name, so concurrent first users race only the exclusive create: the loser sees
+        the winner's inode and serializes on ``flock``. Atomic replacement is forbidden here
+        on purpose — its rename could unlink a lock file that is already held, letting both
+        attempts enter recovery and the probes (E5 review, blocking finding 3).
+        """
         try:
             self.runtime_lock.lstat()
+            return  # an existing lock inode is the shared lock; never replace it
         except FileNotFoundError:
-            fsio.atomic_write(self.runtime_lock, b"")
-        self._check_runtime_lock()
+            pass
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                "sandbox runtime lock cannot be inspected safely") from exc
+        try:
+            fd = os.open(self.runtime_lock,
+                         os.O_CREAT | os.O_EXCL | os.O_WRONLY | NOFOLLOW | CLOEXEC, MODE_FILE)
+        except FileExistsError:
+            return  # lost the exclusive-create race: the winner's inode is the lock
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                "sandbox runtime lock cannot be created safely") from exc
+        try:
+            os.fchmod(fd, MODE_FILE)
+            os.fsync(fd)
+        except OSError as exc:
+            raise GenericScaffoldingError(
+                "sandbox runtime lock cannot be initialized safely") from exc
+        finally:
+            os.close(fd)
+        # Best-effort control-file durability only: a lost lock dirent is recreated on the
+        # next preparation; the publication path is where strict sync is required.
+        fsio._fsync_dir(self.home)
 
     def check_execution_scaffolding(self) -> None:
         for path in (self.home, self.runtime, self.staging):
