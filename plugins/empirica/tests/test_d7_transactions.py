@@ -527,6 +527,38 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual(runs.data[key].value["route_stamp"], 1)
         traverse_history(decode_state(runs.data[key].value), stored)
 
+    def test_a_trusted_write_reads_again_within_eight_commits_then_faults_closed(self):
+        """The trusted compare-and-set transaction: a lost revision reads the run again, at most
+        eight commits are attempted, and a commit that fails otherwise is a closed unavailable
+        Fault; the committed state is the coordinator's last state."""
+        surfaces = iter(("available", "unavailable") * 8)
+        for lost, crashes, expected in ((7, 0, "Allow"), (8, 0, "conflict"), (0, 1, "unavailable")):
+            with self.subTest(lost=lost, crashes=crashes):
+                runs = Runs()
+                coordinator = ProductionCoordinator(Workspace(), Harness(), runs, Artifacts(), PI_PROFILE, {})
+                start = coordinator.handle({
+                    "type": "StartRun", "control_mode": "deliberative",
+                    "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+                    "goal": "g"}, "start")
+                key = next(iter(runs.data))
+                before = runs.data[key]
+                runs.conflicts, runs.crashes, runs.cas_calls = lost, crashes, 0
+                surface = next(surfaces)
+                while surface == decode_state(before.value).invocation["human_surface"]:
+                    surface = next(surfaces)
+                response = coordinator.trusted_human_surface(
+                    start["result"]["run"]["id"], {"surface": surface})
+                if expected == "Allow":
+                    self.assertEqual(response["result"]["type"], "Allow", response)
+                    self.assertEqual(runs.cas_calls, lost + 1)
+                    self.assertEqual(coordinator.last_state, decode_state(runs.data[key].value))
+                    self.assertEqual(coordinator.last_state.invocation["human_surface"], surface)
+                    continue
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": expected, "fail_direction": "closed"})
+                self.assertEqual(runs.cas_calls, 8 if expected == "conflict" else 1)
+                self.assertEqual(runs.data[key], before)
+
     def test_append_once_delegates_idempotency_without_repository_preread(self):
         artifacts_repo = Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), Runs(), artifacts_repo,

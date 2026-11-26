@@ -375,6 +375,26 @@ class GuardControlTests(unittest.TestCase):
                 self.assertFalse(guard._named_test_exists("tests/test_far.py", "Far", "test_x"))
                 self.assertTrue(guard._named_test_exists("tests/test_near.py", "Far", "test_x"))
                 self.assertFalse(guard._named_test_exists("tests/test_near.py", "Far", "test_y"))
+                (root / "tests" / "test_broken.py").write_text("raise ImportError('unimportable')\n")
+                self.assertFalse(guard._named_test_exists("tests/test_broken.py", "Far", "test_x"))
+                self.assertIsNone(guard._TEST_MODULES[(root / "tests" / "test_broken.py")])
+                # the file's own directory resolves its sibling imports, and is removed again after
+                (root / "tests" / "sibling_helper.py").write_text("NAME = 'Far'\n")
+                (root / "tests" / "test_sibling.py").write_text(
+                    "import unittest\nfrom sibling_helper import NAME\n"
+                    "globals()[NAME] = type(NAME, (unittest.TestCase,), {'test_x': lambda self: None})\n")
+                # a same-named module earlier on the path never shadows the file's own sibling
+                (outside / "sibling_helper.py").write_text("NAME = 'Shadow'\n")
+                sys.path.insert(0, str(outside))
+                try:
+                    path_before = list(sys.path)
+                    self.assertTrue(guard._named_test_exists("tests/test_sibling.py", "Far", "test_x"))
+                    self.assertEqual(sys.path, path_before)
+                finally:
+                    sys.path.remove(str(outside))
+                    sys.modules.pop("sibling_helper", None)
+                self.assertEqual(guard._TEST_MODULES[root / "tests" / "test_sibling.py"].__name__,
+                                 "_regression_witness_test_sibling")
             finally:
                 guard.ROOT = original
 

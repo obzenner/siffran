@@ -445,6 +445,15 @@ class RuntimeInspectionTests(unittest.TestCase):
                              runner=runner, clock=clock, host_facts=("Linux", "x86_64"))
         return observed, runner
 
+    def test_each_public_inspector_carries_its_own_name_and_contract(self):
+        for name in ("inspect_observed_runtime", "inspect_current_runtime", "inspect_pinned_runtime"):
+            inspector = getattr(authority, name)
+            with self.subTest(name=name):
+                self.assertEqual((inspector.__name__, inspector.__qualname__), (name, name))
+                self.assertTrue(inspector.__doc__ and inspector.__doc__.strip())
+        self.assertEqual(len({authority.inspect_observed_runtime.__doc__, authority.inspect_current_runtime.__doc__,
+                              authority.inspect_pinned_runtime.__doc__}), 3)
+
     def test_each_read_failure_is_one_closed_error_naming_its_read_and_daemon(self):
         failures = (
             ("timed out", process.CommandResult.fake(stdout="x", timed_out=True), " failed"),
