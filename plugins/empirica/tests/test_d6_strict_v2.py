@@ -321,6 +321,10 @@ def _build_action_sample(kind: str) -> dict:
         return {"kind": "investigate"}
     if kind == "freeze":
         return {"kind": "freeze"}
+    if kind == "environment":
+        return copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["environment"]["example"])
+    if kind == "qualify":
+        return copy.deepcopy(_PUBLIC_CONTRACT["bootstrap"]["actions"]["qualify"]["example"])
     if kind == "child_reserve":
         return {"kind": "child_reserve", "purpose": "audit",
                 "role_profile": _DEFAULT_PROFILE, "execution": "foreground",

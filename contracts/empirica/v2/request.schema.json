@@ -789,6 +789,36 @@
         }
       }
     },
+    "actionEnvironment": {
+      "description": "Coming with run-scoped environment qualification: submit one closed empirica.environment-proposal/1 body (profile, spike images, preparation, rationale) as a new revision for this run. Not yet available in this release: in every active run state the core refuses the action with the closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact (an invalid frozen scope still blocks first); a terminal run is Inert, and nothing is recorded in either case.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "payload"
+      ],
+      "properties": {
+        "kind": {
+          "const": "environment"
+        },
+        "payload": {
+          "$ref": "#/$defs/environmentProposal"
+        }
+      }
+    },
+    "actionQualify": {
+      "description": "Coming with run-scoped environment qualification: request one host qualification attempt of the latest approved environment revision. Carries no payload; the host owns the attempt, its journalling and its binding. Not yet available in this release: in every active run state the core refuses the qualify action with the closed reason environment.not_available, decided before any bootstrap, graph or governance admission fact (an invalid frozen scope still blocks first); a terminal run is Inert, and no attempt is started in either case.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind"
+      ],
+      "properties": {
+        "kind": {
+          "const": "qualify"
+        }
+      }
+    },
     "actionRoute": {
       "type": "object",
       "additionalProperties": false,
@@ -1000,6 +1030,12 @@
           "$ref": "#/$defs/actionConfigureRun"
         },
         {
+          "$ref": "#/$defs/actionEnvironment"
+        },
+        {
+          "$ref": "#/$defs/actionQualify"
+        },
+        {
           "$ref": "#/$defs/actionRoute"
         },
         {
@@ -1064,7 +1100,7 @@
             "docker-isolated-v1",
             "docker-networked-v1"
           ],
-          "description": "Optional host-owned generic Docker profile selection; never author action data."
+          "description": "Host profile ceiling for this run, bound once at StartRun (an explicit wire reinterpretation recorded in the public contract): absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. Host-owned and never author action data; no later action can raise it. Until the run-scoped qualification cycle lands, the host selector still uses this field to select exactly one profile for the run; permitting both under docker-networked-v1 is the forthcoming ceiling meaning (Empirica 7.2 §4.4), not current behaviour."
         }
       }
     },

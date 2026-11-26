@@ -19,6 +19,11 @@ SPAWN_BUDGET = {"investigation": ("max_spawns", *governance.BUDGETS["max_spawns"
 HOST_TIER_UNSUPPORTED = {"foreground_only": "host.async_unsupported",
                          "observational": "host.audit_output_unobservable"}
 READ_COMMANDS = frozenset({"GetRun", "GetArgument", "RestoreRun"})
+# The run-scoped environment qualification actions (Empirica 7.2, §5): declared on the wire now, implemented by
+# E7/E9 later. Until the behaviour lands they share one closed refusal in every run state, so the core never
+# crashes on them and never silently accepts one.
+ENVIRONMENT_ACTIONS = frozenset({"environment", "qualify"})
+ENVIRONMENT_NOT_AVAILABLE = "environment.not_available"
 
 
 def _plain(value: Any) -> Any:
@@ -1658,7 +1663,9 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
 
     Branches, in order: an invalid frozen scope blocks; a non-active (terminal) run allows only
     reads and ``stop``/``report_convergence`` evaluation and is otherwise ``Inert``; read commands
-    are allowed; a graphless ``stop`` ends ``stopped_residual``; an operation whose bootstrap
+    are allowed; a graphless ``stop`` ends ``stopped_residual``; the declared coming environment
+    actions (``environment``, ``qualify``) refuse with the closed reason
+    ``environment.not_available`` before any bootstrap, graph or governance fact; an operation whose bootstrap
     precondition is unmet blocks with that reason; governed work is blocked until the current
     proposal is approved (preparation actions excepted); then each ``ObserveAction`` kind
     (route, investigate, graph, research, freeze, configure_run, child_reserve; any other is
@@ -1683,6 +1690,10 @@ def _evaluate(snapshot: EvaluationSnapshot, command: dict[str, Any], *, consent:
 
     if kind == "EvaluateRun" and command["intent"] == "stop" and snapshot.graph is None:
         return _decision(snapshot, replace(state, status="stopped_residual"))
+    # The coming environment step sits between configuration approval and the first spike, but its two actions
+    # refuse identically in every active run state, so the one closed reason is decided before any other admission.
+    if kind == "ObserveAction" and command["action"]["kind"] in ENVIRONMENT_ACTIONS:
+        return _decision(snapshot, state, "Block", reason=ENVIRONMENT_NOT_AVAILABLE)
     operation = (command["action"]["kind"] if kind == "ObserveAction"
                  and command["action"]["kind"] in {"route", "graph", "configure_run", "investigate"}
                  else "report_convergence" if kind == "EvaluateRun"
