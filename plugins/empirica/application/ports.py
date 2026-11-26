@@ -109,21 +109,6 @@ class QualificationAttemptPort(Protocol):
 
 
 @dataclass(frozen=True)
-class SpikesUnavailable:
-    """A closed selection result. ``diagnostic`` is never persisted as run authority."""
-
-    diagnostic: str | None = None
-
-    def persisted(self) -> dict[str, str]:
-        return {"kind": "spikes_unavailable"}
-
-
-class NullSpikeAuthoritySelector:
-    def select(self, requested_profile: str | None = None) -> SpikesUnavailable:
-        return SpikesUnavailable()
-
-
-@dataclass(frozen=True)
 class CapturedFile:
     observation: FileObservation
     content: bytes | None

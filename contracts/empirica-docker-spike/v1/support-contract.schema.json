@@ -92,7 +92,7 @@
         "probes": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"enum": ["realization", "natural-125", "output-overflow", "timeout", "network-profile"]}},
         "probe_image": {"$ref": "#/$defs/probeImage"},
         "deadline_seconds": {"const": 60}, "candidate": {"const": "private-mode-0600-only"},
-        "installation": {"const": "separate-explicit-revalidation-and-atomic-publication"},
+        "installation": {"const": "run-scoped-record-then-binding-compare-and-set"},
         "image_tools": {"$ref": "#/$defs/stringArray"}
       }
     },

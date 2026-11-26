@@ -1,7 +1,8 @@
-"""Operator-owned one-container Docker qualification and explicit candidate installation.
+"""The one-container Docker qualification probe kernel and its operator diagnostic.
 
-Qualification writes only a caller-selected candidate file. Installation is a separate explicit
-operation; ordinary runtime imports neither operation and can only read exact `/2` records.
+The run-scoped qualification owner (``run_qualification``) runs the same five probes and binds
+their record to one run. The operator diagnostic here writes only a caller-selected private
+candidate file and binds nothing: no run, record namespace or pointer ever reads it.
 """
 from __future__ import annotations
 
@@ -28,14 +29,12 @@ TOTAL_QUALIFICATION_SECONDS = 60.0
 QUALIFICATION_TIMEOUT_SECONDS = 5.0
 CANDIDATE_SCHEMA = "siffran.empirica.docker-spike-qualification-candidate/2"
 RECORD_SCHEMA = "siffran.empirica.docker-spike-qualification-record/2"
-POINTER_SCHEMA = "siffran.empirica.docker-spike-qualification-pointer/2"
 NAMESPACE = "docker-spike-qualification-v2"
 MAX_CANDIDATE_BYTES = 2 * 1024 * 1024
 PROBE_ORDER = ("realization", "natural-125", "output-overflow", "timeout", "network-profile")
 PROBE_EXPECTED = ("PASS", "FAIL", "UNAVAILABLE_OUTPUT_LIMIT", "UNAVAILABLE_TIMEOUT", "PASS")
 IMAGE_CAPABILITIES = ("/bin/sh", "cat", "chmod", "command", "head", "id", "printf",
                       "sleep", "test", "touch", "wget", "uid65534-readable-executable")
-_FULL_DIGEST = "sha256:"
 
 
 class QualificationReason(str, Enum):
@@ -299,7 +298,7 @@ def build_candidate_record(
 
 def _command_result(value: object, where: str) -> process.CommandResult:
     try:
-        return authority._admit_command_result(value, authority.MAX_POINTER_BYTES, where)
+        return authority._admit_command_result(value, authority.MAX_COMMAND_OUTPUT_BYTES, where)
     except Exception as exc:
         raise GenericQualificationFailure(
             QualificationReason.IMAGE_MALFORMED, where + " returned malformed output") from exc
@@ -330,7 +329,7 @@ def inspect_qualification_image(
     try:
         raw_result = runner.run(
             argv, timeout_seconds=min(10.0, deadline - clock()),
-            output_limit_bytes=authority.MAX_POINTER_BYTES, env=environment)
+            output_limit_bytes=authority.MAX_COMMAND_OUTPUT_BYTES, env=environment)
     except Exception as exc:
         raise GenericQualificationFailure(
             QualificationReason.IMAGE_INSPECT_FAILED,
@@ -790,99 +789,3 @@ def qualify_to_candidate(
     _write_candidate(Path(output), record)
     return record
 
-
-class GenericQualificationInstaller:
-    """Explicit candidate validator and atomic `/2` record/pointer publisher."""
-    def __init__(
-        self,
-        sandbox_root: Path,
-        *,
-        runtime_inspector: Callable[..., authority.GenericRuntimeInspection] = authority.inspect_current_runtime,
-        implementation_inspector: Callable[[], Mapping[str, Any]] = common.implementation_manifest,
-        clock: Callable[[], float] = time.monotonic,
-    ) -> None:
-        self.root = common.canonical_authority_path(Path(sandbox_root))
-        self.runtime_inspector = runtime_inspector
-        self.implementation_inspector = implementation_inspector
-        self.clock = clock
-
-    def install(self, candidate: Path, *, profile_id: str) -> dict[str, Any]:
-        try:
-            selected_candidate = common.canonical_authority_path(Path(candidate))
-            raw = common.safe_file(selected_candidate, cap=MAX_CANDIDATE_BYTES)
-            record = validate_candidate_record(json.loads(raw.decode("utf-8")))
-        except GenericQualificationFailure:
-            raise
-        except Exception as exc:
-            raise GenericQualificationFailure(
-                QualificationReason.INSTALL_VALIDATION_FAILED, "candidate cannot be read safely") from exc
-        if record["profile_id"] != profile_id:
-            raise GenericQualificationFailure(
-                QualificationReason.INSTALL_VALIDATION_FAILED, "candidate profile differs")
-        deadline = self.clock() + 15.0
-        try:
-            current = self.runtime_inspector(record["runtime"], deadline=deadline)
-            if (type(current) is not authority.GenericRuntimeInspection
-                    or not authority.authorities_match(record["runtime"], current.runtime)):
-                raise ValueError("semantic capability drift")
-            manifest = self.implementation_inspector()
-            if manifest.get("implementation_digest") != record["implementation_digest"]:
-                raise ValueError("implementation drift")
-        except Exception as exc:
-            raise GenericQualificationFailure(
-                QualificationReason.INSTALL_VALIDATION_FAILED,
-                "candidate no longer matches current implementation or capability") from exc
-        namespace = self.root / NAMESPACE
-        records = namespace / "records"
-        pointers = namespace / "pointers"
-        configs = self.root / "docker-spike-config-v2"
-        config = configs / profile_id
-        work = self.root / "docker-spike-work-v2"
-        for directory in (self.root, namespace, records, pointers, configs, config, work):
-            common.safe_directory(directory, create=True)
-        try:
-            if tuple(config.iterdir()):
-                raise GenericQualificationFailure(
-                    QualificationReason.INSTALL_VALIDATION_FAILED,
-                    "installed Docker config contains foreign files; empty the selected private "
-                    "profile config directory and reinstall the reviewed candidate")
-        except OSError as exc:
-            raise GenericQualificationFailure(
-                QualificationReason.INSTALL_VALIDATION_FAILED,
-                "installed Docker config authority is unreadable") from exc
-        execution_store = common.ExecutionStore(self.root)
-        execution_store.prepare_execution_scaffolding()
-        generic_journal.GenericJournalStore(execution_store).prepare()
-        digest = record["qualification_record_digest"].removeprefix(_FULL_DIGEST)
-        record_path = records / (digest + ".json")
-        payload = fsio.dump_json(record)
-        try:
-            record_path.lstat()
-        except FileNotFoundError:
-            existing = None
-        else:
-            try:
-                existing = common.safe_file(record_path, cap=MAX_CANDIDATE_BYTES)
-            except common.GenericScaffoldingError as exc:
-                raise GenericQualificationFailure(
-                    QualificationReason.INSTALL_VALIDATION_FAILED,
-                    "existing record path is unsafe") from exc
-        if existing is None:
-            fsio.atomic_write(record_path, payload)
-            os.chmod(record_path, 0o600)
-        elif existing != payload:
-            raise GenericQualificationFailure(
-                QualificationReason.INSTALL_VALIDATION_FAILED, "record path contains different bytes")
-        pointer = {
-            "schema": POINTER_SCHEMA, "profile_id": profile_id,
-            "qualification_record_digest": record["qualification_record_digest"],
-            "execution_binding_digest": record["execution_binding_digest"],
-        }
-        pointer_path = pointers / (profile_id + ".json")
-        fsio.atomic_write(pointer_path, fsio.dump_json(pointer))
-        os.chmod(pointer_path, 0o600)
-        loaded = authority.GenericQualificationStore(self.root).load_current(profile_id)
-        if loaded != record:
-            raise GenericQualificationFailure(
-                QualificationReason.INSTALL_VALIDATION_FAILED, "installed qualification differs")
-        return record

@@ -1109,7 +1109,7 @@
             "docker-isolated-v1",
             "docker-networked-v1"
           ],
-          "description": "Host profile ceiling for this run, bound once at StartRun (an explicit wire reinterpretation recorded in the public contract): absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. Host-owned and never author action data; no later action can raise it. Until the run-scoped qualification cycle lands, the host selector still uses this field to select exactly one profile for the run; permitting both under docker-networked-v1 is the forthcoming ceiling meaning (Empirica 7.2 §4.4), not current behaviour."
+          "description": "Host profile ceiling for this run, bound once at StartRun (an explicit wire reinterpretation recorded in the public contract): absent or docker-isolated-v1 permits only the isolated profile; docker-networked-v1 permits both. Host-owned and never author action data; no later action can raise it. It only bounds the run's environment proposals (Empirica 7.2 §4.4); no machine-wide selection reads it."
         }
       }
     },

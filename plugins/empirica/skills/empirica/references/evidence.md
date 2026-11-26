@@ -120,13 +120,19 @@ Research outcomes:
 ## Fold 2: generic spike
 
 Only a `needs-experiment` claim requires Fold 2, and supporting Fold-1 research must already exist.
-Read the RunView’s immutable `spike_backend` first:
+Read the RunView’s `spike_backend` first:
 
 - `spikes_unavailable`: do not submit an unchanged request. Continue non-spike research, refine the
   graph, or stop with an honest residual. Never fabricate evidence or use an ambient host fallback.
-- `qualified` / `docker-isolated-v1` or `docker-networked-v1`: this run is bound to exact
-  qualification-record and execution-binding digests. Bound does not mean currently healthy. The
-  host selected the profile once at `StartRun`; the plan cannot select or change it.
+- `unqualified`: the run has no qualified environment yet. Submit `environment` (a profile within
+  the host ceiling, the already-local spike images, the preparation you will do, a rationale); once
+  it is approved, prepare Docker and the images with your own tools, then `qualify`. Preparation is
+  never evidence. Each refusal names its next call ([recovery.md](recovery.md)).
+- `qualified` / `docker-isolated-v1` or `docker-networked-v1`: one of this run's own `qualify`
+  attempts bound exact qualification-record and execution-binding digests. Bound does not mean
+  currently healthy. The plan cannot select or change the profile, and its image must be one of
+  the bound revision's spike images. After a bound change (another image or profile, a Docker
+  restart, a plugin upgrade), submit a new `environment` revision or `qualify` again in this run.
 
 Submit exactly `{"kind":"spike_request","claim_id":...,"plan":...}`. The `plan` must be one closed
 `empirica.spike-plan-draft/2` with exactly five root fields:
@@ -171,7 +177,7 @@ stdout/stderr overflow, OOM, capture/staging failure, image/platform/create/atta
 identity mismatch, cleanup/recovery failure, or postflight/authority failure is **unavailable** and
 admits **no spike result evidence**. The Fault carries one closed `reason` whenever the cause is
 attributable (for example `image-not-local` or `lifecycle-unavailable`): act on its hint, which may
-be to narrow or redesign, continue research, or arrange operator requalification for a future run.
+be to narrow or redesign, continue research, or prepare the environment again and `qualify`.
 A Fault without a reason is an internal host failure: retry once, then ask the operator. Never
 infer FAIL or use a host fallback.
 

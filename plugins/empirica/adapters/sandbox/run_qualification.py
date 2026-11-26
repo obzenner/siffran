@@ -949,7 +949,7 @@ def _read_probe_inspect(argv: tuple, runner: process.Runner, environment: dict,
     admission happens here - the caller owns the content rules."""
     try:
         result = runner.run(argv, timeout_seconds=min(10.0, deadline - clock()),
-                            output_limit_bytes=authority.MAX_POINTER_BYTES, env=environment)
+                            output_limit_bytes=authority.MAX_COMMAND_OUTPUT_BYTES, env=environment)
     except Exception:
         return None
     try:
@@ -991,8 +991,8 @@ def _locate_probe_image_by_repository_digest(runtime: Mapping[str, Any], pin: An
     except Exception:
         return None
     try:
-        # the listing's bounded read re-enters through the authority's pointer
-        # admission at its OWN fetch bound, never the single-pointer 64 KiB one:
+        # the listing's bounded read re-enters through the authority's command
+        # admission at its OWN fetch bound, never the 64 KiB command-output one:
         # a digest listing the 256 KiB fetch legitimately returns (hundreds of
         # rows) must not be refused as malformed, while an answer past the bound
         # refuses the same closed way

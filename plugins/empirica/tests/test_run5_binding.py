@@ -14,7 +14,6 @@ from adapters.state.repository import FilesystemRunRepository
 from application import protocol, run_state, v2
 from application.location import encode_handle, storage_id
 from application.generic_spike import GenericQualifiedBackend
-from application.ports import SpikesUnavailable
 from application.transaction import Coordinator
 from core import environment
 from core.run import ATTEMPT_OUTCOMES as ENVIRONMENT_RUN_ATTEMPT_OUTCOMES
@@ -35,13 +34,17 @@ def _qualified(qualification=DIGEST_A, execution=DIGEST_B):
         "docker", "docker-isolated-v1", qualification, execution)
 
 
+#: The persisted binding of a run whose host composed no generic Docker backend.
+SPIKES_UNAVAILABLE = {"kind": "spikes_unavailable"}
+
+
 def _persisted(value):
     if type(value) is GenericQualifiedBackend:
         return {"kind": "qualified", "backend": value.backend,
                 "profile_id": value.profile_id,
                 "qualification_record_digest": value.qualification_record_digest,
                 "execution_binding_digest": value.execution_binding_digest}
-    return value.persisted()
+    return dict(value)
 
 
 #: Qualified bindings one member away from admissible: a foreign backend, an unknown and a
@@ -67,31 +70,6 @@ def start_command(project="p", session="s"):
         "selector": {"project": project, "session": session},
         "goal": "g",
     }
-
-
-class CountingSelector:
-    def __init__(self, value=None):
-        self.value = value or SpikesUnavailable()
-        self.calls = 0
-
-    def __bool__(self):
-        return False
-
-    def select(self):
-        self.calls += 1
-        if isinstance(self.value, BaseException):
-            raise self.value
-        return self.value
-
-
-class RequestedProfileSelector:
-    def __init__(self):
-        self.calls = []
-
-    def select(self, *args):
-        self.calls.append(args)
-        profile = args[0] if args else "docker-isolated-v1"
-        return GenericQualifiedBackend("docker", profile, DIGEST_A, DIGEST_B)
 
 
 class ComposedQualificationPort:
@@ -123,12 +101,11 @@ class PublicSpikeBackendTests(unittest.TestCase):
         # qualified binding reaches a run only through its own qualification — seeded here
         # exactly as the succeeded attempt's compare-and-set installs it.
         binding_data = _persisted(binding)
-        selector = CountingSelector(binding)
         # A qualified backend composed (the port is bound) starts the run unqualified and the
         # seeding installs the binding; no composed backend starts spikes-unavailable exactly
         # as the degraded host binds it.
         coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), PROFILE, {},
-                                  selector, None,
+                                  None,
                                   ComposedQualificationPort()
                                   if binding_data["kind"] == "qualified" else None)
         started = coordinator.handle(start_command(session=f"public-{binding_data['kind']}"), "start")
@@ -143,7 +120,6 @@ class PublicSpikeBackendTests(unittest.TestCase):
                 "kind": "ordinary", "gating": True}], "edges": []}}}, "graph")
         run = coordinator.handle({"type": "GetRun", "run_id": run_id}, "read-run")
         argument = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "read-argument")
-        self.assertEqual(selector.calls, 0, "StartRun and public reads must not rediscover authority")
         protocol.schema_validator("response").validate(run)
         protocol.schema_validator("response").validate(argument)
         return run["result"]["run"], argument["result"]["argument"], run["result"]
@@ -153,22 +129,19 @@ class PublicSpikeBackendTests(unittest.TestCase):
         profile ceiling — never a machine-wide selected binding — under every StartRun word of
         the ceiling, and the persisted reference is immutable across reads and resumes."""
         for configured in (None, "docker-isolated-v1", "docker-networked-v1"):
-            selector = RequestedProfileSelector()
             coordinator = Coordinator(Workspace(), Harness(), Runs(), Artifacts(), PROFILE, {},
-                                      selector, None, ComposedQualificationPort())
+                                      None, ComposedQualificationPort())
             command = start_command(session=f"profile-{configured or 'default'}")
             if configured is not None:
                 command["spike_profile"] = configured
             started = coordinator.handle(command, f"start-{configured}")
             run_id = started["result"]["run"]["id"]
-            self.assertEqual(selector.calls, [], "StartRun reads no machine-wide authority")
             self.assertEqual(started["result"]["run"]["spike_backend"], {"kind": "unqualified"})
             read = coordinator.handle({"type": "GetRun", "run_id": run_id}, f"read-{configured}")
             self.assertEqual(read["result"]["run"]["spike_backend"],
                              started["result"]["run"]["spike_backend"])
             resume = coordinator.handle(command, f"resume-{configured}")
             self.assertEqual(resume["result"]["run"]["id"], run_id)
-            self.assertEqual(selector.calls, [])
 
     def test_observe_action_cannot_request_network_profile_authority(self):
         validator = protocol.schema_validator("request")
@@ -182,15 +155,13 @@ class PublicSpikeBackendTests(unittest.TestCase):
         self.assertFalse(validator.is_valid(envelope))
 
     def test_closed_binding_projects_identically_into_run_and_audit_dossier(self):
-        for selected in (SpikesUnavailable("local diagnostic must not escape"),
-                         _qualified(DIGEST_A, DIGEST_B)):
+        for selected in (SPIKES_UNAVAILABLE, _qualified(DIGEST_A, DIGEST_B)):
             persisted = _persisted(selected)
             with self.subTest(kind=persisted["kind"]):
                 run, argument, result = self._public_views(selected)
                 self.assertEqual(run["spike_backend"], persisted)
                 self.assertEqual(argument["spike_backend"], persisted)
                 public_text = author_view.render_author_view(result, strict=True)
-                self.assertNotIn("local diagnostic", public_text)
                 if persisted["kind"] == "spikes_unavailable":
                     self.assertIn(
                         "spikes unavailable; no spike requests "
@@ -215,7 +186,7 @@ class PublicSpikeBackendTests(unittest.TestCase):
         self.assertEqual(seen, ["block-stale-spike-missing.json", "block-stale-spike.json"])
 
     def test_response_schema_rejects_every_backend_extension_or_near_match(self):
-        run, _argument, result = self._public_views(SpikesUnavailable())
+        run, _argument, result = self._public_views(SPIKES_UNAVAILABLE)
         for backend in (
             {"kind": "spikes_unavailable", "diagnostic": "socket"},
             *NEAR_MATCH_QUALIFIED_BINDINGS,
@@ -629,77 +600,43 @@ class Run5EnvironmentStateTests(unittest.TestCase):
         replace(state, environment_history=[], qualification_attempts=())
         replace(state, environment_history=plain_history, qualification_attempts=plain_attempts)
 
-class StartSelectionTests(unittest.TestCase):
-    def coordinator(self, selector, *, workspace=None, harness=None, runs=None, artifacts=None,
+class StartBindingTests(unittest.TestCase):
+    def coordinator(self, *, workspace=None, harness=None, runs=None, artifacts=None,
                     qualification_port=None):
         values = (workspace or Workspace(), harness or Harness(), runs or Runs(),
                   artifacts or Artifacts())
-        return Coordinator(*values, PROFILE, {}, selector, None, qualification_port), values
+        return Coordinator(*values, PROFILE, {}, None, qualification_port), values
 
     def test_a_composed_backend_start_binds_unqualified_and_active_resume_does_no_work(self):
         """E9: with a generic Docker backend composed, StartRun binds ``unqualified`` and reads
         no machine-wide authority; an active resume binds nothing newer and keeps what the run
         holds."""
-        selector = CountingSelector(_qualified(DIGEST_A, DIGEST_B))
         coordinator, (workspace, _harness, runs, artifacts) = self.coordinator(
-            selector, qualification_port=ComposedQualificationPort())
+            qualification_port=ComposedQualificationPort())
         first = coordinator.handle(start_command(), "one")
         self.assertEqual(first["result"]["type"], "Allow")
         key = next(iter(runs.data))
         self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "unqualified"})
-        self.assertEqual(selector.calls, 0)
         before = (len(workspace.calls), artifacts.append_calls, runs.seq)
-        selector.value = _qualified(DIGEST_B, DIGEST_A)
         second = coordinator.handle(start_command(), "two")
         self.assertEqual(second["result"]["run"]["id"], first["result"]["run"]["id"])
-        self.assertEqual(selector.calls, 0)
         self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq), before)
         self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "unqualified"})
 
     def test_an_existing_unavailable_run_never_adopts_a_later_composition(self):
-        """Where no generic Docker backend was composed (StartRun binds spikes-unavailable for
-        the run's life), a newer machine-wide authority can never reach the started run: the
-        run's own qualification is the only way on, and this process composed no port."""
-        selector = CountingSelector(SpikesUnavailable("absent"))
-        coordinator, (_workspace, _harness, runs, _artifacts) = self.coordinator(selector)
+        """Where no generic Docker backend was composed, StartRun binds spikes-unavailable for
+        the run's life: the run's own qualification is the only way on, and this process
+        composed no port."""
+        coordinator, (_workspace, _harness, runs, _artifacts) = self.coordinator()
         first = coordinator.handle(start_command(session="unavailable-sticky"), "one")
         key = next(iter(runs.data))
         self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "spikes_unavailable"})
-        selector.value = _qualified(DIGEST_A, DIGEST_B)
         second = coordinator.handle(start_command(session="unavailable-sticky"), "two")
         self.assertEqual(second["result"]["run"]["id"], first["result"]["run"]["id"])
-        self.assertEqual(selector.calls, 0)
         self.assertEqual(runs.data[key].value["spike_backend"], {"kind": "spikes_unavailable"})
 
-    def test_selector_noise_cannot_block_reasoning(self):
-        """StartRun no longer consults the machine-wide selector (E9): a raising, falsey or
-        impostor selector identity cannot block a start — the run binds the run-scoped
-        reference and ordinary reasoning keeps working."""
-        class GenericBackendImpostor(GenericQualifiedBackend):
-            pass
-
-        impostor = GenericBackendImpostor(
-            "docker", "docker-isolated-v1", DIGEST_A, DIGEST_B)
-        for value in (RuntimeError("broken"), object(), SpikesUnavailable("absent"),
-                      _qualified(DIGEST_A, DIGEST_B), impostor):
-            with self.subTest(value=type(value).__name__):
-                selector = CountingSelector(value)
-                coordinator, (_workspace, _harness, runs, _artifacts) = self.coordinator(
-                    selector, qualification_port=ComposedQualificationPort())
-                result = coordinator.handle(start_command(), "start")
-                self.assertEqual(result["result"]["type"], "Allow")
-                self.assertEqual(next(iter(runs.data.values())).value["spike_backend"],
-                                 {"kind": "unqualified"})
-                routed = coordinator.handle({
-                    "type": "ObserveAction", "run_id": result["result"]["run"]["id"],
-                    "action": {"kind": "route", "reason": "ordinary reasoning"},
-                }, "route")
-                self.assertEqual(routed["result"]["type"], "Allow")
-
     def test_create_race_returns_winners_binding_without_rewrite(self):
-        winner_selector = CountingSelector(_qualified(DIGEST_B, DIGEST_A))
-        winner, (_workspace, _harness, winner_runs, winner_artifacts) = self.coordinator(
-            winner_selector)
+        winner, (_workspace, _harness, winner_runs, winner_artifacts) = self.coordinator()
         winner.handle(start_command(), "winner")
         key = next(iter(winner_runs.data))
         winner_read = winner_runs.data[key]
@@ -712,41 +649,16 @@ class StartSelectionTests(unittest.TestCase):
         race_runs = RaceRuns()
         race_artifacts = Artifacts()
         race_artifacts.values[key] = dict(winner_artifacts.values[key])
-        loser_selector = CountingSelector(_qualified(DIGEST_A, DIGEST_B))
         loser, _ = self.coordinator(
-            loser_selector, runs=race_runs, artifacts=race_artifacts,
+            runs=race_runs, artifacts=race_artifacts,
             qualification_port=ComposedQualificationPort())
         response = loser.handle(start_command(), "loser")
         self.assertEqual(response["result"]["type"], "Allow")
         self.assertEqual(race_runs.data[key].value["spike_backend"],
                          winner_read.value["spike_backend"])
-        self.assertEqual(loser_selector.calls, 0)
-
-    def test_selector_identity_survives_service_composition(self):
-        selector = CountingSelector(_qualified(DIGEST_A, DIGEST_B))
-        workspace, harness, runs, artifacts = Workspace(), Harness(), Runs(), Artifacts()
-        service = v2.compose(
-            workspace, harness, runs, artifacts, None, PROFILE, {}, None,
-            spike_authority_selector=selector,
-            qualification_port=ComposedQualificationPort())
-        result = service._dispatch_validated({"request_id": "start", "command": start_command()})
-        self.assertEqual(result["result"]["type"], "Allow")
-        self.assertIs(service._coordinator.spike_authority_selector, selector)
-        self.assertEqual(selector.calls, 0)
-        self.assertEqual(next(iter(runs.data.values())).value["spike_backend"]["kind"],
-                         "unqualified")
-
-    def test_a_raising_selector_cannot_block_a_start(self):
-        """StartRun reads no machine-wide authority (E9): a selector raising a base exception is
-        never consulted, so the start succeeds instead of propagating into the caller."""
-        coordinator, _ = self.coordinator(CountingSelector(KeyboardInterrupt()),
-                                           qualification_port=ComposedQualificationPort())
-        result = coordinator.handle(start_command(), "start")
-        self.assertEqual(result["result"]["type"], "Allow")
 
     def test_explicit_start_after_latest_run2_creates_fresh_run5_without_mutating_old(self):
-        selector = CountingSelector()
-        coordinator, (_workspace, _harness, runs, artifacts) = self.coordinator(selector)
+        coordinator, (_workspace, _harness, runs, artifacts) = self.coordinator()
         historical_state, historical_artifacts = chain(initial())
         old_key = RunKey(storage_id("p"), storage_id("s"), 1)
         old_document = legacy_document(historical_state, "empirica.run/2")
@@ -759,7 +671,6 @@ class StartSelectionTests(unittest.TestCase):
         new_key = RunKey(old_key.project_id, old_key.run_id, 2)
         self.assertEqual(result["result"]["type"], "Allow")
         self.assertIn(new_key, runs.data)
-        self.assertEqual(selector.calls, 0)
         self.assertEqual(runs.data[old_key], before_read)
         self.assertEqual(artifacts.values[old_key], before_artifacts)
         self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/5")
@@ -773,8 +684,7 @@ class StartSelectionTests(unittest.TestCase):
         for item in values:
             artifacts.append(key, item)
         coordinator, _ = self.coordinator(
-            CountingSelector(), workspace=workspace, harness=harness, runs=runs,
-            artifacts=artifacts)
+            workspace=workspace, harness=harness, runs=runs, artifacts=artifacts)
         return coordinator, encode_handle(key), (workspace, harness, runs, artifacts)
 
     def assert_spike_refused_untouched(self, coordinator, run_id, values, expected,
@@ -805,7 +715,7 @@ class StartSelectionTests(unittest.TestCase):
         # with no revision, environment-pending or environment-rejected while the latest one is
         # undecided or refused, qualification-required once one is approved — and every refusal
         # precedes any artifact, harness call or state rewrite.
-        coordinator, values = self.coordinator(CountingSelector(SpikesUnavailable()))
+        coordinator, values = self.coordinator()
         started = coordinator.handle(start_command(), "start")
         with self.subTest(binding="spikes_unavailable"):
             self.assert_spike_refused_untouched(

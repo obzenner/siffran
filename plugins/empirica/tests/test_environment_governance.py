@@ -303,7 +303,7 @@ class ReceiptTests(unittest.TestCase):
         peer_runs.data.update(runs.data)
         peer = Coordinator(coordinator.workspace, coordinator.harness, peer_runs,
                            coordinator.artifacts, coordinator.profile_id,
-                           {}, coordinator.spike_authority_selector, coordinator.image_resolver)
+                           {}, coordinator.image_resolver)
         raced = peer.handle({"type": "ObserveAction", "run_id": env.run_id,
                              "action": {**copy.deepcopy(ENVIRONMENT_ACTION),
                                         "payload": _revise(ENVIRONMENT_ACTION["payload"])}},

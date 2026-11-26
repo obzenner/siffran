@@ -1,7 +1,7 @@
-"""Passive capability authority and bounded local-image resolution for Docker MVP `/2`.
+"""Passive capability authority and bounded local-image resolution for generic Docker spikes.
 
-Installed records are read-only during ordinary runtime; absent, legacy, malformed, or drifted
-records freeze spikes unavailable. Qualification and installation are explicit separate commands.
+A run's spikes resolve the record its own qualification bound and re-observe the authority it
+pinned; nothing here selects, installs or publishes authority.
 """
 from __future__ import annotations
 
@@ -24,10 +24,9 @@ from core.records import RunKey
 from . import common, generic_admission, planner, process
 
 RECORD_SCHEMA = "siffran.empirica.docker-spike-qualification-record/2"
-POINTER_SCHEMA = "siffran.empirica.docker-spike-qualification-pointer/2"
 NAMESPACE = "docker-spike-qualification-v2"
 MAX_RECORD_BYTES = 2 * 1024 * 1024
-MAX_POINTER_BYTES = 64 * 1024
+MAX_COMMAND_OUTPUT_BYTES = 64 * 1024
 _CONTEXT = re.compile(r"^[A-Za-z0-9_.-]{1,128}$")
 #: `docker version --format` projects exactly the server facts both observation paths use.
 SERVER_VERSION_FORMAT = (
@@ -87,11 +86,6 @@ class GenericRuntimeInspection:
 class PassiveGenericRuntimeInspector(Protocol):
     def __call__(self, recorded_runtime: Mapping[str, Any], *, deadline: float) \
             -> GenericRuntimeInspection: ...
-
-
-@dataclass(frozen=True, slots=True)
-class GenericSpikesUnavailable:
-    state: str = "spikes_unavailable"
 
 
 @dataclass(frozen=True, slots=True)
@@ -284,12 +278,11 @@ def check_private_runtime(directories: tuple[Path, ...], config: Path, work: Pat
 
 
 class GenericQualificationStore:
-    """Read only current qualification records and pointers; never publishes or repairs."""
+    """Read only exact `/2` qualification records; never publishes or repairs."""
     def __init__(self, sandbox_root: Path | None = None, **_: Any) -> None:
         self.sandbox_root = common.sandbox_home() if sandbox_root is None else Path(sandbox_root)
         self.root = self.sandbox_root / NAMESPACE
         self.records = self.root / "records"
-        self.pointers = self.root / "pointers"
         self.configs = self.sandbox_root / "docker-spike-config-v2"
         self.work = self.sandbox_root / "docker-spike-work-v2"
         self.execution_store = common.ExecutionStore(self.sandbox_root)
@@ -297,7 +290,7 @@ class GenericQualificationStore:
     def check_runtime(self, profile_id: str) -> tuple[Path, Path]:
         profile = _profile(profile_id)
         return check_private_runtime(
-            (self.sandbox_root, self.root, self.records, self.pointers, self.configs),
+            (self.sandbox_root, self.root, self.records, self.configs),
             self.configs / profile, self.work, profile)
 
     def load_record(self, record_digest: str) -> dict[str, Any]:
@@ -309,36 +302,6 @@ class GenericQualificationStore:
         if record["qualification_record_digest"] != digest_value:
             raise GenericQualificationError("qualification record path differs")
         return record
-
-    def load_current(self, profile_id: str) -> dict[str, Any]:
-        profile = _profile(profile_id)
-        raw = common.safe_file(self.pointers / (profile + ".json"), cap=MAX_POINTER_BYTES)
-        pointer = _json_document(raw, "qualification pointer")
-        fields = {"schema", "profile_id", "qualification_record_digest",
-                  "execution_binding_digest"}
-        if type(pointer) is not dict or set(pointer) != fields \
-                or pointer.get("schema") != POINTER_SCHEMA or pointer.get("profile_id") != profile:
-            raise GenericQualificationError("qualification pointer is malformed")
-        record = self.load_record(pointer["qualification_record_digest"])
-        if record["execution_binding_digest"] != pointer["execution_binding_digest"]:
-            raise GenericQualificationError("qualification pointer binding differs")
-        return record
-
-
-class GenericBackendSelector:
-    def __init__(self, store: GenericQualificationStore) -> None:
-        self.store = store
-
-    def select(self, requested_profile: str | None = None):
-        profile = spike_plan.ISOLATED_PROFILE if requested_profile is None else requested_profile
-        try:
-            self.store.check_runtime(profile)
-            record = self.store.load_current(profile)
-            return application.GenericQualifiedBackend(
-                "docker", profile, record["qualification_record_digest"],
-                record["execution_binding_digest"])
-        except Exception:
-            return GenericSpikesUnavailable()
 
 
 def _strict_json(text: str, where: str) -> object:
@@ -405,11 +368,11 @@ def _inspect_runtime(
         try:
             launched = selected.run(
                 (cli, *args), timeout_seconds=min(5.0, remaining),
-                output_limit_bytes=MAX_POINTER_BYTES, env=environment)
+                output_limit_bytes=MAX_COMMAND_OUTPUT_BYTES, env=environment)
         except OSError as exc:
             raise GenericQualificationError(
                 where + " could not be launched at the " + daemon + " daemon") from exc
-        result = _admit_command_result(launched, MAX_POINTER_BYTES, where)
+        result = _admit_command_result(launched, MAX_COMMAND_OUTPUT_BYTES, where)
         if (result.timed_out
                 or result.output_limited or result.returncode != 0):
             raise GenericQualificationError(where + " failed")
@@ -639,8 +602,8 @@ class DockerLocalImageResolver(application.LocalImageResolver):
             argv = (str(authority.docker_cli), "image", "inspect", "--format",
                     planner.IMAGE_INSPECT_FORMAT, requested_reference)
             result = _admit_command_result(self.runner.run(
-                argv, timeout_seconds=10.0, output_limit_bytes=MAX_POINTER_BYTES,
-                env=dict(authority.environment)), MAX_POINTER_BYTES, "Docker image inspect")
+                argv, timeout_seconds=10.0, output_limit_bytes=MAX_COMMAND_OUTPUT_BYTES,
+                env=dict(authority.environment)), MAX_COMMAND_OUTPUT_BYTES, "Docker image inspect")
             if result.timed_out or result.output_limited:
                 return application.LocalImageResolutionUnavailable(
                     application.GenericPreparationReason.MALFORMED_REQUIRED_RESULT)

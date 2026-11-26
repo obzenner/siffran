@@ -42,7 +42,7 @@ from core.evaluation import plan_spike_request, plan_spike_result
 from core.freshness import FileObservation, ObservationState, observations_digest
 from core.spike_plan_draft import canonicalize_spike_plan_draft
 from core.records import RunKey
-from driver import FakeLocalImageResolver, FakeSpikeAuthoritySelector
+from driver import FakeLocalImageResolver
 from governance_setup import approve_current, end_with_consent
 from observer_store import BOUND, DRIFTED, _generic_spike_action, _GenericFixtureHarness, body
 force_absent_sandbox_home()
@@ -183,9 +183,6 @@ def _drive_one(base: Path, n: int) -> None:
     sequence = (uuid.UUID(int=k) for k in range(1 + 1000 * n, 1 << 16))
     with mock.patch.object(governance_setup, "uuid4", lambda: next(sequence)):
         service = bridge.build_service(PROFILE)
-    selector = FakeSpikeAuthoritySelector()
-    selector.qualified_next = True
-    service._coordinator.spike_authority_selector = selector
     service._coordinator.image_resolver = FakeLocalImageResolver()
     _drive(service, repo, *TEMPLATES[n])
 

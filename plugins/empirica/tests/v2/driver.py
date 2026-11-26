@@ -40,23 +40,6 @@ import sut_adapter  # noqa: E402  # the only composition bridge; no load-time cy
 force_absent_sandbox_home()
 
 
-class FakeSpikeAuthoritySelector:
-    """Test-only StartRun authority observation; fixture builders choose the next immutable binding."""
-
-    def __init__(self) -> None:
-        self.qualified_next = False
-
-    def select(self, requested_profile=None):
-        from application.generic_spike import GenericQualifiedBackend
-        from application.ports import SpikesUnavailable
-        if not self.qualified_next:
-            return SpikesUnavailable()
-        self.qualified_next = False
-        return GenericQualifiedBackend(
-            "docker", requested_profile or "docker-isolated-v1",
-            f"sha256:{'a' * 64}", f"sha256:{'b' * 64}")
-
-
 # ---------------------------------------------------------------------------
 # Failure signal
 # ---------------------------------------------------------------------------
@@ -466,8 +449,7 @@ _ABSENT = object()
 
 
 def new_driver(profile_id: str, *, limits: dict | None = None,
-               clock: FakeClock | None = None, timeline: MemoryTimeline | None = None,
-               spike_authority_selector=None) -> ConformanceDriver:
+               clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> ConformanceDriver:
     """Build the fake ports and compose the real v2 application/service seam through them.
 
     Fakes own only observations/transport. Composition (the ``application.v2`` import and service
@@ -481,7 +463,6 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     workspace.write(CITED_SOURCE[0], f"# Cited\n\n{CITED_SOURCE[1]}\n".encode())
     harness = FakeGenericHarness()
     resolver = FakeLocalImageResolver()
-    selector = spike_authority_selector or FakeSpikeAuthoritySelector()
     runs = FakeRunRepository()
     artifacts = FakeArtifactRepository()
     host = FakeHostChildSink()
@@ -492,7 +473,7 @@ def new_driver(profile_id: str, *, limits: dict | None = None,
     lim = dict(limits or {})
     return sut_adapter.bind_live(
         workspace, harness, runs, artifacts, host, profile_id, lim, clk,
-        spike_authority_selector=selector, image_resolver=resolver,
+        image_resolver=resolver,
     )
 
 
@@ -511,6 +492,4 @@ def clone_driver(drv) -> ConformanceDriver:
         copy.deepcopy(drv._workspace), copy.deepcopy(drv._harness), inner,
         copy.deepcopy(drv._artifacts), copy.deepcopy(drv._host), drv._profile_id,
         dict(drv._limits), clock,
-        spike_authority_selector=copy.deepcopy(
-            drv._service._coordinator.spike_authority_selector),
         image_resolver=copy.deepcopy(drv._service._coordinator.image_resolver))

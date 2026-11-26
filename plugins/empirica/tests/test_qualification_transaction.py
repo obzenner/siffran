@@ -51,7 +51,7 @@ from core.canonical import canonical_digest
 from core.records import Corrupt, Present, Revision
 from governance_setup import TEST_INVOCATION, approve_current
 from test_environment_actions import CONFIGURE_RUN, ENVIRONMENT_ACTION, QUALIFY_ACTION
-from test_d7_transactions import Artifacts, Harness, QualifiedSelector, Runs, Workspace
+from test_d7_transactions import Artifacts, Harness, Runs, Workspace
 from dataclasses import replace
 from unittest.mock import patch
 
@@ -155,8 +155,7 @@ class QualificationEnv:
         self.port = port
         self.deliveries = 0
         self.coordinator = ProductionCoordinator(
-            Workspace(), Harness(), self.runs, self.artifacts_repo, profile_id, {},
-            QualifiedSelector(), None, port)
+            Workspace(), Harness(), self.runs, self.artifacts_repo, profile_id, {}, None, port)
         self.start = start
         self._start_and_approve()
 
@@ -431,8 +430,8 @@ class QualificationTransactionTests(unittest.TestCase):
 
         def run_the_second_coordinator(request):
             second = ProductionCoordinator(
-                Workspace(), Harness(), env.runs, env.artifacts_repo, PROFILE, {},
-                QualifiedSelector(), None, nested_port)
+                Workspace(), Harness(), env.runs, env.artifacts_repo, PROFILE, {}, None,
+                nested_port)
             nested_result.update(second.handle(
                 {"type": "ObserveAction", "run_id": env.run_id,
                  "action": copy.deepcopy(QUALIFY_ACTION)}, "concurrent"))

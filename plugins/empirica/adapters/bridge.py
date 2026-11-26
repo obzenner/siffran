@@ -55,7 +55,6 @@ if str(_PLUGIN_ROOT) not in sys.path:
 from application import host_runtime  # noqa: E402
 from application import protocol as _proto  # noqa: E402
 from application import v2 as _v2  # noqa: E402
-from application.ports import NullSpikeAuthoritySelector  # noqa: E402
 from adapters.execution import FilesystemWorkspace  # noqa: E402
 from adapters.git.artifact_repo import GitArtifactRepository, toplevel  # noqa: E402
 from adapters.identity import POLICY_VERSION, observe  # noqa: E402
@@ -98,11 +97,6 @@ def _fault(code: str, request_id: str) -> dict:
 
 def GenericQualificationStore(*args, **kwargs):
     from adapters.sandbox.generic_authority import GenericQualificationStore as implementation
-    return implementation(*args, **kwargs)
-
-
-def GenericBackendSelector(*args, **kwargs):
-    from adapters.sandbox.generic_authority import GenericBackendSelector as implementation
     return implementation(*args, **kwargs)
 
 
@@ -302,7 +296,6 @@ def build_service(profile_id: str, *, clock=time.time):
         # no longer matches the still-executing code.
         loaded_release = freeze_loaded_release()
         qualification_store = GenericQualificationStore()
-        spike_authority = GenericBackendSelector(qualification_store)
         # A run's spikes resolve their binding through the run-scoped records its qualification
         # attempts published.
         authority_resolver = GenericAuthorityResolver(
@@ -311,7 +304,6 @@ def build_service(profile_id: str, *, clock=time.time):
         spike_harness = GenericDockerHarness(
             qualification_store.execution_store, authority_resolver)
     except Exception:  # unsafe/absent generic composition freezes spikes unavailable at StartRun
-        spike_authority = NullSpikeAuthoritySelector()
         spike_harness = None
         image_resolver = None
         # (E9) a degraded composition also composes no qualification port (``_v2.compose``
@@ -323,7 +315,6 @@ def build_service(profile_id: str, *, clock=time.time):
         workspace=FilesystemWorkspace(Path.cwd()), harness=spike_harness,
         runs=runs, artifacts=artifacts,
         host=None, profile_id=profile_id, limits={}, clock=None,
-        spike_authority_selector=spike_authority,
         image_resolver=image_resolver,
         qualification_port=(_RunQualificationPort() if spike_harness is not None
                             and _proto.profile_supported(profile_id) else None),

@@ -154,7 +154,7 @@ new prompt (`before_agent_start`) clear it. An auto run whose `turn_end_actor` i
 ## Validation
 
 Run `make check-pi` for fast deterministic adapter coverage. Run the targeted diagnostics in
-`doc/testing.md` when changing persistence or full host-flow boundaries. Generic profile
-qualification and installation use the explicit operator commands in `doc/hosts.md`; native host
+`doc/testing.md` when changing persistence or full host-flow boundaries. A run qualifies its
+Docker environment through its own environment step (`doc/hosts.md`); native host
 acceptance is operator-led via `make native-qualification` and the long-running scenarios
 (`.agents/skills/native-qualification/references/scenarios.md`).

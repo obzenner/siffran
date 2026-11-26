@@ -37,6 +37,8 @@ from test_generic_qualification import FakeKernelFactory
 
 PIN = probe_image.pinned_probe_image()
 PROBE_COUNT = len(run_owner.qualification.PROBE_ORDER)
+#: The schema of the machine-wide `/2` pointer an Empirica 7.1 install may have left on disk.
+LEGACY_POINTER_SCHEMA = "siffran.empirica.docker-spike-qualification-pointer/2"
 
 
 class MutableClock:
@@ -1758,7 +1760,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         other_path.write_bytes(run_owner.fsio.dump_json(other))
         other_path.chmod(common.MODE_FILE)
         pointer = {
-            "schema": run_owner.qualification.POINTER_SCHEMA,
+            "schema": LEGACY_POINTER_SCHEMA,
             "profile_id": spike_plan.ISOLATED_PROFILE,
             "qualification_record_digest": legacy["qualification_record_digest"],
             "execution_binding_digest": legacy["execution_binding_digest"],
@@ -1766,10 +1768,10 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         pointer_path = legacy_pointers / (spike_plan.ISOLATED_PROFILE + ".json")
         pointer_path.write_bytes(run_owner.fsio.dump_json(pointer))
         pointer_path.chmod(common.MODE_FILE)
-        # the planted pointer and record are genuinely usable by the /2 store
+        # the planted record is genuinely readable by the /2 store
         self.assertEqual(
-            authority.GenericQualificationStore(self.root).load_current(
-                spike_plan.ISOLATED_PROFILE), legacy)
+            authority.GenericQualificationStore(self.root).load_record(
+                legacy["qualification_record_digest"]), legacy)
 
         harness = OwnerHarness(self.root)
         harness.manifests = [{"implementation_digest": D0}] * 32
@@ -1786,8 +1788,8 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
         record_path.write_bytes(run_owner.fsio.dump_json({**legacy, "schema": D1}))
         record_path.chmod(common.MODE_FILE)
         with self.assertRaises(authority.GenericQualificationError):
-            authority.GenericQualificationStore(self.root).load_current(
-                spike_plan.ISOLATED_PROFILE)
+            authority.GenericQualificationStore(self.root).load_record(
+                legacy["qualification_record_digest"])
         fresh = OwnerHarness(self.root)
         fresh.manifests = [{"implementation_digest": D0}] * 32
         fresh.attempt_id = "a-2"
