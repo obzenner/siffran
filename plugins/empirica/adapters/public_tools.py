@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import json
+import re
 import uuid
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -105,6 +106,32 @@ def _typed(value: Any) -> Any:
     return result
 
 
+#: The UTF-16 surrogate block as the canonical free-text pattern writes it. A model provider compiles a tool
+#: schema's patterns in its own engine, and a lone-surrogate escape is no portable regular expression (a provider
+#: refuses the whole tool over it). The core refuses surrogates in text itself (``core.environment``), so the
+#: model-facing projection drops the block and keeps the rest of the rule; any other surrogate escape fails it.
+_SURROGATES = range(0xD800, 0xE000)
+_SURROGATE_BLOCK = f"\\u{_SURROGATES.start:04x}-\\u{_SURROGATES.stop - 1:04x}"
+_SURROGATE_ESCAPE = re.compile(r"\\u(?:[dD][89a-fA-F][0-9a-fA-F]{2}|\{0*[dD][89a-fA-F][0-9a-fA-F]{2}\})")
+
+
+def _portable(value: Any) -> Any:
+    """Every ``pattern`` in the portable dialect every supported model provider compiles."""
+    if isinstance(value, list):
+        return [_portable(item) for item in value]
+    if not isinstance(value, dict):
+        return value
+    result = {key: _portable(item) for key, item in value.items()}
+    pattern = result.get("pattern")
+    if isinstance(pattern, str):
+        pattern = pattern.replace(_SURROGATE_BLOCK, "")
+        if _SURROGATE_ESCAPE.search(pattern) or any(ord(c) in _SURROGATES for c in pattern):
+            raise RuntimeError(f"a model-facing pattern names a lone surrogate: {pattern!r}")
+        re.compile(pattern)
+        result["pattern"] = pattern
+    return result
+
+
 def _project_schemas() -> dict[str, dict]:
     run_id = {
         "type": "string",
@@ -161,7 +188,7 @@ def _project_schemas() -> dict[str, dict]:
             },
         },
     }
-    return {name: _typed(schema)
+    return {name: _portable(_typed(schema))
             for name, schema in ((READ_TOOL, read), (OBSERVE_TOOL, observe), (REPORT_TOOL, report))}
 
 

@@ -27,6 +27,47 @@ CLAUDE_PROFILE = host_profile_id("claude-code")
 force_absent_sandbox_home()
 
 
+def _patterns(node, where: str) -> list[tuple[str, str]]:
+    """Every ``pattern`` keyword value under ``node``, with its location."""
+    found: list[tuple[str, str]] = []
+    if isinstance(node, dict):
+        if isinstance(node.get("pattern"), str):
+            found.append((where, node["pattern"]))
+        for key, item in node.items():
+            found.extend(_patterns(item, f"{where}/{key}"))
+    elif isinstance(node, list):
+        for index, item in enumerate(node):
+            found.extend(_patterns(item, f"{where}/{index}"))
+    return found
+
+
+def _portable_pattern_error(pattern: str) -> str | None:
+    """Why ``pattern`` is not a portable regular expression, or ``None``: it must compile, and like a strict
+    ECMAScript-style engine without code-point escapes it may name no UTF-16 surrogate, written as a literal
+    character or as a ``\\uXXXX`` / ``\\u{X}`` escape."""
+    try:
+        re.compile(pattern)
+    except re.error as exc:
+        return f"does not compile: {exc}"
+    surrogate = range(0xD800, 0xE000)
+    index = 0
+    while index < len(pattern):
+        character = pattern[index]
+        if ord(character) in surrogate:
+            return f"a literal surrogate at {index}"
+        if character != "\\":
+            index += 1
+            continue
+        escape = pattern[index + 1:index + 2]
+        if escape == "u":
+            braced = re.match(r"\{([0-9A-Fa-f]+)\}", pattern[index + 2:])
+            digits = braced.group(1) if braced else pattern[index + 2:index + 6]
+            if re.fullmatch(r"[0-9A-Fa-f]+", digits) and int(digits, 16) in surrogate:
+                return f"a lone-surrogate escape at {index}"
+        index += 2
+    return None
+
+
 class PublicToolContractTests(unittest.TestCase):
     def _tools(self):
         from adapters.public_tools import PublicTools
@@ -121,6 +162,44 @@ class PublicToolContractTests(unittest.TestCase):
             self.assertNotEqual(definition["title"], definition["description"])
             self.assertGreaterEqual(len(definition["description"].split(". ")), 4)
             self.assertLessEqual(len(definition["description"]), 2048)
+
+    def test_every_model_facing_pattern_compiles_in_the_portable_dialect(self):
+        """Every ``pattern`` of every model-facing tool schema (the model projection Claude Code serves and the
+        host-handle projection Pi registers) compiles and names no lone surrogate: a model provider compiles the
+        patterns in its own engine and refuses the whole tool over one lone-surrogate escape. The check refuses
+        the canonical free-text pattern, so it is not vacuous."""
+        from adapters.public_tools import _PUBLIC_SCHEMAS
+        from core.contract_bounds import ENVIRONMENT_PROPOSAL_RATIONALE_PATTERNS
+
+        artifact = json.loads((PLUGIN / "vendor/contracts/empirica/v2/public-tools.json").read_text())
+        self.assertEqual(artifact["schemas"], _PUBLIC_SCHEMAS)
+        patterns = _patterns(artifact["schemas"], "schemas")
+        self.assertTrue(patterns)
+        for where, pattern in patterns:
+            with self.subTest(where=where):
+                self.assertEqual(_portable_pattern_error(pattern), None)
+        self.assertTrue(any(_portable_pattern_error(pattern) for pattern in ENVIRONMENT_PROPOSAL_RATIONALE_PATTERNS))
+
+    def test_the_model_facing_free_text_still_refuses_control_characters(self):
+        """The projection drops only the surrogate block from the free-text rule: a control character stays
+        refused by the model-facing schema, and a lone surrogate the schema now admits is refused by the core."""
+        from adapters.public_tools import _PUBLIC_SCHEMAS
+        from core import environment
+
+        observe = _PUBLIC_SCHEMAS["model"]["empirica_observe"]
+        example = next(row["examples"][0] for row in observe["properties"]["action"]["oneOf"]
+                       if row["properties"]["kind"]["const"] == "environment")
+        validator = jsonschema.Draft202012Validator(observe)
+        for member in ("rationale", "preparation"):
+            for character, schema_admits in (("\x1b", False), ("\ud800", True)):
+                payload = json.loads(json.dumps(example["payload"]))
+                text = f"text {character} here"
+                payload[member] = [text] if member == "preparation" else text
+                with self.subTest(member=member, character=repr(character)):
+                    action = {**example, "payload": payload}
+                    self.assertEqual(validator.is_valid({"run_id": "r", "action": action}), schema_admits)
+                    with self.assertRaises(environment.EnvironmentProposalError):
+                        environment.validate_proposal(payload)
 
     def test_host_handle_read_schema_also_avoids_root_combinators(self):
         from adapters.public_tools import _PUBLIC_SCHEMAS
