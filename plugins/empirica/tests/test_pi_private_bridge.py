@@ -474,7 +474,8 @@ class PiEnvironmentBridgeTests(unittest.TestCase):
         for action in (copy.deepcopy(QUALIFY_ACTION), {}, None):
             request = {**PROTOCOL_REQUEST, "request_id": "not-environment", "command": {
                 "type": "ObserveAction", "run_id": self.run_id, "action": action}}
-            with patch.object(bridge, "handle_admitting") as admitting, self.assertRaises(ValueError):
+            with (patch.object(bridge, "handle_admitting") as admitting,
+                  self.assertRaisesRegex(ValueError, "^the private ingress carries only the environment proposal action$")):
                 private_bridge._environment_admit(PI_PROFILE, {"operation": "environment_admit"},
                                                   {"request": request})
             admitting.assert_not_called()
@@ -510,6 +511,14 @@ class PiEnvironmentBridgeTests(unittest.TestCase):
              "proposal_digest": shown["environment"]["proposal_digest"], "outcome": "approve",
              "document_digest": shown["document"]["digest"]})
         self.assertEqual(decided["result"]["type"], "Allow", decided)
+        self.assertEqual(shown["response"], {"protocol": decided["protocol"], "request_id": decided["request_id"],
+                                             "result": shown["response"]["result"]},
+                         "the presented answer is the trusted service's own envelope")
+        # a decided revision has no document to show: the fetch's own refusal comes back in the same envelope
+        again = self._present(revision)
+        self.assertEqual(again["type"], "environment_refused")
+        fetched = bridge.trusted_environment_document(PI_PROFILE, self.run_id, {})
+        self.assertEqual(again["response"], fetched)
         row = self._row()
         self.assertEqual(row["state"], core_environment.APPROVED)
         self.assertEqual({receipt["document_digest"] for receipt in row["receipts"]}, {shown["document"]["digest"]})
@@ -518,6 +527,7 @@ class PiEnvironmentBridgeTests(unittest.TestCase):
         revision = self._admit()["admission"]["revision"]
         refused = self._present(revision + 1)
         self.assertEqual(refused["type"], "environment_refused")
+        self.assertIsNone(refused["response"], "nothing was asked of the service beyond the fetch")
         self.assertEqual(self._documents(), [], "a document of another revision is never written")
         self.assertEqual(self._row()["receipts"], [], "nothing is presented")
         self.assertEqual(self._row()["state"], core_environment.PENDING)
