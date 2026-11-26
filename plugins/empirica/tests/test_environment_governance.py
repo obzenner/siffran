@@ -245,7 +245,7 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(member["state"], environment.PENDING)
 
     def test_a_superseded_presentations_identity_cannot_approve_the_new_revision(self):
-        """Review blocking 1's first seed: finalization binds the full persisted presentation
+        """Finalization binds the full persisted presentation
         identity. Present revision 1, submit revision 2, approve with revision 2's number and
         proposal digest but revision 1's presentation identifier and document digest — the
         approval is never a presentation of revision 2, and it decides nothing."""
@@ -265,7 +265,7 @@ class ReceiptTests(unittest.TestCase):
         self.assertIsNone(member["receipt_id"])
 
     def test_an_a_b_a_revisions_third_is_never_approved_by_the_firsts_presentation(self):
-        """Review blocking 1's second seed: in A → B → A the third revision carries the first's
+        """In A → B → A the third revision carries the first's
         proposal digest, so a digest-only binding would accept it — the persisted presentation
         identity (id and document digest with it) is what stays bound, and revision 3 has no
         presentation of its own; the substitution decides nothing."""
@@ -289,7 +289,7 @@ class ReceiptTests(unittest.TestCase):
         self.assertIsNone(env.state().environment["receipt_id"])
 
     def test_a_lost_compare_and_swap_refuses_the_stale_approval_on_the_retry(self):
-        """Review non-blocking 1's interleaving, committed as the regression it is: the approval
+        """An interleaving: the approval
         is planned against revision 1, a superseding submission wins the repository between that
         planning and the commit — the commit's compare-and-swap is lost — and the real retry
         replans against the committed revision 2 and refuses the stale approval. The revision's
@@ -504,7 +504,7 @@ class ReceiptTests(unittest.TestCase):
         self.assertEqual(env.state().environment["state"], environment.APPROVED)
 
     def test_the_presentation_allowance_refuses_a_further_presentation_after_its_bound(self):
-        """Re-review 1 (non-blocking 3): the per-revision presentation allowance is behavioural,
+        """The per-revision presentation allowance is behavioural,
         not merely a storage bound. Once this revision has recorded its 128 presentations, a
         further presentation refuses with the closed reason environment-presentations-exhausted
         (its own registry row, validated on the wire, its recovery named in next_actions:

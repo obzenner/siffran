@@ -29,7 +29,7 @@ def _with_document(response: dict, *, run_id: str, snapshot) -> dict:
 
 
 def _transaction(c, rid, run_id, body, value_error):
-    """The one private-transaction boundary (re-review 1's blocking word): load, decode,
+    """The one private-transaction boundary: load, decode,
     assemble, apply, commit, retry — exactly once for every governance receipt transaction,
     configuration and environment alike. The caller owns what is specific: ``body``
     (``state, snapshot`` → a response to return early, or ``(next_state, render)`` where
@@ -180,8 +180,8 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
             # its own present bound. The wire already requires the member for every host_ui
             # envelope, so the gate reads it unconditionally.
             # A receipt whose payload diverges from its own present, digest included, is the
-            # mixed envelope the decision gate refuses first as governance.receipt_replay
-            # (review-2 7a), so the prior-digest clause below is defense in depth only.
+            # mixed envelope the decision gate refuses first as governance.receipt_replay,
+            # so the prior-digest clause below is defense in depth only.
             prior = next((r for r in governed["receipts"]
                           if r["id"] == payload["receipt_id"]), None)
             if decision["approval_kind"] == "host_ui":
@@ -236,7 +236,7 @@ def transact(coordinator, run_id: str, payload: dict, *, context: bool = False) 
 
 def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
     """The environment's private receipt transaction (Empirica 7.2 §5) — one receipt engine with
-    the configuration decisions above, and since re-review 1 literally the one transaction
+    the configuration decisions above, and the one transaction
     runner: ``_transaction`` loads, decodes, assembles, commits and retries for both, and this
     body owns only what is the environment's — the admission word
     ``core.environment.receipt_error`` over ``core.governance.replay_verdict`` (the entire
@@ -264,8 +264,8 @@ def transact_environment(coordinator, run_id: str, payload: dict) -> dict:
         if reason == "inert":
             return c._inert_with_run(rid, snapshot)
         if reason == environment.ENVIRONMENT_PRESENTATIONS_EXHAUSTED:
-            # The one admission word that is the human's business, not the host's protocol
-            # (re-review 1, non-blocking 3): the revision's presentation allowance is spent,
+            # The one admission word that is the human's business, not the host's protocol:
+            # the revision's presentation allowance is spent,
             # so a further presentation refuses with its own closed reason and recovery —
             # an already recorded presentation can still finalize, so nothing is failed
             # closed here.

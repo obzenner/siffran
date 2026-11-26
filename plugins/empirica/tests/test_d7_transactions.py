@@ -527,6 +527,68 @@ class D7TransactionTests(unittest.TestCase):
         self.assertEqual(runs.data[key].value["route_stamp"], 1)
         traverse_history(decode_state(runs.data[key].value), stored)
 
+    def test_a_trusted_write_reads_again_within_eight_commits_then_faults_closed(self):
+        """The trusted compare-and-set transaction: a lost revision reads the run again, at most
+        eight commits are attempted, and a commit that fails otherwise is a closed unavailable
+        Fault; the committed state is the coordinator's last state."""
+        surfaces = iter(("available", "unavailable") * 8)
+        for lost, crashes, expected in ((7, 0, "Allow"), (8, 0, "conflict"), (0, 1, "unavailable")):
+            with self.subTest(lost=lost, crashes=crashes):
+                runs = Runs()
+                coordinator = ProductionCoordinator(Workspace(), Harness(), runs, Artifacts(), PI_PROFILE, {})
+                start = coordinator.handle({
+                    "type": "StartRun", "control_mode": "deliberative",
+                    "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
+                    "goal": "g"}, "start")
+                key = next(iter(runs.data))
+                before = runs.data[key]
+                runs.conflicts, runs.crashes, runs.cas_calls = lost, crashes, 0
+                surface = next(surfaces)
+                while surface == decode_state(before.value).invocation["human_surface"]:
+                    surface = next(surfaces)
+                response = coordinator.trusted_human_surface(
+                    start["result"]["run"]["id"], {"surface": surface})
+                if expected == "Allow":
+                    self.assertEqual(response["result"]["type"], "Allow", response)
+                    self.assertEqual(runs.cas_calls, lost + 1)
+                    self.assertEqual(coordinator.last_state, decode_state(runs.data[key].value))
+                    self.assertEqual(coordinator.last_state.invocation["human_surface"], surface)
+                    continue
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": expected, "fail_direction": "closed"})
+                self.assertEqual(runs.cas_calls, 8 if expected == "conflict" else 1)
+                self.assertEqual(runs.data[key], before)
+
+    def test_a_resolve_reads_again_within_eight_reads_then_faults_closed(self):
+        """ResolveRun hands the read-only response its persisted read: a read whose revision moved
+        under assembly reads again, at most eight times, then faults closed as a conflict; a corrupt
+        read blocks before any assembly."""
+        selector = {"project": "p", "session": "s"}
+        for moved, expected in ((7, "Allow"), (8, "conflict")):
+            with self.subTest(moved=moved):
+                runs = Runs()
+                coordinator = ProductionCoordinator(Workspace(), Harness(), runs, Artifacts(), PI_PROFILE, {})
+                coordinator.handle({
+                    "type": "StartRun", "control_mode": "deliberative",
+                    "invocation": dict(TEST_INVOCATION), "selector": selector, "goal": "g"}, "start")
+                key = next(iter(runs.data))
+                coordinator.last_state = None
+                # each attempt reads the run, then checks its revision: every check read moves it
+                runs.read_calls, runs.bump_on_read = 0, {2 * attempt for attempt in range(1, moved + 1)}
+                response = coordinator.handle({"type": "ResolveRun", "selector": selector}, "resolve")
+                if expected == "Allow":
+                    self.assertEqual(response["result"]["type"], "Allow", response)
+                    self.assertEqual(runs.read_calls, 2 * (moved + 1))
+                    self.assertEqual(coordinator.last_state, decode_state(runs.data[key].value))
+                    continue
+                self.assertEqual(response["result"], {
+                    "type": "Fault", "code": "conflict", "fail_direction": "closed"})
+                self.assertEqual(runs.read_calls, 2 * moved)
+                self.assertIsNone(coordinator.last_state)
+        runs.data[key] = Corrupt("injected")
+        refused = coordinator.handle({"type": "ResolveRun", "selector": selector}, "corrupt")
+        self.assertEqual(refused["result"]["reasons"][0]["code"], "run.corrupt", refused)
+
     def test_append_once_delegates_idempotency_without_repository_preread(self):
         artifacts_repo = Artifacts()
         coordinator = ProductionCoordinator(Workspace(), Harness(), Runs(), artifacts_repo,

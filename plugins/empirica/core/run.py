@@ -111,7 +111,7 @@ def validate_environment_member(value: Any, where: str = "environment member") -
         raise ValueError(f"run/5 {where} revision is malformed")
     try:
         # A replace() passes the frozen member back in; the core's one plain() (governance.plain,
-        # the reuse E2a's review demanded — never a second copy in this module) thaws it to the
+        # reused — never a second copy in this module) thaws it to the
         # plain dict/list shapes the ingress validator requires.
         environment.validate_proposal(governance.plain(value["proposal"]))
     except environment.EnvironmentProposalError as exc:

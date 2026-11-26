@@ -367,8 +367,8 @@ class CoreFactsImmutability(unittest.TestCase):
                          {"type": "string", "pattern": fr.CLAIM_ID_PATTERN})
 
     def test_core_digest_pattern_is_the_unregistered_vendored_copies(self):
-        """The hand-written shape pin keeps only the copies registration does not cover
-        (E6c review, blocking 4): the response's digest256 is registered — the annotation guard
+        """The hand-written shape pin keeps only the copies registration does not cover:
+        the response's digest256 is registered — the annotation guard
         and the contract conformance differential own it there — while the request and state
         copies keep the one word until their run-view closure joins at migration node T1."""
         vendored = PLUGIN / "vendor" / "contracts" / "empirica" / "v2"

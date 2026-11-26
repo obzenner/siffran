@@ -60,7 +60,7 @@ CONDITIONAL = {  # the oneOf conditional form a later node registers by declarat
 }
 
 
-TWO_WAY = {  # the two-way if/then/else conditional the run/5 attempt row carries (E6b re-review)
+TWO_WAY = {  # the two-way if/then/else conditional the run/5 attempt row carries
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "$id": "https://siffran.test/two-way",
     "type": "object",
@@ -246,7 +246,7 @@ class RealContractTests(unittest.TestCase):
         )["properties"]["kind"]["enum"])
 
     def test_the_attempt_row_and_view_pairings_derive_breaches_both_judges_refuse(self):
-        """The conditional pairings the wire carries (E6b re-review's own handoff): the run/5
+        """The conditional pairings the wire carries: the run/5
         attempt row's two-way value pairing and the view's last-failure presence pairing each derive
         their guard flips — every breach refused by both judges on every drawn side."""
         for key in ("state#/$defs/qualificationAttempt", "response#/$defs/qualificationView"):
@@ -264,7 +264,7 @@ class RealContractTests(unittest.TestCase):
         return find(self.contract.drawn(key, full=True), lambda document: True, settings=DRY)
 
     def test_the_real_attempt_row_draws_both_directions_of_its_pairing(self):
-        """E6b re-review: the run/5 attempt row's two-way conditional (a probe named exactly on the
+        """The run/5 attempt row's two-way conditional (a probe named exactly on the
         probe-failure word, null on every other reason) is schema-drawn in BOTH directions — the
         guarded word is read from the contract itself, never restated here."""
         key = "state#/$defs/qualificationAttempt"
@@ -284,7 +284,7 @@ class RealContractTests(unittest.TestCase):
             self.assertTrue(self.contract.accepts(key, document))
 
     def test_pattern_probes_substitute_and_insert_the_complement_families(self):
-        """The families the review demanded: printable-complement and astral probes, not only
+        """The probe families: printable-complement and astral probes, not only
         controls and blanks — one substitution through each position, derived per kind."""
         key = "state#/$defs/environmentProposal"
         kinds = {}
@@ -297,8 +297,8 @@ class RealContractTests(unittest.TestCase):
                                         f"{kind} probes must reach across the patterned nodes")
 
     def test_nested_object_rows_are_challenged_inside_their_row(self):
-        """The review: ``_walk`` used to stop at a nonterminal row, leaving every field inside an array
-        of objects unchallenged. The history and attempts plans must derive inside row 0."""
+        """``_walk`` descends through a nonterminal row, so every field inside an array of objects is
+        challenged. The history and attempts plans must derive inside row 0."""
         key = "state#/properties/environment_history"
         derived = self._derived(key, _drawn(self.contract, key))
         inside_row = [item for item in derived if isinstance(item.value, list) and item.value
@@ -398,7 +398,7 @@ class RealContractTests(unittest.TestCase):
                 self.contract.import_validator(attempt_key)(item.value)
 
     def test_a_definition_with_no_maximum_yields_no_boundary_and_no_failure(self):
-        """The review: acceptance used to fail a definition with no such maximum. The attempt id bound
+        """Acceptance does not fail a definition with no such maximum. The attempt id bound
         still exists; a definition without any declared extremum yields an empty list, a fact."""
         key = "state#/$defs/environmentMember"
         base = _drawn(self.contract, key)
@@ -406,11 +406,11 @@ class RealContractTests(unittest.TestCase):
 
 
 class FamilyWitnessTests(unittest.TestCase):
-    """The re-review's finding 1: a same-family substitution for a const or an enumeration is a value
+    """A same-family substitution for a const or an enumeration is a value
     of the SAME JSON type outside the allowed set (a string for a string enum), and the ledger credits a
     keyword only from a witness of that keyword's own family — a wrong-family value must never stand in.
 
-    The re-review 3's finding 2 strengthens the credit: the substitution must also be one the rest of
+    The credit is stronger still: the substitution must also be one the rest of
     the schema admits with only the challenged keyword removed — see IsolatingSubstituteTests."""
 
     def test_every_const_and_enum_candidate_is_of_its_own_family(self):
@@ -501,8 +501,8 @@ class FamilyWitnessTests(unittest.TestCase):
         return Contract({"probe_document": document})
 
     def test_a_four_probe_string_enumeration_still_yields_a_fresh_string(self):
-        """The re-review's seed: an enumeration holding every string of the old hard-coded probe list
-        mistook probe exhaustion for family exhaustion. Fresh strings always exist — the plan generates
+        """An enumeration holding every string of a hard-coded probe list must not be mistaken for
+        family exhaustion. Fresh strings always exist — the plan generates
         one (the longest held value extended by a counter) instead of declaring the pair unsupported."""
         held = ["outside", "elsewhere", "elsewhere-once-more", "elsewhere-twice"]
         contract = self._contract_for({"type": "string", "enum": held})
@@ -517,7 +517,7 @@ class FamilyWitnessTests(unittest.TestCase):
         self.assertTrue(engine.witness_of_family(candidate))
 
     def test_a_decimal_enumeration_yields_the_next_representable_decimal(self):
-        """The re-review's seed: ``[1.5]`` crashed the old probe table with a missing number family.
+        """``[1.5]`` must not find a probe table with a missing number family.
         The fresh decimal continues above the peak instead (the next representable value, outside the
         finite set, of the enumeration's own family)."""
         contract = self._contract_for({"type": "number", "enum": [1.5]})
@@ -530,8 +530,8 @@ class FamilyWitnessTests(unittest.TestCase):
             self.assertTrue(engine.witness_of_family(case))
 
     def test_an_array_constant_gets_an_array_substitute_not_a_flattening(self):
-        """The re-review's seed: a const array was flattened as if its members were enumeration
-        alternatives, so the array family never saw a substitute. The const holds ONE array; the fresh
+        """A const array is never flattened as if its members were enumeration
+        alternatives, which would leave the array family without a substitute. The const holds ONE array; the fresh
         value is a fresh array of the same family — shorter or longer (the isolating series tries every
         length from the empty array up), never the const itself, never a flattening."""
         contract = self._contract_for({"type": "array", "const": ["row", "second"]})
@@ -546,15 +546,15 @@ class FamilyWitnessTests(unittest.TestCase):
 
 
 class IsolatingSubstituteTests(unittest.TestCase):
-    """The re-review 3's finding 2: crediting a same-family substitute with covering ``const`` or
+    """Crediting a same-family substitute with covering ``const`` or
     ``enum`` requires the rest of the schema itself to admit it, with only the challenged keyword
     removed — a candidate a sibling keyword refuses (``maxItems`` turning away the always-longer array
     against a two-row const) is the sibling's word, never the keyword's. When the siblings admit no
     substitute at all, the ledger records the keyword redundant or unsupported — never covered."""
 
-    _SOL_DOC = {  # Sol's seed: a two-row const alongside maxItems 2 — the false-coverage low water mark
+    _TWO_ROW_CONST_DOC = {  # a two-row const alongside maxItems 2 — the false-coverage low water mark
         "$schema": "https://json-schema.org/draft/2020-12/schema",
-        "$id": "https://siffran.test/sol-two-row-const",
+        "$id": "https://siffran.test/two-row-const",
         "type": "object",
         "x-core-ingress": ["/$defs/pinned"],
         "properties": {"pinned": {"$ref": "#/$defs/pinned"}},
@@ -582,7 +582,7 @@ class IsolatingSubstituteTests(unittest.TestCase):
             "items": {"enum": ["row"]}}}}
 
     def _install_core(self, enforce_const: bool) -> None:
-        """A validator the synthetic documents name: one enforcing only ``maxItems`` (Sol's seed — it
+        """A validator the synthetic documents name: one enforcing only ``maxItems`` (it
         refuses a three-row array and accepts anything else, const included), and one honest core that
         also refuses any array other than the pinned rows."""
         module = types.ModuleType("conformance_fixtures")
@@ -606,14 +606,14 @@ class IsolatingSubstituteTests(unittest.TestCase):
         rest = {word: value for word, value in case.node.items() if word != case.keyword}
         return not list(Draft202012Validator(rest).iter_errors(case.holding))
 
-    def test_sol_control_a_two_row_const_with_maxitems_two_is_uncredited(self):
-        """Sol's exact control: a core enforcing only ``maxItems`` used to pass the sweep, because the
-        always-longer probe array was refused for length by both judges and the ledger credited the
+    def test_a_two_row_const_with_maxitems_two_is_uncredited(self):
+        """A core enforcing only ``maxItems`` must not pass the sweep, which it would if the
+        always-longer probe array were refused for length by both judges and the ledger credited the
         ``const`` keyword with the sibling's refusal. The substitute must fit the sibling bound, so the
         missing const refusal surfaces as a disagreement and the keyword is never credited."""
         self._install_core(enforce_const=False)
-        contract = Contract({"sol": copy.deepcopy(self._SOL_DOC)})
-        key = "sol#/$defs/pinned"
+        contract = Contract({"two-row-const": copy.deepcopy(self._TWO_ROW_CONST_DOC)})
+        key = "two-row-const#/$defs/pinned"
         substitute = next(case for case in contract.cases(key) if case.keyword == "const")
         self.assertEqual(substitute.kind, "const outside", substitute.label)
         self.assertLessEqual(len(substitute.holding), substitute.node["maxItems"],
@@ -635,8 +635,8 @@ class IsolatingSubstituteTests(unittest.TestCase):
         """The teeth of the same control: a core that also refuses the const-substitute yields the
         both-refuse witness, so the credit belongs to the isolated keyword — and only to it."""
         self._install_core(enforce_const=True)
-        contract = Contract({"sol": copy.deepcopy(self._SOL_DOC)})
-        key = "sol#/$defs/pinned"
+        contract = Contract({"two-row-const": copy.deepcopy(self._TWO_ROW_CONST_DOC)})
+        key = "two-row-const#/$defs/pinned"
         substitute = next(case for case in contract.cases(key) if case.keyword == "const")
         base = find(contract.drawn(key, full=True), lambda document: True, settings=DRY)
         statuses = {contract.adjudicate(key, derived)
@@ -678,7 +678,7 @@ class IsolatingSubstituteTests(unittest.TestCase):
 
 
 class MethodNameTests(unittest.TestCase):
-    """The re-review's finding 2, naming half: generated test names carry the document identity, and a
+    """Generated test names carry the document identity, and a
     collision is refused rather than silently merged."""
 
     def test_the_document_identity_separates_two_same_named_definitions(self):
@@ -698,7 +698,7 @@ class MethodNameTests(unittest.TestCase):
 
 
 class FeasibleWorkTests(unittest.TestCase):
-    """The re-review's finding 4: an explicit feasible-work limit refuses a definition whose bounds ask
+    """An explicit feasible-work limit refuses a definition whose bounds ask
     for unbounded-in-practice work; a declared x-work-limit override admits honest larger work."""
 
     def test_the_real_definitions_pass(self):
@@ -720,7 +720,7 @@ class FeasibleWorkTests(unittest.TestCase):
 
 
     def test_an_allocation_driving_minimum_refuses_the_definition_too(self):
-        """The re-review 2 finding 3 seed: a string node with no maxLength and a ``minLength`` of one
+        """A string node with no maxLength and a ``minLength`` of one
         million. A minimum allocates on every draw — it is bounded by the same limit, not only maxima."""
         documents = copy.deepcopy(engine.module_documents())
         node = documents["state"]["$defs"]["environmentProposal"]["properties"]["rationale"]
@@ -764,7 +764,7 @@ class GrowthTests(unittest.TestCase):
 
 
 class CaseSwapTests(unittest.TestCase):
-    """The re-review's finding 3, first mechanism: a grammar-derived case witness for each
+    """A grammar-derived case witness for each
     case-restricted class (an uppercase in a lowercase-only name component), derived from the grammar
     and fired in place."""
 
@@ -796,7 +796,7 @@ class CaseSwapTests(unittest.TestCase):
 
 
 class RegressionCorpusTests(unittest.TestCase):
-    """The re-review 2 finding 2: the contract's named regression-witness corpus is a *bounded corpus
+    """The contract's named regression-witness corpus is a *bounded corpus
     of evidenced defects* — every entry an object ``{"value", "defect"}``, at most eight per node, the
     values refused by both judges. The entries live in the contract (``x-regression-witnesses``); the
     test reads them from there, never restating one."""
@@ -825,10 +825,10 @@ class RegressionCorpusTests(unittest.TestCase):
 
 
 class BoundedWorkTests(unittest.TestCase):
-    """The review's non-blocking findings: bounded work, a terminating absent-key probe."""
+    """Bounded work and a terminating absent-key probe."""
 
     def test_absent_key_terminates_on_the_old_never_ending_seed(self):
-        """The review's seed: the object already holds *both* ``unexpected`` and
+        """The object already holds *both* ``unexpected`` and
         ``unexpected<N>`` (N = its property count), the pair that used to loop forever."""
         node = {"properties": {f"unexpected{index}": {"type": "boolean"} for index in range(10)},
                 "additionalProperties": False}
@@ -845,7 +845,7 @@ class BoundedWorkTests(unittest.TestCase):
 
 
 class TwoWayFormTests(unittest.TestCase):
-    """The two-way ``if``/``then``/"``else``" conditional the run/5 attempt row carries (E6b re-review):
+    """The two-way ``if``/``then``/"``else``" conditional the run/5 attempt row carries:
     one entry, both directions — the probe is named exactly when the reason is the probe-failure
     word and null otherwise. The drawing engine must derive the pair itself and refuse everything
     else it does not model, and a free-text driver must still draw its guarded word (the const the
@@ -914,7 +914,7 @@ class TwoWayFormTests(unittest.TestCase):
 
 
     def test_a_boolean_if_inside_allof_stays_refused(self):
-        """Sol's seed (E6c re-review 1, blocking 2): replacing a two-way guard's ``if`` with a
+        """Replacing a two-way guard's ``if`` with a
         boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies (its
         ``then`` names the probe on every reason, a boolean is no const on a member), and the old
         parse silently ignored the entry, so the drawing drew a null probe the schema refused and
@@ -931,7 +931,7 @@ class TwoWayFormTests(unittest.TestCase):
                     mutant.cases("two-way#/$defs/attempt")
 
     def test_a_multi_key_if_required_with_an_optional_member_stays_refused(self):
-        """Sol's seed (E6c review, blocking 3): a two-way conditional whose ``if`` demands the
+        """A two-way conditional whose ``if`` demands the
         guarded member *and* an optional sibling loads today and draws a document the schema itself
         refuses — the drawing honors only the driver's const, and the sibling may legally stay
         absent, so ``if.required`` fires. The form is unmodelled: both engines refuse it at parse."""
@@ -958,7 +958,7 @@ class PresenceFormTests(unittest.TestCase):
     the complementary side (the guard is placed for them, never guessed away)."""
 
     def test_a_presence_conditional_pairing_a_member_with_itself_stays_refused(self):
-        """Sol's seed (E6c re-review 2, blocking 2): leaving the optional-reason fixture's guard
+        """Leaving the optional-reason fixture's guard
         on ``reason`` but pointing both branches at ``reason`` too yields a schema-valid
         conditional the old parse accepted — and the drawing then drew ``{'reason':
         'docker-unreachable'}`` the schema itself refuses, while the first pairing flip derived
@@ -976,7 +976,7 @@ class PresenceFormTests(unittest.TestCase):
             mutant.cases(f"presence#/$defs/{which}")
 
     def test_a_boolean_if_at_the_node_level_stays_refused(self):
-        """Sol's seed (E6c re-review 1, blocking 2): replacing a presence guard's ``if`` with a
+        """Replacing a presence guard's ``if`` with a
         boolean leaves the conditional loadable but unmodelled - ``if: true`` always applies
         (its ``then`` demands the probe on every reason, ``else`` never fires), and the old parse
         silently ignored the node's ``if``, so the drawing drew the guarded reason without its
@@ -994,7 +994,7 @@ class PresenceFormTests(unittest.TestCase):
                         mutant.cases(f"presence#/$defs/{which}")
 
     def test_a_presence_side_that_only_redeclares_properties_stays_refused(self):
-        """Sol's seed (E6c review, blocking 3): a ``then`` that only re-declares the paired member
+        """A ``then`` that only re-declares the paired member
         with its schema does not make it required to jsonschema, but the old presence parser read
         that as a presence demand — every draw supplied the member and the schema-valid member-free
         branch was silently unreachable. Unmodelled: both engines refuse it at parse."""

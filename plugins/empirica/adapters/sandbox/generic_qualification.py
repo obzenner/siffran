@@ -447,8 +447,8 @@ class ProductionProbeKernel:
         self.operation_id_factory = operation_id_factory or (
             lambda: "o-" + secrets.token_hex(16))
         self.runtime_inspector = runtime_inspector
-        # Every post-probe daemon read goes to the endpoint the runtime was pinned to
-        # (E5 review, blocking finding 1): the pinned re-observer never re-resolves the
+        # Every post-probe daemon read goes to the endpoint the runtime was pinned to:
+        # the pinned re-observer never re-resolves the
         # context, so an ambient context change mid-qualification cannot redirect a
         # postflight to a second daemon.
         self.pinned_reobserver = (authority.inspect_pinned_runtime
@@ -768,12 +768,7 @@ def qualify_to_candidate(
     seed_backend = application.GenericQualifiedBackend(
         "docker", profile_id, canonical_digest({"candidate": profile_id, "image": image.image_id}),
         canonical_digest({"execution": profile_id, "image": image.image_id}))
-    resolved = authority.ResolvedGenericAuthority(
-        seed_backend, Path(runtime["docker_cli"]), tuple(sorted({
-            "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime["endpoint"],
-            "DOCKER_CONFIG": str(config),
-        }.items())), work, runtime["server_os"], runtime["server_architecture"],
-        runtime["ncpu"], runtime["mem_total"], runtime)
+    resolved = authority.ResolvedGenericAuthority.at_runtime(seed_backend, runtime, config, work)
     selected_effects = (effects_factory if effects_factory is not None
                         else lambda current: execution.concrete_effects(
                             current.docker_cli, dict(current.environment), current.work_directory))

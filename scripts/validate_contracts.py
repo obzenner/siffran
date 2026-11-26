@@ -2121,7 +2121,7 @@ def _child_relation_mutations(state: str, d64: str, reg_terminal: set):
 
 def check_fault_reason_pairing(fault: dict, res_schema: dict, errors: list[str],
                                where: str) -> None:
-    """The Fault probe conditional (E6b re-review, E6c corpus): the response schema's own ``fault``
+    """The Fault probe conditional: the response schema's own ``fault``
     definition owns the guarded word (its ``if`` const) and the probe enumeration (via the shared
     ``qualificationProbeName`` definition) — never restated here. A refusal names its failed probe
     exactly when its reason is the guarded word: the word demands the probe, the probe demands the
@@ -3531,7 +3531,7 @@ def run_negatives(registry: dict, host_profiles_doc: dict, required_fixtures: se
          "nonce": "abc", "phase": "investigate"}}},
         e, "neg"), "banned field", "retired fields in response")
 
-    # Fault probe conditional (E6b re-review): both refusal directions, schema-owned vocabularies.
+    # Fault probe conditional: both refusal directions, schema-owned vocabularies.
     expect(lambda e: check_fault_reason_pairing(
         {"type": "Fault", "code": "unavailable", "fail_direction": "closed",
          "reason": res_schema["$defs"]["fault"]["if"]["properties"]["reason"]["const"]},

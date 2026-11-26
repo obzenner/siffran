@@ -1,7 +1,7 @@
 """Single-writer transaction coordinator for Empirica v2."""
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import ExitStack
 from dataclasses import dataclass, replace
 from typing import Any
@@ -292,14 +292,7 @@ class Coordinator:
         key = self._latest_key(command["selector"])
         if key is None:
             return self._inert(request_id)
-        loaded = self._load(key)
-        if isinstance(loaded, CorruptLoad):
-            return self._safe_block(key, request_id, "run.corrupt")
-        if isinstance(loaded, LegacyLoad):
-            return self._safe_block(key, request_id, "run.legacy")
-        if isinstance(loaded, AbsentLoad):
-            return self._inert(request_id)
-        return self._read_response(key, loaded.read, command, request_id)
+        return self._read_response(key, self.runs.read(key), command, request_id)
 
     def take_environment_admission(self, request_id: str) -> tuple[str, int] | None:
         """Hand out, once, the (run handle, revision) the dispatch of ``request_id`` admitted."""
@@ -333,41 +326,29 @@ class Coordinator:
         environmental = command["type"] == "ObserveAction" and command["action"]["kind"] == "environment"
         if (command["type"] == "ObserveAction" and command["action"].get("kind") == "qualify"):
             return self._qualify(key, command, request_id)
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            # Read-only legacy (ADR-0074): a previous-family document is refused for every
-            # command except StartRun, which starts a fresh generation instead of resuming it.
-            if isinstance(loaded, LegacyLoad):
-                return self._safe_block(key, request_id, "run.legacy")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
+        mutating_inactive = command["type"] == "ObserveAction" or (
+            command["type"] == "EvaluateRun" and command["intent"] == "continue")
+
+        def admit(state: OperationalState) -> dict[str, Any] | None:
             if self.artifacts is None:
                 return self._fault(request_id, "unsupported")
-            if state.status != "active" and command["type"] == "EvaluateRun" and command["intent"] == "continue":
+            if state.status != "active" and mutating_inactive:
                 return self._inert(request_id)
-            if state.status != "active" and command["type"] == "ObserveAction":
-                return self._inert(request_id)
-            require_graph = command["type"] == "GetArgument" or (
-                command["type"] == "EvaluateRun" and state.selected_graph_artifact_id is not None)
+            return None
+
+        def require_graph(state: OperationalState) -> bool:
             if command["type"] == "ObserveAction":
-                action = command["action"]
-                require_graph = action["kind"] in {"research", "freeze"}
-            try:
-                snapshot = self._assemble(
-                    key, state, command, require_graph=require_graph)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
-            except GraphInvalid:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._block_from_state(key, state, command, request_id, "graph.invalid")
-            except ObservationUnavailable:
-                return self._fault(request_id, "unavailable")
+                return command["action"]["kind"] in {"research", "freeze"}
+            return command["type"] == "GetArgument" or (
+                command["type"] == "EvaluateRun" and state.selected_graph_artifact_id is not None)
+
+        for assembled in self._assembled_reads(key, command, request_id, require_graph=require_graph,
+                                             inactive_ok=True, admit=admit):
+            # Read-only legacy (ADR-0074): a previous-family document is refused for every
+            # command except StartRun, which starts a fresh generation instead of resuming it.
+            if isinstance(assembled, dict):
+                return assembled
+            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             try:
                 decision = evaluate_snapshot(snapshot, command)
             except Exception:
@@ -472,59 +453,18 @@ class Coordinator:
         The latest observation counts; an unchanged one is ``Inert``. Evidence presented under an earlier
         observation stays presented, so a change of surface never invalidates a key."""
         request_id = "trusted-surface"
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert(request_id)
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
-            try:
-                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                          require_graph=False)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
+
+        def observe(state: OperationalState, snapshot: EvaluationSnapshot) -> Any:
             if state.invocation["human_surface"] == payload["surface"]:
                 return self._inert_with_run(request_id, snapshot)
             changed = replace(state, invocation={**_plain(state.invocation), "human_surface": payload["surface"]})
-            try:
-                committed, _, _, planned = self._commit(key, read.revision, snapshot, changed, ())
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-            self.last_state = committed
-            return self._allow(request_id, planned)
-        return self._fault(request_id, "conflict")
+            return changed, ()
+
+        return self._trusted_run(run_id, request_id, observe)
 
     def _human_batch(self, run_id: str, payload: dict[str, Any], plan: Any,
                      request_id: str) -> dict[str, Any]:
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert(request_id)
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
-            try:
-                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                          require_graph=False)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
+        def settle(state: OperationalState, snapshot: EvaluationSnapshot) -> Any:
             decision = plan(snapshot, payload)
             if decision.result_type == "Fault":
                 return self._fault_with_run(request_id, snapshot)
@@ -532,7 +472,7 @@ class Coordinator:
                 return self._inert_with_run(request_id, snapshot)
             if decision.result_type == "Block":
                 response = self._response(request_id, snapshot, decision)
-                # ADR-0072 (PR 10): the document fetch for an evidence step is the mismatch
+                # ADR-0072: the document fetch for an evidence step is the mismatch
                 # refusal itself — its private result carries the core-rendered pair for the
                 # batch the call named, so no adapter re-renders a dict. The presentation names
                 # its ``key``; a confirmation asks for the batch its own presentation recorded.
@@ -543,7 +483,7 @@ class Coordinator:
                     if key is None:
                         shown = confirmation.presentation(snapshot, payload.get("receipt_id"))
                         key = shown["key"] if shown is not None else None
-                    # m10 (review 2): the fetch renders with the snapshot's own run id, the same
+                    # The fetch renders with the snapshot's own run id, the same
                     # value the recompute in ``core.evaluation`` uses — the two are equal only
                     # because ``decode_handle`` is canonical, so the one source of the fact is the
                     # snapshot, never the caller's handle spelling.
@@ -551,41 +491,16 @@ class Coordinator:
                     if document is not None:
                         response["result"]["document"] = document
                 return response
-            try:
-                committed, _, _, planned = self._commit(
-                    key, read.revision, snapshot, state, decision.intent.artifacts)
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-            self.last_state = committed
-            return self._allow(request_id, planned)
-        return self._fault(request_id, "conflict")
+            return state, decision.intent.artifacts
+
+        return self._trusted_run(run_id, request_id, settle)
 
     def _trusted_artifact(self, run_id: str, kind: str, payload: dict[str, Any], request_id: str,
                           child_id: str | None = None) -> dict[str, Any]:
-        key = decode_handle(run_id)
-        if key is None:
-            return self._inert(request_id)
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
+        def record(state: OperationalState, snapshot: EvaluationSnapshot) -> Any:
             planned_body = {"kind": kind, **payload, "route_stamp": state.route_stamp,
                             "investigation_stamp": state.investigation_stamp}
             planned_artifact = {"artifact_id": digest(planned_body), "body": planned_body}
-            try:
-                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                          require_graph=False)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
             if frozen_scope_invalid(snapshot.state, snapshot.graph):
                 return self._fault_with_run(request_id, snapshot)
             if governance.admission(state.governance):
@@ -633,16 +548,9 @@ class Coordinator:
                              first_terminal_fingerprint=planned_artifact["artifact_id"])
                 children[index] = child
                 next_state = replace(state, children=tuple(children))
-            try:
-                committed, _, _, planned = self._commit(
-                    key, read.revision, snapshot, next_state, (planned_artifact,))
-            except Exception as exc:
-                if self._is_conflict(exc):
-                    continue
-                return self._fault(request_id, "unavailable")
-            self.last_state = committed
-            return self._allow(request_id, planned)
-        return self._fault(request_id, "conflict")
+            return next_state, (planned_artifact,)
+
+        return self._trusted_run(run_id, request_id, record)
 
     def trusted_audit_verdict(self, run_id: str, child_id: str, payload: dict[str, Any],
                               request_id: str = "trusted-ingress") -> dict[str, Any]:
@@ -662,22 +570,10 @@ class Coordinator:
                  ("pending", "completed"),
                  ("pending", "failed"), ("pending", "cancelled"),
                  ("pending", "timed_out"), ("pending", "orphaned")}
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
-            try:
-                snapshot = self._assemble(key, state, {"type": "GetRun", "run_id": run_id},
-                                          require_graph=False)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
+            if isinstance(assembled, dict):
+                return assembled
+            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             index = next((i for i, row in enumerate(state.children)
                           if row["child_id"] == child_id), None)
             if index is None:
@@ -776,10 +672,7 @@ class Coordinator:
         prior_binding = None
         lease = None
         with ExitStack() as held:
-            for _ in range(8):
-                assembled = self._load_assembled(key, command, request_id)
-                if assembled is RETRY:
-                    continue
+            for assembled in self._assembled_reads(key, command, request_id):
                 if isinstance(assembled, dict):
                     return assembled
                 read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -934,14 +827,11 @@ class Coordinator:
         conflict = False
         failed = None
         planned = None
-        for _ in range(8):
+        for assembled in self._assembled_reads(
+                key, {"type": "GetRun", "run_id": command["run_id"]}, request_id,
+                inactive_ok=True):
             # An unreadable or vanished run records and binds nothing on a guess; a stopped run
             # is read as it stands (its own open row closes superseded below).
-            assembled = self._load_assembled(
-                key, {"type": "GetRun", "run_id": command["run_id"]}, request_id,
-                inactive_ok=True)
-            if assembled is RETRY:
-                continue
             if isinstance(assembled, dict):
                 return assembled
             read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
@@ -1007,17 +897,9 @@ class Coordinator:
         backend = None
         request_artifact = None
         committed_binding = None
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, LegacyLoad):
-                return self._safe_block(key, request_id, "run.legacy")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
+
+        def admit_request(state: OperationalState) -> dict[str, Any] | None:
+            nonlocal action, backend, draft, persisted
             persisted = dict(state.spike_backend)
             # Only a qualified binding carries spike authority; an unqualified run/5 binding
             # (spec §4.2) is refused exactly like unavailable, before any workspace artifact
@@ -1025,33 +907,33 @@ class Coordinator:
             if spike_plan.spike_backend_kind(persisted) != "qualified":
                 return self._fault(request_id, "unavailable",
                                    GenericPreparationReason.SPIKES_UNAVAILABLE.value)
+            backend = GenericQualifiedBackend(
+                persisted["backend"], persisted["profile_id"],
+                persisted["qualification_record_digest"],
+                persisted["execution_binding_digest"])
+            if draft is None:
+                try:
+                    draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
+                except spike_plan_draft.SpikePlanDraftError:
+                    # An author mistake, never a corrupt run or a host failure.
+                    return self._fault(request_id, "invalid_request")
+                # Any valid spelling (such as unsorted inputs) is accepted; the canonical
+                # draft is the one planned, digested, and persisted.
+                action = {**action, "plan": draft.to_data()}
+            return None
+
+        persisted: dict[str, Any] = {}
+        for _ in range(8):
             try:
-                backend = GenericQualifiedBackend(
-                    persisted["backend"], persisted["profile_id"],
-                    persisted["qualification_record_digest"],
-                    persisted["execution_binding_digest"])
-                if draft is None:
-                    try:
-                        draft = spike_plan_draft.canonicalize_spike_plan_draft(action["plan"])
-                    except spike_plan_draft.SpikePlanDraftError:
-                        # An author mistake, never a corrupt run or a host failure.
-                        return self._fault(request_id, "invalid_request")
-                    # Any valid spelling (such as unsorted inputs) is accepted; the canonical
-                    # draft is the one planned, digested, and persisted.
-                    action = {**action, "plan": draft.to_data()}
-                snapshot = self._assemble(key, state, command, require_graph=True)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
-            except GraphInvalid:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._block_from_state(key, state, command, request_id, "graph.invalid")
-            except ObservationUnavailable:
-                return self._fault(request_id, "unavailable")
+                assembled = self._load_assembled(key, command, request_id, require_graph=True,
+                                                 admit=admit_request)
             except (KeyError, TypeError, ValueError):
                 return self._safe_block(key, request_id, "run.corrupt")
+            if assembled is RETRY:
+                continue
+            if isinstance(assembled, dict):
+                return assembled
+            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             preflight = preflight_spike_request(snapshot, action)
             if preflight is not None:
                 if not self._revision_unchanged(key, read.revision):
@@ -1144,29 +1026,16 @@ class Coordinator:
             result_observations, sealed.snapshot.basis_id,
             observations_digest(result_observations))
 
-        for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, CorruptLoad):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if isinstance(loaded, AbsentLoad):
-                return self._inert(request_id)
-            read, state = loaded.read, loaded.state
-            if state.status != "active":
-                return self._inert(request_id)
+        def admit_result(state: OperationalState) -> dict[str, Any] | None:
             if dict(state.spike_backend) != committed_binding:
                 return self._safe_block(key, request_id, "run.corrupt")  # the binding is immutable persisted state
-            try:
-                snapshot = self._assemble(key, state, command, require_graph=True)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
-            except GraphInvalid:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._block_from_state(key, state, command, request_id, "graph.invalid")
-            except ObservationUnavailable:
-                return self._fault(request_id, "unavailable")
+            return None
+
+        for assembled in self._assembled_reads(key, command, request_id, require_graph=True,
+                                             admit=admit_result):
+            if isinstance(assembled, dict):
+                return assembled
+            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             try:
                 decision = plan_spike_result(snapshot, request_artifact["body"], result_facts)
             except Exception:
@@ -1236,13 +1105,17 @@ class Coordinator:
                         profile_id=self.profile_id, command=command, require_graph=require_graph)
 
     def _load_assembled(self, key: RunKey, command: dict[str, Any], request_id: str, *,
-                        require_graph: bool = False,
-                        inactive_ok: bool = False) -> Assembled | dict[str, Any] | object:
-        """One author-surface read of a run: load, classify, gate on an active run (unless
-        ``inactive_ok``) and assemble the evaluation snapshot. Returns the :class:`Assembled`
-        read, :data:`RETRY` when the persisted run moved under a failed assembly, or the closed
-        response the caller returns as it stands (corrupt, legacy, absent or inactive run, an
-        invalid graph, an unavailable observation)."""
+                        require_graph: bool | Callable[[OperationalState], bool] = False,
+                        inactive_ok: bool = False,
+                        admit: Callable[[OperationalState], dict[str, Any] | None] | None = None,
+                        ) -> Assembled | dict[str, Any] | object:
+        """One read of a run: load, classify, gate on an active run (unless ``inactive_ok``),
+        run the caller's ``admit`` gate on the decoded state (a closed response refuses before
+        any assembly), and assemble the evaluation snapshot, with ``require_graph`` given or
+        derived from the state. Returns the :class:`Assembled` read, :data:`RETRY` when the
+        persisted run moved under a failed assembly, or the closed response the caller returns
+        as it stands (corrupt, legacy, absent or inactive run, the gate's refusal, an invalid
+        graph, an unavailable observation)."""
         loaded = self._load(key)
         if isinstance(loaded, CorruptLoad):
             return self._safe_block(key, request_id, "run.corrupt")
@@ -1253,6 +1126,10 @@ class Coordinator:
         read, state = loaded.read, loaded.state
         if state.status != "active" and not inactive_ok:
             return self._inert(request_id)
+        if admit is not None and (refused := admit(state)) is not None:
+            return refused
+        if callable(require_graph):
+            require_graph = require_graph(state)
         try:
             snapshot = self._assemble(key, state, command, require_graph=require_graph)
         except HistoryCorrupt:
@@ -1266,6 +1143,47 @@ class Coordinator:
         except ObservationUnavailable:
             return self._fault(request_id, "unavailable")
         return Assembled(read, state, snapshot)
+
+    def _trusted_run(self, run_id: str, request_id: str,
+                     step: Callable[[OperationalState, EvaluationSnapshot], Any]) -> dict[str, Any]:
+        """One trusted compare-and-set transaction over a run: ``step`` reads the assembled run and
+        returns a closed response, or the ``(next state, artifacts)`` to commit; a commit that lost
+        the revision reads again within the bound. An undecodable handle is ``Inert``."""
+        key = decode_handle(run_id)
+        if key is None:
+            return self._inert(request_id)
+        for assembled in self._assembled_reads(key, {"type": "GetRun", "run_id": run_id}, request_id):
+            if isinstance(assembled, dict):
+                return assembled
+            planned = step(assembled.state, assembled.snapshot)
+            if isinstance(planned, dict):
+                return planned
+            allowed = self._commit_and_allow(key, assembled.read, assembled.snapshot, *planned, request_id)
+            if allowed is not RETRY:
+                return allowed
+        return self._fault(request_id, "conflict")
+
+    def _assembled_reads(self, key: RunKey, command: dict[str, Any], request_id: str,
+                         **options: Any) -> Any:
+        """The reads of one compare-and-set loop: at most eight :meth:`_load_assembled` reads, each
+        an :class:`Assembled` read or the closed response to return; a read that raced a commit is
+        read again within the same bound. A caller's ``continue`` spends one read."""
+        for _ in range(8):
+            assembled = self._load_assembled(key, command, request_id, **options)
+            if assembled is not RETRY:
+                yield assembled
+
+    def _commit_and_allow(self, key: RunKey, read: Any, snapshot: EvaluationSnapshot,
+                          next_state: OperationalState, artifacts: tuple[dict[str, Any], ...],
+                          request_id: str) -> dict[str, Any] | object:
+        """Commit one planned state against the read's revision and allow the committed run:
+        :data:`RETRY` when another commit won the revision, a closed unavailable Fault otherwise."""
+        try:
+            committed, _, _, planned = self._commit(key, read.revision, snapshot, next_state, artifacts)
+        except Exception as exc:
+            return RETRY if self._is_conflict(exc) else self._fault(request_id, "unavailable")
+        self.last_state = committed
+        return self._allow(request_id, planned)
 
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,
                 next_state: OperationalState, domain: tuple[dict[str, Any], ...],
@@ -1313,6 +1231,12 @@ class Coordinator:
 
     def _read_response(self, key: RunKey, read: Any, command: dict[str, Any], request_id: str,
                        retries: int = 8):
+        """The read-only response over one persisted read: a corrupt read blocks, an absent one is
+        ``Inert``, and a read that moved under assembly reads again within ``retries``."""
+        if isinstance(read, Corrupt):
+            return self._safe_block(key, request_id, "run.corrupt")
+        if not self._present(read):
+            return self._inert(request_id)
         classification = run_state.classify_and_decode(read.value)
         if classification.kind == "legacy":
             return self._safe_block(key, request_id, "run.legacy")
@@ -1328,12 +1252,7 @@ class Coordinator:
         if not self._revision_unchanged(key, read.revision):
             if retries <= 1:
                 return self._fault(request_id, "conflict")
-            latest = self.runs.read(key)
-            if isinstance(latest, Corrupt):
-                return self._safe_block(key, request_id, "run.corrupt")
-            if not self._present(latest):
-                return self._inert(request_id)
-            return self._read_response(key, latest, command, request_id, retries - 1)
+            return self._read_response(key, self.runs.read(key), command, request_id, retries - 1)
         if command["type"] == "ResolveRun" and state.status != "active":
             return self._inert(request_id)
         self.last_state = state

@@ -19,10 +19,11 @@ from adapters.public_tools import PublicTools  # noqa: E402
 from adapters.confirmation import HostConfirmation  # noqa: E402
 from adapters.governance import HostEnvironment, HostGovernance, governance_timeout  # noqa: E402
 from application.protocol import approval_ingress, host_profile_id  # noqa: E402
+from application.host_profile_values import HOST_PROFILE_APPROVAL_INGRESS_MCP_ELICITATION  # noqa: E402
 
 PROTOCOL_VERSION = "2025-11-25"
 #: The one approval ingress this transport carries: the registry's own value for a human asked through MCP elicitation.
-INGRESS = "mcp_elicitation"
+INGRESS = HOST_PROFILE_APPROVAL_INGRESS_MCP_ELICITATION
 
 
 def profile_from_environment(environ: dict[str, str] | None = None) -> str:

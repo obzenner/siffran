@@ -293,7 +293,7 @@ class TestSymlinkRefusal(_Isolated):
 
 
 class TestAtomicWriteFailure(_Isolated):
-    """The shared writer's failure path (re-review 3, blocking 3).
+    """The shared writer's failure path.
 
     The closed mode is set on the exclusive temporary descriptor inside the
     descriptor-owning context, before the write and the sync: an injected mode-change

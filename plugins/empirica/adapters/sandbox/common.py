@@ -31,7 +31,7 @@ CLOEXEC = getattr(os, "O_CLOEXEC", 0)
 # Opening a scaffold name asks the kernel for a directory directly (O_DIRECTORY): a
 # planted non-directory — a regular file, a device, or a named pipe — fails the open
 # with ENOTDIR immediately instead of parking the caller in the kernel's blocked-open
-# wait (re-review 2, blocking 3); O_NONBLOCK is never needed for that refusal.
+# wait; O_NONBLOCK is never needed for that refusal.
 DIRECTORY_OPEN = os.O_RDONLY | NOFOLLOW | OPENDIR | CLOEXEC
 EMPIRICA_ROOT = Path(__file__).resolve().parents[2]
 
@@ -139,6 +139,7 @@ IMPLEMENTATION_SOURCE_PATHS = tuple(sorted({
     "application/generic_spike.py",
     "application/governance.py",
     "application/history_records.py",
+    "application/host_profile_values.py",
     "application/host_runtime.py",
     "application/location.py",
     "application/observation.py",
@@ -244,7 +245,7 @@ def _verified_identity(descriptor: int, name: str, *, final: bool, created: bool
     validated exactly like a found one; the only difference is that a component this
     walk had to create may not stand at a permissive mode even mid-path (the attacker's
     replacement lands on that branch), while a pre-existing intermediate is only
-    required to be a directory (re-review 3, blocking 1).
+    required to be a directory.
     """
     try:
         info = os.fstat(descriptor)
@@ -272,7 +273,7 @@ def _scaffold_component(parent: int, name: str, *, create: bool, final: bool) ->
     mode 0700 on the opened descriptor. Anything else, including a same-owner
     replacement substituted after a successful ``mkdir`` or a mask that stripped owner
     bits, is refused with the scaffolding-unsafe error: never fixed, and never removed
-    by name either (re-review 3, blocking 1; re-review 2, blocking 1).
+    by name either.
     """
     def opened() -> int:
         try:
@@ -281,7 +282,7 @@ def _scaffold_component(parent: int, name: str, *, create: bool, final: bool) ->
             # after this call's own mkdir, the entry can be unopenable because the mask
             # stripped the owner-read bit, or because a swap stands at the name: refused
             # either way, without one permission change and without removing the entry
-            # by name (re-review 3, blocking 1)
+            # by name
             raise GenericScaffoldingError(
                 "sandbox directory cannot be opened after its creation: " + name) from exc
 
@@ -312,7 +313,7 @@ def _scaffold_component(parent: int, name: str, *, create: bool, final: bool) ->
         os.mkdir(name, MODE_DIR, dir_fd=parent)
     except FileExistsError:
         # lost the create race: the winner is validated below exactly like this call's
-        # own creation — and never altered (re-review 1, blocking 3)
+        # own creation — and never altered
         pass
     except OSError as exc:
         raise GenericScaffoldingError(
@@ -332,7 +333,7 @@ def safe_directory(path: Path, *, create: bool) -> None:
     component that a mask left at another mode, a replacement, or a planted impostor
     is refused exactly as it stands, never fixed and never removed by name. A name
     that is not a directory (a regular file, a device, a named pipe) is refused by the
-    directory-only open without blocking (re-review 2, blocking 3).
+    directory-only open without blocking.
     """
     supplied = Path(path)
     if (not supplied.is_absolute() or ".." in supplied.parts
@@ -358,11 +359,11 @@ def safe_file(path: Path, *, cap: int = MAX_CONTROL_FILE_BYTES) -> bytes:
     mode, exactly one link, size inside the cap. The bounded bytes are read from the
     same descriptor, the read is confirmed to have watched a stable inode, link count
     and size, and only when the name still identifies that validated inode does the
-    call return: anything substituted between the checks and the read — Sol's hard
+    call return: anything substituted between the checks and the read — a hard
     link carrying the very same bytes — is neither read nor reported, and a second
     name linked to the same inode during the read is refused by its changed link
-    count (re-review 4, non-blocking 1), with the substitute keeping its own metadata
-    untouched (re-review 3, blocking 2).
+    count, with the substitute keeping its own metadata
+    untouched.
     """
     try:
         descriptor = os.open(path, os.O_RDONLY | NOFOLLOW | NONBLOCK | CLOEXEC)
@@ -489,7 +490,7 @@ class ExecutionStore:
         same name, so concurrent first users race only the exclusive create: the loser sees
         the winner's inode and serializes on ``flock``. Atomic replacement is forbidden here
         on purpose — its rename could unlink a lock file that is already held, letting both
-        attempts enter recovery and the probes (E5 review, blocking finding 3).
+        attempts enter recovery and the probes.
         """
         try:
             self.runtime_lock.lstat()

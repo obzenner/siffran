@@ -127,6 +127,31 @@ class CandidateQualificationTests(unittest.TestCase):
                 self.assertFalse((cell / qualification.NAMESPACE).exists())
                 self.assertFalse((cell / "work" / qualification.NAMESPACE).exists())
 
+    def test_the_probe_effects_run_under_the_authority_of_the_admitted_runtime(self):
+        seen = []
+
+        class EffectKernel(FakeKernel):
+            def __init__(self, *args, effects_factory, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.effects_factory = effects_factory
+
+            def run(self, name, expected, *, deadline):
+                self.effects_factory("probe", name)
+                return super().run(name, expected, deadline=deadline)
+
+        cell = self.root / "effects"
+        cell.mkdir(mode=0o700)
+        args = qualify_args(cell)
+        args["kernel_factory"] = EffectKernel
+        args["effects_factory"] = seen.append
+        qualification.qualify_to_candidate(**args)
+        self.assertEqual(len(seen), len(qualification.PROBE_ORDER))
+        current = seen[0]
+        self.assertIs(type(current), authority.ResolvedGenericAuthority)
+        self.assertEqual((current.backend.profile_id, current.docker_cli, current.runtime),
+                         ("docker-isolated-v1", Path(runtime()["docker_cli"]), runtime()))
+        self.assertEqual(dict(current.environment)["DOCKER_HOST"], runtime()["endpoint"])
+
     def test_probe_failure_interrupt_cleanup_or_deadline_writes_no_candidate(self):
         cases = [
             FakeKernelFactory(failure="natural-125"),

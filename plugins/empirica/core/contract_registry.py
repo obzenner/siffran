@@ -4,8 +4,8 @@ The ADR-0075 registration is deliberately two independent declarations, one on e
 boundary, and they must agree:
 
 * the contract's side is its ``x-core-ingress`` inventory — the entry-point roots and the annotated
-  ``$defs`` their closures reach (the review's finding: an inventory can be edited away together with
-  its validator);
+  ``$defs`` their closures reach (an inventory alone could be edited away together with its
+  validator);
 * this module is *the core's* side: the one place the core names the registered keys itself, as
   ``(document name, local pointer)`` pairs.
 

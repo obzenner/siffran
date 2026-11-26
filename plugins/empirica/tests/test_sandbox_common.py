@@ -96,7 +96,7 @@ class ScaffoldingTests(unittest.TestCase):
                 common.ExecutionStore(alias)
 
     def test_a_create_race_lost_to_a_planted_symlink_is_refused_target_untouched(self):
-        # (re-review, blocking 3) a scaffolding creation that lost the concurrent
+        # A scaffolding creation that lost the concurrent
         # first-use race is refused without any permission change first: the planted
         # link's target keeps its own mode, and the chmod never follows the link.
         with tempfile.TemporaryDirectory() as temporary:
@@ -163,7 +163,7 @@ class ScaffoldingTests(unittest.TestCase):
                     common.safe_directory(impersonator, create=create)
 
     def test_an_owner_stripping_umask_refuses_the_created_entry_unfixed(self):
-        # (re-review 3, blocking 1) there is no mode change on scaffolding at all:
+        # There is no mode change on scaffolding at all:
         # the mask can only remove bits, so a mask that strips owner-write (0o177)
         # leaves the fresh component at 0600 and the walk refuses it — never fchmod'ed
         # back to the closed mode. Masks that only strip group/other bits (0o077)
@@ -188,7 +188,7 @@ class ScaffoldingTests(unittest.TestCase):
                              "the wrongly-masked creation is left exactly as the mask made it")
 
     def test_a_mask_that_hides_the_fresh_directory_refuses_without_changing_the_mask(self):
-        # (re-review 3, blocking 1) a mask that strips the owner-read bit (0o777) makes
+        # A mask that strips the owner-read bit (0o777) makes
         # the fresh directory unopenable: the scaffolding is refused with
         # sandbox-scaffolding-unsafe — the mask is never zeroed, no helper process runs,
         # no path-based permission change happens — and the unusable entry is left in
@@ -209,7 +209,7 @@ class ScaffoldingTests(unittest.TestCase):
                              "the unopenable entry keeps exactly the mode the mask gave it")
 
     def test_created_components_never_touch_the_process_mask_or_a_stranger(self):
-        # (re-review 2, blocking 1) the controlled-thread result, made deterministic: a
+        # The controlled-thread result, made deterministic: a
         # file created inside the creation window — by any thread — must inherit the
         # ambient 0o077 mask (0600, not 0666), an intermediate parent must be created at
         # the closed mode through the descriptor (never a 0777 default-mode parent), and
@@ -308,7 +308,7 @@ class ScaffoldingTests(unittest.TestCase):
             common.safe_directory(Path("/"), create=True)
 
     def test_a_replacement_after_a_successful_mkdir_is_refused_and_left_alone(self):
-        # (re-review 3, blocking 1) a successful mkdir by name does not establish that
+        # A successful mkdir by name does not establish that
         # the opened inode is the one created: between them, the fresh component is
         # moved aside and a same-owner 0755 replacement stands at the name. The walk
         # refuses, the replacement's mode and content are left untouched, the moved
@@ -340,8 +340,8 @@ class ScaffoldingTests(unittest.TestCase):
                              "the moved-aside creation is left alone: never removed by name")
 
     def test_sandbox_file_verification_reads_one_descriptor_and_names_it(self):
-        # (re-review 3, blocking 2) one descriptor owns the metadata checks and the
-        # bounded read; an entry substituted at the name between the two — Sol's hard
+        # One descriptor owns the metadata checks and the
+        # bounded read; an entry substituted at the name between the two — a hard
         # link carrying the very same bytes — is neither read as the record nor
         # reported: the call refuses, and the substitute keeps exactly its own mode.
         import stat as stat_module
@@ -423,7 +423,7 @@ class ScaffoldingTests(unittest.TestCase):
                 common.safe_file(large, cap=len(big) - 1)
 
     def test_a_second_name_linked_to_the_validated_inode_during_the_read_is_refused(self):
-        # (re-review 4, non-blocking 1) a hard link added to the very inode being
+        # A hard link added to the very inode being
         # validated and read keeps the bytes, the device, the inode and the size —
         # only the link count changes. The stable-identity confirmation after the
         # read must compare it: the bytes at a double-named record are refused
@@ -457,7 +457,7 @@ class ScaffoldingTests(unittest.TestCase):
                 common.safe_file(record, cap=len(payload))
 
     def test_a_named_pipe_at_a_scaffold_name_is_refused_without_blocking(self):
-        # (re-review 2, blocking 3) a named pipe parked at the scaffold name must be
+        # A named pipe parked at the scaffold name must be
         # refused promptly: the directory-only open rejects a non-directory kernel-side
         # instead of waiting for a reader. The call runs on its own thread so a blocked
         # worker is a bounded failure, not a parked suite.

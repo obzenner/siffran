@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Unit controls for scripts/gen_contract_bounds.py — the generator's ownership is checked, not assumed.
 
-The E2c review seeded two disjoint integer branches with maxima 4 and 9 and the old emitter silently
-kept only the 9; a second name collision (two properties whose names normalize alike) overwrote too.
-These controls keep the refusal behaviour: a conflict is named, never silently resolved, and the one
-allowed duplication — the same definition embedded byte-equal in two documents (state and request both
-carry environmentProposal) — emits exactly one constant from either copy.
+Two disjoint branches under one path with different bounds, or two properties whose names normalize
+alike, are a named conflict, never silently resolved by keeping the last bound; the one allowed
+duplication — the same definition embedded byte-equal in two documents (state and request both carry
+environmentProposal) — emits exactly one constant from either copy. The host-profile registry's
+``x-supported`` declaration generates only as a subset of its own enumeration.
 """
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ class GeneratorControlTests(unittest.TestCase):
                          "rerun `make contract-bounds`")
 
     def test_two_branches_with_different_bounds_under_one_path_are_refused(self):
-        """The review's seeded conflict: two oneOf branches sharing the node's path with maxima 4 and 9."""
+        """Two oneOf branches sharing the node's path with maxima 4 and 9 are a named conflict."""
         def seed(schema):
             def as_branch(maximum):
                 return {"type": "integer", "maximum": maximum}
@@ -90,6 +90,60 @@ class GeneratorControlTests(unittest.TestCase):
         tag = collected["ENVIRONMENT_PROPOSAL_SPIKE_IMAGES_GRAMMAR_TAG"]
         import re
         self.assertIsNotNone(re.compile(tag).fullmatch("3.12-slim"), "the tag piece still tags")
+
+    def _registry(self, mutation):
+        registry = copy.deepcopy(generator._load_host_profiles_schema())
+        mutation(registry["properties"]["profiles"]["items"]["properties"])
+        return registry
+
+    def test_every_target_is_what_the_contracts_generate(self):
+        for target, fresh in generator.generate(Contract()).items():
+            with self.subTest(target=target.name):
+                self.assertEqual(fresh, target.read_text(encoding="utf-8"),
+                                 "rerun `make contract-bounds`")
+        self.assertEqual(set(generator.generate(Contract())), set(generator.TARGETS))
+
+    def test_the_supported_declaration_generates_from_the_registry_schema(self):
+        members = generator._load_host_profiles_schema()["properties"]["profiles"]["items"]["properties"]
+        collected = generator.collect_host_profiles()
+        self.assertEqual(collected["HOST_PROFILE_PROMOTION_STATUS_SUPPORTED"],
+                         tuple(members["promotion_status"][generator.X_SUPPORTED]))
+        for value in members["approval_ingress"]["enum"]:
+            self.assertIn(value, collected.values())
+
+    def test_a_supported_declaration_outside_its_enumeration_is_refused(self):
+        def outside(members):
+            members["promotion_status"][generator.X_SUPPORTED] = ["not-a-status"]
+
+        def repeated(members):
+            members["promotion_status"][generator.X_SUPPORTED] *= 2
+
+        def no_enumeration(members):
+            members["host_id"][generator.X_SUPPORTED] = []
+        claim = "host-profiles.schema.json#"
+        for mutation, message in (
+                (outside, f"{claim}promotion_status: {generator.X_SUPPORTED} must list distinct values of the enumeration"),
+                (repeated, f"{claim}promotion_status: {generator.X_SUPPORTED} must list distinct values of the enumeration"),
+                (no_enumeration, f"{claim}host_id: {generator.X_SUPPORTED} on a member with no enumeration")):
+            with self.subTest(mutation=mutation.__name__), self.assertRaises(ValueError) as caught:
+                generator.collect_host_profiles(self._registry(mutation))
+            self.assertEqual(str(caught.exception), message)
+
+    def test_a_supported_declaration_may_name_the_whole_enumeration(self):
+        def everything(members):
+            members["promotion_status"][generator.X_SUPPORTED] = list(members["promotion_status"]["enum"])
+        registry = self._registry(everything)
+        collected = generator.collect_host_profiles(registry)
+        self.assertEqual(collected["HOST_PROFILE_PROMOTION_STATUS_SUPPORTED"], tuple(
+            registry["properties"]["profiles"]["items"]["properties"]["promotion_status"]["enum"]))
+
+    def test_two_registry_values_normalizing_alike_are_refused(self):
+        def alike(members):
+            members["approval_ingress"]["enum"] += ["pi-ui"]
+        with self.assertRaises(ValueError) as caught:
+            generator.collect_host_profiles(self._registry(alike))
+        self.assertEqual(str(caught.exception), "host-profiles.schema.json#approval_ingress: two "
+                         "registry values generate one name HOST_PROFILE_APPROVAL_INGRESS_PI_UI")
 
 
 if __name__ == "__main__":

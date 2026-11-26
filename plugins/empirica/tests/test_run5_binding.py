@@ -44,6 +44,21 @@ def _persisted(value):
     return value.persisted()
 
 
+#: Qualified bindings one member away from admissible: a foreign backend, an unknown and a
+#: non-isolated profile, a malformed record digest. Both the response and the state schema refuse each.
+NEAR_MATCH_QUALIFIED_BINDINGS = (
+    {**_persisted(_qualified()), "backend": "host"},
+    {**_persisted(_qualified()), "profile_id": "other"},
+    {**_persisted(_qualified()), "profile_id": "docker-rust-v1"},
+    {**_persisted(_qualified()), "qualification_record_digest": "bad"},
+)
+
+
+#: A spike request in a retired shape, never a canonical draft.
+UNCANONICAL_SPIKE_ACTION = {"kind": "spike_request", "claim_id": "C0",
+                            "command": "true", "dependent_files": ["x"]}
+
+
 def start_command(project="p", session="s"):
     return {
         "type": "StartRun",
@@ -203,14 +218,7 @@ class PublicSpikeBackendTests(unittest.TestCase):
         run, _argument, result = self._public_views(SpikesUnavailable())
         for backend in (
             {"kind": "spikes_unavailable", "diagnostic": "socket"},
-            {"kind": "qualified", "backend": "host", "profile_id": "docker-isolated-v1",
-             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
-            {"kind": "qualified", "backend": "docker", "profile_id": "other",
-             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
-            {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
-             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
-            {"kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
-             "qualification_record_digest": "bad", "execution_binding_digest": DIGEST_B},
+            *NEAR_MATCH_QUALIFIED_BINDINGS,
         ):
             candidate = copy.deepcopy(result)
             candidate["run"]["spike_backend"] = backend
@@ -356,14 +364,7 @@ class Run5SchemaTests(unittest.TestCase):
             {"kind": "spikes_unavailable", "reason": "absent"},
             {"kind": "unqualified", "reason": "qualification pending"},
             {"kind": "unqualified", "record_digest": DIGEST_A},
-            {"kind": "qualified", "backend": "host", "profile_id": "docker-isolated-v1",
-             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
-            {"kind": "qualified", "backend": "docker", "profile_id": "other",
-             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
-            {"kind": "qualified", "backend": "docker", "profile_id": "docker-rust-v1",
-             "qualification_record_digest": DIGEST_A, "execution_binding_digest": DIGEST_B},
-            {"kind": "qualified", "backend": "docker", "profile_id": "docker-isolated-v1",
-             "qualification_record_digest": "bad", "execution_binding_digest": DIGEST_B},
+            *NEAR_MATCH_QUALIFIED_BINDINGS,
         ):
             candidate = copy.deepcopy(self.fixture)
             candidate["spike_backend"] = binding
@@ -575,7 +576,7 @@ class Run5EnvironmentStateTests(unittest.TestCase):
                     replace(state, **{field: bad})
 
     def test_replacing_an_unrelated_field_keeps_the_populated_members_valid(self):
-        """Review finding 1: ``__post_init__`` re-validates a state it had already frozen, the way
+        """``__post_init__`` re-validates a state it had already frozen, the way
         every ordinary transition moves a decoded run (``dataclasses.replace``). The frozen
         proposal (current and history) must pass the same validators its decoded form passed,
         so an unrelated-field replacement survives and nothing is re-derived."""
@@ -601,7 +602,7 @@ class Run5EnvironmentStateTests(unittest.TestCase):
         self.assertEqual(run_state.classify_and_decode(reencoded).kind, "valid")
 
     def test_history_rows_are_objects_and_the_two_arrays_are_real_sequences(self):
-        """Review finding 2: null speaks for the current member only, and each member demands an
+        """Null speaks for the current member only, and each member demands an
         actual bounded sequence — a mapping is never one (an empty one would read as "no rows"),
         and neither is an unsized iterable (its length is not a fact any transition may check)."""
         state = run_state.classify_and_decode(self.fixture).state
@@ -763,76 +764,68 @@ class StartSelectionTests(unittest.TestCase):
         self.assertEqual(artifacts.values[old_key], before_artifacts)
         self.assertEqual(runs.data[new_key].value["state_schema"], "empirica.run/5")
 
-    def test_unavailable_run5_spike_is_guarded_before_workspace_artifact_and_harness(self):
-        coordinator, (workspace, harness, runs, artifacts) = self.coordinator(
-            CountingSelector(SpikesUnavailable()))
-        started = coordinator.handle(start_command(), "start")
-        before = (len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls)
-        result = coordinator.handle({
-            "type": "ObserveAction", "run_id": started["result"]["run"]["id"],
-            "action": {"kind": "spike_request", "claim_id": "C0",
-                       "command": "true", "dependent_files": ["x"]},
-        }, "spike")
-        self.assertEqual(result["result"], {
-            "type": "Fault", "code": "unavailable", "fail_direction": "closed",
-            "reason": "spikes-unavailable"})
-        self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
-                         before)
-
-    def test_unqualified_run5_spike_is_guarded_before_workspace_artifact_and_harness(self):
-        # run/5 admits an unqualified binding (spec §4.2): every guarded spike path must keep
-        # refusing it exactly like unavailable — no artifact, no harness call, no state rewrite.
+    def seeded(self, state):
+        """A coordinator over one persisted run of ``state`` and its artifact chain."""
         workspace, harness, runs, artifacts = Workspace(), Harness(), Runs(), Artifacts()
-        state, values = chain(replace(initial(), spike_backend={"kind": "unqualified"}))
+        state, values = chain(state)
         key = RunKey(storage_id("p"), storage_id("s"), 1)
         runs.create(key, run_state.encode_state(state))
         for item in values:
             artifacts.append(key, item)
-        coordinator = Coordinator(workspace, harness, runs, artifacts, PROFILE, {}, CountingSelector())
-        before = (len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls)
+        coordinator, _ = self.coordinator(
+            CountingSelector(), workspace=workspace, harness=harness, runs=runs,
+            artifacts=artifacts)
+        return coordinator, encode_handle(key), (workspace, harness, runs, artifacts)
+
+    def assert_spike_refused_untouched(self, coordinator, run_id, values, expected,
+                                       action=UNCANONICAL_SPIKE_ACTION):
+        """A spike request on the run answers ``expected(result)`` and changes nothing: no
+        workspace read, artifact, state write or harness call. The default request is not a
+        canonical draft, so the guard is shown to precede the draft's own validation."""
+        workspace, harness, runs, artifacts = values
+
+        def effects():
+            return (copy.deepcopy(runs.data), copy.deepcopy(artifacts.values),
+                    len(workspace.calls), harness.calls, artifacts.append_calls)
+        before = effects()
         result = coordinator.handle({
-            "type": "ObserveAction", "run_id": encode_handle(key),
-            "action": {**spike_action("probe.py")},
-        }, "unqualified-spike")
-        self.assertEqual(result["result"], {
+            "type": "ObserveAction", "run_id": run_id,
+            "action": action}, "guarded-spike")
+        expected(result["result"])
+        self.assertEqual(effects(), before)
+
+    def assert_spikes_unavailable(self, result):
+        self.assertEqual(result, {
             "type": "Fault", "code": "unavailable", "fail_direction": "closed",
             "reason": "spikes-unavailable"})
-        self.assertEqual((len(workspace.calls), artifacts.append_calls, runs.seq, harness.calls),
-                         before)
+
+    def test_a_run5_spike_without_a_qualified_binding_is_guarded_before_every_effect(self):
+        # run/5 admits an unqualified binding (spec §4.2): every guarded spike path refuses it
+        # exactly like unavailable — no artifact, no harness call, no state rewrite.
+        coordinator, values = self.coordinator(CountingSelector(SpikesUnavailable()))
+        started = coordinator.handle(start_command(), "start")
+        with self.subTest(binding="spikes_unavailable"):
+            self.assert_spike_refused_untouched(
+                coordinator, started["result"]["run"]["id"], values, self.assert_spikes_unavailable)
+        with self.subTest(binding="unqualified"):
+            self.assert_spike_refused_untouched(
+                *self.seeded(replace(initial(), spike_backend={"kind": "unqualified"})),
+                self.assert_spikes_unavailable, spike_action("probe.py"))
+
     def test_terminal_run5_spike_is_inert_before_every_side_effect(self):
-        bindings = (
-            {"kind": "spikes_unavailable"},
-            {"kind": "unqualified"},
-            _persisted(_qualified(DIGEST_A, DIGEST_B)),
-        )
-        for binding in bindings:
+        for binding in ({"kind": "spikes_unavailable"}, {"kind": "unqualified"},
+                        _persisted(_qualified(DIGEST_A, DIGEST_B))):
             with self.subTest(kind=binding["kind"]):
-                workspace, harness, runs, artifacts = Workspace(), Harness(), Runs(), Artifacts()
-                state = replace(initial(), status="stopped_residual", spike_backend=binding)
-                state, values = chain(state)
-                key = RunKey(storage_id("p"), storage_id("s"), 1)
-                runs.create(key, run_state.encode_state(state))
-                for item in values:
-                    artifacts.append(key, item)
-                coordinator = Coordinator(
-                    workspace, harness, runs, artifacts, PROFILE, {}, CountingSelector())
-                before = (copy.deepcopy(runs.data[key]), copy.deepcopy(artifacts.values[key]),
-                          len(workspace.calls), harness.calls, artifacts.append_calls)
-                result = coordinator.handle({
-                    "type": "ObserveAction", "run_id": encode_handle(key),
-                    "action": {"kind": "spike_request", "claim_id": "C0",
-                               "command": "true", "dependent_files": ["x"]},
-                }, "terminal-spike")
-                self.assertEqual(result["result"]["type"], "Inert")
-                self.assertEqual(
-                    (runs.data[key], artifacts.values[key], len(workspace.calls), harness.calls,
-                     artifacts.append_calls), before)
+                self.assert_spike_refused_untouched(
+                    *self.seeded(replace(initial(), status="stopped_residual",
+                                         spike_backend=binding)),
+                    lambda result: self.assertEqual(result["type"], "Inert"))
 
 
 def incompatible_family(identifier, offset):
     """A neighbouring generation of a generation-suffixed identity (a state schema or the
     protocol id), derived from an owner constant so no test retypes another era's discriminator
-    (ADR-0075; review E2b finding 1)."""
+    (ADR-0075)."""
     stem, _, generation = identifier.rpartition("/")
     prefix, digits = generation[:1], generation[1:]
     if prefix.isalpha():
@@ -865,7 +858,7 @@ class LegacyRejectionTests(unittest.TestCase):
     def contract_reason_row(self, phrase):
         """The one reason row whose message carries the phrase, selected from the public
         contract by content, so its code and recovery actions are asserted, never retyped
-        (ADR-0075; review E2b finding 1)."""
+        (ADR-0075)."""
         rows = [(code, row) for code, row in protocol.public_contract()["reasons"].items()
                 if phrase in row["message"]]
         self.assertEqual(len(rows), 1, f"expected exactly one reason row matching {phrase!r}")
@@ -873,8 +866,8 @@ class LegacyRejectionTests(unittest.TestCase):
 
     def dispatch_public(self, service, request_id, command):
         """The public ingress envelope: the request is schema-validated, dispatched, and its
-        response schema-validated before it returns, exactly as a host receives it (review
-        E2b finding 2 — a bypassed handler does not test request dispatch)."""
+        response schema-validated before it returns, exactly as a host receives it: a bypassed
+        handler would not test request dispatch."""
         return service.dispatch({"protocol": protocol.protocol_id(),
                                   "request_id": request_id, "command": command})
 
@@ -897,71 +890,34 @@ class LegacyRejectionTests(unittest.TestCase):
         del missing["state_schema"]
         self.assertEqual(run_state.classify_and_decode(missing).kind, "current_corrupt")
 
-    def test_a_legacy_run5_family_run_is_never_resumed_or_rewritten(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            runs = FilesystemRunRepository(Path(temporary))
-            artifacts = Artifacts()
-            state, values = chain(initial())
-            key = RunKey(storage_id("p"), storage_id("s"), 1)
-            runs.create(key, legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID))
-            for item in values:
-                artifacts.append(key, item)
-            workspace, harness = Workspace(), Harness()
-            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
-            run_id = encode_handle(key)
-            path = runs._doc_path(key)
-            before_bytes = path.read_bytes()
-            before_read = runs.read(key)
-            before_artifacts = copy.deepcopy(artifacts.values[key])
-            legacy_code, legacy_row = self.contract_reason_row("read-only legacy")
-            for command in (
-                {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
-                {"type": "GetRun", "run_id": run_id},
-                {"type": "RestoreRun", "run_id": run_id},
-                {"type": "GetArgument", "run_id": run_id},
-                {"type": "EvaluateRun", "run_id": run_id, "intent": "continue"},
-                {"type": "ObserveAction", "run_id": run_id,
-                 "action": {"kind": "route", "reason": "must not write"}},
-                {"type": "ObserveAction", "run_id": run_id,
-                 "action": {**spike_action("src/x.py")}},
-            ):
-                with self.subTest(command=command["type"]):
-                    # public ingress: the request validates, so the refusal is the legacy
-                    # one, not a wire rejection the schema would have caught earlier
-                    result = self.dispatch_public(service, command["type"], command)
-                    self.assertEqual(result["result"]["type"], "Block")
-                    self.assertEqual(result["result"]["reasons"][0]["code"], legacy_code)
-                    self.assertEqual(result["result"]["reasons"][0]["next_actions"],
-                                     legacy_row["next_actions"],
-                                     "the contract's own closed recovery action")
-            self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
-            trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
-            self.assertEqual(trusted["result"]["type"], "Inert")
-            after_read = runs.read(key)
-            self.assertEqual(path.read_bytes(), before_bytes)
-            self.assertEqual(after_read.revision, before_read.revision)
-            self.assertEqual(artifacts.values[key], before_artifacts)
-            self.assertEqual(workspace.calls, [])
-            self.assertEqual(harness.calls, 0)
+    def persisted_family(self, temporary, discriminator):
+        """A service over one filesystem run persisted under ``discriminator`` and its artifacts."""
+        runs = FilesystemRunRepository(Path(temporary))
+        artifacts = Artifacts()
+        state, values = chain(initial())
+        key = RunKey(storage_id("p"), storage_id("s"), 1)
+        runs.create(key, legacy_document(state, discriminator))
+        for item in values:
+            artifacts.append(key, item)
+        workspace, harness = Workspace(), Harness()
+        service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+        return service, key, (workspace, harness, runs, artifacts)
 
-    def test_older_and_major_families_stay_corrupt_and_cannot_mutate(self):
-        for discriminator in (OLDER_FAMILY, MAJOR_FAMILY):
+    def test_a_previous_family_run_is_refused_and_never_resumed_or_rewritten(self):
+        """The one legacy family is read-only legacy; the older and the major family are corrupt.
+        Every command is refused with the contract's own reason and recovery, and nothing is
+        written, read from the workspace or run."""
+        for discriminator, phrase in ((run_state.LEGACY_STATE_SCHEMA_ID, "read-only legacy"),
+                                      (OLDER_FAMILY, "is corrupt"), (MAJOR_FAMILY, "is corrupt")):
             with self.subTest(state_schema=discriminator), tempfile.TemporaryDirectory() as temporary:
-                runs = FilesystemRunRepository(Path(temporary))
-                artifacts = Artifacts()
-                state, values = chain(initial())
-                key = RunKey(storage_id("p"), storage_id("s"), 1)
-                runs.create(key, legacy_document(state, discriminator))
-                for item in values:
-                    artifacts.append(key, item)
-                workspace, harness = Workspace(), Harness()
-                service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
+                service, key, (workspace, harness, runs, artifacts) = self.persisted_family(
+                    temporary, discriminator)
                 run_id = encode_handle(key)
                 path = runs._doc_path(key)
                 before_bytes = path.read_bytes()
                 before_read = runs.read(key)
                 before_artifacts = copy.deepcopy(artifacts.values[key])
-                corrupt_code, corrupt_row = self.contract_reason_row("is corrupt")
+                code, row = self.contract_reason_row(phrase)
                 for command in (
                     {"type": "ResolveRun", "selector": {"project": "p", "session": "s"}},
                     {"type": "GetRun", "run_id": run_id},
@@ -974,15 +930,29 @@ class LegacyRejectionTests(unittest.TestCase):
                      "action": {**spike_action("src/x.py")}},
                 ):
                     with self.subTest(command=command["type"]):
+                        # public ingress: the request validates, so the refusal is the family's
+                        # own, not a wire rejection the schema would have caught earlier
                         result = self.dispatch_public(service, command["type"], command)
                         self.assertEqual(result["result"]["type"], "Block")
-                        self.assertEqual(result["result"]["reasons"][0]["code"], corrupt_code)
+                        self.assertEqual(result["result"]["reasons"][0]["code"], code)
                         self.assertEqual(result["result"]["reasons"][0]["next_actions"],
-                                         corrupt_row["next_actions"],
+                                         row["next_actions"],
                                          "the contract's own closed recovery action")
                 self.assertIsNone(service.trusted_host_runtime(run_id=run_id))
                 trusted = service.trusted_evidence_leaf(run_id=run_id, payload={})
                 self.assertEqual(trusted["result"]["type"], "Inert")
+                coordinator = service._coordinator
+                for name, call in (
+                        ("human surface", lambda: coordinator.trusted_human_surface(run_id, {})),
+                        ("evidence presentation",
+                         lambda: coordinator.trusted_evidence_presentation(run_id, {})),
+                        ("attribution", lambda: coordinator.trusted_attribution(run_id, {})),
+                        ("child event", lambda: coordinator.trusted_child_event(run_id, "c", {}))):
+                    with self.subTest(trusted=name):
+                        # every coordinator read refuses the family before it reads a payload
+                        refused = call()["result"]
+                        self.assertEqual(refused["type"], "Block")
+                        self.assertEqual(refused["reasons"][0]["code"], code)
                 after_read = runs.read(key)
                 self.assertEqual(path.read_bytes(), before_bytes)
                 self.assertEqual(after_read.revision, before_read.revision)
@@ -992,17 +962,10 @@ class LegacyRejectionTests(unittest.TestCase):
 
     def test_start_run_after_a_legacy_latest_starts_a_fresh_generation_without_touching_it(self):
         with tempfile.TemporaryDirectory() as temporary:
-            runs = FilesystemRunRepository(Path(temporary))
-            artifacts = Artifacts()
-            state, values = chain(initial())
-            key = RunKey(storage_id("p"), storage_id("s"), 1)
-            runs.create(key, legacy_document(state, run_state.LEGACY_STATE_SCHEMA_ID))
-            for item in values:
-                artifacts.append(key, item)
+            service, key, (_workspace, _harness, runs, artifacts) = self.persisted_family(
+                temporary, run_state.LEGACY_STATE_SCHEMA_ID)
             before_bytes = runs._doc_path(key).read_bytes()
             before_artifacts = copy.deepcopy(artifacts.values[key])
-            workspace, harness = Workspace(), Harness()
-            service = v2.compose(workspace, harness, runs, artifacts, None, PROFILE, {}, None)
             started = self.dispatch_public(service, "start", start_command())
             self.assertEqual(started["result"]["type"], "Allow")
             fresh = started["result"]["run"]["id"]

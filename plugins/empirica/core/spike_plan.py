@@ -31,7 +31,7 @@ MAX_TEXT_BYTES = 4096
 MAX_PATH_BYTES = 1024
 # The image-grammar constants are contract-owned (the environmentProposal spike-image lexeme wrote them
 # once in shared-defs.json's x-grammar; make contract-bounds regenerated them here) — the core consumes
-# the contract's word, it never keeps a second copy (E2c review finding 6: one owner for a grammar).
+# the contract's word, it never keeps a second copy: one owner for a grammar.
 MAX_IMAGE_REFERENCE_BYTES = _GRAMMAR_IMAGE_MAX_LENGTH
 MAX_STAGING_FILES = 256
 MAX_STAGING_BYTES = 64 * 1024 * 1024

@@ -68,7 +68,7 @@ _MAJOR_VERSION = re.compile(r"^[0-9]+$")
 #: name (the digest is the image's content identity, the repository name is not),
 #: never on the daemon-local ``Id``; the record stores both.
 PROBE_IMAGE_LIST_FORMAT = "{{json .}}"
-#: The bounded `docker image list --digests` fallback (drift review, non-blocking 6): the
+#: The bounded `docker image list --digests` fallback: the
 #: answer's bytes and rows are each capped, and an oversized or unparsable list refuses
 #: the admission rather than risk a partial read.
 MAX_IMAGE_LIST_BYTES = 256 * 1024
@@ -107,8 +107,7 @@ def server_version_major(value: object) -> str:
     never relaxes. A version with no numeric major part — a private build, a garbage
     answer — can seal no binding and fails closed.
 
-    The major is the normalized integer, never the literal text (drift review,
-    non-blocking 2): ``029.1`` and ``29.1`` bind the same ``29``, so the invariant is
+    The major is the normalized integer, never the literal text: ``029.1`` and ``29.1`` bind the same ``29``, so the invariant is
     numeric rather than textual.
     """
     major = value.partition(".")[0] if type(value) is str else None
@@ -356,8 +355,7 @@ def _elapsed_ms(value: object, where: str) -> int:
 PROBE_DURATION_CEILING_MS = 59_999
 QUALIFICATION_ELAPSED_CEILING_MS = int(DEFAULT_QUALIFICATION_SECONDS * 1000) - 1
 _DAEMON_IDENTIFIER = re.compile(
-    # exactly the rule the /2 authority's ``_daemon_id`` applies (registration
-    # review, non-blocking 2, aligned so a daemon the authority observes is never
+    # exactly the rule the /2 authority's ``_daemon_id`` applies (aligned so a daemon the authority observes is never
     # refused at sealing after all five probes): no C0/C1 control anywhere, at
     # most 128 characters (checked beside the pattern), and not all whitespace —
     # interior, leading and trailing ASCII spaces stay admissible everywhere.
@@ -421,7 +419,7 @@ def validate_run_binding_shape(value: object) -> dict[str, Any]:
 
 def validate_daemon_identity_shape(value: object) -> str:
     """The record's optional ``daemon_id`` member's own lexeme — exactly what the /2
-    authority's ``_daemon_id`` admits (registration review, non-blocking 2): no C0/C1
+    authority's ``_daemon_id`` admits: no C0/C1
     control, at most 128 characters, not all whitespace, interior, leading and trailing
     spaces included, so a daemon the authority observes is never refused at sealing.
     Everything beyond the lexeme — when the identity may appear at all and which daemon
@@ -442,6 +440,13 @@ def validate_spike_image_row_shape(value: object) -> dict[str, Any]:
     reference = value["reference"]
     if type(reference) is not str or not 1 <= len(reference) <= 255:
         _refuse("spike row reference is abnormal")
+    _validate_image_row_platform(value, "spike row")
+    return value
+
+
+def _validate_image_row_platform(value: dict[str, Any], row: str) -> None:
+    """The image-row facts both row shapes share: the daemon image ID, the recorded Linux platform
+    facts (every one a nonblank string) and no declared volumes; ``row`` names the refused row."""
     validate_digest256(value["id"])
     raw_os = value["raw_os"]
     raw_architecture = value["raw_architecture"]
@@ -449,10 +454,9 @@ def validate_spike_image_row_shape(value: object) -> dict[str, Any]:
     if (type(raw_os) is not str or not raw_os or value["os"] != "linux"
             or type(raw_architecture) is not str or not raw_architecture
             or type(architecture) is not str or not architecture):
-        _refuse("spike row platform is unknown")
+        _refuse(row + " platform is unknown")
     if type(value["declared_volumes"]) is not list or value["declared_volumes"]:
-        _refuse("spike row declares volumes")
-    return value
+        _refuse(row + " declares volumes")
 
 
 def validate_qualification_image_shape(value: object) -> dict[str, Any]:
@@ -462,16 +466,7 @@ def validate_qualification_image_shape(value: object) -> dict[str, Any]:
     if type(value) is not dict or set(value) != _PROBE_IMAGE_FIELDS:
         _refuse("probe image row shape is unknown")
     validate_repo_digest(value["reference"])
-    validate_digest256(value["id"])
-    raw_os = value["raw_os"]
-    raw_architecture = value["raw_architecture"]
-    architecture = value["architecture"]
-    if (type(raw_os) is not str or not raw_os or value["os"] != "linux"
-            or type(raw_architecture) is not str or not raw_architecture
-            or type(architecture) is not str or not architecture):
-        _refuse("probe image row platform is unknown")
-    if type(value["declared_volumes"]) is not list or value["declared_volumes"]:
-        _refuse("probe image row declares volumes")
+    _validate_image_row_platform(value, "probe image row")
     capabilities = value["capabilities"]
     if (type(capabilities) is not list or len(capabilities) != len(qualification.IMAGE_CAPABILITIES)
             or any(type(item) is not str or not item for item in capabilities)):
@@ -607,7 +602,7 @@ def validate_run_record(value: object) -> dict[str, Any]:
         raise authority.GenericQualificationError("run qualification record probe image digest proof is absent")
     probe_digest_proof = _repo_digest(image_body["repo_digest"], "probe image")
     if probe_digest_proof.rsplit("@", 1)[1] != probe_image.pinned_probe_image().index_digest:
-        # (registration review, blocking) the proof may name any repository the daemon
+        # the proof may name any repository the daemon
         # observed carrying the pinned content, but its digest part must be the
         # pinned index digest — never another digest, however well-formed the record
         raise authority.GenericQualificationError(
@@ -721,7 +716,7 @@ def build_run_record(
 def _naming_levels(store: "RunQualificationStore") -> tuple[Path, Path, Path]:
     """The three directory levels that name a published record, from the top.
 
-    The durable barrier covers this whole required chain (re-review, blocking 2): the
+    The durable barrier covers this whole required chain: the
     sandbox directory naming the namespace, the namespace naming ``records``, and
     ``records`` naming the record file. Every level must be proven synced — the scaffold
     may have pre-created any of them well before the publication, so "newly created for
@@ -772,8 +767,8 @@ class RunQualificationStore:
         Publication is strictly durable across the whole naming chain: the file is
         fsynced and renamed, and each of the three directories that name it — the sandbox
         directory naming the namespace, the namespace naming ``records``, and ``records``
-        naming the file — is strictly fsynced, whatever created it and however long ago
-        (re-review, blocking 2). A directory-open or fsync error at any level fails the
+        naming the file — is strictly fsynced, whatever created it and however long ago.
+        A directory-open or fsync error at any level fails the
         publication, and the identical-bytes retry re-proves the same chain before
         returning. Read-back and mode checks alone would not.
         """
@@ -794,8 +789,7 @@ class RunQualificationStore:
         except common.GenericScaffoldingError as exc:
             if path.exists() or path.is_symlink():
                 # an impostor occupies the publication name: unsafe, and the owner
-                # boundary reports it as the scaffolding reason (re-review 4,
-                # non-blocking 2), never a capability one
+                # boundary reports it as the scaffolding reason, never a capability one
                 raise common.GenericScaffoldingError(
                     "run qualification record path is unsafe") from exc
         if readback is not None:
@@ -804,7 +798,7 @@ class RunQualificationStore:
                     "run qualification record path contains different bytes")
             # The retry also proves durability: an interrupted writer can leave the
             # renamed file (or any of its naming levels) behind with no synchronized
-            # dirent (E5 review, blocking 5; re-review, blocking 2 for the ancestors).
+            # dirent, for the file and for each of its ancestors.
             for level in reversed(_naming_levels(self)):
                 fsio.sync_directory(level)
             return path
@@ -814,8 +808,8 @@ class RunQualificationStore:
         # temporary descriptor before its fsync and the rename (fsio.atomic_write), so
         # an entry that appears here with any other mode, owner, or link shape — for
         # example a hard link to an unrelated 0644 file swapped onto the fresh
-        # publication — is refused without one write through the name (re-review 2,
-        # blocking 4: hard links are no-follow-proof, only absence-of-mutation is).
+        # publication — is refused without one write through the name (hard links are
+        # no-follow-proof, only absence-of-mutation is).
         try:
             readback = common.safe_file(path, cap=MAX_RECORD_BYTES)
             if readback != payload:
@@ -825,7 +819,7 @@ class RunQualificationStore:
             if path.exists() or path.is_symlink():
                 # a swapped-in impostor occupies the publication name: unsafe, refused,
                 # and reported at the owner boundary as the scaffolding reason
-                # (re-review 4, non-blocking 2), never a capability one
+                # never a capability one
                 raise common.GenericScaffoldingError(
                     "run qualification record path is unsafe") from exc
             raise
@@ -869,7 +863,7 @@ def _observe_authority(runtime_inspector: Callable[..., authority.GenericRuntime
     The owner's observation is the non-admitting
     :func:`authority.inspect_observed_runtime`: it resolves the endpoint once, pins its
     own remaining reads to it and never admits the facts, because recovery precedes the
-    new attempt's admission (E5 review, blocking finding 2): a capability or
+    new attempt's admission: a capability or
     implementation refusal must never skip journal recovery. Admission of these same
     facts happens after recovery.
     """
@@ -962,14 +956,13 @@ def _read_probe_inspect(argv: tuple, runner: process.Runner, environment: dict,
 def _locate_probe_image_by_repository_digest(runtime: Mapping[str, Any], pin: Any,
                                              *, runner: process.Runner, environment: dict,
                                              deadline: float, clock: Callable[[], float]) -> str | None:
-    """The one bounded ``docker image list --digests`` fallback (drift review,
-    non-blocking 6): when the pinned reference finds no local image, the digest is
+    """The one bounded ``docker image list --digests`` fallback: when the pinned reference finds no local image, the digest is
     still the image's content identity, so the list may name it under some other
     repository - a proxy's own pull name - whose reported repository digest is the
     pin's. Returns the located row's digest-sealed reference to inspect -
     ``<repository>@<pinned index digest>`` - or ``None`` when no row carries the
     pinned digest, every candidate name is unusable (a lexeme-screened ``<none>``
-    row, registration review non-blocking 1), or the list is unusable (truncated,
+    row), or the list is unusable (truncated,
     oversized, or unparsable: never a partial admission). The row's reported image
     ID is never trusted or returned: the classic store's ID is the config digest,
     not the index digest (the digest-sealed reference is the one form both image
@@ -1011,7 +1004,7 @@ def _locate_probe_image_by_repository_digest(runtime: Mapping[str, Any], pin: An
                     or row.get("Digest") != pin.index_digest):
                 continue
             repositories.add(row["Repository"])
-        # (registration review, non-blocking 1) a row whose repository name is
+        # a row whose repository name is
         # unusable — a `<none>` dangling name, which sorts before every real one —
         # cannot name a reference any daemon would answer, so the repo-digest lexeme
         # on the combined reference screens it out before the sorted-first choice,
@@ -1046,10 +1039,9 @@ def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: proce
     name and the admission inspects the located row's digest-sealed reference —
     ``<repository>@<pinned digest>``, the one form both image stores answer; the
     row's reported ID is never trusted, because the classic store's ID is the
-    config digest, not the index digest — through the same content rules (drift
-    review, non-blocking 6; the coordinator's real mirror pull on Docker Desktop
-    29.7.2's containerd store witnessed the digest-sealed reference answering
-    where the pinned one does not).
+    config digest, not the index digest — through the same content rules (a mirror
+    pull on Docker Desktop 29.7.2's containerd store answers the digest-sealed
+    reference where the pinned one does not).
     """
     _remain(deadline, clock, "the trusted probe image inspection")
     pin = probe_image.pinned_probe_image()
@@ -1108,7 +1100,7 @@ def admit_probe_image(runtime: Mapping[str, Any], *, config: Path, runner: proce
     except Exception as exc:
         raise _RunFailure(RunQualificationReason.PROBE_IMAGE_UNTRUSTED, detail) from exc
     row = image.to_data()
-    # (registration review, blocking) the digest proof member is the observation
+    # the digest proof member is the observation
     # the daemon itself made for the admitted image — the sorted-first
     # ``RepoDigests`` entry carrying the pinned digest, whatever repository name it
     # was reported under, and already shape-checked by the matching screen — never
@@ -1463,7 +1455,7 @@ def _qualify_locked(
         # derived once, here at the facts' admission: a daemon whose version has no
         # derivable major — a private build, a garbage answer — ends the attempt with
         # the capability reason before any Docker image command runs, never after a
-        # whole probe run (drift review, non-blocking 1). The builder re-derives the
+        # whole probe run. The builder re-derives the
         # same value for the execution binding; within one attempt the exact version
         # must still match (the after-probe re-observation).
         try:
@@ -1497,13 +1489,8 @@ def _qualify_locked(
         except OSError as exc:
             raise _RunFailure(RunQualificationReason.CAPABILITY_UNAVAILABLE,
                               "the qualification Docker config is unreadable") from exc
-        resolved = authority.ResolvedGenericAuthority(
-            application.GenericQualifiedBackend("docker", profile_id, seed, seed),
-            Path(runtime["docker_cli"]), tuple(sorted({
-                "LANG": "C", "LC_ALL": "C", "DOCKER_HOST": runtime["endpoint"],
-                "DOCKER_CONFIG": str(config),
-            }.items())), work, runtime["server_os"], runtime["server_architecture"],
-            runtime["ncpu"], runtime["mem_total"], runtime)
+        resolved = authority.ResolvedGenericAuthority.at_runtime(
+            application.GenericQualifiedBackend("docker", profile_id, seed, seed), runtime, config, work)
         runner = process.BoundedRunner() if image_runner is None else image_runner
         # Trusted probe image admission (4.3), then spike-image resolution and sealing.
         stage[0] = "the trusted probe image inspection"

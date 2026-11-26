@@ -118,9 +118,9 @@ def renames(root: Path, base: str) -> dict[str, str]:
 
 def generated_outputs() -> frozenset[str]:
     """The sources a generator owns, each declared by its generator and read by that generator's freshness check:
-    ``contract_bounds.py`` (``gen_contract_bounds.TARGET``, which ``make contract-check`` compares with a regeneration)."""
+    every module ``gen_contract_bounds.TARGETS`` declares, which ``make contract-check`` compares with a regeneration."""
     import gen_contract_bounds
-    return frozenset(path.relative_to(ROOT).as_posix() for path in (gen_contract_bounds.TARGET,))
+    return frozenset(path.relative_to(ROOT).as_posix() for path in gen_contract_bounds.TARGETS)
 
 
 def is_test(path: str) -> bool:
