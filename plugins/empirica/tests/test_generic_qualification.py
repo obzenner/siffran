@@ -240,7 +240,6 @@ class CandidateQualificationTests(unittest.TestCase):
 
     def test_record_digest_tamper_old_schema_and_network_timing_are_rejected(self):
         self.assertEqual(authority.RECORD_SCHEMA, qualification.RECORD_SCHEMA)
-        self.assertEqual(authority.POINTER_SCHEMA, qualification.POINTER_SCHEMA)
         self.assertEqual(authority.NAMESPACE, qualification.NAMESPACE)
         base = record()
         mutations = []
@@ -464,90 +463,10 @@ class ProductionProbeKernelTests(unittest.TestCase):
             qualification.validate_probe(row, 0)
         qualification.validate_probe({**row, "realization_digest": D0}, 0)
 
-
-class InstallSeparationTests(unittest.TestCase):
-    def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.addCleanup(self.temporary.cleanup)
-        self.root = Path(self.temporary.name).resolve()
-        self.root.chmod(0o700)
-        self.candidate = self.root / "candidate.json"
-        self.candidate.write_bytes(qualification.fsio.dump_json(record()))
-        self.candidate.chmod(0o600)
-        self.home = self.root / "installed"
-
-    def installer(self, facts=None, implementation=D0):
-        return qualification.GenericQualificationInstaller(
-            self.home, runtime_inspector=runtime_inspector(runtime() if facts is None else facts),
-            implementation_inspector=lambda: {"implementation_digest": implementation})
-
-    def test_install_is_separate_atomic_and_old_namespace_is_untouched(self):
-        old = self.home / "generic-qualification-v2" / "old.json"
-        old.parent.mkdir(parents=True, mode=0o700)
-        self.home.chmod(0o700)
-        old.parent.chmod(0o700)
-        old.write_text("legacy")
-        selected = authority.GenericBackendSelector(
-            authority.GenericQualificationStore(self.home)).select("docker-isolated-v1")
-        self.assertIs(type(selected), authority.GenericSpikesUnavailable)
-        installed = self.installer().install(
-            self.candidate, profile_id="docker-isolated-v1")
-        self.assertEqual(installed, record())
-        self.assertEqual(old.read_text(), "legacy")
-        store = authority.GenericQualificationStore(self.home)
-        self.assertEqual(store.load_current("docker-isolated-v1"), installed)
-        pointer = store.pointers / "docker-isolated-v1.json"
-        self.assertEqual(oct(pointer.stat().st_mode & 0o777), "0o600")
-
-    def test_install_tolerates_capacity_and_nonrequired_security_diagnostics(self):
-        changed = runtime()
-        changed.update(ncpu=9, mem_total=99)
-        changed["security_options"].extend(["name=rootless", "name=userns"])
-        installed = self.installer(changed).install(
-            self.candidate, profile_id="docker-isolated-v1")
-        self.assertEqual(installed, record())
-
-    def test_install_ignores_an_unbound_daemon_id_as_the_resolver_does(self):
-        current = runtime()
-        current["daemon_id"] = "a-live-daemon-the-record-never-bound"
-        installed = self.installer(current).install(
-            self.candidate, profile_id="docker-isolated-v1")
-        self.assertEqual(installed, record())
-
-    def test_tamper_profile_implementation_capability_pointer_and_old_schema_reject(self):
-        for label, installer, profile in (
-            ("profile", self.installer(), "docker-networked-v1"),
-            ("implementation", self.installer(implementation=D1), "docker-isolated-v1"),
-            ("capability", self.installer({**runtime(), "swap_limit": False}),
-             "docker-isolated-v1"),
-        ):
-            with self.subTest(label=label), self.assertRaises(
-                    qualification.GenericQualificationFailure):
-                installer.install(self.candidate, profile_id=profile)
-        old = copy.deepcopy(record())
-        old["schema"] = "siffran.empirica.generic-docker-qualification/2"
-        self.candidate.write_bytes(qualification.fsio.dump_json(old))
-        self.candidate.chmod(0o600)
-        with self.assertRaises(qualification.GenericQualificationFailure):
-            self.installer().install(self.candidate, profile_id="docker-isolated-v1")
-
-        self.candidate.write_bytes(qualification.fsio.dump_json(record()))
-        self.candidate.chmod(0o600)
-        self.installer().install(self.candidate, profile_id="docker-isolated-v1")
-        store = authority.GenericQualificationStore(self.home)
-        pointer = store.pointers / "docker-isolated-v1.json"
-        data = json.loads(pointer.read_text())
-        data["execution_binding_digest"] = D1
-        pointer.write_text(json.dumps(data))
-        pointer.chmod(0o600)
-        with self.assertRaises(authority.GenericQualificationError):
-            store.load_current("docker-isolated-v1")
-
     def test_source_has_no_old_probes_schema_or_image_acquisition(self):
         sources = "\n".join((
             Path(qualification.__file__).read_text(),
             (Path(__file__).parents[3] / "scripts/generic_docker_qualify.py").read_text(),
-            (Path(__file__).parents[3] / "scripts/generic_docker_install.py").read_text(),
         ))
         for forbidden in ("seven-probe", "docker-rust-v1", "kill -9 $$",
                           "docker pull", "docker build", "docker load", "docker login",

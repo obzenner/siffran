@@ -2,7 +2,7 @@
 
 A read-only page for people. The **Universe**: every run a mark, each project an island, zoom from the store to an
 island to a run. The **Inbox**: buckets of what needs you, the calendar, and runs by standing. A run's **sheet**
-(resizable): what it owes or how it ended, its immutable spike capability (unavailable, run/5's unqualified no-authority kind, or a safely abbreviated qualified
+(resizable): what it owes or how it ended, its spike capability (unavailable, run/5's unqualified no-authority kind, or a safely abbreviated qualified
 binding, never live health), its environment step (each revision and its decision, each qualification attempt with its outcome and reason, and whether the binding is bound, stale or failed), its claims with their read-only single-container spike requests and admitted results (each naming the qualification it ran under), its audits, attempts and history. Its human decisions each show the HITL document their host bound (ADR-0072, PR 15): the
 store's own status, the exact form beside `verified`, the honest refusals `missing`, `mismatch`, `too_large` and
 `unreadable`, a copyable digest and path, `later` reading "not answered", and a `?decision=` link that opens and

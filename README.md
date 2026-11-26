@@ -34,8 +34,8 @@ pi install git:github.com/obzenner/siffran
 Then restart Pi, or run `/reload` in an existing session.
 
 Empirica `7.1.0` uses wire `empirica/v2` and exact `empirica.run/4` state. Deterministic spikes
-are closed single-container `empirica.spike-plan-draft/2` workloads bound once to an operator-qualified
-`docker-isolated-v1` or `docker-networked-v1` authority, with no command-string or ambient
+are closed single-container `empirica.spike-plan-draft/2` workloads run under the
+`docker-isolated-v1` or `docker-networked-v1` authority the run qualified through its own environment step, with no command-string or ambient
 host-shell fallback. Any tool can be the argv; every limit an agent sees is the public-contract clause
 `evidence/spike/limits`. See the [Empirica 7 upgrade guide](doc/upgrading-empirica-7.md) and the
 [Empirica 6 upgrade guide](doc/upgrading-empirica-6.md).

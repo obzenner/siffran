@@ -67,7 +67,7 @@
     },
     "deadline_seconds": 60,
     "candidate": "private-mode-0600-only",
-    "installation": "separate-explicit-revalidation-and-atomic-publication",
+    "installation": "run-scoped-record-then-binding-compare-and-set",
     "image_tools": ["/bin/sh", "cat", "chmod", "command", "head", "id", "printf", "sleep", "test", "touch", "wget", "uid65534-readable-executable"]
   },
   "observer": {

@@ -339,7 +339,7 @@ class OneClaimsBlockerOrder(MediatorFixture):
     """A1-5: terminal states, then what the author can do now, then waiting on a human; the batch is still there."""
 
     def experiment(self, mode="deliberative"):
-        drv, run_id = self.start(kind="needs-experiment", mode=mode, qualified=True)
+        drv, run_id = self.start(kind="needs-experiment", mode=mode)
         self.research(drv, run_id, "web", URL)
         return drv, run_id
 

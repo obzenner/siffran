@@ -56,8 +56,7 @@ def bind_selector(operation_context: str, reason_codes: list[str],
 
 
 def compose_application(workspace, harness, runs, artifacts, host,
-                        profile_id, limits, clock, spike_authority_selector=None,
-                        image_resolver=None):
+                        profile_id, limits, clock, image_resolver=None):
     """Import ``application.v2`` and call its ``compose()`` factory — the only composition entry.
 
     Raises :class:`driver.V2SeamAbsent` (late import, no load-time cycle) when the seam is absent
@@ -85,7 +84,6 @@ def compose_application(workspace, harness, runs, artifacts, host,
     return compose(
         workspace=workspace, harness=harness, runs=runs, artifacts=artifacts,
         host=host, profile_id=profile_id, limits=limits, clock=clock,
-        spike_authority_selector=spike_authority_selector,
         image_resolver=image_resolver,
     )
 
@@ -312,14 +310,13 @@ class LiveDriver:
 
 
 def bind_live(workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-              spike_authority_selector=None, image_resolver=None):
+              image_resolver=None):
     """Compose the real v2 service through the fake ports and wrap it behind ``ConformanceDriver``.
 
     The only SUT composition entry point. ``driver.new_driver`` calls this; tests never do.
     """
     service = compose_application(
         workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-        spike_authority_selector=spike_authority_selector,
         image_resolver=image_resolver,
     )
     return LiveDriver(

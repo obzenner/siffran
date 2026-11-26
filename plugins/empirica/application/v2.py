@@ -8,7 +8,6 @@ from core import governance, hitl
 from core.projection import project_runview
 from . import protocol as _proto
 from .location import decode_handle
-from .ports import NullSpikeAuthoritySelector
 from .governance import host_ingress_admitted, transact_environment
 from .run_state import classify_and_decode
 from .snapshot import HistoryCorrupt
@@ -46,16 +45,14 @@ class _Service:
                  "_limits", "_clock", "_image_resolver", "_qualification_port", "_coordinator")
 
     def __init__(self, workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-                 spike_authority_selector=None, image_resolver=None, qualification_port=None):
+                 image_resolver=None, qualification_port=None):
         self._workspace, self._harness, self._runs = workspace, harness, runs
         self._artifacts, self._host, self._profile_id = artifacts, host, profile_id
         self._limits, self._clock = _admit_limits(limits), clock
         self._image_resolver = image_resolver
         self._qualification_port = qualification_port
-        selector = (spike_authority_selector if spike_authority_selector is not None
-                    else NullSpikeAuthoritySelector())
         self._coordinator = Coordinator(
-            workspace, harness, runs, artifacts, profile_id, self._limits, selector,
+            workspace, harness, runs, artifacts, profile_id, self._limits,
             image_resolver, qualification_port)
 
     def dispatch(self, raw: dict) -> dict:
@@ -70,7 +67,6 @@ class _Service:
     def reload(self) -> "_Service":
         return _Service(self._workspace, self._harness, self._runs, self._artifacts,
                         self._host, self._profile_id, self._limits, self._clock,
-                        self._coordinator.spike_authority_selector,
                         self._image_resolver, self._coordinator.qualification_port)
 
     def compact(self) -> dict:
@@ -310,7 +306,7 @@ class _Service:
 
 
 def compose(workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-            spike_authority_selector=None, image_resolver=None, qualification_port=None):
+            image_resolver=None, qualification_port=None):
     return _Service(
         workspace, harness, runs, artifacts, host, profile_id, limits, clock,
-        spike_authority_selector, image_resolver, qualification_port)
+        image_resolver, qualification_port)

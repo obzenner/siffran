@@ -268,17 +268,6 @@ QUALIFICATION_DIGEST = canonical_digest("qualified transaction record")
 EXECUTION_BINDING_DIGEST = canonical_digest("qualified transaction binding")
 
 
-class QualifiedSelector:
-    def __init__(self):
-        self.calls = 0
-
-    def select(self):
-        self.calls += 1
-        return generic_spike.GenericQualifiedBackend(
-            "docker", "docker-isolated-v1", QUALIFICATION_DIGEST,
-            EXECUTION_BINDING_DIGEST)
-
-
 def bind_qualified_backend(coordinator, runs: Runs, *, record_digest=QUALIFICATION_DIGEST,
                            execution_binding_digest=EXECUTION_BINDING_DIGEST,
                            spike_images=None) -> None:
@@ -837,7 +826,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_route_order_rejections_have_zero_writes_or_execution(self):
         runs, artifacts_repo, harness = Runs(), Artifacts(), Harness()
         coordinator = ProductionCoordinator(Workspace(), harness, runs, artifacts_repo,
-                                  PI_PROFILE, {}, QualifiedSelector())
+                                  PI_PROFILE, {})
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION),
             "selector": {"project": "p", "session": "route"}, "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -1049,8 +1038,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_post_plan_capture_tracks_disjoint_graph_heads(self):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
         coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, QualifiedSelector(),
-            ImageResolver())
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, ImageResolver())
         started = coordinator.handle({"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
                                       "goal": "g"}, "start")
         run_id = started["result"]["run"]["id"]
@@ -1255,10 +1243,8 @@ class D7TransactionTests(unittest.TestCase):
                                 research_author=_KEEP, request_author=_KEEP,
                                 completion_author=AUDITOR):
         runs, artifacts_repo, workspace, harness = Runs(), Artifacts(), Workspace(), Harness()
-        selector = QualifiedSelector()
         coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, selector,
-            ImageResolver())
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, ImageResolver())
         started = coordinator.handle(
             {"type": "StartRun", "control_mode": "deliberative", "invocation": dict(TEST_INVOCATION), "selector": {"project": "p", "session": "s"},
              "goal": "g"}, "start")
@@ -1362,9 +1348,8 @@ class D7TransactionTests(unittest.TestCase):
         runs, artifacts_repo = Runs(), Artifacts()
         workspace = Workspace() if workspace is None else workspace
         harness = harness if harness is not None else Harness()
-        selector = QualifiedSelector()
         coordinator = ProductionCoordinator(
-            workspace, harness, runs, artifacts_repo, PI_PROFILE, {}, selector,
+            workspace, harness, runs, artifacts_repo, PI_PROFILE, {},
             ImageResolver() if resolver is None else resolver, port)
         started = coordinator.handle(
             {"type": "StartRun", "control_mode": "deliberative",
@@ -1386,7 +1371,7 @@ class D7TransactionTests(unittest.TestCase):
                                            "citation": "Observation basis fixture."}}}, "research")
         workspace.write("src/x.py", b"x")
         action = spike_action("src/x.py")
-        return (coordinator, runs, artifacts_repo, workspace, harness, selector, run_id,
+        return (coordinator, runs, artifacts_repo, workspace, harness, run_id,
                 next(iter(runs.data)), action)
 
     @staticmethod
@@ -1437,7 +1422,7 @@ class D7TransactionTests(unittest.TestCase):
                 return result
 
         harness = RealHarness()
-        coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, _ = \
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key, _ = \
             self._qualified_spike_ready(harness, session="real-harness-result-admission")
         # The live E2E-B1 shape: inputs in author order, not canonical order, through the
         # schema-validating protocol gateway the bridge uses.
@@ -1469,7 +1454,7 @@ class D7TransactionTests(unittest.TestCase):
         for order in itertools.permutations(("src/x.py", "sample.conf", "lib/a.py")):
             with self.subTest(order=order):
                 harness = Harness()
-                coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, _ = \
+                coordinator, runs, artifacts_repo, workspace, _, run_id, key, _ = \
                     self._qualified_spike_ready(harness, session="order-" + "-".join(order))
                 workspace.write("sample.conf", b"k=v\n")
                 workspace.write("lib/a.py", b"a")
@@ -1493,7 +1478,7 @@ class D7TransactionTests(unittest.TestCase):
         for inputs in (("src", "src/x.py"), ("src", "src/")):
             with self.subTest(inputs=inputs):
                 harness, resolver = Harness(), ImageResolver()
-                coordinator, runs, artifacts_repo, _, _, _, run_id, key, _ = \
+                coordinator, runs, artifacts_repo, _, _, run_id, key, _ = \
                     self._qualified_spike_ready(
                         harness, session="malformed-" + "-".join(inputs), resolver=resolver)
                 before = self._artifact_kinds(artifacts_repo, key)
@@ -1510,7 +1495,7 @@ class D7TransactionTests(unittest.TestCase):
         for exit_code in (0, 17):
             with self.subTest(exit_code=exit_code):
                 harness = Harness(exit_code=exit_code)
-                (coordinator, runs, artifacts_repo, workspace, _, selector, run_id, key,
+                (coordinator, runs, artifacts_repo, workspace, _, run_id, key,
                  action) = self._qualified_spike_ready(harness, session=f"exit-{exit_code}")
 
                 def inspect_request_boundary():
@@ -1524,9 +1509,6 @@ class D7TransactionTests(unittest.TestCase):
                     {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
                 self.assertEqual(response["result"]["type"], "Allow", response)
                 self.assertEqual(harness.calls, 1)
-                # E9: StartRun reads no machine-wide authority (the run binds through its own
-                # qualification), so the selector is never consulted on this path.
-                self.assertEqual(selector.calls, 0)
                 request_value = harness.arguments[0]["request"]
                 self.assertTrue(request_value.run_id.startswith("r-"))
                 self.assertEqual(request_value.backend, generic_spike.GenericQualifiedBackend(
@@ -1547,7 +1529,7 @@ class D7TransactionTests(unittest.TestCase):
                 self.assertNotIn("captured_bytes", json.dumps(result))
 
     def test_qualified_spike_canonicalizes_dependent_paths_before_capture_and_execution(self):
-        coordinator, _, _, workspace, harness, _, run_id, _, action = \
+        coordinator, _, _, workspace, harness, run_id, _, action = \
             self._qualified_spike_ready(session="sorted-paths")
         workspace.write("src/a.py", b"a")
         action = spike_action("src/a.py", "src/x.py")
@@ -1572,7 +1554,7 @@ class D7TransactionTests(unittest.TestCase):
         for failure, expected in failures:
             with self.subTest(expected=expected):
                 harness = Harness(failure=failure)
-                coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+                coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
                     self._qualified_spike_ready(harness, session=f"failure-{expected}")
                 if expected == "BaseException":
                     with self.assertRaises(KeyboardInterrupt):
@@ -1616,7 +1598,7 @@ class D7TransactionTests(unittest.TestCase):
         for reason in reasons:
             with self.subTest(reason=reason.value):
                 harness = Harness()
-                coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+                coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
                     self._qualified_spike_ready(harness, session=f"prep-{reason.value}",
                                                 resolver=RefusingResolver(reason))
                 response = coordinator.handle(
@@ -1626,7 +1608,7 @@ class D7TransactionTests(unittest.TestCase):
                     "reason": reason.value})
                 self.assertEqual(harness.calls, 0)
                 self.assertNotIn("spike_request", self._artifact_kinds(artifacts_repo, key))
-        coordinator, _, _, workspace, harness, _, run_id, _, action = \
+        coordinator, _, _, workspace, harness, run_id, _, action = \
             self._qualified_spike_ready(session="prep-capture-invalid")
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id,
@@ -1658,7 +1640,7 @@ class D7TransactionTests(unittest.TestCase):
             self.assertIn(remedy, validator.REASON_HINTS[reason])
             with self.subTest(case=case):
                 harness, resolver = Harness(), Resolver()
-                coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, action = \
+                coordinator, runs, artifacts_repo, workspace, _, run_id, key, action = \
                     self._qualified_spike_ready(harness, session=f"reobserve-{reason}",
                                                 resolver=resolver)
 
@@ -1680,7 +1662,7 @@ class D7TransactionTests(unittest.TestCase):
                 self.assertNotIn("spike", self._artifact_kinds(artifacts_repo, key))
 
     def test_request_conflict_replans_before_the_single_harness_call(self):
-        coordinator, runs, _, _, harness, _, run_id, _, action = \
+        coordinator, runs, _, _, harness, run_id, _, action = \
             self._qualified_spike_ready(session="request-conflict")
         runs.conflicts = 1
         response = coordinator.handle(
@@ -1692,7 +1674,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_absent_and_corrupt_runs_never_call_the_harness(self):
         for state_kind in ("absent", "corrupt"):
             with self.subTest(state_kind=state_kind):
-                coordinator, runs, _, _, harness, _, run_id, key, action = \
+                coordinator, runs, _, _, harness, run_id, key, action = \
                     self._qualified_spike_ready(session=f"preflight-{state_kind}")
                 if state_kind == "absent":
                     runs.data.pop(key)
@@ -1706,7 +1688,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_request_only_crash_can_retry_without_duplicate_request(self):
         harness = Harness(failure=KeyboardInterrupt())
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="request-only")
         with self.assertRaises(KeyboardInterrupt):
             coordinator.handle(
@@ -1724,7 +1706,7 @@ class D7TransactionTests(unittest.TestCase):
     def test_request_only_retry_refuses_moved_tag_before_second_effect(self):
         resolver = ImageResolver()
         harness = Harness(failure=KeyboardInterrupt())
-        coordinator, _, _, _, _, _, run_id, _, action = self._qualified_spike_ready(
+        coordinator, _, _, _, _, run_id, _, action = self._qualified_spike_ready(
             harness, session="moved-tag", resolver=resolver)
         with self.assertRaises(KeyboardInterrupt):
             coordinator.handle(
@@ -1744,7 +1726,7 @@ class D7TransactionTests(unittest.TestCase):
                 "route_stamp", "investigation_stamp", "corrupt"):
             with self.subTest(race=race):
                 harness = Harness()
-                coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+                coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
                     self._qualified_spike_ready(harness, session=f"race-{race}")
 
                 def mutate():
@@ -1814,7 +1796,7 @@ class D7TransactionTests(unittest.TestCase):
                                          ("symlink-only-directory", real, ["emptydir"])):
             with self.subTest(label):
                 harness = Harness()
-                coordinator, _, artifacts_repo, _, _, _, run_id, key, action = \
+                coordinator, _, artifacts_repo, _, _, run_id, key, action = \
                     self._qualified_spike_ready(harness, session="empty-" + label, workspace=workspace)
                 action["plan"]["inputs"] = inputs
                 response = coordinator.handle(
@@ -1852,7 +1834,7 @@ class D7TransactionTests(unittest.TestCase):
             {"id": "C1", "text": "u", "gating": True, "kind": "needs-experiment"}],
             "edges": [{"from": "R", "to": "C0", "type": "SupportedBy"},
                       {"from": "R", "to": "C1", "type": "SupportedBy"}]}
-        coordinator, _, artifacts_repo, _, _, _, run_id, key, action = self._qualified_spike_ready(
+        coordinator, _, artifacts_repo, _, _, run_id, key, action = self._qualified_spike_ready(
             harness, session="shared-drift", resolver=resolver, workspace=workspace, graph=graph)
         research = coordinator.handle({"type": "ObserveAction", "run_id": run_id, "action": {
             "kind": "research", "claim_id": "C1", "source_kind": "code", "result": "supports",
@@ -1888,7 +1870,7 @@ class D7TransactionTests(unittest.TestCase):
             return real(self, snapshot, state, domain, post_plan_observation)
 
         harness = Harness()
-        coordinator, _, artifacts_repo, _, _, _, run_id, key, action = \
+        coordinator, _, artifacts_repo, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="missing-coverage")
         with mock.patch.object(transaction.Coordinator, "_post_plan", without_rows):
             response = coordinator.handle(
@@ -1902,7 +1884,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_a_binding_replaced_between_request_and_result_ends_superseded(self):
         harness = Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="binding-changed")
         mutated = []
 
@@ -1940,7 +1922,7 @@ class D7TransactionTests(unittest.TestCase):
         plan = transaction.plan_spike_request
         for order in itertools.permutations(("src/x.py", "sample.conf", "lib/a.py")):
             with self.subTest(order=order), mock.patch.object(transaction, "plan_spike_request", recording):
-                coordinator, _, _, workspace, _, _, run_id, _, _ = \
+                coordinator, _, _, workspace, _, run_id, _, _ = \
                     self._qualified_spike_ready(session="handler-" + "-".join(order))
                 workspace.write("sample.conf", b"k=v\n")
                 workspace.write("lib/a.py", b"a")
@@ -1952,11 +1934,10 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_concurrent_duplicate_calls_may_execute_twice_but_each_admits_once(self):
         first_harness, second_harness = Harness(), Harness()
-        coordinator, runs, artifacts_repo, workspace, _, _, run_id, key, action = \
+        coordinator, runs, artifacts_repo, workspace, _, run_id, key, action = \
             self._qualified_spike_ready(first_harness, session="concurrent")
         second = ProductionCoordinator(
-            workspace, second_harness, runs, artifacts_repo, PI_PROFILE, {},
-            QualifiedSelector(), ImageResolver())
+            workspace, second_harness, runs, artifacts_repo, PI_PROFILE, {}, ImageResolver())
         second_response = []
 
         def run_duplicate():
@@ -1979,7 +1960,7 @@ class D7TransactionTests(unittest.TestCase):
         harness = Harness(failure=generic_spike.GenericHarnessUnavailable(
             generic_spike.GenericUnavailableReason.AUTHORITY_INVALID,
             "PRIVATE_STUCK_OPERATION_o-123"))
-        coordinator, runs, artifacts_repo, _, _, selector, run_id, key, action = \
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="unavailable-harness")
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
@@ -1995,7 +1976,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_result_planner_refuses_fact_without_exact_committed_request(self):
         harness = Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="missing-request")
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
@@ -2017,7 +1998,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_public_run_and_argument_never_project_authored_environment_fingerprints(self):
         sentinel = "G9C_PUBLIC_SECRET_SENTINEL_7b8f2a"
-        coordinator, runs, _, _, _, _, run_id, key, action = \
+        coordinator, runs, _, _, _, run_id, key, action = \
             self._qualified_spike_ready(session="public-env-redaction")
         action["plan"]["environment"] = {"TOKEN": sentinel}
         response = coordinator.handle(
@@ -2041,7 +2022,7 @@ class D7TransactionTests(unittest.TestCase):
             {"TOKEN": sentinel})
 
     def test_core_request_planner_rejects_alternate_operation_timeout(self):
-        coordinator, _, _, workspace, _, _, run_id, key, action = \
+        coordinator, _, _, workspace, _, run_id, key, action = \
             self._qualified_spike_ready(session="operation-timeout-correlation")
         loaded = coordinator._load(key)
         snapshot = coordinator._assemble(
@@ -2062,7 +2043,7 @@ class D7TransactionTests(unittest.TestCase):
             plan_spike_request(snapshot, action, facts)
 
     def test_public_request_keeps_sealed_operation_timeout_after_current_constant_changes(self):
-        coordinator, _, _, _, _, _, run_id, _, action = \
+        coordinator, _, _, _, _, run_id, _, action = \
             self._qualified_spike_ready(session="historical-operation-timeout")
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
@@ -2076,7 +2057,7 @@ class D7TransactionTests(unittest.TestCase):
 
     def test_core_result_planner_rejects_alternate_composition_facts(self):
         harness = Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = \
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = \
             self._qualified_spike_ready(harness, session="result-correlation")
         response = coordinator.handle(
             {"type": "ObserveAction", "run_id": run_id, "action": action}, "spike")
@@ -2462,7 +2443,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         """A pending later revision qualifies nothing: its image is not admitted, while the bound
         revision's image stays admitted until a rebind."""
         resolver, harness = ImageResolver(), Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="membership", resolver=resolver)
         state = decode_state(runs.data[key].value)
         later = environment.revision_member(
@@ -2486,7 +2467,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         """A rebuilt listed image needs no new revision: the next spike resolves the reference
         again, for this run's binding, and seals and runs the new image ID."""
         resolver, harness = ImageResolver(), Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="per-spike", resolver=resolver)
         first = self.spike(coordinator, run_id, action, "first")
         resolver.image_id = "sha256:" + "7" * 64
@@ -2507,7 +2488,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         revision and the image ID of its own sealed request, and keeps naming them after the run
         is rebound; the rebind itself is part of what the argument digest binds."""
         resolver, harness = ImageResolver(), Harness()
-        coordinator, runs, _, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, _, _, _, run_id, key, action = self.ready(
             harness, session="lineage", resolver=resolver)
         self.assertEqual(self.spike(coordinator, run_id, action, "first")["result"]["type"], "Allow")
         before = coordinator.handle({"type": "GetArgument", "run_id": run_id}, "read")["result"]
@@ -2542,7 +2523,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
                 (2, "30.0.0", stale.QUALIFICATION_STALE_DAEMON, 1)):
             with self.subTest(call=call, reason=reason.value):
                 resolver, harness = ImageResolver(), Harness()
-                coordinator, _, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+                coordinator, _, artifacts_repo, _, _, run_id, key, action = self.ready(
                     harness, session="stale-" + str(call) + reason.value, resolver=resolver)
                 if isinstance(answer, str):
                     harness.before_result = lambda: setattr(resolver, "server_version", answer)
@@ -2555,7 +2536,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
 
     def test_the_effects_and_the_result_run_under_the_held_runtime_lock(self):
         port, harness = LeasePort(), Harness()
-        coordinator, _, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, _, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="leased", port=port)
         held = []
         harness.before_result = lambda: held.append(port.held)
@@ -2578,7 +2559,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
 
     def test_a_binding_replaced_before_the_lock_is_granted_ends_superseded_without_effects(self):
         port, harness = LeasePort(), Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="superseded", port=port)
         port.on_enter = lambda: self.rebind(coordinator, runs, "rebound")
         self.assertFault(self.spike(coordinator, run_id, action),
@@ -2595,7 +2576,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
         """The rebind lands between the sealing read and the request compare-and-set: the retry
         finds the binding the request was sealed under replaced and runs nothing."""
         resolver, harness = ImageResolver(), Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="sealing", resolver=resolver)
         real_resolve = resolver.resolve
 
@@ -2613,7 +2594,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
     def test_a_request_left_open_under_a_replaced_binding_does_not_block_the_retry(self):
         harness = Harness(failure=generic_spike.GenericHarnessUnavailable(
             generic_spike.GenericUnavailableReason.LIFECYCLE_UNAVAILABLE))
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="retry")
         self.spike(coordinator, run_id, action, "first")
         self.rebind(coordinator, runs, "requalified")
@@ -2646,7 +2627,7 @@ class SpikeBindingAdmissionTests(unittest.TestCase):
 
         port.runtime_lease = announced
         harness = Harness()
-        coordinator, runs, artifacts_repo, _, _, _, run_id, key, action = self.ready(
+        coordinator, runs, artifacts_repo, _, _, run_id, key, action = self.ready(
             harness, session="real-lock", port=port)
         responses = []
         with port.runtime_lease():

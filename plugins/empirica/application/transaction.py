@@ -38,7 +38,7 @@ from .generic_spike import (
     reobserve_generic_spike, sealed_request_facts,
     sealed_result_facts, validate_generic_harness_result,
 )
-from .ports import (NullSpikeAuthoritySelector, ObservationSnapshot,
+from .ports import (ObservationSnapshot,
                     QualificationAttemptRequest,
                     QualificationAttemptBound, QualificationAttemptFailed,
                     QualificationRuntimeBusy, QualificationSettleRequest)
@@ -137,7 +137,7 @@ def complete_start_ceilings(command: Mapping[str, Any],
 
 class Coordinator:
     def __init__(self, workspace: Any, harness: Any, runs: RunRepository[Any], artifacts: Any,
-                 profile_id: str, limits: Mapping[str, int], spike_authority_selector: Any = None,
+                 profile_id: str, limits: Mapping[str, int],
                  image_resolver: Any = None, qualification_port: Any = None):
         self.workspace, self.harness, self.runs, self.artifacts = workspace, harness, runs, artifacts
         self.profile_id, self.limits = profile_id, limits
@@ -146,9 +146,6 @@ class Coordinator:
         # degraded composition — makes StartRun bind spikes-unavailable and an admitted ``qualify`` refuse
         # as the unsupported host fact before reserving anything.
         self.qualification_port = qualification_port
-        self.spike_authority_selector = (spike_authority_selector
-                                         if spike_authority_selector is not None
-                                         else NullSpikeAuthoritySelector())
         self.image_resolver = image_resolver if image_resolver is not None else NullLocalImageResolver()
         self.last_state: OperationalState | None = None
         self.last_snapshot: EvaluationSnapshot | None = None

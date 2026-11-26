@@ -30,8 +30,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 import jsonschema
 
@@ -290,13 +289,11 @@ class BridgeV2Tests(unittest.TestCase):
     def test_build_service_composes_exact_v2_authority_image_resolver_and_harness(self):
         execution_store = object()
         store = type("Store", (), {"execution_store": execution_store})()
-        selector, resolver, image_resolver, docker_harness, service, run_store = (
-            object(), object(), object(), object(), object(), object())
+        resolver, image_resolver, docker_harness, service, run_store = (
+            object(), object(), object(), object(), object())
         loaded_release = "sha256:" + "0" * 64
         with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
               patch.object(bridge, "RunQualificationStore", return_value=run_store) as run_type,
-              patch.object(
-                  bridge, "GenericBackendSelector", return_value=selector) as selector_type,
               patch.object(bridge, "freeze_loaded_release", return_value=loaded_release) as frozen,
               patch.object(
                   bridge, "GenericAuthorityResolver", return_value=resolver) as resolver_type,
@@ -307,7 +304,6 @@ class BridgeV2Tests(unittest.TestCase):
               patch.object(bridge._v2, "compose", return_value=service) as compose):
             self.assertIs(bridge.build_service(_CANONICAL_PROFILE), service)
         store_type.assert_called_once_with()
-        selector_type.assert_called_once_with(store)
         frozen.assert_called_once_with()
         # A run's spikes resolve their binding through the run-scoped record store.
         run_type.assert_called_once_with()
@@ -316,7 +312,6 @@ class BridgeV2Tests(unittest.TestCase):
         harness_type.assert_called_once_with(execution_store, resolver)
         self.assertIs(compose.call_args.kwargs["harness"], docker_harness)
         self.assertIs(compose.call_args.kwargs["image_resolver"], image_resolver)
-        self.assertIs(compose.call_args.kwargs["spike_authority_selector"], selector)
         # E9: the host qualification port is composed exactly where the generic Docker backend
         # composed, and it is the bridge's own run-scoped port type.
         port = compose.call_args.kwargs["qualification_port"]
@@ -331,7 +326,7 @@ class BridgeV2Tests(unittest.TestCase):
             loaded_release="release")
 
     def test_sandbox_constructor_failure_degrades_only_spikes(self):
-        names = ("GenericQualificationStore", "GenericBackendSelector", "freeze_loaded_release",
+        names = ("GenericQualificationStore", "freeze_loaded_release",
                  "RunQualificationStore", "GenericAuthorityResolver", "DockerLocalImageResolver",
                  "GenericDockerHarness")
         for failing in names:
@@ -339,8 +334,6 @@ class BridgeV2Tests(unittest.TestCase):
             with self.subTest(failing=failing), \
                     patch.object(bridge, "GenericQualificationStore",
                                  return_value=store_value) as store, \
-                    patch.object(bridge, "GenericBackendSelector",
-                                 return_value=object()) as selector, \
                     patch.object(bridge, "freeze_loaded_release",
                                  return_value="sha256:" + "0" * 64) as loaded_release, \
                     patch.object(bridge, "RunQualificationStore",
@@ -351,17 +344,14 @@ class BridgeV2Tests(unittest.TestCase):
                                  return_value=object()) as image_resolver, \
                     patch.object(bridge, "GenericDockerHarness",
                                  return_value=object()) as docker_harness:
-                {"GenericQualificationStore": store, "GenericBackendSelector": selector,
+                {"GenericQualificationStore": store,
                  "freeze_loaded_release": loaded_release, "RunQualificationStore": run_store,
                  "GenericAuthorityResolver": resolver,
                  "DockerLocalImageResolver": image_resolver,
                  "GenericDockerHarness": docker_harness}[failing].side_effect = PermissionError(
                      "unsafe")
                 service = bridge.build_service(_CANONICAL_PROFILE)
-            from application.ports import NullSpikeAuthoritySelector
             self.assertIsNone(service._harness)
-            self.assertIsInstance(
-                service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
             self.assertIsNone(service._coordinator.qualification_port,
                                "a degraded composition composes no qualification port")
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
@@ -390,10 +380,7 @@ class BridgeV2Tests(unittest.TestCase):
         def composed_service():
             return bridge.build_service(_CANONICAL_PROFILE)
 
-        from application.ports import NullSpikeAuthoritySelector
         with (patch.object(bridge, "GenericQualificationStore", return_value=store) as store_type,
-              patch.object(
-                  bridge, "GenericBackendSelector", return_value=object()) as selector_type,
               patch.object(bridge, "GenericAuthorityResolver", return_value=object()),
               patch.object(bridge, "DockerLocalImageResolver", return_value=object()),
               patch.object(bridge, "GenericDockerHarness", return_value=object()),
@@ -405,30 +392,14 @@ class BridgeV2Tests(unittest.TestCase):
                 disk.append(landed)  # a valid release lands on disk under the live process
                 services.append(composed_service())
             store_type.assert_not_called()
-            selector_type.assert_not_called()
         for service in services:
             self.assertIsNone(service._harness)
-            self.assertIsInstance(
-                service._coordinator.spike_authority_selector, NullSpikeAuthoritySelector)
             self.assertIsNone(service._coordinator.qualification_port)
             response = service.dispatch(_valid_request({"type": "GetContract", "target": "index"}))
             self.assertEqual(response["result"]["type"], "Allow", response)
         self.assertEqual(reads, [1])  # one snapshot attempt, at the failed first composition
         self.assertTrue(sandbox_common._loaded_release_failed)
         self.assertIsNone(sandbox_common.loaded_release_digest())
-
-    def test_bridge_construction_performs_no_docker_discovery(self):
-        store = SimpleNamespace(execution_store=object())
-        selector = SimpleNamespace(select=Mock(
-            side_effect=AssertionError("selection is StartRun-only")))
-        with patch.object(bridge, "GenericQualificationStore", return_value=store), \
-                patch.object(bridge, "GenericBackendSelector", return_value=selector), \
-                patch.object(bridge, "GenericAuthorityResolver", return_value=object()), \
-                patch.object(bridge, "DockerLocalImageResolver", return_value=object()), \
-                patch.object(bridge, "GenericDockerHarness", return_value=object()):
-            service = bridge.build_service(_CANONICAL_PROFILE)
-        self.assertTrue(callable(service.dispatch))
-        selector.select.assert_not_called()
 
     def test_start_run_binds_the_run_scoped_reference_without_docker_reads(self):
         self.assertEqual(Path(os.environ["EMPIRICA_SANDBOX_HOME"]), ABSENT_SANDBOX_HOME)
@@ -556,7 +527,6 @@ class QualificationPortCompositionTests(unittest.TestCase):
     def _compose(self, profile_id):
         store = type("Store", (), {"execution_store": object()})()
         with (patch.object(bridge, "GenericQualificationStore", return_value=store),
-              patch.object(bridge, "GenericBackendSelector", return_value=object()),
               patch.object(bridge, "freeze_loaded_release", return_value="sha256:" + "0" * 64),
               patch.object(bridge, "GenericAuthorityResolver", return_value=object()),
               patch.object(bridge, "DockerLocalImageResolver", return_value=object()),

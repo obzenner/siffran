@@ -35,12 +35,12 @@ The normative adapter-independent Docker boundary lives in `contracts/empirica-d
 
 The application, capability-authority, local-image-resolution, pure compiler, semantic-admission,
 immutable staging, bounded-effects, reconstructing-journal, cleanup/recovery, and one-container
-harness and five-probe qualification checkpoints are complete. Qualification and installation are
-separate Make-owned operator operations: the first writes only a private candidate, and the second
-revalidates current implementation, semantic capability, profile, and candidate identity before
-atomically publishing the new `/2` record and pointer. Both require an exact profile and one
-server-native Linux image, remain outside an Empirica run, and never pull, build, load, log
-in, repair, switch context, or accept model-authored runtime input.
+harness and five-probe qualification checkpoints are complete. A run qualifies its own environment
+through its `qualify` action, whose attempt writes the run-scoped `/3` record and binds it by the run's
+compare-and-set; no machine-wide record or pointer is published or read. The operator diagnostic
+`make generic-docker-qualify-candidate` runs the same probe kernel outside any run for one exact
+profile and one server-native Linux image, writes only a private candidate that binds nothing, and
+never pulls, builds, loads, logs in, repairs, switches context, or accepts model-authored runtime input.
 
 Qualification has five mandatory probes: sandbox realization PASS, natural 125 FAIL,
 output overflow unavailable, a qualification-only five-second timeout unavailable, and selected
@@ -52,9 +52,9 @@ and journal/staging roots empty, never a global Docker inventory comparison.
 
 After discovery, every qualification and runtime operation uses only the resolved canonical CLI target (an ordinary symlink to that regular executable is accepted) and a closed host environment (`LANG=C`, `LC_ALL=C`, exact local Unix `DOCKER_HOST`, and an
 empty profile-owned Docker config directory). A nonempty config refusal identifies the offending private directory without exposing file contents. There is no ambient context, host execution, proxy,
-credential, image-acquisition, or network-profile fallback. Runtime selection is read-only;
+credential, image-acquisition, or network-profile fallback. Spike-time resolution is read-only;
 historical resolution re-observes the exact environment, implementation, Docker, endpoint, and
-image identities by digest. A new installed pointer can affect only future runs.
+image identities by digest. A new qualification binds only the run that made it.
 
 The application accepts only closed single-container `empirica.spike-plan-draft/2` data: one local
 image reference, exact argv, optional repository-relative file/directory inputs, and a bounded
@@ -184,11 +184,10 @@ Docker daemon.
 | `make empirica-generic-staging-check` | `/2` descriptor-relative, no-follow immutable snapshot materialization, exact revalidation, atomic publication, and bounded cleanup | temporary filesystem only; no Docker daemon |
 | `make empirica-generic-harness-check` | single-container private Docker coordinator, reconstructing journal, exact natural verdict/cleanup/postflight admission, and closed unavailable reasons | fake effects and authority only; no live qualification authority |
 | `make empirica-generic-authority-check` | passive local Docker Engine/Desktop capability observation, semantic record binding, exact profile selection, historical re-observation, and one-call local image resolution | fake passive observations only; no Docker daemon |
-| `make empirica-bridge-composition-check` | production generic store, selector, authority, local-image resolver, and exact `/2` harness composition; unsafe authority degradation and non-spike availability | isolated absent `EMPIRICA_SANDBOX_HOME`; no Docker daemon, publication, or live qualification authority |
+| `make empirica-bridge-composition-check` | production generic store, run-scoped record store, authority, local-image resolver, and exact `/2` harness composition; unsafe authority degradation and non-spike availability | isolated absent `EMPIRICA_SANDBOX_HOME`; no Docker daemon, publication, or live qualification authority |
 | `make empirica-transaction-check` | single-container two-CAS activation: bounded read-only image resolution, deterministic file/directory capture, immutable request before execution, exact retry correlation, one effect across result-CAS retries, postflight image/input/authority re-observation, and unavailable fail-closed behavior | in-memory repositories/workspace/resolver/harness, plus real filesystem capture of a temporary directory; no Docker daemon or live authority |
-| `make empirica-generic-qualification-check` | closed new `/2` candidate/record/pointer validation, exact five-probe sequencing and expected outcomes through fake production effects, under-60 bound, running network membership, scoped cleanup, tamper/legacy rejection, candidate-only output, and separately explicit atomic installation | temporary files and fake Docker observations only; neither qualify nor install target is invoked |
-| `make generic-docker-qualify-candidate PROFILE=… IMAGE=… DOCKER=… OUT=… WORK=…` | operator-only five-probe qualification of one already-local native image and exact profile; writes only a private candidate | live Docker operation, deliberately outside automated checks; never installs |
-| `make generic-docker-install-candidate PROFILE=… CANDIDATE=… SANDBOX_HOME=…` | separately revalidate and atomically publish one exact new `/2` record/pointer | explicit operator mutation, deliberately never invoked by tests or ordinary runtime |
+| `make empirica-generic-qualification-check` | closed `/2` candidate record validation, exact five-probe sequencing and expected outcomes through fake production effects, under-60 bound, running network membership, scoped cleanup, tamper/legacy rejection, candidate-only output, and the run-scoped `/3` qualification owner | temporary files and fake Docker observations only; the diagnostic target is never invoked |
+| `make generic-docker-qualify-candidate PROFILE=… IMAGE=… DOCKER=… OUT=… WORK=…` | operator diagnostic: the five probes of one already-local native image and exact profile outside any run; writes only a private candidate | live Docker operation, deliberately outside automated checks; binds no run |
 | `make empirica-governance-check` | full governance service, CAS/replay/consent, simulated host flows | repeated Git/state setup |
 | `make empirica-core-integration` | full governance coverage, strict v2 state, transactions, retry, persistence, complete behavioral matrix | broad filesystem/schema scenarios; includes `empirica-governance-check` so admission/consent negative controls cannot fall outside the milestone gate |
 | `make empirica-v2-check ARGS="-k test_name"` | a selected behavioral regression (omit ARGS for all v2 cases) | ordinary unittest selection, no custom runner |

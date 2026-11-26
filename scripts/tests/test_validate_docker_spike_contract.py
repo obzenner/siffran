@@ -209,7 +209,7 @@ class StaleTextTests(unittest.TestCase):
         self.assertIn("600 seconds", exempt.read_text())
         makefile = root / "Makefile"
         makefile.write_text(makefile.read_text().replace(
-            "generic-docker-install-candidate:", "generic-docker-install-renamed:"))
+            "generic-docker-qualify-candidate:", "generic-docker-qualify-renamed:"))
         with self.assertRaisesRegex(validator.ContractError, "absent Make target"):
             validator.check_stale_text(root)
 

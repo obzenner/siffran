@@ -623,7 +623,7 @@ lifecycle-gates-unit-check: ## Test through make that lint and adr-check fail wi
 
 ## --- Qualify
 
-.PHONY: empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-fixtures empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check generic-docker-qualify-candidate generic-docker-install-candidate empirica-generic-harness-check empirica-generic-execution-check
+.PHONY: empirica-sandbox-check empirica-spike-plan-draft-check empirica-generic-spike-application-check empirica-docker-fixtures empirica-docker-planner-check empirica-generic-staging-check empirica-generic-authority-check empirica-generic-qualification-check generic-docker-qualify-candidate empirica-generic-harness-check empirica-generic-execution-check
 
 empirica-sandbox-check: ## Test generic workspace capture, subprocess, scaffolding, lock, digest-pinned probe image, and implementation-identity primitives without Docker
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica $(PYTHON) -m unittest -q $(EMPIRICA_SANDBOX_TESTS)
@@ -649,17 +649,13 @@ empirica-generic-authority-check: ## Test passive Docker capability authority, r
 	@$(PYTHON) $(SCRIPTS)/generate_generic_docker_fixtures.py --check
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_GENERIC_AUTHORITY_TESTS)
 
-empirica-generic-qualification-check: ## Test five-probe candidate qualification and explicit installation without Docker or publication
+empirica-generic-qualification-check: ## Test the five-probe qualification kernel, the operator diagnostic candidate and the run-scoped qualification owner without Docker
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_GENERIC_QUALIFICATION_TESTS)
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_RUN_QUALIFICATION_TESTS)
 
-generic-docker-qualify-candidate: ## QUALIFY ONLY: write a private candidate with PROFILE= IMAGE= DOCKER= OUT= WORK=; OUT= must not exist and its parent must already be your own mode-0700 directory (checked when the candidate is written, after the probes); never installs authority
+generic-docker-qualify-candidate: ## DIAGNOSTIC ONLY: run the five qualification probes outside any run and write a private candidate with PROFILE= IMAGE= DOCKER= OUT= WORK=; OUT= must not exist and its parent must already be your own mode-0700 directory (checked when the candidate is written, after the probes); binds nothing: a run qualifies through its own environment step
 	@test -n "$(PROFILE)" -a -n "$(IMAGE)" -a -n "$(DOCKER)" -a -n "$(OUT)" -a -n "$(WORK)" || { echo 'PROFILE, IMAGE, DOCKER, OUT, and WORK are required' >&2; exit 2; }
 	@$(PYTHON) $(SCRIPTS)/generic_docker_qualify.py --profile "$(PROFILE)" --image "$(IMAGE)" --docker "$(DOCKER)" --output "$(OUT)" --work-root "$(WORK)"
-
-generic-docker-install-candidate: ## EXPLICIT INSTALL: validate/publish CANDIDATE= for PROFILE= into SANDBOX_HOME=; never qualifies or acquires images
-	@test -n "$(PROFILE)" -a -n "$(CANDIDATE)" -a -n "$(SANDBOX_HOME)" || { echo 'PROFILE, CANDIDATE, and SANDBOX_HOME are required' >&2; exit 2; }
-	@$(PYTHON) $(SCRIPTS)/generic_docker_install.py --profile "$(PROFILE)" --candidate "$(CANDIDATE)" --sandbox-home "$(SANDBOX_HOME)"
 
 empirica-generic-harness-check: ## Test the production-composed generic Docker coordinator without Docker
 	@PYTHONPATH=$(PLUGINS_DIR)/empirica:$(PLUGINS_DIR)/empirica/tests $(PYTHON) $(EMPIRICA_GENERIC_HARNESS_TESTS)
@@ -816,7 +812,7 @@ verify: ## The one hermetic gate: the installs (node_modules, dev-install, ui-in
 release-check: check empirica-core-integration empirica-governance-check empirica-host-integration empirica-subagents-matrix empirica-pi-api-typecheck ## Deliberate pre-release gate: fast checks, integration diagnostics, the reviewed pi-subagents and Pi API matrices
 	@printf '\n$(BOLD)Automated release checks passed.$(RESET) They are not release evidence on their own; the rest is yours:\n'
 	@printf '  1. native qualification in each supported host (make native-qualification prints the operator procedure)\n'
-	@printf '  2. Docker qualification and install of each profile at this implementation digest (generic-docker-qualify-candidate, then generic-docker-install-candidate)\n'
+	@printf '  2. Docker qualification of each profile at this implementation digest, through the environment step of a live run (generic-docker-qualify-candidate is the out-of-run diagnostic)\n'
 	@printf '  3. the live cells of contracts/empirica-docker-spike/v1/support-contract.json, observed by the operator\n'
 	@printf '  4. confirm the version bump is in plugin.json (make status)\n'
 	@printf '  5. commit and push, then open or update the PR\n'

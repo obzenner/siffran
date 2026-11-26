@@ -41,8 +41,7 @@ from core.canonical import canonical_digest
 from core.governance import expected_approval_kind
 from application.protocol import host_profile
 from core.records import Present, Revision, RunKey
-from driver import (FIXTURE_SPIKE_IMAGE, FakeClock, FakeSpikeAuthoritySelector, MemoryTimeline,
-                    clone_driver)
+from driver import FIXTURE_SPIKE_IMAGE, FakeClock, MemoryTimeline, clone_driver
 force_absent_sandbox_home()
 
 PROFILE = ConformanceCase.DEFAULT_PROFILE
@@ -457,11 +456,9 @@ def _graph(root: str, claims: list[tuple[str, str, str]], edges: list[tuple[str,
 class _Builder:
     def __init__(self, clock: FakeClock | None = None, timeline: MemoryTimeline | None = None) -> None:
         self.a = _Author()
-        self.spike_authority = FakeSpikeAuthoritySelector()
         timeline = MemoryTimeline() if timeline is None else timeline
         self.store = Store(self.a.bind_driver("observer", "store", "observer fixture store", PROFILE,
-                                              clock=clock or FakeClock(T0, STEP), timeline=timeline,
-                                              spike_authority_selector=self.spike_authority),
+                                              clock=clock or FakeClock(T0, STEP), timeline=timeline),
                            timeline=timeline)
         self.drv = self.store.driver
         self.files: dict[str, bytes] = {}  # what the workspace holds, so citations quote it verbatim

@@ -101,8 +101,8 @@ class Gates(unittest.TestCase):
         banner = done.stdout
         self.assertIn("Automated release checks passed", banner)
         self.assertNotIn("Ready to release", banner)
-        for owed in ("native qualification", "make native-qualification", "generic-docker-qualify-candidate",
-                     "generic-docker-install-candidate", "contracts/empirica-docker-spike/v1/support-contract.json"):
+        for owed in ("native qualification", "make native-qualification", "environment step",
+                     "contracts/empirica-docker-spike/v1/support-contract.json"):
             self.assertIn(owed, banner)
 
 

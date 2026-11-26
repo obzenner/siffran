@@ -29,7 +29,7 @@ from application import generic_spike, protocol
 from application.ports import QualificationSettleRequest
 from core import run as core_run
 from application.transaction import Coordinator as ProductionCoordinator
-from test_d7_transactions import Harness, QualifiedSelector, Workspace
+from test_d7_transactions import Harness, Workspace
 from test_environment_actions import ENVIRONMENT_ACTION, QUALIFY_ACTION
 from test_qualification_transaction import PROFILE, ProcessDied, QualificationEnv
 from test_run_qualification import D0, OwnerHarness, spike_document
@@ -211,8 +211,8 @@ class RealPortTests(unittest.TestCase):
 
         self.harness.on_inspect = pause_in_the_attempt
         rival = ProductionCoordinator(
-            Workspace(), Harness(), self.env.runs, self.env.artifacts_repo, PROFILE, {},
-            QualifiedSelector(), None, bridge._RunQualificationPort(**self.harness.options()))
+            Workspace(), Harness(), self.env.runs, self.env.artifacts_repo, PROFILE, {}, None,
+            bridge._RunQualificationPort(**self.harness.options()))
         answers = {}
         attempt = threading.Thread(
             target=lambda: answers.update(first=self.env.qualify("first")), daemon=True)
