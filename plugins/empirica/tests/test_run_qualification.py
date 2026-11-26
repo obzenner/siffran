@@ -149,6 +149,7 @@ class OwnerHarness:
         self.docker_cli = Path(runtime()["docker_cli"])
         self.inspector_facts = copy.deepcopy(runtime())
         self.inspector_calls = 0
+        self.on_inspect = None
         self.manifests = [{"implementation_digest": D0}]
         self.kernel_wrapper = None
         self.effects_options = {
@@ -166,6 +167,8 @@ class OwnerHarness:
 
     def _runtime_inspector(self, recorded, *, deadline, **kwargs):
         self.inspector_calls += 1
+        if self.on_inspect is not None:
+            self.on_inspect(self.inspector_calls)
         return authority.GenericRuntimeInspection(copy.deepcopy(self.inspector_facts))
 
     def _implementation_inspector(self):
@@ -1930,7 +1933,7 @@ class OwnerTests(IsolatedSandboxHomeTestCase):
 
 
 class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
-    """Settling the open row of a dead attempt (spec §5, E9 fix round): the shared runtime lock
+    """Settling the open row of a dead attempt (spec §5): the shared runtime lock
     is taken without waiting, prior journals are recovered by the attempt's own recovery owner
     under it, and the transaction's closing runs still under it."""
 
@@ -2016,6 +2019,38 @@ class SettleInterruptedAttemptTests(IsolatedSandboxHomeTestCase):
         stale = self.harness.call(lease=lease)
         self.assertIs(type(stale), run_owner.RunQualificationFailed)
         self.assertIs(stale.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+
+    def test_a_settle_spends_only_what_is_left_of_the_lease_deadline(self):
+        """The lease carries the one bound of a qualify: time already spent under it is not given
+        back to the settle, so a settle that starts past the bound ends as the deadline failure
+        without recovering or closing the row (the settle's own budget alone would still have had room)."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        clock = self.harness.clock
+        closed = []
+        with run_owner.hold_runtime_lock(sandbox_root=self.root, clock=clock) as lease:
+            clock.advance(bound * 1.1)
+            outcome = self.settle(lambda: closed.append(True), lease=lease)
+        self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+        self.assertIs(outcome.reason, run_owner.RunQualificationReason.DEADLINE_EXCEEDED)
+        self.assertEqual((closed, self.recoveries), ([], []))
+
+    def test_the_budget_has_one_ingress_bound_for_the_attempt_and_the_settle(self):
+        """A budget is a positive number of seconds no larger than the qualify bound, and never a
+        boolean or text; the attempt and the settle refuse the same values before any effect."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        refused = (0, -1, bound + 0.001, True, "5", float("nan"))
+        closed = []
+        for value in refused:
+            with self.subTest(value=value):
+                settled = self.settle(lambda: closed.append(True), qualification_seconds=value)
+                attempted = self.harness.call(qualification_seconds=value)
+                for outcome in (settled, attempted):
+                    self.assertIs(type(outcome), run_owner.RunQualificationFailed)
+                    self.assertIs(outcome.reason, run_owner.RunQualificationReason.INVALID_INPUT)
+        self.assertEqual((closed, self.recoveries, self.harness.inspector_calls), ([], [], 0))
+        for value in (None, bound, 0.5):
+            with self.subTest(accepted=value):
+                self.assertIs(self.settle(lambda: None, qualification_seconds=value), True)
 
     def test_a_recovery_that_cannot_run_returns_its_closed_failure_and_never_closes(self):
         closed = []

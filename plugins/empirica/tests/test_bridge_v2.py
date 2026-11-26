@@ -63,6 +63,7 @@ from sandbox_isolation import (  # noqa: E402
     ABSENT_SANDBOX_HOME, force_absent_sandbox_home)
 
 from adapters import bridge  # noqa: E402
+from core.governance import UNAVAILABLE_CAPABILITY  # noqa: E402
 from adapters.sandbox import common as sandbox_common  # noqa: E402
 from governance_setup import invocation_for  # noqa: E402
 force_absent_sandbox_home()
@@ -523,6 +524,12 @@ class BridgeV2Tests(unittest.TestCase):
         _assert_inert_no_run(resp)
 
 
+def _withheld(profile) -> bool:
+    """A profile whose registry row carries no approval capability, read from the contract data."""
+    return (_PUBLIC_CONTRACT["approval_ingress"][profile["approval_ingress"]]["capability"]
+            == UNAVAILABLE_CAPABILITY)
+
+
 class QualificationPortCompositionTests(unittest.TestCase):
     """The qualification port is an execution path: it is composed where the generic Docker
     composition succeeded, and never for a profile the registry marks unsupported."""
@@ -542,7 +549,7 @@ class QualificationPortCompositionTests(unittest.TestCase):
             profile_id = profile["profile_id"]
             with self.subTest(profile=profile_id):
                 port = self._compose(profile_id)._coordinator.qualification_port
-                if profile["promotion_status"] == bridge._QUALIFICATION_WITHHELD_STATUS:
+                if _withheld(profile):
                     self.assertIsNone(port)
                 else:
                     self.assertIsInstance(port, bridge._RunQualificationPort)
@@ -553,7 +560,7 @@ class QualificationPortCompositionTests(unittest.TestCase):
         from test_qualification_transaction import FakeQualificationPort, QualificationEnv
         env = QualificationEnv(FakeQualificationPort())
         unsupported = next(p["profile_id"] for p in _HOST_PROFILES["profiles"]
-                           if p["promotion_status"] == bridge._QUALIFICATION_WITHHELD_STATUS)
+                           if _withheld(p))
         coordinator = self._compose(unsupported)._coordinator
         coordinator.runs, coordinator.artifacts, coordinator.workspace = (
             env.runs, env.artifacts_repo, Workspace())

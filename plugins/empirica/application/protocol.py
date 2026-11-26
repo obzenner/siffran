@@ -18,6 +18,7 @@ from referencing import Registry, Resource
 
 from core.canonical import CONTRACT_DIGEST_PLACEHOLDER, canonical_digest, replace_string_values
 from core.evaluation import ContractView
+from core.governance import UNAVAILABLE_CAPABILITY
 from .history_records import POLICY_INPUT_KEYS
 
 _LOGGER = logging.getLogger("empirica.protocol")
@@ -199,6 +200,12 @@ def host_profile_id(host_id: str) -> str:
 def audit_launch(profile_id: str) -> str | None:
     """The exact auditor launch a host's profile declares (``host-profiles.json`` is its only copy), else ``None``."""
     return (_PROFILES.get(profile_id) or {}).get("audit_launch")
+
+
+def approval_available(profile_id: str) -> bool:
+    """Whether the profile's approval ingress carries any approval capability (``public-contract.json``):
+    where none does, no host consent can ever be given."""
+    return APPROVAL_CAPABILITY[_PROFILES[profile_id]["approval_ingress"]] != UNAVAILABLE_CAPABILITY
 
 
 def host_profile(profile_id: str) -> Mapping[str, Any]:

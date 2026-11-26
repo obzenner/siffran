@@ -65,7 +65,7 @@ class QualificationAttemptFailed:
 @dataclass(frozen=True, slots=True)
 class QualificationSettleRequest:
     """The facts a host needs to settle an open attempt row that no live attempt drives
-    (Empirica 7.2 §5, E9 fix round): the run binding and the open row's identity, plus the
+    (Empirica 7.2 §5): the run binding and the open row's identity, plus the
     profile whose scaffolding journal recovery runs on. Built from committed state only."""
 
     project_id: str

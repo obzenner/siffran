@@ -426,7 +426,7 @@ class GenericUnavailableReason(str, Enum):
     IMAGE_INSPECT_OUTPUT_LIMIT = "image-inspect-output-limit"
     IMAGE_TOOL_MISSING = "image-tool-missing"
     IMAGE_UID_UNUSABLE = "image-uid65534-unusable"
-    # Empirica 7.2 §5 (E9 fix round): the two causes of an attempt that is not one delivery's own.
+    # Empirica 7.2 §5 (E9): the two causes of an attempt that is not one delivery's own.
     # ``qualification-in-progress`` refuses a qualify while another attempt of the shared runtime
     # holds the lock (nothing reserved, nothing charged); ``qualification-interrupted`` is the
     # cause the next qualify records on an open row whose attempt died, which stays charged and

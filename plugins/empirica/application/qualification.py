@@ -1,10 +1,10 @@
 """The run-scoped qualification attempt transaction's host-neutral pieces (Empirica 7.2 §5, E9).
 
-One pure module beside the transaction that performs it: the neutral host port the bridge binds
-to E5's sandbox owner (``adapters.sandbox.run_qualification.qualify_run_environment``), the closed
-validation of the outcome that port returns, and the pure state projections of a recorded outcome
-— the attempt row's resolved form and the qualified spike-backend binding a bound outcome
-installs. The transaction itself (reservation, effect, binding compare-and-set, orphan handling)
+One pure module beside the transaction that performs it: the closed validation of the outcome the
+neutral host port (``application.ports``, which the bridge binds to E5's sandbox owner,
+``adapters.sandbox.run_qualification.qualify_run_environment``) returns, and the pure state
+projections of a recorded outcome — the attempt row's resolved form and the qualified
+spike-backend binding a bound outcome installs. The transaction itself (reservation, effect, binding compare-and-set, orphan handling)
 lives in :class:`application.transaction.Coordinator._qualify`; consumption of the recorded rows
 (views, audit context) is E11's.
 

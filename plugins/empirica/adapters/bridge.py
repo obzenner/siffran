@@ -190,11 +190,6 @@ def GenericDockerHarness(*args, **kwargs):
     return implementation(*args, **kwargs)
 
 
-#: The promotion status whose profiles never compose the qualification port: the port is an
-#: execution path, so an unsupported profile is withheld from it. ``host-profiles.json`` owns it.
-_QUALIFICATION_WITHHELD_STATUS = "wip_unsupported"
-
-
 #: The owner injection seams the lease and the settle take: recovery needs the discovery, the
 #: effects and the clock — never the attempt's probes; the sandbox root is the lease's.
 _SETTLE_SEAMS = frozenset({"runtime_inspector", "effects_factory", "clock"})
@@ -203,7 +198,8 @@ _LEASE_SEAMS = frozenset({"sandbox_root", "clock"})
 
 class _RunQualificationPort:
     """The host qualification port (Empirica 7.2 §5, E9), bound only where the guarded generic
-    Docker composition succeeded and the host's profile is supported: every call runs E5's
+    Docker composition succeeded and the host's profile carries an approval capability (an
+    environment revision can only be approved where one exists): every call runs E5's
     owner (``adapters.sandbox.run_qualification``) under the run binding the transaction
     reserved, with the approved revision's profile and spike-image references, the one 90-second
     host deadline the owner owns, the process's frozen loaded release, and the shared runtime
@@ -237,6 +233,8 @@ class _RunQualificationPort:
         from application.ports import (QualificationAttemptBound,
                                        QualificationAttemptFailed)
         from adapters.sandbox import run_qualification
+        if lease is None:
+            raise RuntimeError("a qualification attempt runs only under the held runtime lease")
         outcome = run_qualification.qualify_run_environment(
             project_id=request.project_id, run_id=request.run_id,
             generation=request.generation, attempt_id=request.attempt_id,
@@ -317,8 +315,7 @@ def build_service(profile_id: str, *, clock=time.time):
         spike_authority_selector=spike_authority,
         image_resolver=image_resolver,
         qualification_port=(_RunQualificationPort() if spike_harness is not None
-                            and _proto.host_profile(profile_id)["promotion_status"]
-                            != _QUALIFICATION_WITHHELD_STATUS else None),
+                            and _proto.approval_available(profile_id) else None),
     )
 
 

@@ -54,7 +54,7 @@ Empirica **7.0.0** is the plugin major; its public wire remains `empirica/v2`, c
 [upgrade guide](upgrading-empirica-7.md) (and [the 6 guide](upgrading-empirica-6.md)), [ADR-0071](adr/0071-bind-spikes-to-qualified-docker-authority-per-run.md), and the
 [normative Docker support contract](../contracts/empirica-docker-spike/v1/README.md). The support contract's internal `/1` does not add a legacy runtime surface.
 
-Two paths coexist until spike admission moves to the run-scoped one (Empirica 7.2, node E10).
+Two paths coexist until spike admission moves to the run-scoped one (Empirica 7.2).
 The **legacy spike execution path** is operator-installed: an operator separately qualifies one exact local Unix
 Docker authority after the final tree is clean and committed, and the spike harness reads that installed `/2`
 record and pointer. The **run qualification path** is the run's own: `StartRun` binds the run's own `unqualified`
@@ -62,7 +62,7 @@ reference and never reads machine-wide authority, and a run binds its exact qual
 `docker-networked-v1` qualification and execution digest pair only through its own approved environment revision and
 `qualify` attempt (a charged attempt, compare-and-set into the run). `qualify` takes the shared runtime lock without
 waiting before it reserves anything and holds it until the outcome is recorded: a request that cannot take it refuses with
-`qualification-in-progress` and is never charged, and an open attempt row seen under the lock belongs to a dead attempt.
+`qualification-in-progress` and is never charged, and an open attempt row seen under the lock belongs to a dead attempt. The one 90-second bound of a `qualify` starts when it takes the lock and is shared by the recovery of a dead row and the attempt that follows.
 The host composes the run qualification port wherever the guarded generic Docker composition succeeded, never for an
 unsupported profile, and a run whose host composition did not bind reads `spikes_unavailable`; existing runs never adopt a later current record. Qualified means bound, not live
 health. At host

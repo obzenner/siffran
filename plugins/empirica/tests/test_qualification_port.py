@@ -26,6 +26,7 @@ from adapters import bridge
 from adapters.sandbox import common
 from adapters.sandbox import run_qualification as run_owner
 from application import generic_spike, protocol
+from application.ports import QualificationSettleRequest
 from core import run as core_run
 from application.transaction import Coordinator as ProductionCoordinator
 from test_d7_transactions import Harness, QualifiedSelector, Workspace
@@ -72,6 +73,14 @@ class RealPortTests(unittest.TestCase):
         self.port = bridge._RunQualificationPort(**self.harness.options())
         self.env = QualificationEnv(self.port)
         self.store = run_owner.RunQualificationStore(self.root)
+
+    def _settle_request(self):
+        self.env.qualify()
+        row = self.env.rows()[0]
+        return QualificationSettleRequest(
+            project_id=self.env.key.project_id, run_id=self.env.key.run_id,
+            generation=self.env.key.generation, attempt_id=row["attempt_id"],
+            profile_id=ENVIRONMENT_ACTION["payload"]["profile_id"])
 
     def _loaded_record(self):
         installed = self.env.binding()
@@ -188,45 +197,89 @@ class RealPortTests(unittest.TestCase):
         self.assertEqual([row["outcome"] for row in self.env.rows()], [SUCCEEDED])
 
     def test_a_live_attempt_is_never_closed_as_interrupted_by_a_concurrent_qualify(self):
-        """The earliest instant after the reservation commit: the attempt already holds the real
-        lock, so a second coordinator's qualify (its own port, its own descriptor on the same
-        lock file) refuses in progress and leaves the open row alone; the attempt then binds."""
+        """Inside the attempt itself — the owner's first discovery, strictly after the reservation
+        committed — the attempt holds the real lock: a second coordinator's qualify (its own port,
+        its own descriptor on the same lock file) refuses in progress and leaves the open row
+        alone; the attempt then binds."""
         reserved, release = threading.Event(), threading.Event()
-        commit = self.env.coordinator._commit
-        commits = []
 
-        def pausing_commit(*args, **kwargs):
-            outcome = commit(*args, **kwargs)
-            commits.append(outcome)
-            if len(commits) == 1:
+        def pause_in_the_attempt(call):
+            if call == 1:
                 reserved.set()
-                self.assertTrue(release.wait(PROCESS_BOUND_SECONDS), "the test released the paused attempt")
-            return outcome
+                self.assertTrue(release.wait(PROCESS_BOUND_SECONDS),
+                                "the test released the paused attempt")
 
+        self.harness.on_inspect = pause_in_the_attempt
         rival = ProductionCoordinator(
             Workspace(), Harness(), self.env.runs, self.env.artifacts_repo, PROFILE, {},
             QualifiedSelector(), None, bridge._RunQualificationPort(**self.harness.options()))
         answers = {}
-        with mock.patch.object(self.env.coordinator, "_commit", pausing_commit):
-            attempt = threading.Thread(
-                target=lambda: answers.update(first=self.env.qualify("first")), daemon=True)
-            attempt.start()
-            try:
-                self.assertTrue(reserved.wait(PROCESS_BOUND_SECONDS), "the reservation committed")
-                self.assertEqual([row["outcome"] for row in self.env.rows()], [RESERVED])
-                answers["rival"] = rival.handle(
-                    {"type": "ObserveAction", "run_id": self.env.run_id,
-                     "action": json.loads(json.dumps(QUALIFY_ACTION))}, "rival")["result"]
-                self.assertEqual([row["outcome"] for row in self.env.rows()], [RESERVED],
-                                 "the live row was not closed by the rival")
-            finally:
-                release.set()
-                attempt.join(PROCESS_BOUND_SECONDS)
-                self.assertFalse(attempt.is_alive(), "the attempt finished within its bound")
+        attempt = threading.Thread(
+            target=lambda: answers.update(first=self.env.qualify("first")), daemon=True)
+        attempt.start()
+        try:
+            self.assertTrue(reserved.wait(PROCESS_BOUND_SECONDS), "the attempt started")
+            self.assertEqual([row["outcome"] for row in self.env.rows()], [RESERVED])
+            answers["rival"] = rival.handle(
+                {"type": "ObserveAction", "run_id": self.env.run_id,
+                 "action": json.loads(json.dumps(QUALIFY_ACTION))}, "rival")["result"]
+            self.assertEqual([row["outcome"] for row in self.env.rows()], [RESERVED],
+                             "the live row was not closed by the rival")
+        finally:
+            release.set()
+            attempt.join(PROCESS_BOUND_SECONDS)
+            self.assertFalse(attempt.is_alive(), "the attempt finished within its bound")
         self.assertEqual((answers["rival"]["type"], answers["rival"]["reason"]),
                          ("Fault", IN_PROGRESS), answers["rival"])
         self.assertEqual(answers["first"]["type"], "Allow", answers["first"])
         self.assertEqual([row["outcome"] for row in self.env.rows()], [SUCCEEDED])
+        self.assertEqual(self.env.binding()["kind"], "qualified")
+
+    def test_the_port_refuses_an_attempt_or_a_settle_without_the_held_lease(self):
+        """Neither call may take its own lock: without the transaction's lease they raise, and
+        the owner refuses a lease that was released (an internal host failure, nothing run)."""
+        request = self._settle_request()
+        calls = self.harness.inspector_calls
+        with self.assertRaises(RuntimeError):
+            self.env.port.run_qualification_attempt(None, None)
+        with run_owner.hold_runtime_lock(sandbox_root=self.root) as lease:
+            pass
+        with self.assertRaises(RuntimeError):
+            self.env.port.settle_interrupted_attempt(request, lambda: None, lease)
+        self.assertEqual(self.harness.inspector_calls, calls)
+
+    def test_a_settle_and_the_attempt_after_it_share_the_one_qualify_deadline(self):
+        """One qualify has one bound, taken when it takes the lock: the settle of a dead row and
+        the fresh attempt each spend what is left of it. Here the settle's recovery spends most of
+        the bound, so the attempt ends as the deadline outcome — charged, binding nothing, never
+        working past the bound — where each phase owning a fresh budget would have bound."""
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        self._die_after(publishing=False)
+        clock = self.harness.clock
+        self.harness.inspector_calls = 0
+        started = clock()
+        spent = {1: bound * 0.7, 2: bound * 0.4}
+        self.harness.on_inspect = lambda call: clock.advance(spent.get(call, 0.0))
+        result = self.env.qualify()
+        self.assertEqual((result["type"], result["reason"]), (
+            "Fault", run_owner.RunQualificationReason.DEADLINE_EXCEEDED.value), result)
+        self.assertEqual([(row["outcome"], row["reason"]) for row in self.env.rows()], [
+            (FAILED, INTERRUPTED),
+            (FAILED, run_owner.RunQualificationReason.DEADLINE_EXCEEDED.value)])
+        self.assertEqual(self.env.binding(), {"kind": "unqualified"})
+        self.assertEqual(self.harness.inspector_calls, 2, "no work after the bound is spent")
+        self.assertGreater(clock() - started, bound, "the discovery that crossed the bound ended it")
+
+    def test_a_settle_and_the_attempt_within_the_one_deadline_bind(self):
+        bound = run_owner.DEFAULT_QUALIFICATION_SECONDS
+        self._die_after(publishing=False)
+        clock = self.harness.clock
+        self.harness.inspector_calls = 0
+        started = clock()
+        self.harness.on_inspect = lambda call: clock.advance(bound * 0.3) if call <= 2 else None
+        result = self.env.qualify()
+        self.assertEqual(result["type"], "Allow", result)
+        self.assertLess(clock() - started, bound)
         self.assertEqual(self.env.binding()["kind"], "qualified")
 
 if __name__ == "__main__":

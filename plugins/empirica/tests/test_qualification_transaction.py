@@ -29,7 +29,7 @@ import copy
 import sys
 import threading
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
@@ -38,12 +38,17 @@ from application import generic_spike, protocol
 from application.location import decode_handle
 from application.ports import (QualificationAttemptBound, QualificationAttemptFailed,
                                QualificationRuntimeBusy)
+from application import run_state
 from application.run_state import decode_state
 from application.protocol import host_profile_id
+from application.observation import ObservationUnavailable
+from application.snapshot import GraphInvalid, HistoryCorrupt
+from application.transaction import RETRY, Assembled
 from application.transaction import Coordinator as ProductionCoordinator
 from core import environment
 from core import run as core_run
 from core.canonical import canonical_digest
+from core.records import Corrupt, Present, Revision
 from governance_setup import TEST_INVOCATION, approve_current
 from test_environment_actions import CONFIGURE_RUN, ENVIRONMENT_ACTION, QUALIFY_ACTION
 from test_d7_transactions import Artifacts, Harness, QualifiedSelector, Runs, Workspace
@@ -70,7 +75,7 @@ class ProcessDied(BaseException):
 
 class FakeQualificationPort:
     """The composed port's fake: every outcome is closed and deterministic. ``before_result``
-    runs once per attempt, inside the host effect exactly where the E9 transaction called it (its
+    runs once per attempt, inside the host effect exactly where the transaction calls it (its
     nested observations see the run's committed state mid-attempt). A bound outcome is derived
     from the delivered request, so two deliveries read two distinct publishings of their own
     attempt; ``overrides`` pins specific attempts' outcomes for the race tests. ``published``
@@ -193,8 +198,11 @@ class QualificationEnv:
     def state(self):
         return self.coordinator.last_state
 
+    def persisted_document(self):
+        return self.runs.data[self.key].value
+
     def persisted(self):
-        return decode_state(self.runs.data[self.key].value)
+        return decode_state(self.persisted_document())
 
     def rows(self):
         return [dict(row) for row in self.persisted().qualification_attempts]
@@ -519,6 +527,91 @@ class QualificationTransactionTests(unittest.TestCase):
                          "recovery runs on the profile the dead attempt's revision proposed")
         self.assertEqual(env.binding()["qualification_record_digest"],
                          _record_digest(port.requests[1]))
+
+    def test_an_unreadable_run_answers_as_every_other_command_does_before_and_after_the_effect(self):
+        """A run that is corrupt, a legacy document or gone — when the qualify reads it and again
+        when the attempt's outcome is about to be recorded — answers exactly what a read of the
+        same stored run answers (one shared classification), and records and binds nothing."""
+        stored = {
+            "corrupt": lambda env: Corrupt("bad bytes"),
+            "legacy": lambda env: Present(
+                {"protocol": env.persisted_document()["protocol"],
+                 "state_schema": run_state.LEGACY_STATE_SCHEMA_ID}, Revision("legacy")),
+            "absent": lambda env: None,
+        }
+        for label, make in stored.items():
+            for phase in ("before the effect", "after the effect"):
+                with self.subTest(label, phase=phase):
+                    def damage(env):
+                        replacement = make(env)
+                        if replacement is None:
+                            del env.runs.data[env.key]
+                        else:
+                            env.runs.data[env.key] = replacement
+
+                    env = QualificationEnv(FakeQualificationPort())
+                    if phase == "before the effect":
+                        damage(env)
+                    else:
+                        env.port.before_result = lambda request: damage(env)
+                    result = self._qualify(env)
+                    expected = env.coordinator.handle(
+                        {"type": "GetRun", "run_id": env.run_id}, "read")["result"]
+                    self.assertEqual(result, expected)
+                    self.assertEqual(env.port.calls, 0 if phase == "before the effect" else 1)
+
+    def test_the_shared_read_closes_each_assembly_failure_and_gates_on_an_active_run(self):
+        """The one author-surface read both qualify phases use: a failed assembly asks for a re-read
+        when the run moved and otherwise closes as the sibling transactions do; an inactive run is
+        Inert unless the caller reads it as it stands."""
+        env = QualificationEnv(FakeQualificationPort())
+        coordinator, key = env.coordinator, env.key
+        command = {"type": "GetRun", "run_id": env.run_id}
+        state = env.persisted()
+        run_corrupt, graph_invalid = "run.corrupt", "graph.invalid"
+        self.assertLessEqual({run_corrupt, graph_invalid}, set(protocol.public_contract()["reasons"]))
+        failures = (
+            (HistoryCorrupt(), lambda: coordinator._safe_block(key, "read", run_corrupt)),
+            (GraphInvalid(), lambda: coordinator._block_from_state(
+                key, state, command, "read", graph_invalid)),
+            (ObservationUnavailable(), lambda: coordinator._fault("read", "unavailable")))
+        for exception, expected in failures:
+            with self.subTest(type(exception).__name__):
+                with patch.object(coordinator, "_assemble", side_effect=exception):
+                    self.assertEqual(coordinator._load_assembled(key, command, "read"), expected())
+                    if not isinstance(exception, ObservationUnavailable):
+                        with patch.object(coordinator, "_revision_unchanged", return_value=False):
+                            self.assertIs(coordinator._load_assembled(key, command, "read"), RETRY)
+        stopped = coordinator.handle(
+            {"type": "EvaluateRun", "run_id": env.run_id, "intent": "stop"}, "stop")["result"]
+        self.assertEqual(stopped["type"], "Allow", stopped)
+        self.assertEqual(coordinator._load_assembled(key, command, "read"),
+                         coordinator._inert("read"))
+        read = coordinator._load_assembled(key, command, "read", inactive_ok=True)
+        self.assertIsInstance(read, Assembled)
+        self.assertEqual(read.state.status, env.persisted().status)
+
+    def test_an_exception_escaping_the_call_never_leaks_the_runtime_lock(self):
+        """In a long-lived bridge process nothing frees a lock on a crash but the call's own
+        unwinding: whatever escapes the transaction — the attempt, the settle, a commit — the lock
+        is free again, so the next qualify takes it instead of refusing in progress forever."""
+        for label in ("attempt", "settle", "commit"):
+            with self.subTest(label):
+                port = FakeQualificationPort(
+                    raiser=RuntimeError("the host died mid-attempt") if label == "settle" else None)
+                env = QualificationEnv(port)
+                if label == "settle":
+                    self._qualify(env)
+                    port.raiser, port.settle_raises = None, ProcessDied()
+                elif label == "attempt":
+                    port.raiser = ProcessDied()
+                commit = (patch.object(env.coordinator, "_commit", side_effect=ProcessDied())
+                          if label == "commit" else nullcontext())
+                with commit, self.assertRaises(ProcessDied):
+                    self._qualify(env)
+                self.assertFalse(port.lock.locked(), "the unwinding released the lock")
+                port.raiser = port.settle_raises = None
+                self.assertEqual(self._qualify(env)["type"], "Allow")
 
     def test_a_crash_after_the_record_was_published_orphans_it(self):
         """The process died after its record was durably published and before the outcome commit:

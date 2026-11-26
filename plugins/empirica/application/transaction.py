@@ -92,6 +92,19 @@ class Loaded:
 
 
 @dataclass(frozen=True)
+class Assembled:
+    """One loaded run with the snapshot assembled from it: what a transaction body decides on."""
+
+    read: Any
+    state: OperationalState
+    snapshot: EvaluationSnapshot
+
+
+#: ``Coordinator._load_assembled`` answer: the read raced a commit, so the caller reads again.
+RETRY = object()
+
+
+@dataclass(frozen=True)
 class CorruptLoad:
     """Persisted bytes exist but cannot be trusted as a run."""
 
@@ -741,9 +754,11 @@ class Coordinator:
            row seen under the lock is dead. The state is then re-read under the lock.
         3. **An open row** is recovered by the port (prior journals, under the lock) and closed by
            this transaction, still under the lock, failed as ``qualification-interrupted``
-           (charged, binding nothing, any record it published an orphan no row names). The effect
-           is never resumed or reused; the request is then evaluated as a fresh attempt, so the
-           ceiling refuses honestly if that was the last.
+           (charged, binding nothing, any record it published an orphan no row names). This
+           cleanup only repairs, so it precedes the admission below and its approval gate. The
+           effect is never resumed or reused; the request is then evaluated as a fresh attempt, so
+           the ceiling refuses honestly if that was the last. The lock's lease carries the one
+           host deadline of the call: the recovery and the attempt each spend what is left of it.
         4. The core decides admission (environment, configuration approval, ceiling); an admitted
            qualify with no composed port refuses as the unsupported host fact.
         5. **Reserve** one charged row durably first, before any effect, under the lock.
@@ -762,28 +777,12 @@ class Coordinator:
         lease = None
         with ExitStack() as held:
             for _ in range(8):
-                loaded = self._load(key)
-                if isinstance(loaded, CorruptLoad):
-                    return self._safe_block(key, request_id, "run.corrupt")
-                if isinstance(loaded, LegacyLoad):
-                    return self._safe_block(key, request_id, "run.legacy")
-                if isinstance(loaded, AbsentLoad):
-                    return self._inert(request_id)
-                read, state = loaded.read, loaded.state
-                if state.status != "active":
-                    return self._inert(request_id)
-                try:
-                    snapshot = self._assemble(key, state, command, require_graph=False)
-                except HistoryCorrupt:
-                    if not self._revision_unchanged(key, read.revision):
-                        continue
-                    return self._safe_block(key, request_id, "run.corrupt")
-                except GraphInvalid:
-                    if not self._revision_unchanged(key, read.revision):
-                        continue
-                    return self._block_from_state(key, state, command, request_id, "graph.invalid")
-                except ObservationUnavailable:
-                    return self._fault(request_id, "unavailable")
+                assembled = self._load_assembled(key, command, request_id)
+                if assembled is RETRY:
+                    continue
+                if isinstance(assembled, dict):
+                    return assembled
+                read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
                 rows = state.qualification_attempts
                 # --- 1. an exact replay of this delivery's resolved attempt ---------------
                 replayed = environment.delivery_attempt_index(rows, request_id)
@@ -935,12 +934,16 @@ class Coordinator:
         failed = None
         planned = None
         for _ in range(8):
-            loaded = self._load(key)
-            if isinstance(loaded, (CorruptLoad, AbsentLoad)):
-                # The run's persisted facts are unreadable or gone: nothing may be recorded or
-                # bound on a guess, and an already-published record stays an inert orphan.
-                return self._fault(request_id, "unavailable")
-            read, state = loaded.read, loaded.state
+            # An unreadable or vanished run records and binds nothing on a guess; a stopped run
+            # is read as it stands (its own open row closes superseded below).
+            assembled = self._load_assembled(
+                key, {"type": "GetRun", "run_id": command["run_id"]}, request_id,
+                inactive_ok=True)
+            if assembled is RETRY:
+                continue
+            if isinstance(assembled, dict):
+                return assembled
+            read, state, snapshot = assembled.read, assembled.state, assembled.snapshot
             rows = state.qualification_attempts
             index = next((position for position, row in enumerate(rows)
                           if row["attempt_id"] == reserved.attempt_id), None)
@@ -958,16 +961,6 @@ class Coordinator:
                 # The already-published record is orphaned and binds nothing.
                 conflict = True
                 break
-            try:
-                snapshot = self._assemble(
-                    key, state, {"type": "GetRun", "run_id": command["run_id"]},
-                    require_graph=False)
-            except HistoryCorrupt:
-                if not self._revision_unchanged(key, read.revision):
-                    continue
-                return self._safe_block(key, request_id, "run.corrupt")
-            except ObservationUnavailable:
-                return self._fault(request_id, "unavailable")
             if state.status != "active" or revision_lost:
                 # The run stopped during the attempt, or its revision window closed: a
                 # compare-and-set loser (spec §5). Our own still-open row records the outcome
@@ -1240,6 +1233,38 @@ class Coordinator:
         stored = self._read_artifacts(key)
         return assemble(state, stored, self.workspace, run_id=encode_handle(key),
                         profile_id=self.profile_id, command=command, require_graph=require_graph)
+
+    def _load_assembled(self, key: RunKey, command: dict[str, Any], request_id: str, *,
+                        require_graph: bool = False,
+                        inactive_ok: bool = False) -> Assembled | dict[str, Any] | object:
+        """One author-surface read of a run: load, classify, gate on an active run (unless
+        ``inactive_ok``) and assemble the evaluation snapshot. Returns the :class:`Assembled`
+        read, :data:`RETRY` when the persisted run moved under a failed assembly, or the closed
+        response the caller returns as it stands (corrupt, legacy, absent or inactive run, an
+        invalid graph, an unavailable observation)."""
+        loaded = self._load(key)
+        if isinstance(loaded, CorruptLoad):
+            return self._safe_block(key, request_id, "run.corrupt")
+        if isinstance(loaded, LegacyLoad):
+            return self._safe_block(key, request_id, "run.legacy")
+        if isinstance(loaded, AbsentLoad):
+            return self._inert(request_id)
+        read, state = loaded.read, loaded.state
+        if state.status != "active" and not inactive_ok:
+            return self._inert(request_id)
+        try:
+            snapshot = self._assemble(key, state, command, require_graph=require_graph)
+        except HistoryCorrupt:
+            if not self._revision_unchanged(key, read.revision):
+                return RETRY
+            return self._safe_block(key, request_id, "run.corrupt")
+        except GraphInvalid:
+            if not self._revision_unchanged(key, read.revision):
+                return RETRY
+            return self._block_from_state(key, state, command, request_id, "graph.invalid")
+        except ObservationUnavailable:
+            return self._fault(request_id, "unavailable")
+        return Assembled(read, state, snapshot)
 
     def _commit(self, key: RunKey, revision: Any, snapshot: EvaluationSnapshot,
                 next_state: OperationalState, domain: tuple[dict[str, Any], ...],

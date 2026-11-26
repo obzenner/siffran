@@ -227,14 +227,18 @@ class RunBinding:
             raise ValueError("run qualification identifier is not closed: " + where)
         return value
 
+    @staticmethod
+    def _counter(value: object, where: str) -> int:
+        if type(value) is not int or isinstance(value, bool) or not 1 <= value < 2 ** 31:
+            raise ValueError("run qualification counter is not closed: " + where)
+        return value
+
     def __post_init__(self) -> None:
         self._identifier(self.project_id, "project_id")
         self._identifier(self.run_id, "run_id")
         self._identifier(self.attempt_id, "attempt_id")
         for name in ("generation", "revision"):
-            value = getattr(self, name)
-            if type(value) is not int or isinstance(value, bool) or not 1 <= value < 2 ** 31:
-                raise ValueError("run qualification counter is not closed: " + name)
+            self._counter(getattr(self, name), name)
         try:
             validate_digest256(self.proposal_digest)
         except ValueError as exc:
@@ -1124,14 +1128,36 @@ def _concrete_effects(resolved: authority.ResolvedGenericAuthority) \
                                       dict(resolved.environment), resolved.work_directory)
 
 
+def _qualification_budget(value: object) -> float:
+    """The one bound check of a qualification budget in seconds (``None`` is the default)."""
+    if value is None:
+        return float(DEFAULT_QUALIFICATION_SECONDS)
+    if type(value) is not float and type(value) is not int:
+        raise ValueError("run qualification budget is malformed")
+    if not 0 < value <= DEFAULT_QUALIFICATION_SECONDS:
+        raise ValueError("run qualification budget is outside its bound")
+    return float(value)
+
+
+def _prepared_store(sandbox_root: Path | None) -> tuple[Path, "common.ExecutionStore"]:
+    """The sandbox root and its execution store, scaffolding and journal store prepared."""
+    root = (common.sandbox_home() if sandbox_root is None
+            else common.canonical_authority_path(Path(sandbox_root)))
+    store = common.ExecutionStore(root)
+    store.prepare_execution_scaffolding()
+    generic_journal.GenericJournalStore(store).prepare()
+    return root, store
+
+
 class RuntimeLease:
     """Proof that the shared runtime lock is held by the caller: made only by
-    :func:`hold_runtime_lock`, valid until that context exits."""
+    :func:`hold_runtime_lock`, valid until that context exits. ``deadline`` is the one bound
+    (on the clock the lease was taken with) that every step run under the lease shares."""
 
-    __slots__ = ("root", "held")
+    __slots__ = ("root", "held", "deadline")
 
-    def __init__(self, root: Path) -> None:
-        self.root, self.held = root, True
+    def __init__(self, root: Path, deadline: float) -> None:
+        self.root, self.held, self.deadline = root, True, deadline
 
 
 @contextmanager
@@ -1140,16 +1166,12 @@ def hold_runtime_lock(
 ) -> Iterator[RuntimeLease]:
     """Take the shared runtime lock without waiting and hold it for the context: an attempt or a
     settle given the lease runs under it instead of taking its own, so a caller can order its own
-    durable steps (the transaction's reservation) inside the lock. A lock another holder has
-    raises :class:`common.RuntimeLockBusy` at once."""
-    root = (common.sandbox_home() if sandbox_root is None
-            else common.canonical_authority_path(Path(sandbox_root)))
-    store = common.ExecutionStore(root)
-    store.prepare_execution_scaffolding()
-    generic_journal.GenericJournalStore(store).prepare()
-    lease = RuntimeLease(root)
-    with common.runtime_lock(store, clock() + DEFAULT_QUALIFICATION_SECONDS, clock=clock,
-                             blocking=False):
+    durable steps (the transaction's reservation) inside the lock. The lease carries the one
+    host deadline of the whole qualify: a settle and the attempt run under it each spend what is
+    left of it. A lock another holder has raises :class:`common.RuntimeLockBusy` at once."""
+    root, store = _prepared_store(sandbox_root)
+    lease = RuntimeLease(root, clock() + DEFAULT_QUALIFICATION_SECONDS)
+    with common.runtime_lock(store, lease.deadline, clock=clock, blocking=False):
         try:
             yield lease
         finally:
@@ -1214,22 +1236,15 @@ def qualify_run_environment(
             raise ValueError("run qualification spike images are not closed")
         for item in spike_images:
             spike_plan.validate_local_image_reference(item)
-        if type(qualification_seconds) is not float and type(qualification_seconds) is not int:
-            if qualification_seconds is None:
-                qualification_seconds = DEFAULT_QUALIFICATION_SECONDS
-            else:
-                raise ValueError("run qualification budget is malformed")
-        if not 0 < qualification_seconds <= DEFAULT_QUALIFICATION_SECONDS:
-            raise ValueError("run qualification budget is outside its bound")
+        budget = _qualification_budget(qualification_seconds)
         docker_cli = Path(docker_cli)
     except (ValueError, TypeError, OSError) as exc:
         return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
     refused = None if lease is None else _lease_refusal(lease)
     if refused is not None:
         return refused
-    budget = float(qualification_seconds)
     began = clock()
-    deadline = began + budget
+    deadline = began + budget if lease is None else min(began + budget, lease.deadline)
     # The stage label for deadline details: the inner attempt keeps it current.
     stage: list[str] = ["the runtime lock wait"]
 
@@ -1248,7 +1263,7 @@ def qualify_run_environment(
                                began=began, clock=clock, stage=stage, lease=lease)
     except _RunFailure as exc:
         if clock() >= deadline:
-            # Expiry anywhere reports the deadline reason (E5 review, blocking 4), including
+            # Expiry anywhere reports the deadline reason, including
             # a stage error that fired while the budget was already gone.
             return deadline_outcome()
         return RunQualificationFailed(exc.reason, exc.detail, exc.probe)
@@ -1299,7 +1314,7 @@ def _recover_prior_journals(
     # Initial discovery: one observation (context, version, info including
     # ``daemon_id``) that resolves the endpoint once — reads only, no admission.
     # Recovery precedes the new attempt's admission, so a capability or
-    # implementation refusal must never skip journal recovery (E5 review, 2).
+    # implementation refusal must never skip journal recovery.
     stage[0] = "the authority observation"
     observed = _observe_authority(runtime_inspector, {"docker_cli": str(docker_cli)},
                                  deadline=deadline, clock=clock, stage=stage[0])
@@ -1371,22 +1386,17 @@ def settle_interrupted_attempt(
         for name, value in (("project_id", project_id), ("run_id", run_id),
                             ("attempt_id", attempt_id)):
             RunBinding._identifier(value, name)
-        if type(generation) is not int or isinstance(generation, bool) or not 1 <= generation < 2 ** 31:
-            raise ValueError("run qualification counter is not closed: generation")
+        RunBinding._counter(generation, "generation")
         if type(profile_id) is not str or profile_id not in spike_plan.NETWORK_PROFILES:
             raise ValueError("run qualification profile is unknown")
-        if qualification_seconds is None:
-            qualification_seconds = DEFAULT_QUALIFICATION_SECONDS
-        if (type(qualification_seconds) not in (int, float)
-                or not 0 < qualification_seconds <= DEFAULT_QUALIFICATION_SECONDS):
-            raise ValueError("run qualification budget is outside its bound")
+        budget = _qualification_budget(qualification_seconds)
         docker_cli = Path(docker_cli)
     except (ValueError, TypeError, OSError) as exc:
         return RunQualificationFailed(RunQualificationReason.INVALID_INPUT, str(exc))
     refused = _lease_refusal(lease)
     if refused is not None:
         return refused
-    deadline = clock() + float(qualification_seconds)
+    deadline = min(clock() + budget, lease.deadline)
     stage: list[str] = ["the prior journal recovery"]
     try:
         store = common.ExecutionStore(lease.root)
@@ -1429,11 +1439,8 @@ def _qualify_locked(
     stage: list[str],
     lease: RuntimeLease | None = None,
 ) -> RunQualificationBound:
-    root = (lease.root if lease is not None else common.sandbox_home() if sandbox_root is None
-            else common.canonical_authority_path(Path(sandbox_root)))
-    store = common.ExecutionStore(root)
-    store.prepare_execution_scaffolding()
-    generic_journal.GenericJournalStore(store).prepare()
+    root, store = (_prepared_store(sandbox_root) if lease is None
+                   else (lease.root, common.ExecutionStore(lease.root)))
     with (nullcontext() if lease is not None
           else common.runtime_lock(store, deadline, clock=clock)):
         observed, config, work, seed, selected_effects = _recover_prior_journals(
